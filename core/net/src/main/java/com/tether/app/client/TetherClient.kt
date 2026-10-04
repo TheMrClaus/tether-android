@@ -504,6 +504,13 @@ interface TetherClient {
     val linkEpoch: StateFlow<Long> get() = NO_LINK_EPOCH
 
     /**
+     * ta-coik.21 r2: which credential is in force, as a number that moves (never back) each time it
+     * changes to a different one (a sign-in, a re-pairing, a sign-out), on the same server or another.
+     * State held for one sign-in (the GitHub connection's typed token) is dropped when it moves.
+     */
+    val credentialEpoch: StateFlow<Long> get() = NO_CREDENTIAL_EPOCH
+
+    /**
      * T7.3: a send that DELEGATES (v103 `send.mention`): durable like [send], but only when drawn for
      * the server the outbox belongs to ([expectedOrigin]; r2), for a listed session that is neither
      * read-only, handed off nor archived, with a mention the current catalog offers it
@@ -651,6 +658,14 @@ interface TetherClient {
      * The default refuses every call without touching the network.
      */
     val claudeAccountActions: ClaudeAccountActions get() = ClaudeAccountActions.Unavailable
+
+    /**
+     * ta-coik.21: Settings' GitHub connection (`/api/github/connection*`: the status, the device-code
+     * sign-in, a token saved and verified, disconnect), each call only to the server it names, on a
+     * fixed route, never following a redirect (see [HttpGitHubConnection]). The default refuses every
+     * call without touching the network.
+     */
+    val githubConnection: GitHubConnectionSource get() = GitHubConnectionSource.Unavailable
 
     /**
      * T10.4: Settings → Devices (paired devices, passkeys, signed-in sessions), over the fixed routes
@@ -1039,6 +1054,7 @@ sealed interface CreateReplyRecord {
 private val NO_CREATED: StateFlow<CreatedReply?> = MutableStateFlow(null)
 private val NO_CREATE_ERRORS: StateFlow<CreateErrorReply?> = MutableStateFlow(null)
 private val NO_LINK_EPOCH: StateFlow<Long> = MutableStateFlow(0L)
+private val NO_CREDENTIAL_EPOCH: StateFlow<Long> = MutableStateFlow(0L)
 
 private val NO_EVENT_LOG: StateFlow<EventLog> = MutableStateFlow(EventLog())
 private val NO_HISTORIES_BY_CWD: StateFlow<Map<String, List<HistorySession>>> = MutableStateFlow(emptyMap())

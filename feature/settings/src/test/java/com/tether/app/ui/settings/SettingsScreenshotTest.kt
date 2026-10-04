@@ -53,6 +53,7 @@ enum class SettingsShot(
     val profiles: ProfilesShot? = null,
     val nodes: NodesShot? = null,
     val devices: DevicesShot? = null,
+    val github: GitHubShot? = null,
 ) {
     General("settings-general", SettingsTab.General),
     Appearance("settings-appearance", SettingsTab.Appearance),
@@ -81,12 +82,16 @@ enum class SettingsShot(
     EnginesAdding("settings-engines-adding", SettingsTab.Engines, accounts = AccountsShot.Adding),
     EnginesRename("settings-engines-rename", SettingsTab.Engines, accounts = AccountsShot.Rename),
     Restart("settings-restart", SettingsTab.General, restart = true),
-    Advanced("settings-advanced", SettingsTab.Advanced, server = ServerShot.Advanced),
-    AdvancedRevealed("settings-advanced-revealed", SettingsTab.Advanced, server = ServerShot.Revealed),
-    AdvancedLocked("settings-advanced-locked", SettingsTab.Advanced, server = ServerShot.Locked),
-    AdvancedLifecycle("settings-advanced-lifecycle", SettingsTab.Advanced, server = ServerShot.Lifecycle),
-    AdvancedDefaults("settings-advanced-defaults", SettingsTab.Advanced, server = ServerShot.Defaults),
-    AdvancedCli("settings-advanced-cli", SettingsTab.Advanced, server = ServerShot.Cli),
+    Advanced("settings-advanced", SettingsTab.Advanced, server = ServerShot.Advanced, github = GitHubShot.Fresh),
+    AdvancedRevealed("settings-advanced-revealed", SettingsTab.Advanced, server = ServerShot.Revealed, github = GitHubShot.Fresh),
+    AdvancedLocked("settings-advanced-locked", SettingsTab.Advanced, server = ServerShot.Locked, github = GitHubShot.Fresh),
+    AdvancedLifecycle("settings-advanced-lifecycle", SettingsTab.Advanced, server = ServerShot.Lifecycle, github = GitHubShot.Fresh),
+    AdvancedDefaults("settings-advanced-defaults", SettingsTab.Advanced, server = ServerShot.Defaults, github = GitHubShot.Fresh),
+    AdvancedCli("settings-advanced-cli", SettingsTab.Advanced, server = ServerShot.Cli, github = GitHubShot.Fresh),
+    AdvancedGitHub("settings-advanced-github", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Fresh),
+    AdvancedGitHubDevice("settings-advanced-github-device", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Device),
+    AdvancedGitHubConnected("settings-advanced-github-connected", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Connected),
+    AdvancedGitHubErrors("settings-advanced-github-errors", SettingsTab.Advanced, server = ServerShot.GitHubToken, github = GitHubShot.Errors),
     Metadata("settings-metadata", SettingsTab.Metadata, server = ServerShot.Metadata),
     MetadataText("settings-metadata-text", SettingsTab.Metadata, server = ServerShot.MetadataText),
     EnginesCards("settings-engines-cards", SettingsTab.Engines, server = ServerShot.Engines),
@@ -225,6 +230,10 @@ enum class ServerShot(val scrollTo: String? = null, val reveal: Boolean = false)
     Engines,
     EnginesMissing(EngineTags.card(com.tether.app.client.EngineCard.Opencode)),
     EnginesLocked(EngineTags.card(com.tether.app.client.EngineCard.Codex)),
+    /** ta-coik.21: Advanced scrolled to the GitHub connection. */
+    GitHub(ServerSettingsTags.GitHub),
+    /** ta-coik.21: Advanced scrolled to the GitHub token rows (a refusal under the field in frame). */
+    GitHubToken(GitHubTags.Pat),
     ;
 
     fun binding(): ServerSettingsBinding = when (this) {
@@ -243,6 +252,45 @@ enum class ServerShot(val scrollTo: String? = null, val reveal: Boolean = false)
         )
         else -> ServerFixtures.binding(writer = NeverWrites)
     }
+}
+
+/**
+ * ta-coik.21: the GitHub connection seeds, timing-free like the others: the controller is built from a
+ * state made HERE (so nothing is read on creation), over a source that fails the shot on any call.
+ * `-advanced-github` gh installed with no login (the web reference's fresh state: Re-check, Start device
+ * flow, the empty token field); `-device` the device flow with its one-time code (GitHub's own example
+ * code), Waiting… held, open and Cancel; `-connected` a managed token (Remove Tether token, the form
+ * gone); `-errors` (scrolled to the token rows) gh not installed, a failed device flow's line, a typed (masked, obviously FAKE) token
+ * and the server's refusal of it. Every Advanced shot draws [Fresh] in its place.
+ */
+enum class GitHubShot {
+    Fresh,
+    Device,
+    Connected,
+    Errors,
+    ;
+
+    fun seed(): GitHubSeed = when (this) {
+        Fresh -> GitHubSeed(status = GitHubFixtures.NOT_LOGGED_IN)
+        Device -> GitHubSeed(status = GitHubFixtures.NOT_LOGGED_IN, deviceFlow = true, poll = GitHubFixtures.pending("WDJB-MJHT", "https://github.com/login/device"))
+        Connected -> GitHubSeed(status = GitHubFixtures.MANAGED)
+        Errors -> GitHubSeed(
+            status = GitHubFixtures.NOT_INSTALLED,
+            poll = com.tether.app.client.GitHubDevicePoll(true, com.tether.app.client.GitHubDeviceStatus.Error, null, null, "gh auth login exited with code 1."),
+            tokenInput = GitHubFixtures.FAKE_TOKEN,
+            tokenError = "That token could not be verified. Check the value and its scopes.",
+        )
+    }
+}
+
+/** The GitHub source behind a seeded shot: any call is a timing dependency, so it fails the shot. */
+private object NeverCalledGitHub : com.tether.app.client.GitHubConnectionSource {
+    override suspend fun status(origin: String): com.tether.app.client.SecurityResult<com.tether.app.client.GitHubConnectionStatus> = error("a seeded shot must not read the status")
+    override suspend fun startLogin(origin: String): com.tether.app.client.SecurityResult<Unit> = error("a seeded shot must not start a login")
+    override suspend fun pollLogin(origin: String): com.tether.app.client.SecurityResult<com.tether.app.client.GitHubDevicePoll> = error("a seeded shot must not poll")
+    override suspend fun cancelLogin(origin: String): com.tether.app.client.SecurityResult<Unit> = error("a seeded shot must not cancel")
+    override suspend fun saveToken(origin: String, token: com.tether.app.client.GitHubToken): com.tether.app.client.SecurityResult<com.tether.app.client.GitHubTokenSaved> = error("a seeded shot must not send a token")
+    override suspend fun logout(origin: String): com.tether.app.client.SecurityResult<Unit> = error("a seeded shot must not log out")
 }
 
 /** The writer behind a seeded shot: a write is a timing dependency (and a bug), so it fails the shot. */
@@ -348,6 +396,8 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
         focus = androidx.compose.ui.platform.LocalFocusManager.current
         val nodeActions = shot.nodes?.let { rememberNodesActions(NeverWritesNodes, it.notice) }
         val devicesController = shot.devices?.let { rememberDevicesController(NeverCalledSecurity, DevicesFixtures.ORIGIN, it.seed(), authenticator = NeverPromptsPasskeys) }
+        val githubScope = androidx.compose.runtime.rememberCoroutineScope()
+        val github = shot.github?.let { g -> androidx.compose.runtime.remember { GitHubConnectionController(NeverCalledGitHub, ServerFixtures.ORIGIN, githubScope, seed = g.seed()) } }
         SettingsUnderTest(
             store.prefs,
             state,
@@ -360,6 +410,7 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
             providers = shot.profiles?.binding() ?: ProvidersBinding.None,
             nodes = if (shot.nodes != null && nodeActions != null) shot.nodes.binding(nodeActions) else NodesBinding.None,
             devices = devicesController?.let { DevicesBinding(it, now = { DevicesFixtures.NOW }) } ?: DevicesBinding.None,
+            github = github?.let { GitHubBinding(it) } ?: GitHubBinding.None,
         )
     }
     mainClock.advanceTimeBy(600)
@@ -434,7 +485,7 @@ class SettingsTabletScreenshotTest(private val shot: SettingsShot, private val s
     }
 }
 
-/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list and a login (ta-7rh), Advanced, Metadata, the engine cards, the custom providers, the Nodes list and form, and the Devices top, paired devices and pairing code; Studio light + dark). */
+/** PLAN §4: 1.3× font scale does not break the dialog (General, Appearance, the Claude accounts list and a login (ta-7rh), Advanced and its GitHub device flow (ta-coik.21), Metadata, the engine cards, the custom providers, the Nodes list and form, and the Devices top, paired devices and pairing code; Studio light + dark). */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
 class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private val skin: TetherSkin) : SettingsShotBase() {
@@ -443,6 +494,6 @@ class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.EnginesLogin, SettingsShot.Advanced, SettingsShot.Metadata, SettingsShot.EnginesCards, SettingsShot.Profiles, SettingsShot.Nodes, SettingsShot.NodesAdding, SettingsShot.Devices, SettingsShot.DevicesPaired, SettingsShot.DevicesCode).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.EnginesLogin, SettingsShot.Advanced, SettingsShot.AdvancedGitHubDevice, SettingsShot.Metadata, SettingsShot.EnginesCards, SettingsShot.Profiles, SettingsShot.Nodes, SettingsShot.NodesAdding, SettingsShot.Devices, SettingsShot.DevicesPaired, SettingsShot.DevicesCode).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }

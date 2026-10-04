@@ -675,7 +675,7 @@ private fun AccountCheckbox(label: String, checked: Boolean, enabled: Boolean, d
 
 /** A line under a card or the section: the web's `.settings-field-note.is-warning`, or a quiet status (words and glyph, never colour alone). */
 @Composable
-private fun NoteLine(line: AccountsLine, tag: String) {
+internal fun NoteLine(line: AccountsLine, tag: String) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Row(

@@ -50,6 +50,7 @@ internal fun SettingsPanel(
     providers: ProvidersBinding = ProvidersBinding.None,
     nodes: NodesBinding = NodesBinding.None,
     devices: DevicesBinding = DevicesBinding.None,
+    github: GitHubBinding = GitHubBinding.None,
 ) {
     when (tab) {
         SettingsTab.General -> GeneralPanel(live, state, currentWorkspace, narrow)
@@ -64,7 +65,7 @@ internal fun SettingsPanel(
         // ta-t7l: keyed on the server, so another server's tab starts from nothing (every secret
         // masked, every half-typed field dropped; a dropped edit is bound to its own server).
         SettingsTab.Metadata -> key(serverSettings.origin) { MetadataPanel(narrow, serverSettings) }
-        SettingsTab.Advanced -> key(serverSettings.origin) { AdvancedPanel(narrow, serverSettings) }
+        SettingsTab.Advanced -> key(serverSettings.origin) { AdvancedPanel(narrow, serverSettings, github) }
     }
 }
 
@@ -262,20 +263,20 @@ private fun MetadataPanel(narrow: Boolean, binding: ServerSettingsBinding) {
 
 /**
  * Advanced (settings-dialog.tsx 887c222 :2321-2449), in the web's order: Network, Authentication
- * (the two secrets, masked), Storage, GitHub connection, Session lifecycle, Session defaults, then
+ * (the two secrets, masked), Storage, GitHub connection (ta-coik.21, GitHubConnectionSection.kt; 90fbb9f
+ * :2339, drawn once the server settings are in, as there), Session lifecycle, Session defaults, then
  * Claude CLI. Every row writes at once (`set-server-settings` with only its key); a value an
  * environment variable forces is locked. The restart banner above follows the server's
  * `restartRequired` in its reply. The Claude CLI picker writes at once like the web's (ta-coik.5:
  * no app-only confirmation). The engine homes, commands and launch command are on Engines (ta-dh1,
  * EnginesSection.kt), written as the web's blur writes them.
  *
- * Not here: the GitHub connection card (the `/api/github/connection` routes, MATRIX row `/api/github/...`, T8.4)
- * holds its place with a note; the active Codex / opencode session's provider controls
+ * Not here: the active Codex / opencode session's provider controls
  * (settings-dialog.tsx:2380-2420, shown on the web only while such a session is open) stay in that
  * session's composer (T7.2).
  */
 @Composable
-private fun AdvancedPanel(narrow: Boolean, binding: ServerSettingsBinding) {
+private fun AdvancedPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding) {
     // r2: no server, nothing drawn (a frame kept past a sign-out must never show).
     val view = binding.settings?.takeIf { binding.origin != null }
     Column {
@@ -294,10 +295,7 @@ private fun AdvancedPanel(narrow: Boolean, binding: ServerSettingsBinding) {
                 ServerTextRow(AdvancedRows.stateDir, view, binding, narrow)
                 ServerTextRow(AdvancedRows.workspaceRoot, view, binding, narrow)
             }
-            // T8.4 (MATRIX `/api/github/*`): GitHubConnectionSection is not ported in this slice.
-            SettingsSection(AdvancedRows.GITHUB, AnnotatedString(AdvancedRows.GITHUB_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.GitHub)) {
-                ComingSoonNote(AdvancedRows.GITHUB_LATER)
-            }
+            GitHubConnectionSection(github, narrow)
             SettingsSection(AdvancedRows.LIFECYCLE, AnnotatedString(AdvancedRows.LIFECYCLE_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("lifecycle"))) {
                 ServerToggleRow(AdvancedRows.claudePersistent, view, binding, narrow)
                 ServerToggleRow(AdvancedRows.claudeTaskTelemetry, view, binding, narrow)

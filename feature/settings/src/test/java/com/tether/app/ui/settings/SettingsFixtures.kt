@@ -65,6 +65,7 @@ fun SettingsUnderTest(
     providers: ProvidersBinding = ProvidersBinding.None,
     nodes: NodesBinding = NodesBinding.None,
     devices: DevicesBinding = DevicesBinding.None,
+    github: GitHubBinding = GitHubBinding.None,
 ) {
     TetherTheme(mode) {
         CompositionLocalProvider(LocalReducedMotion provides true) {
@@ -81,6 +82,7 @@ fun SettingsUnderTest(
                 providers = providers,
                 nodes = nodes,
                 devices = devices,
+                github = github,
             )
         }
     }

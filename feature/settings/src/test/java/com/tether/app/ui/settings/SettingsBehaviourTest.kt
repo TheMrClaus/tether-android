@@ -118,17 +118,16 @@ class SettingsBehaviourTest {
     }
 
     /**
-     * Engines, Metadata, Advanced and Nodes say what is coming, they are never empty. Engines: ta-dh1
-     * drew the engines and Host config, ta-q6p Custom providers, so no slot is left there.
+     * Every panel is drawn when its tab is chosen (ta-coik.21: the last "coming later" slot, Advanced's
+     * GitHub connection, is ported, and the slot itself is gone).
      */
-    @Test fun theLaterPanelsSayWhatIsComing() {
+    @Test fun everyPanelIsDrawnWhenItsTabIsChosen() {
         show()
         // ta-t7l: Metadata and Advanced are drawn now (here, before any server reply, they wait for it).
-        mapOf(SettingsTab.Devices to 0, SettingsTab.Nodes to 0, SettingsTab.Engines to 0, SettingsTab.Metadata to 0, SettingsTab.Advanced to 0).forEach { (t, slots) ->
+        listOf(SettingsTab.Devices, SettingsTab.Nodes, SettingsTab.Engines, SettingsTab.Metadata, SettingsTab.Advanced).forEach { t ->
             tab(t).performScrollTo().performClick()
             compose.waitForIdle()
             compose.onNodeWithTag(SettingsDialogTags.panel(t)).assertExists()
-            assertEquals("$t", slots, compose.onAllNodesWithTag(SettingsTags.ComingSoon).fetchSemanticsNodes().size)
         }
     }
 

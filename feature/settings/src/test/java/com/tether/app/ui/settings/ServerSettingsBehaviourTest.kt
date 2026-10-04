@@ -145,9 +145,8 @@ class ServerSettingsBehaviourTest {
             "Default to isolated worktree", "Allowed folders", "Spawn extra writable roots", "Detached agent launches", "Claude CLI version")) {
             assertTrue(label, all.contains(label))
         }
-        // The GitHub card is excluded (T8.4) and says so in its own section.
+        // ta-coik.21: the GitHub connection is drawn in its place (its rows: GitHubConnectionBehaviourTest).
         tag(ServerSettingsTags.GitHub).assertExists()
-        assertTrue(all.contains(AdvancedRows.GITHUB_LATER))
         assertTrue(all.contains("2 allowed folders"))
         assertTrue(all.contains("Auto resolves to 2.1.225 (newest installed)"))
     }

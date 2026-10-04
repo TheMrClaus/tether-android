@@ -356,27 +356,5 @@ internal fun ThemeChoices(modifier: Modifier = Modifier, content: @Composable Co
     Column(modifier.fillMaxWidth().selectableGroup(), content = content)
 }
 
-/**
- * A panel (or a part of one) a later task fills in: what it will hold, in the section's own words.
- * Tagged so a test can find every slot that is still waiting.
- */
-@Composable
-internal fun ComingSoonNote(text: String, modifier: Modifier = Modifier) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    Row(
-        modifier
-            .testTag(SettingsTags.ComingSoon)
-            .fillMaxWidth()
-            .cssSurface(RoundedCornerShape(8.dp), t.mineral, null, emptyList())
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Icon(TetherIcons.Info, contentDescription = null, tint = t.muted, modifier = Modifier.padding(top = 3.dp).size(14.dp))
-        Text(text, color = t.muted, style = settingsText(type.ui, 13f, 400, lineHeight = 1.6f))
-    }
-}
-
 /** The env lock's accessible name (settings-dialog.tsx:144 `aria-label="Set by environment"`). */
 internal const val ENV_LOCK_LABEL = "Set by environment"

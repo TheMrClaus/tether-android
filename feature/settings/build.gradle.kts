@@ -40,6 +40,8 @@ dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    // ta-coik.21: the GitHub connection's activity-scoped ViewModel (the web's section outlives the dialog).
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.lucide.icons)
     implementation(libs.kotlinx.coroutines.android)
 

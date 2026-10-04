@@ -104,7 +104,6 @@ object SettingsDialogTags {
 /** Tags of the shared parts in SettingsKit.kt. */
 internal object SettingsTags {
     const val TipBubble = "settings-tip-bubble"
-    const val ComingSoon = "settings-coming-soon"
     const val EnvLock = "settings-env-lock"
 }
 
@@ -236,6 +235,13 @@ fun SettingsDialog(
     val passkeys = remember(activity) { com.tether.app.client.CredentialManagerPasskeys { activity } }
     val devicesController = rememberDevicesController(client.deviceSecurity, origin, clipboard = pairingClipboard, authenticator = passkeys)
     val devicesBinding = DevicesBinding(devicesController)
+    // ta-coik.21: the GitHub connection lives in an activity-scoped ViewModel bound to the signed-in
+    // server and credential (r2) (the web's section stays mounted with the page); its device page opens
+    // in the browser.
+    val github = androidx.lifecycle.viewmodel.compose.viewModel(key = GITHUB_VIEW_MODEL_KEY) {
+        GitHubConnectionViewModel(client.githubConnection, GitHubConnectionViewModel.identityOf(client), GitHubConnectionViewModel.identitiesOf(client))
+    }
+    val githubBinding = GitHubBinding(github.controller, opener = loginOpener)
     val layout = currentLayoutClass()
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
         val view = LocalView.current
@@ -253,6 +259,7 @@ fun SettingsDialog(
             providers = providersBinding,
             nodes = nodesBinding,
             devices = devicesBinding,
+            github = githubBinding,
             modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
             surfaceModifier = Modifier.graphicsLayer {
                 val p = progress.value
@@ -293,6 +300,8 @@ fun SettingsFrame(
     nodes: NodesBinding = NodesBinding.None,
     /** T10.4: the Devices tab's sign-in security and paired devices. */
     devices: DevicesBinding = DevicesBinding.None,
+    /** ta-coik.21: Advanced's GitHub connection. */
+    github: GitHubBinding = GitHubBinding.None,
 ) {
     val t = LocalTetherTokens.current
     val live by prefs.preferences.collectAsStateWithLifecycle(initialValue = initialPreferences)
@@ -362,6 +371,7 @@ fun SettingsFrame(
                         providers = providers,
                         nodes = nodes,
                         devices = devices,
+                        github = github,
                     )
                 }
             }
@@ -562,6 +572,9 @@ internal val SettingsDialogProperties = DialogProperties(
     decorFitsSystemWindows = false,
     securePolicy = SecureFlagPolicy.SecureOn,
 )
+
+/** ta-coik.21: the GitHub connection's ViewModel in the activity's store. */
+private const val GITHUB_VIEW_MODEL_KEY = "settings-github-connection"
 
 /** settings-dialog.tsx:2000, the banner's words. */
 const val RESTART_REQUIRED = "Some changes need a server restart to take effect."

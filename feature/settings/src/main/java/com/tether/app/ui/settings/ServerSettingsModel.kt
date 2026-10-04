@@ -92,10 +92,12 @@ object AdvancedRows {
     val stateDir = ServerRow(ServerSetting.StateDir, "State directory", "Journals, manifests, and settings (set via TETHER_STATE_DIR)", "Root directory for all Tether state: session journals, manifests, and server-settings.json. Always set via the TETHER_STATE_DIR environment variable — cannot be changed from the UI.", "~/.local/state/tether")
     val workspaceRoot = ServerRow(ServerSetting.WorkspaceRoot, "Workspace root", "Default folder for new sessions", "The default starting folder shown in the session picker. Not a security boundary — any directory the process can read may host a session. Requires restart.", "~")
 
-    /** settings-dialog.tsx:968 `GitHubConnectionSection`, drawn between Storage and Session lifecycle. */
+    /**
+     * settings-dialog.tsx:968 `GitHubConnectionSection`, drawn between Storage and Session lifecycle
+     * (ta-coik.21: GitHubConnectionSection.kt). The caption's `gh` is drawn as the web's `<code>`.
+     */
     const val GITHUB = "GitHub connection"
     const val GITHUB_CAPTION = "Drives the issues and pull-requests features. Reuses a host gh login when present, or stores a personal access token (masked after entry)."
-    const val GITHUB_LATER = "Connecting GitHub from the app arrives with the issues and pull-requests features. Connect it from the web console for now."
 
     const val LIFECYCLE = "Session lifecycle"
     const val LIFECYCLE_CAPTION = "Warm-session persistence, eviction, and background-task handling."

@@ -224,8 +224,6 @@ class ProfilesBehaviourTest {
         assertFalse(exists(ProfileTags.row("claude-work", ProfileTags.VERIFIED)))
         tag(field("gemini", ProfileTags.TOOLS)).assertIsNotEnabled()
         tag(field("claude-work", ProfileTags.TOOLS)).assertIsEnabled()
-        // No slot is left on this tab.
-        assertEquals(0, compose.onAllNodesWithTag(SettingsTags.ComingSoon).fetchSemanticsNodes().size)
     }
 
     @Test fun beforeTheServerRepliesTheSectionWaitsAndSignedOutNothingIsDrawn() {

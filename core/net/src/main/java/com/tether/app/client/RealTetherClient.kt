@@ -414,10 +414,20 @@ class RealTetherClient(
     private var signInStarts = 0L
     private val pendingSignIns = HashMap<Long, String>()
 
+    // ta-coik.21 r2: moves each time [credentialValue] becomes a different credential (by value).
+    private val credentialEpochState = MutableStateFlow(0L)
+    override val credentialEpoch: StateFlow<Long> = credentialEpochState
+
     // The ONE credential in force. Cookie (password login) and device token
     // (pairing) differ only in the header they add, so the connect loop below
-    // never branches on the auth mode.
+    // never branches on the auth mode. ta-coik.21 r2: every change to a different
+    // one moves [credentialEpoch] (set under [lock], as every write here is).
     private var credentialValue: Credential? = null
+        set(value) {
+            val changed = value != field
+            field = value
+            if (changed) credentialEpochState.value = credentialEpochState.value + 1
+        }
 
     @Volatile
     private var lastInboundAt = 0L
@@ -3781,6 +3791,20 @@ class RealTetherClient(
      * read as [claudeAccounts]; each call is made only when that server is the one the screen names.
      */
     override val claudeAccountActions: ClaudeAccountActions = HttpClaudeAccountActions(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
+        }
+    })
+
+    /**
+     * ta-coik.21: Settings' GitHub connection, over [authHttp] with the same per-call (server,
+     * credential) read as [claudeAccountActions]; each call is made only when that server is the one
+     * the screen names.
+     */
+    override val githubConnection: GitHubConnectionSource = HttpGitHubConnection(authHttp, authority = {
         val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
         when {
             base == null || credential == null -> FilesAuthority.SignedOut
