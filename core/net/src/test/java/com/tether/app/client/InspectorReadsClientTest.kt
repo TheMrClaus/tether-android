@@ -9,8 +9,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -205,5 +209,48 @@ class InspectorReadsClientTest {
         } finally {
             job.cancel()
         }
+    }
+
+    /** ta-coik.18: the automatic read (dashboard.tsx:827) goes through the web's `send` too, so one not sent says so. */
+    @Test fun theAutomaticPullRequestReadNotSentSaysSo() {
+        h.newClient()
+        val errors = CopyOnWriteArrayList<String>()
+        val job = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { h.client.errors.collect { errors += it } }
+        try {
+            assertEquals(false, h.client.requestChangeRequest("s1"))
+            runBlocking { withTimeout(20_000) { while (errors.isEmpty()) kotlinx.coroutines.delay(10) } }
+            assertEquals(listOf("The secure link is reconnecting. Your input was not sent."), errors.toList())
+        } finally {
+            job.cancel()
+        }
+    }
+
+    /**
+     * ta-coik.18: the client keeps a `worktree-logs` reply within the server's own bound
+     * (worktree-scripts.mjs: 200 lines of 500 chars): the LAST 200 lines, each cut to 500 chars.
+     */
+    @Test fun aLogsReplyIsKeptToItsLastTwoHundredLinesOfFiveHundredChars() {
+        h.enqueueConnect()
+        h.newClient()
+        h.client.start()
+        val ws = h.nextSocket()
+        h.handshake(ws)
+        created(ws, "s1")
+
+        val lines = List(300) { i -> "line $i " + "x".repeat(if (i % 2 == 0) 600 else 10) }
+        val frame = buildJsonObject {
+            put("type", "worktree-logs")
+            put("sessionId", "s1")
+            put("name", "dev")
+            put("lines", JsonArray(lines.map(::JsonPrimitive)))
+            put("dropped", 0)
+        }
+        ws.send(frame.toString())
+        val kept = await(h.client.worktreeLogs) { "s1" in it }.getValue("s1").lines
+        assertEquals(200, kept.size)
+        assertEquals("the last 200, the oldest dropped", "line 100 ", kept.first().take(9))
+        assertEquals(500, kept.first().length)
+        assertEquals("a short line is kept whole", "line 299 " + "x".repeat(10), kept.last())
+        assertEquals(lines.takeLast(200).map { it.take(500) }, kept)
     }
 }

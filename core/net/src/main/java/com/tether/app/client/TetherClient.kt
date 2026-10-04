@@ -707,8 +707,9 @@ interface TetherClient {
 
     /**
      * `change-request` (use-tether.ts:1508), a read; [refresh] asks the server to look again (the
-     * inspector's "Refresh pull request status", dashboard.tsx:1457). False when not sent; a refresh
-     * not sent says so in [errors], as the web's `send` does.
+     * inspector's "Refresh pull request status", dashboard.tsx:1457). False when not sent; a read
+     * not sent (the automatic one, dashboard.tsx:827, or a refresh) says so in [errors], as the web's
+     * `send` does (ta-coik.18).
      */
     fun requestChangeRequest(sessionId: String, refresh: Boolean = false): Boolean = false
 

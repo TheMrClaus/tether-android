@@ -4326,9 +4326,11 @@ class RealTetherClient(
     override fun requestWorktreeScripts(sessionId: String): Boolean =
         sendFrame(ClientMessage.WorktreeScriptsRequest(sessionId))
 
+    // ta-coik.18: the automatic read (dashboard.tsx:827) goes through the web's `send` too, so a
+    // read not sent says so as the refresh does (use-tether.ts:337-341).
     override fun requestChangeRequest(sessionId: String, refresh: Boolean): Boolean =
         sendFrame(ClientMessage.ChangeRequestFetch(sessionId, refresh.takeIf { it })).also { sent ->
-            if (!sent && refresh) emitError(LINK_RECONNECTING)
+            if (!sent) emitError(LINK_RECONNECTING)
         }
 
     // ta-coik.14: use-tether.ts:1497-1505; a frame not sent says so, as the web's `send` does (337-341).
