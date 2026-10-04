@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import com.tether.app.client.LabelText
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
+import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.ProviderLogos
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -341,7 +342,8 @@ private fun ProvidersFooter(providers: List<ProviderAvailability>) {
             ) {
                 val style = cssText(type.ui, 0.72f, 400)
                 if (mark != null) {
-                    Icon(mark, contentDescription = null, tint = ink, modifier = Modifier.size(LogoSize))
+                    // ProviderLogo, not a bare Icon: a `colored` mark (gemini) keeps its own fills.
+                    ProviderLogo(p.id, color = ink, markSize = LogoSize)
                     Text(label, color = ink, style = style)
                 } else {
                     // provider-logo.tsx renders the bare letter: one text run with the label.

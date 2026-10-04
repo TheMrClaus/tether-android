@@ -46,7 +46,7 @@ class ComponentGalleryTest {
     }
 
     @Test fun providerSectionCoversEveryMarkAndTheFallbacks() {
-        assertTrue(GalleryProviders.containsAll(ProviderLogos.paths.keys))
+        assertTrue(GalleryProviders.containsAll(ProviderLogos.marks.keys))
         assertTrue(GalleryProviders.any { ProviderLogos.mark(it) == null })
     }
 

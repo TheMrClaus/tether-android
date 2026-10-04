@@ -223,7 +223,7 @@ fun IconGrid(names: List<String>) {
 // Provider logos (T3.5) and the brand
 
 /** The web's LOGO_MARKS providers, the letter fallbacks, and an unknown/empty id. */
-val GalleryProviders: List<String> = ProviderLogos.paths.keys.toList() + listOf("gemini", "reasonix", "pi", "acp", "")
+val GalleryProviders: List<String> = ProviderLogos.marks.keys.toList() + listOf("acp", "")
 
 @Composable
 fun ProviderLogosSection() {
@@ -243,7 +243,7 @@ fun ProviderLogosSection() {
         }
     }
     GalleryRow("bare marks at 24dp and 48dp, ink") {
-        for (p in ProviderLogos.paths.keys) {
+        for (p in ProviderLogos.marks.keys) {
             ProviderLogo(p, color = t.ink, markSize = 24.dp)
             ProviderLogo(p, color = t.ink, markSize = 48.dp)
         }
