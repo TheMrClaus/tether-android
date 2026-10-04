@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.TransactionTooLargeException
 import android.net.Uri
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.Locale
@@ -58,10 +59,16 @@ object ChromeIntents {
     fun isIntentLink(href: String): Boolean = href.length >= 7 && href.regionMatches(0, "intent:", 0, 7, ignoreCase = true) &&
         href.take(7).all { it.code < 128 }
 
-    /** The sanitised intent Chrome starts for the `intent:` link [href], or null when it starts none. */
+    /**
+     * TEST/INSPECTION ONLY (r5): the sanitised intent Chrome builds for the `intent:` link [href], or
+     * null when it builds none; its `browser_fallback_url` is dropped, as [open] drops it. It must
+     * NEVER be started: it skips [open]'s non-exported check and fallback; [open] is the only way an
+     * `intent:` link goes out.
+     */
     fun parse(href: String): Intent? {
         val intent = parseUri(href) ?: return null
         if (refusedData(intent)) return null
+        intent.removeExtra(EXTRA_BROWSER_FALLBACK_URL)
         return sanitize(intent)
     }
 
@@ -141,21 +148,31 @@ object ChromeIntents {
         null
     }
 
+    /** What the non-exported query says of an intent. */
+    private enum class Resolution { Allowed, NonExported, Unresolvable }
+
     /**
      * r3: Chrome's resolvesToNonExportedActivity: whether [intent] would resolve to an activity of
      * this app that is not exported (a page's link must never reach the app's own internals). Queried
      * as Chrome queries (GET_RESOLVED_FILTER | MATCH_DEFAULT_ONLY). r4: a query that throws counts as
-     * one that does (fail closed: nothing starts, the link's web fallback may still open).
+     * one that does (fail closed). r5: except where Chromium's PackageManagerUtils reads the throw
+     * as an empty result (a NullPointerException, or a TransactionTooLargeException wrapped in a
+     * RuntimeException): nothing starts either, and the link takes its unresolvable path.
      */
+    fun resolvesToNonExportedActivity(context: Context, intent: Intent): Boolean = resolution(context, intent) != Resolution.Allowed
+
     // QueryPermissionsNeeded: only this app's own activities matter here, and an app always sees its own.
     @SuppressLint("QueryPermissionsNeeded")
-    fun resolvesToNonExportedActivity(context: Context, intent: Intent): Boolean = try {
-        context.packageManager.queryIntentActivities(intent, PackageManager.GET_RESOLVED_FILTER or PackageManager.MATCH_DEFAULT_ONLY).any { info ->
+    private fun resolution(context: Context, intent: Intent): Resolution = try {
+        val nonExported = context.packageManager.queryIntentActivities(intent, PackageManager.GET_RESOLVED_FILTER or PackageManager.MATCH_DEFAULT_ONLY).any { info ->
             val activity = info.activityInfo
             activity != null && activity.packageName == context.packageName && !activity.exported
         }
-    } catch (_: RuntimeException) {
-        true
+        if (nonExported) Resolution.NonExported else Resolution.Allowed
+    } catch (_: NullPointerException) {
+        Resolution.Unresolvable
+    } catch (e: RuntimeException) {
+        if (e.cause is TransactionTooLargeException) Resolution.Unresolvable else Resolution.NonExported
     }
 
     /**
@@ -171,8 +188,12 @@ object ChromeIntents {
         val webOnly = { (fallback as? Fallback.Web)?.let { openWeb(it.url) } ?: false }
         if (refusedData(intent)) return webOnly()
         sanitize(intent)
-        if (resolvesToNonExportedActivity(context, intent)) return webOnly()
-        if (start(context, intent, newTask)) return true
+        when (resolution(context, intent)) {
+            Resolution.NonExported -> return webOnly()
+            // r5: PackageManagerUtils' empty result: no app takes it, so the unresolvable path below.
+            Resolution.Unresolvable -> Unit
+            Resolution.Allowed -> if (start(context, intent, newTask)) return true
+        }
         return when (fallback) {
             is Fallback.Web -> openWeb(fallback.url)
             is Fallback.Store -> start(context, store(fallback.marketUrl(context.packageName)), newTask) || openWeb(fallback.webUrl)

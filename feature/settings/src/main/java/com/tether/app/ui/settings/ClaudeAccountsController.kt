@@ -140,7 +140,7 @@ fun interface LoginLinkOpener {
             // ta-coik.18 r2: an `intent:` link as Chrome opens it (the shared ChromeIntents: its web
             // fallback or its package's store page when no app takes it); nothing about it crashes the tap.
             if (!link.web && ChromeIntents.isIntentLink(link.url)) {
-                ChromeIntents.open(context, link.url, newTask = true) { web -> ChromeIntents.start(context, ChromeIntents.view(web), newTask = true) }
+                ChromeIntents.open(context, link.url, newTask = true) { web -> ChromeIntents.openView(context, web, newTask = true) }
             } else {
                 // r4 (ta-qap9): as Chrome hands a page's link on, never to this app's own non-exported activity.
                 ChromeIntents.openView(context, link.url, newTask = true)
@@ -154,6 +154,8 @@ fun interface LoginLinkOpener {
          * parse, or whose data is a scheme Chrome refuses ([ChromeIntents.REFUSED_DATA_SCHEMES]:
          * content, file and Chrome's own internal schemes). [browser] opens such a link's web fallback.
          */
+        // TEST/INSPECTION ONLY (r5): never started (it skips the non-exported check and the fallback);
+        // [browser] opens links only through ChromeIntents.open / openView. Its fallback extra is dropped.
         fun intentFor(link: ClaudeLoginLink): Intent? =
             if (!link.web && ChromeIntents.isIntentLink(link.url)) ChromeIntents.parse(link.url) else ChromeIntents.view(link.url)
 

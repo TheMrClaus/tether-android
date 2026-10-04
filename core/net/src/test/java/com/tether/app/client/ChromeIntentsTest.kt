@@ -298,4 +298,50 @@ class ChromeIntentsTest {
         assertTrue(ChromeIntents.open(phone, "intent://x#Intent;scheme=gh;S.browser_fallback_url=%20HTTPS%3A%2F%2FExample.test%2Fpr%0A;end", newTask = false) { web += it; true })
         assertEquals(listOf("https://example.test/pr"), web)
     }
+
+    /** A context whose package manager query throws [thrown]; it records what is started. */
+    private class Throwing(base: Context, private val thrown: () -> Throwable) : ContextWrapper(base) {
+        val started = mutableListOf<Intent>()
+        override fun getPackageManager(): android.content.pm.PackageManager = throw thrown()
+        override fun startActivity(intent: Intent) { started += intent }
+    }
+
+    /**
+     * r5 (ta-kn42 P3-1): Chromium's PackageManagerUtils reads a TransactionTooLargeException (wrapped)
+     * as an empty result: the parsed intent never starts, and the link takes its unresolvable path,
+     * here the store page of the package it names.
+     */
+    @Test fun aTooLargeQueryIsAnEmptyResultSoTheStoreOpens() {
+        val phone = Throwing(app) { RuntimeException(android.os.TransactionTooLargeException()) }
+        assertTrue(ChromeIntents.open(phone, "intent://pr/1#Intent;scheme=gh;package=com.example.gh;end", newTask = false) { error("store first") })
+        assertEquals("market://details?id=com.example.gh&referrer=" + app.packageName, phone.started.single().dataString)
+        assertEquals(ChromeIntents.PLAY_STORE_PACKAGE, phone.started.single().`package`)
+    }
+
+    @Test fun aNullPointerQueryIsAnEmptyResultSoTheStoreOpens() {
+        val phone = Throwing(app) { NullPointerException("pm") }
+        assertTrue(ChromeIntents.open(phone, "intent://pr/1#Intent;scheme=gh;package=com.example.gh;end", newTask = false) { error("store first") })
+        assertEquals("market://details?id=com.example.gh&referrer=" + app.packageName, phone.started.single().dataString)
+        // With a fallback, the fallback (as for any unresolvable link); a plain link starts nothing.
+        val web = mutableListOf<String>()
+        assertTrue(ChromeIntents.open(phone, "intent://pr/1#Intent;scheme=gh;package=com.example.gh;$fallbackPart" + "end", newTask = false) { web += it; true })
+        assertEquals(listOf("https://example.test/fb"), web)
+        assertFalse(ChromeIntents.openView(phone, "gh://x", newTask = false))
+        assertEquals(1, phone.started.size)
+    }
+
+    /** r5: any other throw still fails closed: nothing starts, never the store, only the web fallback. */
+    @Test fun anotherThrowStillStartsNothingAndNeverTheStore() {
+        val phone = Throwing(app) { IllegalStateException("died") }
+        assertFalse(ChromeIntents.open(phone, "intent://pr/1#Intent;scheme=gh;package=com.example.gh;end", newTask = false) { error("no web") })
+        assertFalse(ChromeIntents.open(Throwing(app) { RuntimeException(android.os.RemoteException()) }, "intent://pr/1#Intent;scheme=gh;package=com.example.gh;end", newTask = false) { error("no web") })
+        assertEquals(emptyList<Intent>(), phone.started)
+    }
+
+    /** r5 (P3-3): parse (test/inspection only) drops the fallback extra, as open does. */
+    @Test fun parseDropsTheFallbackExtra() {
+        val intent = ChromeIntents.parse("intent://x#Intent;scheme=gh;$fallbackPart" + "S.k=v;end")!!
+        assertNull(intent.getStringExtra(ChromeIntents.EXTRA_BROWSER_FALLBACK_URL))
+        assertEquals("v", intent.getStringExtra("k"))
+    }
 }

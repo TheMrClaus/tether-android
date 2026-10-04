@@ -496,6 +496,28 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertTrue(started.single().hasCategory(android.content.Intent.CATEGORY_BROWSABLE))
     }
 
+    /** ta-coik.18 r5 (ta-kn42 P3-2): the web fallback goes out through openView too: never to this app's own non-exported activity. */
+    @Test fun aWebFallbackToOurOwnNonExportedActivityIsNotHandedOn() {
+        val pm = org.robolectric.Shadows.shadowOf(appContext().packageManager)
+        val inner = android.content.ComponentName(appContext().packageName, "com.tether.app.Inner")
+        val info = pm.addActivityIfNotPresent(inner)
+        info.exported = false
+        pm.addOrUpdateActivity(info)
+        pm.addIntentFilterForActivity(inner, android.content.IntentFilter(android.content.Intent.ACTION_VIEW).apply {
+            addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+            addCategory(android.content.Intent.CATEGORY_DEFAULT)
+            addDataScheme("https")
+            addDataAuthority("inner.example.test", null)
+        })
+        val started = mutableListOf<android.content.Intent>()
+        val phone = object : android.content.ContextWrapper(appContext()) {
+            override fun startActivity(intent: android.content.Intent) { started += intent }
+        }
+        val l = ClaudeLoginLink.parse("intent://x/y#Intent;scheme=file;S.browser_fallback_url=https%3A%2F%2Finner.example.test%2Fx;end")!!
+        assertFalse(LoginLinkOpener.browser(phone).open(l))
+        assertEquals(emptyList<android.content.Intent>(), started)
+    }
+
     /** r3 (security F2): a parsed `intent:` link keeps only Chrome's ALLOWED_INTENT_FLAGS: CLEAR_TASK and the grants are stripped. */
     @Test fun anIntentLinksFlagsAreLimitedToChromesAllowedFlags() {
         val clearTask = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK or
