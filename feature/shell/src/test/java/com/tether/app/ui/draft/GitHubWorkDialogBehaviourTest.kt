@@ -174,6 +174,8 @@ class GitHubWorkDialogBehaviourTest {
     fun workOnThisIssueFillsTheComposerAndSetsTheFolder() {
         openSheet()
         val folder = formCwd()
+        // The seeded folder is not the operator's pick yet; the web's onSetCwd makes it one.
+        assertTrue(composer.state.value.modified["cwd"] != com.tether.app.protocol.tree.JsBool.TRUE)
         tap(GitHubWorkTags.IssuesButton)
         tap(GitHubWorkTags.row(60))
         awaitTag(GitHubWorkTags.Work)
@@ -183,6 +185,7 @@ class GitHubWorkDialogBehaviourTest {
         val expected = GitHubWorkPrompt.issue(GitHubFixtures.REPO, GitHubFixtures.issues.issues[0])
         until("the composer holds the prompt") { composer.state.value.text == expected }
         assertEquals(folder, formCwd())
+        assertEquals(com.tether.app.protocol.tree.JsBool.TRUE, composer.state.value.modified["cwd"])
     }
 
     @Test
