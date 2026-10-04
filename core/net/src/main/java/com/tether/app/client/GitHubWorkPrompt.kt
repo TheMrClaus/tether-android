@@ -54,10 +54,10 @@ object GitHubWorkPrompt {
      * which Kotlin's `isWhitespace` would drop.
      */
     fun jsSpace(c: Char): Boolean = when (c) {
-        '\u0009', '\u000B', '\u000C', ' ', ' ', '﻿',
-        '\n', '\r', ' ', ' ',
-        ' ', ' ', ' ', '　' -> true
-        else -> c in ' '..' '
+        '\u0009', '\u000B', '\u000C', '\u0020', '\u00A0', '\uFEFF',
+        '\n', '\r', '\u2028', '\u2029',
+        '\u1680', '\u202F', '\u205F', '\u3000' -> true
+        else -> c in '\u2000'..'\u200A'
     }
 
     fun jsTrim(text: String): String = text.trim(::jsSpace)
