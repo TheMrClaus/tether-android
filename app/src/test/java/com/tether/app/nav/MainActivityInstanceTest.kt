@@ -166,6 +166,32 @@ class MainActivityInstanceTest {
         assertNull(main.vm.selectedSessionId.value)
     }
 
+    /**
+     * ta-coik.39: every open of a chat attaches it (as the web's ChatView mount does), so only an
+     * open may: a configuration change or the activity leaving and re-entering the foreground
+     * recomposes the chat without opening it again.
+     */
+    @Test
+    fun onlyAnOpenAttachesNotARecreationOrALifecycleReEntry() {
+        val main = root(launcher())
+        main.vm.selectSession(LISTED) // the drawer's tap
+        idle()
+        assertEquals(1, client.attached.count { it == LISTED })
+        main.recreate()
+        idle()
+        main.pause().stop()
+        idle()
+        main.start().resume()
+        idle()
+        main.recreate()
+        idle()
+        assertEquals(LISTED, main.vm.selectedSessionId.value)
+        assertEquals("one open, one attach", 1, client.attached.count { it == LISTED })
+        main.vm.selectSession(LISTED) // opened again: attached again (the client decides what goes out)
+        idle()
+        assertEquals(2, client.attached.count { it == LISTED })
+    }
+
     @Test
     fun aRecreatedRootStaysTheRoot() {
         val main = root(view("tether://session/$LISTED"))

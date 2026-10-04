@@ -357,6 +357,9 @@ class RealTetherClient(
     // A re-attach released by its timer before the focus's snapshot: the focus is attached again
     // once that snapshot is in (from its new cursor), so the server still ends up watching it.
     private var rewatchOnSnapshot: Pair<WebSocket, String>? = null
+    // ta-coik.39: the session of the last `attach` handed to a socket (recorded under [lock] as it
+    // is sent, so in wire order): the one the server watches on that socket (server.mjs `watchedSessionId`).
+    private var lastAttachSent: Pair<WebSocket, String>? = null
 
     private class DeferredAttach(
         val socket: WebSocket,
@@ -4197,10 +4200,10 @@ class RealTetherClient(
     // ------------------------------------------------------------------
 
     /**
-     * Subscribe [sessionId]. Idempotent per connection epoch: once a session was
-     * attached on the current socket (by this call or by the ready re-attach),
-     * another attach() sends nothing. Before the handshake it only subscribes;
-     * the ready handler attaches it (after `hello`).
+     * Subscribe [sessionId] and attach it: the UI opened it. ta-coik.39: every call on a live
+     * socket sends an `attach`, also for a session attached on it already (from its cursor), as the
+     * web does on every open, so the server watches the chat on screen. Before the handshake it only
+     * subscribes; the ready handler attaches it (after `hello`).
      */
     override fun attach(sessionId: String) {
         attachNow(sessionId, expectedOrigin = null)
@@ -4242,10 +4245,27 @@ class RealTetherClient(
             }
             // Claimed by the ready already when it was waiting; otherwise claimed now.
             val send = live && (wasWaiting || attachedThisEpoch.add(sessionId))
+            // ta-coik.39: attached already on this socket, it goes again all the same when another
+            // session was attached after it, as the web sends an attach on every open of a chat
+            // (use-tether.ts 90fbb9f :1568, ChatView mount per session) and the server watches the
+            // LAST session a socket attached (server.mjs :9609): updates of hidden sessions (:5087)
+            // and the read-only watch refresh (:10745) follow the chat on screen. From its cursor, as
+            // the web (afterSeq = cursor): a stateless reply when nothing changed. Not while a
+            // deferral waits (its rewatch attaches the focus last), nor while the timer's rewatch of
+            // this very chat waits for its first snapshot (it goes then), nor when the last attach
+            // on this socket was this chat already (the server watches it). Decided and sent in one
+            // step under the lock, so no other attach slips between.
+            val ws = socket
+            val watched = lastAttachSent?.takeIf { it.first === ws }?.second
+            if (live && !send && ws != null && waiting == null && rewatchOnSnapshot?.second != sessionId && watched != sessionId) {
+                val frame = ClientMessage.Attach(sessionId, tracker.cursorFor(sessionId))
+                sendLocked(ws, frame, frame.encode())
+            }
             // Released by its timer earlier: the open chat is this one now, never the one left.
             if (rewatchOnSnapshot?.second != sessionId || send) rewatchOnSnapshot = null
             if (!send) {
-                // Offline (or attached already): the saved copy, if there is one (§4.2).
+                // Offline, attached already (re-attached above if need be) or waiting for the
+                // deferral's rewatch: the saved copy, if there is one (§4.2).
                 null
             } else {
                 publishAttachedLocked()
@@ -5099,8 +5119,15 @@ class RealTetherClient(
         val text = message.encode()
         synchronized(lock) {
             val ws = (if (socketOpen && handshakeDone) socket else null) ?: return false
-            return ws.send(text)
+            return sendLocked(ws, message, text)
         }
+    }
+
+    /** [WebSocket.send] of [text] (= [message] encoded); an `attach` handed over is [lastAttachSent]. Caller holds [lock]. */
+    private fun sendLocked(ws: WebSocket, message: ClientMessage, text: String): Boolean {
+        val sent = ws.send(text)
+        if (sent && message is ClientMessage.Attach) lastAttachSent = ws to message.sessionId
+        return sent
     }
 
     /**
@@ -5111,7 +5138,7 @@ class RealTetherClient(
         val text = message.encode()
         synchronized(lock) {
             val ws = (if (socketOpen && handshakeDone && socketOrigin == origin) socket else null) ?: return false
-            return ws.send(text)
+            return sendLocked(ws, message, text)
         }
     }
 
@@ -5124,7 +5151,7 @@ class RealTetherClient(
         val text = message.encode()
         synchronized(lock) {
             if (socket !== expected || !socketOpen || !handshakeDone) return false
-            return expected.send(text)
+            return sendLocked(expected, message, text)
         }
     }
 

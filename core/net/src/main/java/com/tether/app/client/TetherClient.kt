@@ -197,6 +197,7 @@ interface TetherClient {
     /** Tear down permanently (logout / settings change). */
     fun stop()
 
+    /** The UI opened [sessionId]: subscribe it and attach it, every time (ta-coik.39). */
     fun attach(sessionId: String)
 
     /**
