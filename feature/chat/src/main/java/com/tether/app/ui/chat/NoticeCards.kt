@@ -30,7 +30,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
@@ -92,33 +91,23 @@ private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
  * link never holds a key disabled on the next. ta-coik.23: nothing here locks on the link or the
  * copy's liveness. As on the web (notice-dismiss-button.tsx, chat-view.tsx 90fbb9f :1384-1394,
  * :3707-3714), the X and the limit card's keys stay live offline and catching up; the client sends on
- * an open socket and otherwise says the link is reconnecting.
+ * an open socket and otherwise says the link is reconnecting. ta-coik.23 r2: nor on the session's
+ * read-only or handed-off state: the web draws the card's keys and the cancel live there too
+ * (chat-view.tsx :3693-3714); the server refuses a read-only session's choice with an `error`, shown.
  */
 @Immutable
 class NoticeActions(
     val sessionId: String?,
-    /** The rate-limit choices change what the agent does: read-only / handed off only ([sessionControlLock]). */
-    val controlLock: ConsentLock?,
     val link: Any?,
     internal val onDismiss: (dismissKey: String) -> NoticeResult,
     internal val onRateLimit: (SessionControl.RateLimitResume) -> ControlResult,
     /** Says a refusal in words (the screen's error toast). */
     internal val onRefused: (String) -> Unit = {},
 ) {
-    /**
-     * T6.6 r2: the lock on declining the limit prompt / cancelling a scheduled resume
-     * (`rate-limit-resume` `dismiss`). [controlLock] minus the handoff: a resume left scheduled
-     * would start a turn in the source after the handoff, the web draws that X ungated and the
-     * server refuses the frame only read-only. Read-only stays locked.
-     */
-    val cancelLock: ConsentLock?
-        get() = if (controlLock == ConsentLock.HandedOff) null else controlLock
-
     companion object {
-        /** Fail closed: every X and key renders disabled and nothing is sent. */
+        /** No session: nothing is sent. */
         val Unavailable = NoticeActions(
             sessionId = null,
-            controlLock = ConsentLock.Offline,
             link = null,
             onDismiss = { NoticeResult.NotConnected },
             onRateLimit = { ControlResult.NotConnected },
@@ -126,30 +115,26 @@ class NoticeActions(
     }
 }
 
-/**
- * ta-coik.23: the limit card's lock, from the session alone (read-only, then handed off): never the
- * link or the copy's liveness, which the web's keys do not wait for either.
- */
-fun sessionControlLock(session: com.tether.app.protocol.model.AgentSession?): ConsentLock? = when {
-    session?.readOnly == true -> ConsentLock.ReadOnly
-    !session?.handedOffTo.isNullOrEmpty() -> ConsentLock.HandedOff
-    else -> null
-}
-
 /** The notices read their session's actions here. */
 val LocalNoticeActions = compositionLocalOf { NoticeActions.Unavailable }
+
+/**
+ * ta-coik.23 r2: the client's NotLive now means only "drawn for another server"; the app's words for
+ * that elsewhere (settings' NOT_SENT / NOT_SENT_OTHER).
+ */
+internal const val OTHER_SERVER_NOT_SENT = "Nothing was sent: the app is now signed in to another server."
 
 /** The words for a dismissal that sent nothing (null: nothing to say — the notice is already gone, or the client said it). */
 internal fun noticeRefusalCopy(result: NoticeResult): String? = when (result) {
     NoticeResult.Sent, NoticeResult.AlreadySent, NoticeResult.NotShown, NoticeResult.NotConnected -> null
-    NoticeResult.NotLive -> "Catching up — the notice was not dismissed. Try again in a moment."
+    NoticeResult.NotLive -> OTHER_SERVER_NOT_SENT
     NoticeResult.Locked -> "This session can’t be changed from here."
 }
 
 /** The words for a limit choice that sent nothing. */
 internal fun rateLimitRefusalCopy(result: ControlResult): String? = when (result) {
     ControlResult.Sent, ControlResult.NotConnected -> null
-    ControlResult.NotLive -> "Catching up — nothing was sent. Try again in a moment."
+    ControlResult.NotLive -> OTHER_SERVER_NOT_SENT
     ControlResult.Locked -> "This session can’t be changed from here."
     ControlResult.NotOffered -> "That limit prompt is no longer active — nothing was sent."
 }
@@ -352,7 +337,7 @@ internal fun SessionNoticeRow(view: SessionNoticeView, modifier: Modifier = Modi
  * client sent disables the keys while the card waits for the server's event to remove it; as on the
  * web (chat-view.tsx 90fbb9f :1361-1371, ta-coik.22), they re-enable after [RATE_LIMIT_RETRY_MS] so a
  * choice a half-open link swallowed can be made again (a new link re-enables them at once too).
- * A handed-off source keeps only Dismiss ([NoticeActions.cancelLock]); read-only keeps none.
+ * ta-coik.23 r2: live on a handed-off or read-only session too, as on the web (the server answers).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -373,16 +358,12 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
             sent = null
         }
     }
-    val lock = actions.controlLock
-    val cancelLock = actions.cancelLock
-    // Live whenever any key could act (Dismiss alone on a handed-off source).
-    val armed = sent == null && cancelLock == null
+    val armed = sent == null
     val resetClock = limitClockTime(view.resetsAt, locale, zone)
     val resumeClock = limitClockTime(view.resumeAt, locale, zone)
 
     fun choose(action: String) {
-        val gate = if (action == "dismiss") actions.cancelLock else actions.controlLock
-        if (sent != null || !armed || gate != null) return
+        if (sent != null || !armed) return
         sent = action
         val result = actions.onRateLimit(SessionControl.RateLimitResume(view.resetsAt, action))
         if (result != ControlResult.Sent) {
@@ -433,8 +414,6 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
                 color = t.muted,
             )
             val status = when {
-                lock == ConsentLock.HandedOff && sent == null -> HANDED_OFF_LIMIT_COPY
-                lock != null && sent == null -> lock.copy.replace("answer", "choose")
                 overlayBlocked && sent == null -> OVERLAY_COPY.replace("answer", "choose")
                 sent != null -> "Choice sent. Waiting for the server."
                 else -> null
@@ -460,7 +439,7 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
                     classes = KeyClasses.ButtonPrimary,
                     label = "Schedule auto-continue · $resumeClock",
                     icon = TetherIcons.Clock,
-                    enabled = armed && lock == null,
+                    enabled = armed,
                     modifier = keyModifier.testTag("rate-limit-schedule"),
                 )
                 TetherKey(
@@ -468,7 +447,7 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
                     classes = KeyClasses.ButtonSecondary,
                     label = "Resume now",
                     icon = TetherIcons.Play,
-                    enabled = armed && lock == null,
+                    enabled = armed,
                     modifier = keyModifier.testTag("rate-limit-resume-now"),
                 )
                 TetherKey(
@@ -476,7 +455,7 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
                     classes = KeyClasses.ButtonSecondary,
                     label = "Dismiss",
                     icon = TetherIcons.Ban,
-                    enabled = armed && cancelLock == null,
+                    enabled = armed,
                     modifier = keyModifier.testTag("rate-limit-dismiss"),
                 )
             }
@@ -487,23 +466,14 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
 /** chat-view.tsx 90fbb9f :1367: how long a sent limit choice keeps the card's keys disabled. */
 internal const val RATE_LIMIT_RETRY_MS = 4_000L
 
-/** r3: why the scheduled-resume cancel cannot send, worded like the Stop keys' lock ([stopLockCopy]). */
-internal fun cancelLockCopy(lock: ConsentLock): String = when (lock) {
-    ConsentLock.Offline -> "Connect to cancel it. This is a saved copy."
-    ConsentLock.CatchingUp -> "Catching up… You can cancel it once this session is live."
-    ConsentLock.ReadOnly -> "Read-only: Tether isn’t driving this conversation."
-    ConsentLock.HandedOff -> "This session was handed off."
-}
 
-/** A handed-off source's limit card: only Dismiss is live (the work continues elsewhere). */
-internal const val HANDED_OFF_LIMIT_COPY = "This session was handed off. Choose in the session it continued in — you can still dismiss this prompt here."
 
 /**
  * The scheduled resume (`.chat-continuation`, `role="status"`): Clock, "Automatic resume scheduled
  * for <time>.", and the cancel X ("Cancel scheduled resume"), which sends `dismiss` for this
  * prompt's `resetsAt` — it cancels a turn the server would start, so it takes T7.2's guarded path.
- * Its lock is [NoticeActions.cancelLock]: a read-only session cannot cancel from here, but a
- * handed-off source can (r2 — otherwise the resume would start a turn there after the handoff).
+ * ta-coik.23 r2: never locked, as on the web (chat-view.tsx 90fbb9f :3707-3714), read-only and
+ * handed-off sessions included (the server answers a read-only one with an `error`, shown).
  */
 @Composable
 internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = Modifier, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()) {
@@ -512,17 +482,13 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
     val actions = LocalNoticeActions.current
     // Scoped to the session too (r2), like the card.
     val identity = Triple(actions.sessionId, view.resetsAt, actions.link)
-    val lock = actions.cancelLock
     // ta-coik.13: the first tap cancels, as on the web (chat-view.tsx 90fbb9f :3707-3714, no arm
     // delay); a press across a change of prompt is dropped ([StaleTapGuard]); no overlay taps.
     // ta-coik.22: no "Cancelling…" latch, as on the web (chat-view.tsx 90fbb9f :3707-3714): each tap sends.
-    val enabled = lock == null
     val label = "Cancel scheduled resume"
     val tap = {
-        if (actions.cancelLock == null) {
-            val result = actions.onRateLimit(SessionControl.RateLimitResume(view.resetsAt, "dismiss"))
-            if (result != ControlResult.Sent) rateLimitRefusalCopy(result)?.let(actions.onRefused)
-        }
+        val result = actions.onRateLimit(SessionControl.RateLimitResume(view.resetsAt, "dismiss"))
+        if (result != ControlResult.Sent) rateLimitRefusalCopy(result)?.let(actions.onRefused)
     }
     Row(
         modifier.widthIn(max = 720.dp).testTag("rate-limit-scheduled"),
@@ -540,17 +506,15 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
             Box(
                 guard
                     .size(TetherDimens.touchTargetDp)
-                    .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = tap)
+                    .clickable(role = Role.Button, onClickLabel = label, onClick = tap)
                     .semantics(mergeDescendants = true) {
                         contentDescription = label
                         role = Role.Button
-                        if (lock != null) stateDescription = cancelLockCopy(lock)
-                        if (!enabled) disabled()
                     }
                     .testTag("rate-limit-cancel"),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp).alpha(if (lock == null) 1f else 0.5f))
+                Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
             }
         }
     }

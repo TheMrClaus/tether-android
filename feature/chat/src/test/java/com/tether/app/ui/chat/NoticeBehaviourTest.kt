@@ -107,7 +107,8 @@ class NoticeBehaviourTest {
         settle()
         rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsEnabled()
         assertEquals(1, rec.refusals.size)
-        assertTrue(rec.refusals.single().contains("not dismissed"))
+        // ta-coik.23 r2: NotLive is a control drawn for another server; the app's words for that.
+        assertEquals(listOf("Nothing was sent: the app is now signed in to another server."), rec.refusals)
     }
 
     @Test
@@ -141,18 +142,6 @@ class NoticeBehaviourTest {
         settle()
         assertEquals(1, rec.dismissed.size)
         assertTrue(rec.refusals.isEmpty())
-    }
-
-    @Test
-    fun aReadOnlySessionMayStillDismiss() {
-        // The server allows dismiss-notice read-only; only the limit keys take the control lock.
-        actions = rec.actions(controlLock = ConsentLock.ReadOnly)
-        show(NoticeFixtures.claudeFallback)
-        arm()
-        rule.onNodeWithContentDescription("Dismiss notice").performClick()
-        settle()
-        assertEquals(1, rec.dismissed.size)
-        assertTrue(rec.dismissed.single().startsWith("provider_notice:t1:"))
     }
 
     @Test
@@ -227,60 +216,34 @@ class NoticeBehaviourTest {
         rule.onNodeWithTag("rate-limit-dismiss").assertIsEnabled()
     }
 
+    /**
+     * ta-coik.23 r2: the client's NotLive now means only "drawn for another server"; the X, the
+     * card and the cancel say that in the app's words for it, never "Catching up".
+     */
     @Test
-    fun aReadOnlyLimitCardSaysWhyAndSendsNothing() {
-        actions = rec.actions(controlLock = ConsentLock.ReadOnly)
+    fun aControlDrawnForAnotherServerSaysSoInTheAppsWords() {
+        rec.dismissResult = NoticeResult.NotLive
+        rec.controlResult = ControlResult.NotLive
         show(NoticeFixtures.limit)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
-        arm()
-        rule.onNodeWithTag("rate-limit-resume-now").assertIsNotEnabled().performClick()
+        rule.onNodeWithTag("rate-limit-schedule").performClick()
         settle()
-        // server.mjs READ_ONLY_MUTATIONS holds rate-limit-resume: even Dismiss is locked.
-        rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled().performClick()
-        settle()
-        rule.onNodeWithTag("rate-limit-status").assertExists()
-        assertTrue(rec.controls.isEmpty())
+        assertEquals(listOf("Nothing was sent: the app is now signed in to another server."), rec.refusals)
+        rule.onNodeWithTag("rate-limit-schedule").assertIsEnabled()
+        assertEquals("Nothing was sent: the app is now signed in to another server.", noticeRefusalCopy(NoticeResult.NotLive))
+        assertEquals("Nothing was sent: the app is now signed in to another server.", rateLimitRefusalCopy(ControlResult.NotLive))
     }
 
     @Test
-    fun aHandedOffLimitCardKeepsOnlyDismiss() {
-        actions = rec.actions(controlLock = ConsentLock.HandedOff)
-        show(NoticeFixtures.limit)
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
-        rule.onNodeWithTag("rate-limit-status")
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, listOf(androidx.compose.ui.text.AnnotatedString(HANDED_OFF_LIMIT_COPY))))
-        // Starting work in the source stays locked.
-        rule.onNodeWithTag("rate-limit-schedule").assertIsNotEnabled().performClick()
-        rule.onNodeWithTag("rate-limit-resume-now").assertIsNotEnabled().performClick()
-        settle()
-        assertTrue(rec.controls.isEmpty())
-        rule.onNodeWithTag("rate-limit-dismiss").assertIsEnabled().performClick()
-        settle()
-        rule.onNodeWithTag("rate-limit-dismiss").performClick()
-        settle()
-        assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "dismiss")), rec.controls)
-    }
-
-    @Test
-    fun aHandedOffSourceMayCancelItsScheduledResume() {
-        // A resume left scheduled would start a turn here after the handoff.
-        actions = rec.actions(controlLock = ConsentLock.HandedOff)
+    fun theScheduledResumeCancelIsNeverLockedAndEachTapSends() {
         show(NoticeFixtures.scheduled)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
-        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsEnabled().performClick()
+        rule.onNodeWithContentDescription("Cancel scheduled resume")
+            .assertIsEnabled()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+            .performClick()
         settle()
         assertEquals(listOf(SessionControl.RateLimitResume(NoticeFixtures.RESETS_AT, "dismiss")), rec.controls)
-    }
-
-    @Test
-    fun aReadOnlySessionCannotCancelAScheduledResume() {
-        actions = rec.actions(controlLock = ConsentLock.ReadOnly)
-        show(NoticeFixtures.scheduled)
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
-        arm()
-        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsNotEnabled().performClick()
-        settle()
-        assertTrue(rec.controls.isEmpty())
     }
 
     /** [f] as another session's (same dismiss keys, same resetsAt). */

@@ -44,8 +44,8 @@ import org.robolectric.annotation.Config
  * Catching up, Saved, Not downloaded and a missing entry. ta-coik.23: as on the web (90fbb9f), a
  * notice's X, the limit card's Schedule / Resume now / Dismiss and the scheduled-resume cancel stay
  * live on every such copy and offline, and the tap reaches the client (which sends on an open socket
- * and otherwise says the link is reconnecting); only the session's read-only / handed-off lock holds
- * them. The Auto-continue pill and sheet rows still stand on the session controls' live-copy lock.
+ * and otherwise says the link is reconnecting); r2: on read-only and handed-off sessions too (the
+ * server answers). The Auto-continue pill and sheet rows still stand on the session controls' lock.
  */
 
 /** Every freshness a copy can have that is not Live, plus "no entry" from a client that reports freshness. */
@@ -202,35 +202,50 @@ class NoticeSyncTest {
         }
     }
 
+    /**
+     * ta-coik.23 r2: on a handed-off or read-only session the web draws the card and its keys live
+     * (chat-view.tsx 90fbb9f :3693-3700, :1386-1394; no handoff check in session-manager.mjs
+     * :2279-2285): every key reaches the client, offline included; the server answers a read-only
+     * session's choice with an `error`, shown.
+     */
     @Test
-    fun aHandedOffSourceDeclinesOrCancelsOnEveryCopyButNeverStartsWork() {
-        // The r2 exception (a handed-off source may decline its prompt) holds offline and catching up too.
-        val source = session.copy(handedOffTo = "s9")
-        val client = client(source, NoticeFixtures.limit)
+    fun aHandedOffSessionsLimitKeysAreLiveAsOnTheWeb() = everyLimitKeyIsLive(session.copy(handedOffTo = "s9"))
+
+    @Test
+    fun aReadOnlySessionsLimitKeysAreLiveAsOnTheWeb() = everyLimitKeyIsLive(session.copy(readOnly = true))
+
+    private fun everyLimitKeyIsLive(shown: AgentSession) {
+        val client = client(shown, NoticeFixtures.limit)
         client.link.value = ConnectionState.Disconnected
         client.live.value = emptySet()
         client.sync.value = mapOf("s1" to SessionSync(Freshness.Saved, 1L))
-        rule.hostChat(client, source)
+        rule.hostChat(client, shown)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
-        rule.onNodeWithTag("rate-limit-status").assert(text(HANDED_OFF_LIMIT_COPY))
-        rule.onNodeWithTag("rate-limit-schedule").assertIsNotEnabled().performClick()
-        rule.onNodeWithTag("rate-limit-resume-now").assertIsNotEnabled().performClick()
-        rule.waitForIdle()
-        assertTrue(client.controlCalls.isEmpty())
-        rule.onNodeWithTag("rate-limit-dismiss").assertIsEnabled().performClick()
-        rule.waitForIdle()
-        assertEquals(listOf(limitCall("dismiss")), client.controlCalls.toList())
+        rule.onNodeWithTag("rate-limit-status").assertDoesNotExist()
+        val expected = mutableListOf<String>()
+        for (key in listOf("schedule", "resume-now", "dismiss")) {
+            rule.onNodeWithTag("rate-limit-$key").assertIsEnabled().performClick()
+            rule.waitForIdle()
+            expected += limitCall(key)
+            assertEquals(expected, client.controlCalls.toList())
+            rule.mainClock.advanceTimeBy(4_100)
+            rule.waitForIdle()
+        }
     }
 
     @Test
-    fun aHandedOffSourceCancelsItsScheduledResumeOnACopyThatIsNotLive() {
-        val source = session.copy(handedOffTo = "s9")
-        val client = client(source, NoticeFixtures.scheduled)
-        rule.hostChat(client, source)
+    fun aHandedOffSessionCancelsItsScheduledResumeOnACopyThatIsNotLive() = cancelIsLiveOnEveryCopy(session.copy(handedOffTo = "s9"))
+
+    @Test
+    fun aReadOnlySessionsScheduledResumeCancelIsLiveAsOnTheWeb() = cancelIsLiveOnEveryCopy(session.copy(readOnly = true))
+
+    private fun cancelIsLiveOnEveryCopy(shown: AgentSession) {
+        val client = client(shown, NoticeFixtures.scheduled)
+        rule.hostChat(client, shown)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
         val cancel = "Cancel scheduled resume"
         val expected = mutableListOf<String>()
-        for ((name, sync) in notLiveCopies("s1")) {
+        for ((name, sync) in notLiveCopies("s1") + ("live" to liveCopy("s1"))) {
             rule.runOnIdle { client.sync.value = sync }
             arm()
             rule.onNodeWithContentDescription(cancel).assertIsEnabled().performClick()
@@ -238,18 +253,6 @@ class NoticeSyncTest {
             expected += limitCall("dismiss")
             assertEquals("$name: the tap reached the client", expected, client.controlCalls.toList())
         }
-    }
-
-    @Test
-    fun aReadOnlySessionStillCannotChooseOrCancelOnAnyCopy() {
-        // server.mjs READ_ONLY_MUTATIONS holds rate-limit-resume (the session's own lock, kept).
-        val ro = session.copy(readOnly = true)
-        val client = client(ro, NoticeFixtures.scheduled)
-        rule.hostChat(client, ro)
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-scheduled"))
-        rule.onNodeWithContentDescription("Cancel scheduled resume").assertIsNotEnabled().performClick()
-        rule.waitForIdle()
-        assertTrue(client.controlCalls.isEmpty())
     }
 
     @Test

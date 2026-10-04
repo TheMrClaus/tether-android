@@ -161,14 +161,20 @@ class NoticeTransmissionTest {
     }
 
     @Test
-    fun aReadOnlyOrHandedOffSessionMayDismissButNotDecideTheLimit() {
-        // server.mjs READ_ONLY_MUTATIONS holds rate-limit-resume but not dismiss-notice.
-        val (client, _) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
+    fun aReadOnlySessionDismissesAndItsLimitChoiceGoesToTheServerAsOnTheWeb() {
+        // ta-coik.23 r2: the web draws the keys live and sends; server.mjs READ_ONLY_MUTATIONS
+        // (90fbb9f :708-713, :9604) refuses rate-limit-resume with an `error`, which is shown.
+        val (client, ws) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
+        val server = java.util.concurrent.LinkedBlockingQueue<String>()
+        h.scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { client.serverErrors.collect { server.put(it.text) } }
         val origin = client.consentOrigin.value
         assertEquals(NoticeResult.Sent, client.dismissNotice("s1", keys(client).first(), origin))
-        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), origin))
-        assertEquals(1, frames("dismiss-notice").size)
-        assertTrue(frames("rate-limit-resume").isEmpty())
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), origin))
+        val sent = h.framesUntilBarrier()
+        assertEquals(1, sent.count { it.type() == "dismiss-notice" })
+        assertEquals(listOf("schedule"), sent.filter { it.type() == "rate-limit-resume" }.map { it.str("action") })
+        ws.send("""{"type":"error","message":"This session is read-only."}""")
+        assertEquals("This session is read-only.", server.poll(20, java.util.concurrent.TimeUnit.SECONDS))
     }
 
     @Test
@@ -237,30 +243,28 @@ class NoticeTransmissionTest {
     }
 
     @Test
-    fun aReadOnlySessionCannotGrantAutoContinueOrDecideTheLimit() = lockedSessionSendsNoGrant(""","readOnly":true""")
+    fun aReadOnlySessionCannotGrantAutoContinueButSendsEveryLimitChoice() = lockedSessionSendsNoGrant(""","readOnly":true""")
 
     @Test
-    fun aHandedOffSessionCannotGrantAutoContinueOrDecideTheLimit() = lockedSessionSendsNoGrant(""","handedOffTo":"s2"""")
+    fun aHandedOffSessionCannotGrantAutoContinueButSendsEveryLimitChoice() = lockedSessionSendsNoGrant(""","handedOffTo":"s2"""")
 
+    /** ta-coik.23 r2: auto-continue keeps the lock; every rate-limit-resume action goes out, as on the web. */
     private fun lockedSessionSendsNoGrant(extra: String) {
-        val (client, _) = connected(readyWithSessions("s1", extra = extra))
+        val (client, ws) = connected(readyWithSessions("s1", extra = extra))
         val origin = client.consentOrigin.value
         assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true), origin))
-        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "resume-now"), origin))
-        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), origin))
-        assertTrue(frames("set-auto-continue-on-limit").isEmpty() && frames("rate-limit-resume").isEmpty())
-    }
-
-    @Test
-    fun aReadOnlySessionCannotEvenDeclineTheLimit() {
-        // server.mjs READ_ONLY_MUTATIONS holds rate-limit-resume: every action, dismiss included.
-        val (client, ws) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
-        val origin = client.consentOrigin.value
-        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "resume-now"), origin))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), origin))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
+        val sent = h.framesUntilBarrier()
+        assertTrue(sent.none { it.type() == "set-auto-continue-on-limit" })
+        assertEquals(listOf("resume-now", "schedule", "dismiss"), sent.filter { it.type() == "rate-limit-resume" }.map { it.str("action") })
+        // Scheduled: its cancel goes out too; the other actions are not offered by the prompt.
         ws.send(eventFrame("s1", 6, "rate_limit_resume_scheduled", null, ""","resetsAt":3600000,"resumeAt":3720000"""))
         h.await(client.projectionTrees) { trees -> trees["s1"].toString().contains("scheduled") }
-        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
-        assertTrue(frames("rate-limit-resume").isEmpty())
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "resume-now"), origin))
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
+        assertEquals(listOf("dismiss"), frames("rate-limit-resume").map { it.str("action") })
     }
 
     @Test
@@ -279,8 +283,9 @@ class NoticeTransmissionTest {
         // Scheduled (from another device): the row's cancel goes out; starting work stays locked.
         ws.send(eventFrame("s1", 6, "rate_limit_resume_scheduled", null, ""","resetsAt":3600000,"resumeAt":3720000"""))
         h.await(client.projectionTrees) { trees -> trees["s1"].toString().contains("scheduled") }
-        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "resume-now"), origin))
-        assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), origin))
+        // ta-coik.23 r2: only the prompt bounds them now (scheduled offers dismiss alone), not the handoff.
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "resume-now"), origin))
+        assertEquals(ControlResult.NotOffered, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), origin))
         assertEquals(ControlResult.Locked, client.sessionControl("s1", SessionControl.AutoContinueOnLimit(true), origin))
         assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "dismiss"), origin))
         assertEquals(listOf("dismiss"), frames("rate-limit-resume").map { it.str("action") })

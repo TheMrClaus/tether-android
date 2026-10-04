@@ -4263,10 +4263,10 @@ class RealTetherClient(
      * ([expectedOrigin] = the socket's origin); ta-coik.23: not the session's liveness (the web's `send`
      * puts `rate-limit-resume` and every control on any OPEN socket, use-tether.ts 90fbb9f :337-344,
      * :1661-1665; a refusal comes back as a shown `error`); listed, and neither
-     * read-only nor handed off (fail closed) — the one exception (T6.6 r2): a handed-off source may
-     * still decline its limit prompt / cancel its scheduled resume
-     * ([SessionControlsGuard.allowedWhileHandedOff]), since that resume would otherwise start a turn
-     * there after the handoff; the value one the session's current state offers
+     * read-only nor handed off (fail closed) — the exception (T6.6 r2, ta-coik.23 r2): every
+     * `rate-limit-resume` action goes out on a read-only or handed-off session too, as on the web
+     * ([SessionControlsGuard.allowedWhileReadOnly], [SessionControlsGuard.allowedWhileHandedOff]; the
+     * server's read-only refusal comes back as a shown `error`); the value one the session's current state offers
      * ([SessionControlsGuard.check]); then enqueued on that
      * socket. Nothing is retried, held or persisted.
      */
@@ -4278,7 +4278,7 @@ class RealTetherClient(
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized ControlResult.NotConnected
             if (expectedOrigin != origin) return@synchronized ControlResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized ControlResult.Locked
-            if (session.readOnly) return@synchronized ControlResult.Locked
+            if (session.readOnly && !SessionControlsGuard.allowedWhileReadOnly(control)) return@synchronized ControlResult.Locked
             if (!session.handedOffTo.isNullOrEmpty() && !SessionControlsGuard.allowedWhileHandedOff(control)) return@synchronized ControlResult.Locked
             val codex = codexControlsState.value[sessionId]?.snapshot
             val opencode = opencodeControlsState.value[sessionId]?.snapshot

@@ -204,10 +204,9 @@ fun ChatScreen(
     // (rate-limit-resume: T7.2's guarded path). Taps only. ta-coik.23: as on the web (use-tether.ts
     // 90fbb9f :337-344 `send`, :1657-1665), neither locks offline or catching up: the client sends on
     // an open socket for the server they were drawn for, and says the link is reconnecting otherwise.
-    // The limit card keeps only the session's own read-only / handed-off lock.
+    // ta-coik.23 r2: nor on read-only / handed off (the web's keys are live there; the server answers).
     val noticeLink = Triple(connection, liveNow, consentOrigin)
-    val limitLock = sessionControlLock(session)
-    val noticeActions = remember(session?.id, noticeLink, limitLock, vm) {
+    val noticeActions = remember(session?.id, noticeLink, vm) {
         val s = session
         val drawnFor = consentOrigin
         if (s == null) {
@@ -215,7 +214,6 @@ fun ChatScreen(
         } else {
             NoticeActions(
                 sessionId = s.id,
-                controlLock = limitLock,
                 link = noticeLink,
                 onDismiss = { key -> vm.client.dismissNotice(s.id, key, drawnFor) },
                 onRateLimit = { control -> vm.client.sessionControl(s.id, control, drawnFor) },

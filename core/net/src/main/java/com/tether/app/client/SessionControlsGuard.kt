@@ -329,14 +329,20 @@ object SessionControlsGuard {
     }
 
     /**
-     * T6.6 r2: the one control a handed-off (but not read-only) session still takes — `dismiss` of
-     * its limit prompt, which also cancels a scheduled resume. The resume would otherwise start a
-     * turn in the source after the handoff; the web draws that X ungated and server.mjs refuses
-     * rate-limit-resume only for read-only sessions. `schedule` / `resume-now` (which start work
-     * there) and every other control stay locked.
+     * T6.6 r2 / ta-coik.23 r2: the controls a handed-off session still sends — every
+     * `rate-limit-resume` action (dismiss, schedule, resume-now), as on the web: chat-view.tsx 90fbb9f
+     * :3693-3700 draws the card whatever the handoff, its keys wait only on a sent choice (:1386-1394),
+     * and neither server.mjs (:708-713) nor session-manager.mjs decideRateLimitResume (:2279-2285)
+     * checks the handoff. Every other control stays locked.
      */
-    fun allowedWhileHandedOff(control: SessionControl): Boolean =
-        control is SessionControl.RateLimitResume && control.action == "dismiss"
+    fun allowedWhileHandedOff(control: SessionControl): Boolean = control is SessionControl.RateLimitResume
+
+    /**
+     * ta-coik.23 r2: the controls a read-only session still sends — `rate-limit-resume`, whose keys
+     * the web draws live there too; server.mjs READ_ONLY_MUTATIONS (:708-713, :9604) refuses it with
+     * an `error`, which the client shows. Every other control stays locked.
+     */
+    fun allowedWhileReadOnly(control: SessionControl): Boolean = control is SessionControl.RateLimitResume
 
     /** protocol-validate.mjs "rate-limit-resume": the three actions it accepts. */
     val RATE_LIMIT_ACTIONS = setOf("dismiss", "schedule", "resume-now")
