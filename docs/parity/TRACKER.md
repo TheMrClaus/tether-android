@@ -106,7 +106,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T5.1 | Session list: groups, pinned workspaces, synced order, pin/rename/archive/kill, seen/unread | VERIFIED | claude-main @ 2026-09-27 13:53 |  |  |
 | T5.2 | History/resume picker | VERIFIED | TheMrClaus @ 2026-09-28 00:37 |  |  |
 | T5.3 | Global + in-session search | VERIFIED | TheMrClaus @ 2026-09-28 03:33 |  |  |
-| T5.4 | Away digests (if on web) | TODO |  |  |  |
+| T5.4 | Away digests (if on web) | VERIFIED |  |  |  |
 
 ### Phase 6 — Chat view
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -132,11 +132,11 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T8.1 | Studio welcome + new-session catalog + providers | TODO |  |  | coordinator 2026-10-02: all six slices merged and verified (ta-8cv, ta-abm, ta-2uq, ta-xki, ta-23f, ta-3e7). T8.1 stays open only for M.lib… |
-| T8.2 | Folder picker, workspaces | IN-PROGRESS | TheMrClaus @ 2026-10-05 14:42 |  |  |
+| T8.2 | Folder picker, workspaces | VERIFIED | TheMrClaus @ 2026-10-05 14:42 |  |  |
 | T8.3 | Worktree modes/scripts/logs/diff/services/open, repository panel, change request | TODO |  |  |  |
 | T8.4 | GitHub work dialog | VERIFIED | TheMrClaus @ 2026-10-04 22:50 | `bd show` |  |
-| T8.5 | Metadata draft panel, handoff brief + claim | IN-PROGRESS | TheMrClaus @ 2026-10-05 14:42 |  | slice a MERGED ff-only 9541cd29 (full gate 6448/0/5, stale 0; verify CONFIRMED by a different actor: core:net 1366, feature:shell 870, scre… |
-| T8.6 | Browser pane (native frame stream) — scope per T0.5 | TODO |  |  |  |
+| T8.5 | Metadata draft panel, handoff brief + claim | IN-PROGRESS | TheMrClaus @ 2026-10-05 14:42 |  | slices b+c (maker, branch T8.5b): 6a0453a9 limit-card takeover (chat-view.tsx:1395-1399; dashboard.tsx:311-372; use-draft-composer.ts:355-4… |
+| T8.6 | Browser pane (native frame stream) — scope per T0.5 | IN-PROGRESS | TheMrClaus @ 2026-10-05 16:29 |  |  |
 
 ### Phase 9 — Inspector, usage, scheduled actions
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -148,8 +148,8 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 10 — Settings & first run
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T10.1 | Settings dialog, all tabs | TODO |  |  | Split into 5 slices (coordinator, after a read-only plan): ta-k3f shell+General+Appearance; ta-9q2 Claude accounts read-only + plan names (… |
-| T10.2 | Session settings sheet | TODO |  |  |  |
+| T10.1 | Settings dialog, all tabs | TODO |  |  | Close-out verification (different actor, at main 8e050340): every tab and control present and writable. Two gaps: (1) Claude account Termin… |
+| T10.2 | Session settings sheet | VERIFIED |  |  |  |
 | T10.3 | Nodes settings | VERIFIED | security-executor-T10.3 @ 2026-10-01 22… | `bd show` |  |
 | T10.4 | Paired devices + sign-in security (device-token view) | VERIFIED | security-executor-T10.4 @ 2026-10-02 01… |  |  |
 | S10.1 | Server `/.well-known/assetlinks.json` — PR | VERIFIED | TheMrClaus @ 2026-09-28 16:02 |  |  |
@@ -160,13 +160,13 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T11.1 | Workspace file browser (all /api/files ops) | VERIFIED | TheMrClaus @ 2026-09-27 22:25 |  |  |
-| T11.2 | Android share target → session | IN-PROGRESS | TheMrClaus @ 2026-10-05 15:12 |  |  |
+| T11.2 | Android share target → session | IN-PROGRESS | TheMrClaus @ 2026-10-05 15:12 |  | maker: 1fa237c2 — exported no-UI ShareActivity trampoline (SEND text/plain, SEND/SEND_MULTIPLE */*), ShareIntents.parse (untrusted extras),… |
 
 ### Phase 12 — Notifications
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T12.1 | FCM refresh, channels, deep link, Android 13+ permission | VERIFIED | claude-main @ 2026-09-27 12:49 |  |  |
-| T12.2 | Web-push trigger/settings parity | TODO |  |  |  |
+| T12.2 | Web-push trigger/settings parity | VERIFIED | TheMrClaus @ 2026-10-05 15:26 |  |  |
 | T12.3 | (owner opt-in) Approve/deny actions in the notification | BLOCKED (deferred) |  |  |  |
 
 ### Phase 13 — Proper sync
@@ -417,6 +417,7 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-04 | ta-coik.21, .19 and .33 merged (two green full gates each: 6051, 6097, 6100 tests, 0 failed). ta-coik.33 (owner bug: a chat opened on already-read messages) = the transcript was not keyed per session, so scroll and follow mode carried over; now keyed as the web remounts ChatView. Owner perf report filed as ta-coik.32: diagnosis = an 8 s ping probe on resume of a frozen app's dead socket, a 0.5-1 s first-reconnect backoff, every opened chat re-attached before the open one, serial auth+upgrade; phase 2 approved (immediate reconnect, fresh connect after >=25 s away or a network change, open chat first, pool cleared on network change, parallel auth check, TetherTiming log). No background foreground service | Owner asked for snappy; every change does at least what the web does | claude-main (owner delegation) |
 | 2026-10-04 | ta-6t1 r13: verify REFUTED, security PASS WITH FOLLOW-UPS; both found a setup handing a process outside its cgroup (systemd-run --user, a running tmux/pm2 server, docker) keeps the session contained. r14: **any session whose checkout ran a non-empty owner-approved setup is exposed for its lifetime** (the one provable rule), plus the launch keeps argv[0]-dispatch shims working and the remaining hardening | Owner: ship as is; labels may be conservative, behaviour unchanged | claude-main (owner delegation) |
 | 2026-10-04 | ops: the console's SSO proxy admits /api/github/ (owner's explicit-route list), for ta-coik.21 | Owner instruction (handover) | claude-main |
+| 2026-10-05 | T12.2 merged (`8e050340`, gate 6473/0/5): push row shows the web's Web Push phases with Enable / Disable / Re-enable (use-push-notifications.ts:121-196, settings-dialog.tsx:2073-2096); 'needs a paired device' is the server's own rule (server.mjs:7740-7750). T8.2 merged (`b3a99fa0`, gate 6504 with 1 known flake ta-wpu7, passes alone): one shared folder picker with create folder, load error, Opening/stalled until confirmed, Browse for engine/provider homes (folder-picker-dialog.tsx, settings-dialog.tsx:2178-2188/:740-750). T10.2 and T5.4 verified closed by a read-only close-out check (all web capabilities present). Gates now run with --no-daemon and a 25-min limit after three stale-daemon lint hangs | Verified CONFIRMED by different actors | claude-main |
 | 2026-10-05 | T8.5 slice a merged (`9541cd29`, full gate 6448/0/5): Repository panel Draft commit message / Draft pull request keys (shown when metadataGenerationEnabled === true and not read-only), server-wide draft list (cap 8, client-only dismiss), metadata draft panel with copy keys, as repository-panel.tsx:27-51, use-tether.ts:1171-1193/:1867-1881 and metadata-draft-panel.tsx at 90fbb9f. Also: tether PR #241 merged by the coordinator at the owner's request (1bf4a465, PROTOCOL 143, after a merge-regression fix 536c9f2); Android slice filed as ta-m7ef | Verified CONFIRMED by a different actor | claude-main |
 | 2026-10-05 | ta-coik.53 merged (`9df86e40`, full gate 6415/0/5): Studio sign-in compact footer centred, inputs 50dp/9dp/14dp/graphite, keys 44dp (48dp touch), accent focus outline, 0.6 disabled fade, refused-password danger border, as studio-login.module.css :59-:70 and studio.css :265-269 at 90fbb9f. The bead's 9px/700 key values were wrong: the web's more specific `:root .button-primary` draws 10px/680, which the app already drew | Verified CONFIRMED by a different actor | claude-main |
 | 2026-10-05 | ta-coik.43 merged (`5d0cb361`, full gate 6409/0/5): Android Back onto an earlier Sessions entry re-selects the chat it named through the pending path, as the web's popstate handler (dashboard.tsx 90fbb9f :1110-1118); chat switches add no entry (web replaceState :1072-1096). Follow-up ta-3qyc | Verified CONFIRMED by a different actor | claude-main |
