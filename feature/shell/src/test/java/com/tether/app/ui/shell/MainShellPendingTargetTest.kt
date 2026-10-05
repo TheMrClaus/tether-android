@@ -6,6 +6,7 @@ import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -76,6 +77,8 @@ class MainShellPendingTargetTest {
 
     private fun reopeningShown() = rule.onAllNodesWithText("Reopening your session.").fetchSemanticsNodes().isNotEmpty()
 
+    private fun chatShown() = rule.onAllNodesWithTag(ShellTags.WorkspaceHeader, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+
     private fun selected(destination: TopBarDestination) =
         rule.onNodeWithTag(ShellTags.nav(destination)).fetchSemanticsNode().config.getOrNull(SemanticsProperties.Selected) == true
 
@@ -99,6 +102,7 @@ class MainShellPendingTargetTest {
         rule.runOnIdle { vm.openSession("x") }
         rule.waitForIdle()
         assertEquals("the chat on screen stays (and nothing is attached)", listOf("a"), client.mountCalls.toList())
+        assertTrue("a chat, not the welcome stage", chatShown())
         assertFalse(reopeningShown())
         assertEquals("still the chat on screen", "a", remembered()?.sessionId)
 
@@ -120,6 +124,7 @@ class MainShellPendingTargetTest {
 
         list(client, chat("a"))
         assertFalse("a list without it: the welcome stage", reopeningShown())
+        assertFalse(chatShown())
         assertTrue("nothing is picked while a target is pending", client.mountCalls.isEmpty())
         assertNull(vm.activeId.value)
 

@@ -240,10 +240,11 @@ class TetherViewModelPendingTargetTest {
     @Test
     fun aLiveSearchHitClearsThePickAndBecomesThePendingTarget() {
         aOnScreen()
+        vm.openSearchHit("b")
+        assertNull("the pick clears (dashboard.tsx :1266)", vm.activeId.value)
         assertTrue(vm.resumeHistory(history("h1")))
         vm.openDraft()
         vm.openSearchHit("b")
-        assertNull(vm.activeId.value)
         assertNull(vm.openingHistoryId.value)
         assertEquals("b", vm.pendingSessionId.value)
         assertEquals("b", vm.selectedSessionId.value)

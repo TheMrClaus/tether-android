@@ -219,6 +219,8 @@ class GlobalSearchBehaviourTest {
         rule.waitForIdle()
         h.client.globalReply(h.client.globalSearchResults.value.requestId, "parity", listOf(hit("h-1", "Parity notes thread")))
         rule.waitForIdle()
+        rule.runOnIdle { h.vm.selectSession("s-picked") } // something picked before (dashboard.tsx :1266 clears it)
+        rule.waitForIdle()
         h.client.frames.clear()
         // T4.4's link path is the one way a session opens from outside the sidebar.
         val opened = mutableListOf<String>()
