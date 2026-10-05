@@ -140,13 +140,15 @@ class SidebarController(
 
     /**
      * Make [cwd] current. The view model's own `discover` subscribes to that folder alone, so the
-     * complete watch set is re-declared right after (use-tether.ts selectWorkspace keeps `watch`).
+     * complete watch set is re-declared right after (use-tether.ts selectWorkspace keeps `watch`),
+     * T8.2: as the durable workspace intent (use-tether.ts 90fbb9f :1376-1384), redelivered until the
+     * server confirms it — the folder picker's "Opening…" state.
      */
     private fun makeCurrent(cwd: String, workspaces: List<String>) {
         selectWorkspace(cwd)
         val set = watchSet(workspaces, cwd)
         watched = set
-        client.discoverWorkspace(cwd, readPreferences().lastSeenSessions, set)
+        client.activateWorkspace(cwd, readPreferences().lastSeenSessions, set)
     }
 
     /** dashboard.tsx:374-377 — the block that OWNS the folder becomes current. */

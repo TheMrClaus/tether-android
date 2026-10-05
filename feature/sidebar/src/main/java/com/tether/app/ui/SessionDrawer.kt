@@ -220,7 +220,12 @@ fun SessionDrawer(
     if (settingsOpen) SettingsDialog(client, prefs, currentWorkspace = current.orEmpty(), onDismiss = { settingsOpen = false })
 }
 
-/** The drawer's folder picker and [WorkspacePickerHost]'s: choosing a folder pins it and makes it current. */
+/**
+ * The drawer's folder picker and [WorkspacePickerHost]'s (dashboard.tsx 90fbb9f :1849): choosing a
+ * folder pins it and makes it current; the picker stays open showing "Opening…" / "couldn't open —
+ * retrying" until the server confirms the workspace ([TetherClient.workspaceSelect]), and offers
+ * "Create a new folder" and the "couldn't load this folder" state.
+ */
 @Composable
 private fun WorkspaceFolderPicker(
     client: com.tether.app.client.TetherClient,
@@ -230,15 +235,16 @@ private fun WorkspaceFolderPicker(
     controller: SidebarController,
     onDismiss: () -> Unit,
 ) {
+    val browseStatus by client.browseStatus.collectAsStateWithLifecycle()
     FolderPickerDialog(
         directories = directories,
         current = current,
         onDismiss = onDismiss,
         onBrowse = { client.browse(it) },
-        onChoose = { cwd ->
-            onDismiss()
-            controller.chooseWorkspace(cwd, pinned, current)
-        },
+        onChoose = { cwd -> controller.chooseWorkspace(cwd, pinned, current) },
+        onCreateFolder = { cwd, name -> client.createFolder(cwd, name) },
+        browseStatus = browseStatus,
+        selectStatus = client.workspaceSelect,
     )
 }
 

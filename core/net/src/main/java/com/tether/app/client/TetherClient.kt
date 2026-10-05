@@ -558,7 +558,40 @@ interface TetherClient {
 
     fun resumeHistory(historyId: String, cwd: String)
     fun discover(cwd: String)
+
+    /**
+     * T8.2 (use-tether.ts 90fbb9f :1471-1489 browseWorkspace): a correlated `browse` (a fresh
+     * requestId). The latest one wins: a `directories` reply naming another requestId is dropped,
+     * and one that never arrives within the watchdog window (or a link that is down) turns
+     * [browseStatus] to [BrowseStatus.Phase.Error].
+     */
     fun browse(cwd: String? = null)
+
+    /** T8.2 (use-tether.ts 90fbb9f :257): the latest folder navigation, null once its listing arrived. */
+    val browseStatus: StateFlow<BrowseStatus?> get() = NO_BROWSE_STATUS
+
+    /**
+     * T8.2 (use-tether.ts 90fbb9f :258, :431-441): the durable workspace-activation intent
+     * (lib/pending-workspace.mjs) as the folder picker shows it — `opening` / `stalled` — null once a
+     * `histories` reply echoing its requestId confirmed it.
+     */
+    val workspaceSelect: StateFlow<WorkspaceSelectStatus?> get() = NO_WORKSPACE_SELECT
+
+    /**
+     * T8.2 (use-tether.ts 90fbb9f :1514-1516): v80 `create-folder` in the folder being browsed. The
+     * server answers with a fresh (uncorrelated) `directories` listing; a refusal is its `error`,
+     * shown as every server error is. A link that is down says so, as the web's `send` does.
+     */
+    fun createFolder(cwd: String, name: String): Boolean = false
+
+    /**
+     * T8.2 (use-tether.ts 90fbb9f :1376-1384 selectWorkspace): make [cwd] current as a DURABLE
+     * intent — a plain `browse` and a `discover` carrying a requestId, redelivered on reconnect and
+     * by the sweep until a `histories` echoing it arrives ([workspaceSelect]). [watch] / [lastSeen]
+     * are as [discoverWorkspace]'s.
+     */
+    fun activateWorkspace(cwd: String, lastSeen: Map<String, Long>, watch: List<String>): Boolean =
+        discoverWorkspace(cwd, lastSeen, watch)
 
     /**
      * T7.2: the ONE path an operator's session-control choice takes to the wire (`set-mode`,
@@ -1128,6 +1161,18 @@ private val NO_ADVANCED_SETTINGS: StateFlow<ServerMessage.AdvancedSettings?> = M
 private val NO_PROVIDER_PROFILES: StateFlow<ProvidersList?> = MutableStateFlow(null)
 private val NO_SERVER_SETTINGS_REPLIES: StateFlow<Long> = MutableStateFlow(0L)
 private val NO_HIDDEN_AGENT_SESSION_COUNT: StateFlow<Int?> = MutableStateFlow(null)
+private val NO_BROWSE_STATUS: StateFlow<BrowseStatus?> = MutableStateFlow(null)
+private val NO_WORKSPACE_SELECT: StateFlow<WorkspaceSelectStatus?> = MutableStateFlow(null)
+
+/** T8.2 (use-tether.ts 90fbb9f :257): `{ requestId, cwd, phase: "loading" | "error" }`. */
+data class BrowseStatus(val requestId: String, val cwd: String, val phase: Phase) {
+    enum class Phase { Loading, Error }
+}
+
+/** T8.2 (lib/pending-workspace.mjs describeIntent): `{ cwd, requestId, phase: "opening" | "stalled" }`. */
+data class WorkspaceSelectStatus(val cwd: String, val requestId: String, val phase: Phase) {
+    enum class Phase { Opening, Stalled }
+}
 
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
 private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)

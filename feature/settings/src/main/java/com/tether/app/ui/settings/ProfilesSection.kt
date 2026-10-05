@@ -364,7 +364,25 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
                 !p.homeDir.isNullOrEmpty() -> codeLabel(p.homeDir!!)
                 else -> AnnotatedString(ProfileRows.HOME_OPTIONAL)
             }
-            ProfileTextRow(p, ProfileTags.HOME, ProfileRows.HOME, homeCaption, p.homeDir.orEmpty(), true, narrow, placeholder = ProfileRows.HOME_PLACEHOLDER) {
+            // T8.2 (settings-dialog.tsx 90fbb9f :740-750, :2240-2245, :2470-2472): "Browse folders"
+            // fills the home with the folder chosen, written at once.
+            val picker = LocalHomeFolderPicker.current
+            ProfileTextRow(
+                p, ProfileTags.HOME, ProfileRows.HOME, homeCaption, p.homeDir.orEmpty(), true, narrow, placeholder = ProfileRows.HOME_PLACEHOLDER,
+                trailing = {
+                    TetherKey(
+                        onClick = {
+                            val home = p.homeDir.orEmpty()
+                            picker.open(home, home) { path -> latest.send(p.id, ProfileEdit.Home(p.id, path)) }
+                        },
+                        classes = KeyClasses.IconButton,
+                        icon = TetherIcons.FolderOpen,
+                        iconSize = 14.dp,
+                        contentDescription = HomeFolderCopy.browseLabel(ProfileRows.name(p)),
+                        modifier = Modifier.testTag(HomeFolderTags.profile(p.id)),
+                    )
+                },
+            ) {
                 ProfileRows.outcome(latest.send(p.id, ProfileEdit.Home(p.id, it), quiet = true))
             }
             SettingsRow(
@@ -442,6 +460,8 @@ private fun ProfileTextRow(
     placeholder: String = "",
     label: String = what,
     digits: Boolean = false,
+    /** T8.2: a key beside the field (the home's "Browse folders", `.settings-server-input-wrap`). */
+    trailing: (@Composable () -> Unit)? = null,
     onCommit: (String) -> CommitOutcome,
 ) {
     val shown = remember(value) { LabelText.withoutHidden(value) }
@@ -451,7 +471,8 @@ private fun ProfileTextRow(
         modifier = Modifier.testTag(ProfileTags.row(p.id, what)),
         text = { m -> SettingsRowText(title, caption, m) },
         control = { m ->
-            CommitField(
+            @Composable
+            fun field(modifier: Modifier) = CommitField(
                 shown = shown,
                 label = ProfileRows.field(p, label),
                 tag = ProfileTags.field(p.id, what),
@@ -461,8 +482,16 @@ private fun ProfileTextRow(
                 keyboardType = if (digits) KeyboardType.Number else KeyboardType.Text,
                 accept = if (digits) { typed -> typed.all { it in NUMBER_KEYS } } else { _ -> true },
                 onCommit = onCommit,
-                modifier = m.serverFieldWidth(narrow),
+                modifier = modifier,
             )
+            if (trailing == null) {
+                field(m.serverFieldWidth(narrow))
+            } else {
+                Row(m.serverFieldWidth(narrow), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    field(Modifier.weight(1f))
+                    trailing()
+                }
+            }
         },
     )
 }

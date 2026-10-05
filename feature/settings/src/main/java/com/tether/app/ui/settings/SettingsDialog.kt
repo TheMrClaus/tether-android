@@ -247,11 +247,13 @@ fun SettingsDialog(
     }
     val githubBinding = GitHubBinding(github.controller, opener = loginOpener)
     val layout = currentLayoutClass()
+    // T8.2: the home "Browse folders" picker (settings-dialog.tsx 90fbb9f :2457-2480).
+    val homePicker = remember(client) { HomeFolderPicker.of(client) }
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
         val view = LocalView.current
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
         val progress = rememberDialogIn()
-        SettingsFrame(
+        androidx.compose.runtime.CompositionLocalProvider(LocalHomeFolderPicker provides homePicker) { SettingsFrame(
             prefs = prefs,
             serverUrl = client.serverUrl,
             state = state,
@@ -271,7 +273,8 @@ fun SettingsDialog(
                 alpha = p
                 translationY = (1f - p) * 8.dp.toPx()
             },
-        )
+        ) }
+        HomeFolderPickerHost(homePicker)
     }
 }
 

@@ -311,6 +311,12 @@ object ServerSettingsPatch {
         return patch(engine.home, JsonPrimitive(dir))
     }
 
+    /**
+     * T8.2: a home chosen with "Browse folders" (settings-dialog.tsx 90fbb9f :2473-2475:
+     * `onUpdateServerSettings({ [homeBrowseTarget]: path })`), written at once as it came.
+     */
+    fun pickedHome(engine: EngineCard, path: String): JsonObject = patch(engine.home, JsonPrimitive(path))
+
     /** The home "Use detected" offers, or null when the web draws no such row (:2191: `noHome && det?.configDir`). */
     fun detectedHome(view: ServerSettingsView, engine: EngineCard): String? {
         val dir = view.detection(engine)?.configDir?.takeIf { it.isNotEmpty() } ?: return null

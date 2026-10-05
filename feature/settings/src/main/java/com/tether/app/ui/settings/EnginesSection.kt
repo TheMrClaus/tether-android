@@ -262,26 +262,47 @@ private fun EngineValueRow(
     val forced = view.forced(setting)
     val raw = view.text(setting)
     val shown = remember(raw) { LabelText.withoutHidden(raw) }
+    val latest by rememberUpdatedState(binding)
+    val picker = LocalHomeFolderPicker.current
+    // T8.2 (settings-dialog.tsx 90fbb9f :2178-2188): the home's "Browse folders", unless the environment sets it.
+    val browsable = setting == engine.home && !forced
     SettingsRow(
         narrow = narrow,
         rule = !first,
         modifier = Modifier.testTag(ServerSettingsTags.row(setting)),
         text = { m -> SettingsRowText(title, caption, m, locked = forced) },
         control = { m ->
-            CommitField(
-                shown = shown,
-                label = EngineRows.fieldLabel(engine, setting),
-                tag = ServerSettingsTags.input(setting),
-                enabled = !forced,
-                narrow = narrow,
-                placeholder = "",
-                // The placeholder is server text (a detected path): drawn by the code rule.
-                styledPlaceholder = codeLabel(placeholder),
-                // Never past the server's limit (it would refuse the write).
-                accept = { ServerSettingsPatch.fits(setting, it) },
-                onCommit = { serverCommit(ServerSettingsPatch.engineValue(view, setting, it, shown), binding::send) },
-                modifier = m.serverFieldWidth(narrow),
-            )
+            Row(m.serverFieldWidth(narrow), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CommitField(
+                    shown = shown,
+                    label = EngineRows.fieldLabel(engine, setting),
+                    tag = ServerSettingsTags.input(setting),
+                    enabled = !forced,
+                    narrow = narrow,
+                    placeholder = "",
+                    // The placeholder is server text (a detected path): drawn by the code rule.
+                    styledPlaceholder = codeLabel(placeholder),
+                    // Never past the server's limit (it would refuse the write).
+                    accept = { ServerSettingsPatch.fits(setting, it) },
+                    onCommit = { serverCommit(ServerSettingsPatch.engineValue(view, setting, it, shown), binding::send) },
+                    modifier = Modifier.weight(1f),
+                )
+                if (browsable) {
+                    TetherKey(
+                        // :2182: browse from the home, else the detected one, else the server's default.
+                        onClick = {
+                            picker.open(raw, raw.ifEmpty { view.detection(engine)?.configDir.orEmpty() }) { path ->
+                                latest.send(ServerSettingsPatch.pickedHome(engine, path))
+                            }
+                        },
+                        classes = KeyClasses.IconButton,
+                        icon = TetherIcons.FolderOpen,
+                        iconSize = 14.dp,
+                        contentDescription = HomeFolderCopy.browseLabel(engine.label),
+                        modifier = Modifier.testTag(HomeFolderTags.engine(engine.id)),
+                    )
+                }
+            }
         },
     )
 }

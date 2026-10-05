@@ -446,6 +446,8 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHu
                 composer.setCwd(cwd)
             },
             title = "Choose a working folder",
+            // T8.2 (draft-composer.tsx 90fbb9f :921): the same "Create a new folder".
+            onCreateFolder = { cwd, name -> client.createFolder(cwd, name) },
         )
     }
     // github-work-dialog.tsx :130-140 / draft-composer.tsx :350-353: `onTextChange(prompt); onSetCwd(cwd)`.

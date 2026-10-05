@@ -22,6 +22,9 @@ import com.tether.app.protocol.fold.projectionHasNoticeKey
 import com.tether.app.protocol.fold.reduce
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.str
+import com.tether.app.protocol.helpers.PendingWorkspace
+import com.tether.app.protocol.helpers.get
+import com.tether.app.protocol.tree.js
 import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
@@ -104,6 +107,9 @@ private const val MAX_CONTROL_MESSAGE = 500
 
 /** use-tether.ts:339, the web's word for any frame its `send` could not put on the link. */
 private const val LINK_RECONNECTING = "The secure link is reconnecting. Your input was not sent."
+
+/** T8.2 (use-tether.ts 90fbb9f :73): BROWSE_TIMEOUT_MS = UNACKED_CLOSE_MS. */
+private const val BROWSE_TIMEOUT_MS: Long = PendingInput.UNACKED_CLOSE_MS
 
 /** lib/worktree-scripts.mjs:35-36: the server keeps at most this much of a script's output. */
 private const val MAX_WORKTREE_LOG_LINES = 200
@@ -573,6 +579,18 @@ class RealTetherClient(
     private val sessionStore = SessionStore()
     private val historiesState = MutableStateFlow<List<HistorySession>>(emptyList())
     private val directoriesState = MutableStateFlow<DirectoryListing?>(null)
+    // T8.2 (use-tether.ts 90fbb9f :249-262, issue #141): the latest correlated `browse` and the one
+    // durable workspace-activation intent (lib/pending-workspace.mjs, a JS-shaped slot), with their
+    // published projections. Guarded by [lock].
+    private val browseStatusState = MutableStateFlow<BrowseStatus?>(null)
+    private var browseRequestId: String? = null
+    private var browseTimer: Cancellable? = null
+    private val workspaceSelectState = MutableStateFlow<WorkspaceSelectStatus?>(null)
+    private var workspaceIntent: com.tether.app.protocol.tree.JsValue? = null
+    // The watch set and seen stamps of the latest `discover` (use-tether.ts watchedRef / lastSeenRef),
+    // which a redelivered intent carries as the web's drain does.
+    private var discoverWatch: List<String> = emptyList()
+    private var discoverLastSeen: Map<String, Long> = emptyMap()
     private val sessionControlsState = MutableStateFlow<Map<String, ServerMessage.SessionControls>>(emptyMap())
     // T7.2: provider-control snapshots received on the CURRENT socket (cleared with the live set).
     private val codexControlsState = MutableStateFlow<Map<String, ProviderControlsState<CodexSnapshot>>>(emptyMap())
@@ -625,6 +643,8 @@ class RealTetherClient(
     override val projectionTrees: StateFlow<Map<String, JsObj>> = sessionStore.trees
     override val histories: StateFlow<List<HistorySession>> = historiesState
     override val directories: StateFlow<DirectoryListing?> = directoriesState
+    override val browseStatus: StateFlow<BrowseStatus?> = browseStatusState
+    override val workspaceSelect: StateFlow<WorkspaceSelectStatus?> = workspaceSelectState
     override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = sessionControlsState
     override val codexControls: StateFlow<Map<String, ProviderControlsState<CodexSnapshot>>> = codexControlsState
     override val opencodeControls: StateFlow<Map<String, ProviderControlsState<OpencodeSnapshot>>> = opencodeControlsState
@@ -1502,6 +1522,14 @@ class RealTetherClient(
         synchronized(lock) { sessionStore.clearViews() }
         historiesState.value = emptyList()
         directoriesState.value = null
+        // T8.2: another server's folder navigation and workspace intent do not carry over.
+        synchronized(lock) {
+            clearBrowseLocked()
+            workspaceIntent = null
+            discoverWatch = emptyList()
+            discoverLastSeen = emptyMap()
+            publishWorkspaceSelectLocked()
+        }
         sessionControlsState.value = emptyMap()
         gitFileDiffsState.value = emptyMap()
         worktreeDiffsState.value = emptyMap()
@@ -2566,6 +2594,8 @@ class RealTetherClient(
         rewatchOnSnapshot = null
         // ta-coik.19: with the link down every unresolved send reads "waiting for link".
         publishPendingSends()
+        // T8.2: likewise a workspace intent reads "couldn't open — retrying" (describeIntent: no socket).
+        publishWorkspaceSelectLocked()
         clearLiveLocked()
         // ta-895: the catalog the socket delivered is no longer the live one.
         providerCatalogLiveState.value = false
@@ -2918,6 +2948,12 @@ class RealTetherClient(
                 // use-tether.ts 90fbb9f :727-729: everything is back to `waiting` until reconcile
                 // (the assignment republishes the rows, now on an open socket).
                 pendingStore = PendingInput.resetInFlight(pendingStore)
+                // T8.2 (use-tether.ts 90fbb9f :730-740): a new socket proves nothing about the
+                // workspace intent's `discover` (the ready redelivers it), and a stale "couldn't load
+                // this folder" does not survive into a live link.
+                workspaceIntent = PendingWorkspace.resetInFlight(workspaceIntent)
+                publishWorkspaceSelectLocked()
+                clearBrowseLocked()
                 false
             }
             if (reject) webSocket.cancel() else trace.mark("socket-open")
@@ -3041,6 +3077,13 @@ class RealTetherClient(
             is ServerMessage.Histories -> ifCurrent(webSocket) {
                 historiesState.value = message.sessions
                 sidebarSync.onFrame(message)
+                // T8.2 (use-tether.ts 90fbb9f :874-882): a `histories` echoing the workspace intent's
+                // requestId proves its subscription landed; matched on the token alone.
+                val confirm = PendingWorkspace.confirmIntent(workspaceIntent, message.requestId?.let(::JsStr))
+                if (confirm["confirmed"] == com.tether.app.protocol.tree.JsBool.TRUE) {
+                    workspaceIntent = confirm["intent"].takeIf { it != com.tether.app.protocol.tree.JsNull }
+                    publishWorkspaceSelectLocked()
+                }
             }
             // T5.1: v67 order, v63 seen, v50/v128 server settings (SidebarSync.kt); ta-t7l: v16 advanced settings.
             // ta-q6p: v84 the custom-providers registry (SidebarSync.kt, dropped with the settings frames).
@@ -3053,7 +3096,15 @@ class RealTetherClient(
             }
             // ta-q6p: v74 `acp-agents` is retired server-side (887c222 never sends it): decoded, routed nowhere.
             is ServerMessage.AcpAgents -> Unit
-            is ServerMessage.Directories -> ifCurrent(webSocket) { directoriesState.value = message.listing }
+            // T8.2 (use-tether.ts 90fbb9f :905-917): a reply naming a superseded browse is dropped; an
+            // uncorrelated one (create-folder, the intent's plain browse, the ready's) still lands.
+            is ServerMessage.Directories -> ifCurrent(webSocket) {
+                val requestId = message.requestId
+                if (requestId == null || requestId == browseRequestId) {
+                    directoriesState.value = message.listing
+                    if (requestId != null) clearBrowseLocked()
+                }
+            }
             // T5.3: the two search replies (SearchSync.kt drops a superseded global one).
             is ServerMessage.SearchResults, is ServerMessage.GlobalSearchResults ->
                 ifCurrent(webSocket) { searchSync.onFrame(message) }
@@ -3289,6 +3340,9 @@ class RealTetherClient(
         // T9.3 (use-tether.ts:801): the scheduled actions snapshot, asked for on every new socket;
         // later changes arrive as the server's broadcasts. On THIS socket only.
         sendFrameOn(webSocket, ClientMessage.ScheduledActionsRequest)
+        // T8.2 (use-tether.ts 90fbb9f :826-831): redeliver the workspace intent with its requestId
+        // (a no-op when none is outstanding). On THIS socket only.
+        drainWorkspaceIntent(webSocket)
         // Fresh input filed while the socket was not yet live goes out now, right
         // after the re-attach; an already-transmitted record still waits for its
         // session's snapshot.
@@ -3843,9 +3897,15 @@ class RealTetherClient(
             // Half-open detection: socket OPEN + oldest in-flight record older
             // than 8 s + no inbound frame of ANY kind for 8 s -> force-close.
             val toCancel = synchronized(lock) {
+                // T8.2 (use-tether.ts 90fbb9f :1273-1285): an unconfirmed workspace intent is the
+                // same evidence as an unacknowledged prompt.
+                val oldestInFlight = maxOf(
+                    PendingInput.oldestInFlightAge(pendingStore, now).toDouble(),
+                    PendingWorkspace.inFlightAge(workspaceIntent, now.toDouble()),
+                )
                 if (
                     socketOpen &&
-                    PendingInput.oldestInFlightAge(pendingStore, now) > PendingInput.UNACKED_CLOSE_MS &&
+                    oldestInFlight > PendingInput.UNACKED_CLOSE_MS &&
                     now - lastInboundAt > PendingInput.UNACKED_CLOSE_MS
                 ) {
                     socket
@@ -3854,6 +3914,18 @@ class RealTetherClient(
                 }
             }
             toCancel?.let { dropSocket(it) }
+            // T8.2 (:1286-1294): a single lost `discover` on a live link is redelivered once it has
+            // gone unconfirmed past the watchdog window (an idempotent read subscription).
+            val redeliverOn = synchronized(lock) {
+                val ws = socket
+                if (ws != null && socketOpen && PendingWorkspace.isDrainDue(workspaceIntent, now.toDouble())) {
+                    workspaceIntent = PendingWorkspace.resetInFlight(workspaceIntent)
+                    ws
+                } else {
+                    null
+                }
+            }
+            redeliverOn?.let { drainWorkspaceIntent(it) }
             val unsent = synchronized(lock) {
                 val result = PendingInput.expireRecords(pendingStore, now)
                 pendingStore = result.store
@@ -3870,7 +3942,61 @@ class RealTetherClient(
             // ta-coik.19 (use-tether.ts 90fbb9f :1316): promote `sending` -> `waiting for link` as the
             // watchdog window elapses with no inbound frame.
             synchronized(lock) { publishPendingSends() }
+            // T8.2 (:1317): promote `opening` -> `stalled` (couldn't open — retrying) likewise.
+            synchronized(lock) { publishWorkspaceSelectLocked() }
         }
+    }
+
+    /**
+     * T8.2 (use-tether.ts 90fbb9f :431-441 syncWorkspaceSelect): the picker's view of the workspace
+     * intent, from the slot and the link. Equal statuses publish nothing. Caller holds [lock].
+     */
+    private fun publishWorkspaceSelectLocked() {
+        val described = PendingWorkspace.describeIntent(
+            workspaceIntent,
+            JsObj.of(
+                "now" to js(clock()),
+                "socketOpen" to js(socketOpen),
+                "lastServerFrameAt" to js(lastInboundAt),
+            ),
+        )
+        workspaceSelectState.value = described?.let {
+            WorkspaceSelectStatus(
+                cwd = (it["cwd"] as? JsStr)?.value.orEmpty(),
+                requestId = (it["requestId"] as? JsStr)?.value.orEmpty(),
+                phase = if ((it["phase"] as? JsStr)?.value == "opening") WorkspaceSelectStatus.Phase.Opening else WorkspaceSelectStatus.Phase.Stalled,
+            )
+        }
+    }
+
+    /**
+     * T8.2 (use-tether.ts 90fbb9f :604-621 drainWorkspaceIntent): (re)transmit the intent on [webSocket]
+     * once it is the live, handshaken socket — a plain `browse` (the shared listing stays fresh) and
+     * the correlated `discover` with the latest watch set — then probe the link, since a send on a
+     * half-open socket succeeds silently. Nothing outstanding, or not live: nothing is sent.
+     */
+    private fun drainWorkspaceIntent(webSocket: WebSocket): Boolean {
+        synchronized(lock) {
+            val intent = workspaceIntent ?: return false
+            if (socket !== webSocket || !socketOpen || !handshakeDone) return false
+            val cwd = (intent["cwd"] as? JsStr)?.value ?: return false
+            val requestId = (intent["requestId"] as? JsStr)?.value ?: return false
+            val watch = LinkedHashSet<String>().apply { add(cwd); addAll(discoverWatch) }.toList()
+            if (!webSocket.send(ClientMessage.Browse(cwd).encode())) return false
+            if (!webSocket.send(ClientMessage.Discover(cwd, discoverLastSeen, watch, requestId).encode())) return false
+            workspaceIntent = PendingWorkspace.markSent(intent, clock().toDouble())
+            publishWorkspaceSelectLocked()
+        }
+        probeLink()
+        return true
+    }
+
+    /** T8.2: no folder navigation outstanding (its timer cancelled, its status gone). Caller holds [lock]. */
+    private fun clearBrowseLocked() {
+        browseTimer?.cancel()
+        browseTimer = null
+        browseRequestId = null
+        browseStatusState.value = null
     }
 
     /**
@@ -4701,7 +4827,48 @@ class RealTetherClient(
     }
 
     override fun browse(cwd: String?) {
-        sendFrame(ClientMessage.Browse(cwd))
+        val requestId = UUID.randomUUID().toString()
+        synchronized(lock) {
+            browseTimer?.cancel()
+            browseTimer = null
+            browseRequestId = requestId
+            browseStatusState.value = BrowseStatus(requestId, cwd.orEmpty(), BrowseStatus.Phase.Loading)
+        }
+        val sent = sendFrame(ClientMessage.Browse(cwd, requestId))
+        synchronized(lock) {
+            if (browseRequestId != requestId) return
+            if (!sent) {
+                // The link is visibly down: the failure now, not after the timeout (:1478-1483).
+                browseStatusState.value = BrowseStatus(requestId, cwd.orEmpty(), BrowseStatus.Phase.Error)
+                return
+            }
+            browseTimer = scheduler.schedule(BROWSE_TIMEOUT_MS) {
+                synchronized(lock) {
+                    if (browseRequestId != requestId) return@synchronized
+                    browseTimer = null
+                    browseStatusState.value = browseStatusState.value
+                        ?.takeIf { it.requestId == requestId }
+                        ?.copy(phase = BrowseStatus.Phase.Error)
+                        ?: browseStatusState.value
+                }
+            }
+        }
+    }
+
+    /** T8.2 (use-tether.ts 90fbb9f :1514-1516): `create-folder`; a down link says so (the web's `send`). */
+    override fun createFolder(cwd: String, name: String): Boolean =
+        sendFrame(ClientMessage.CreateFolder(name, cwd)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
+
+    /** T8.2 (use-tether.ts 90fbb9f :1376-1384 selectWorkspace): a fresh durable intent, drained at once. */
+    override fun activateWorkspace(cwd: String, lastSeen: Map<String, Long>, watch: List<String>): Boolean {
+        val ws = synchronized(lock) {
+            discoverWatch = watch
+            discoverLastSeen = lastSeen
+            workspaceIntent = PendingWorkspace.beginIntent(JsStr(cwd), JsStr(UUID.randomUUID().toString()), clock().toDouble())
+            publishWorkspaceSelectLocked()
+            socket
+        }
+        return ws != null && drainWorkspaceIntent(ws)
     }
 
     /**
@@ -4844,8 +5011,14 @@ class RealTetherClient(
     }
 
     // T5.1 sidebar sync (SidebarSync.kt): the exact frames, sent on the current handshaken socket.
-    override fun discoverWorkspace(cwd: String, lastSeen: Map<String, Long>, watch: List<String>): Boolean =
-        sendFrame(SidebarSync.discover(cwd, lastSeen, watch))
+    override fun discoverWorkspace(cwd: String, lastSeen: Map<String, Long>, watch: List<String>): Boolean {
+        // T8.2: the latest watch set, which a redelivered workspace intent carries (use-tether.ts watchedRef).
+        synchronized(lock) {
+            discoverWatch = watch
+            discoverLastSeen = lastSeen
+        }
+        return sendFrame(SidebarSync.discover(cwd, lastSeen, watch))
+    }
 
     override fun markSeen(historyId: String, seenAt: Long): Boolean = sendFrame(SidebarSync.markSeen(historyId, seenAt))
 
