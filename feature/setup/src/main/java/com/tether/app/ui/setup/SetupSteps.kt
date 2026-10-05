@@ -105,8 +105,10 @@ object SetupWords {
 
 @Composable
 internal fun WelcomeCopy(model: SetupWizardModel, phone: Boolean, modifier: Modifier = Modifier) {
+    // globals.css 2347-2348: below the stacking point the hero is centred (`justify-items: center; text-align: center`).
+    val align = if (phone) androidx.compose.ui.text.style.TextAlign.Center else androidx.compose.ui.text.style.TextAlign.Start
     val t = LocalTetherTokens.current
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(if (phone) 20.dp else 24.dp), horizontalAlignment = Alignment.Start) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(if (phone) 20.dp else 24.dp), horizontalAlignment = if (phone) Alignment.CenterHorizontally else Alignment.Start) {
         Text(
             SetupWords.WELCOME,
             modifier = Modifier.semantics { heading() }.widthIn(max = (if (phone) 290f else 380f).dp),
@@ -117,12 +119,13 @@ internal fun WelcomeCopy(model: SetupWizardModel, phone: Boolean, modifier: Modi
                 fontSize = (if (phone) 42f else 64f).sp,
                 lineHeight = (if (phone) 42f else 64f).times(1.08f).sp,
                 letterSpacing = (-0.035).em,
+                textAlign = align,
             ),
         )
-        SetupText(SetupWords.LEDE, if (phone) 15f else 16f, Modifier.widthIn(max = (380f).dp), lineHeight = if (phone) 1.7f else 1.8f)
+        SetupText(SetupWords.LEDE, if (phone) 15f else 16f, Modifier.widthIn(max = (380f).dp), lineHeight = if (phone) 1.7f else 1.8f, textAlign = align)
         if (model.stateError.isNotEmpty()) {
-            Column(Modifier.testTag(SetupTags.Error).semantics { liveRegion = LiveRegionMode.Polite }) {
-                SetupText(model.stateError, 12f, color = t.danger, weight = 600, lineHeight = 1.5f)
+            Column(Modifier.testTag(SetupTags.Error).semantics { liveRegion = LiveRegionMode.Polite }, horizontalAlignment = if (phone) Alignment.CenterHorizontally else Alignment.Start) {
+                SetupText(model.stateError, 12f, color = t.danger, weight = 600, lineHeight = 1.5f, textAlign = align)
                 SetupText(
                     SetupWords.TRY_AGAIN,
                     12f,
@@ -147,13 +150,13 @@ internal fun WelcomeCopy(model: SetupWizardModel, phone: Boolean, modifier: Modi
             minHeight = 50.dp,
             contentPadding = 24.dp,
             trailing = if (ready) {
-                { Icon(TetherIcons.ArrowRight, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                { Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.white, modifier = Modifier.size(16.dp)) }
             } else {
                 null
             },
             modifier = Modifier.testTag(SetupTags.Begin),
         )
-        SetupFootnote(SetupWords.FOOTNOTE, Modifier.widthIn(max = (380f).dp))
+        SetupText(SetupWords.FOOTNOTE, 12f, Modifier.widthIn(max = (380f).dp), color = t.faint, lineHeight = 1.7f, textAlign = align)
     }
 }
 

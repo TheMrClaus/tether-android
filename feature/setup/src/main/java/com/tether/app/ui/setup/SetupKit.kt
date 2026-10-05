@@ -67,8 +67,10 @@ internal fun SetupText(
     lineHeight: Float = 1.6f,
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
+    textAlign: androidx.compose.ui.text.style.TextAlign? = null,
 ) {
     val style = TextStyle(
+        textAlign = textAlign ?: androidx.compose.ui.text.style.TextAlign.Unspecified,
         color = color,
         fontFamily = Manrope,
         fontWeight = FontWeight(weight),

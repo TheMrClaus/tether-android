@@ -153,21 +153,24 @@ fun SetupWizardScreen(
         val side = if (phone) 20.dp else 40.dp
         val scroll = rememberScrollState()
         // studio.css 863 / 1031: the shell pads 112/48 (100/32 on a phone); a window too short for it scrolls.
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(scroll)
-                .padding(start = side, end = side, top = top, bottom = if (phone) 32.dp else 48.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            when {
-                finish != null -> SetupDone(model, finish, phone, Modifier.widthIn(max = 560.dp).fillMaxWidth())
-                model.step == 0 -> Welcome(model, phone)
-                else -> Console(model, phone, githubStep, claudeStep)
+        // The wordmark is absolute inside the scrolling shell (studio.css 864 / 1032; globals.css 2059-2063),
+        // so it scrolls away with the page: the first thing in the scrolled content, over the padded column.
+        Box(Modifier.fillMaxSize().verticalScroll(scroll)) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = side, end = side, top = top, bottom = if (phone) 32.dp else 48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                when {
+                    finish != null -> SetupDone(model, finish, phone, Modifier.widthIn(max = 560.dp).fillMaxWidth())
+                    model.step == 0 -> Welcome(model, phone)
+                    else -> Console(model, phone, githubStep, claudeStep)
+                }
             }
+            // `.setup-shell .login-wordmark`: top 36 / left 40 (30 / 24 on a phone).
+            Wordmark(Modifier.align(Alignment.TopStart).padding(top = if (phone) 30.dp else 36.dp, start = if (phone) 24.dp else 40.dp))
         }
-        // `.setup-shell .login-wordmark`: top 36 / left 40 (30 / 24 on a phone).
-        Wordmark(Modifier.align(Alignment.TopStart).padding(top = if (phone) 30.dp else 36.dp, start = if (phone) 4.dp else 20.dp))
     }
     val target = model.picker
     if (target != null) {
@@ -209,8 +212,9 @@ internal fun Wordmark(modifier: Modifier = Modifier) {
 private fun Welcome(model: SetupWizardModel, phone: Boolean) {
     if (phone) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(36.dp)) {
-            WelcomeCopy(model, phone = true)
+            // globals.css 2347-2348: the tools card first, the copy (centred) below it.
             ProviderConnections(model, phone = true, Modifier.fillMaxWidth())
+            WelcomeCopy(model, phone = true, Modifier.fillMaxWidth())
         }
     } else {
         Row(Modifier.widthIn(max = 1080.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(80.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -411,7 +415,7 @@ private fun Footer(model: SetupWizardModel, phone: Boolean) {
                     label = SetupWords.CONTINUE,
                     enabled = model.canAdvance && !model.busy,
                     minHeight = 46.dp,
-                    trailing = { Icon(TetherIcons.ArrowRight, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    trailing = { Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.white, modifier = Modifier.size(16.dp)) },
                     modifier = Modifier.testTag(SetupTags.Continue),
                 )
             } else {
@@ -423,7 +427,7 @@ private fun Footer(model: SetupWizardModel, phone: Boolean) {
                     iconSize = 16.dp,
                     enabled = !model.busy,
                     minHeight = 46.dp,
-                    trailing = if (model.busy) null else { { Icon(TetherIcons.Check, contentDescription = null, modifier = Modifier.size(16.dp)) } },
+                    trailing = if (model.busy) null else { { Icon(TetherIcons.Check, contentDescription = null, tint = t.white, modifier = Modifier.size(16.dp)) } },
                     modifier = Modifier.testTag(SetupTags.Apply),
                 )
             }
