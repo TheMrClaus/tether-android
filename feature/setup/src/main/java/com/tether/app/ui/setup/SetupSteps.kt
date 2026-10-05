@@ -71,8 +71,25 @@ object SetupTags {
     const val SignIn = "setup-sign-in"
     const val Waiting = "setup-waiting"
     const val Command = "setup-command"
-    const val GitHubSeam = "setup-seam-github"
-    const val ClaudeSeam = "setup-seam-claude"
+    const val GitHub = "setup-step-github"
+    const val ClaudeAccounts = "setup-step-claude"
+    const val GitHubDevice = "setup-github-device"
+    const val GitHubToken = "setup-github-token"
+    const val GitHubTokenField = "setup-github-token-field"
+    const val GitHubTokenSave = "setup-github-token-save"
+    const val GitHubCode = "setup-github-code"
+    const val GitHubOpen = "setup-github-open"
+    const val GitHubCopy = "setup-github-copy"
+    const val GitHubCancel = "setup-github-cancel"
+    const val GitHubRetry = "setup-github-retry"
+    const val ClaudeNickname = "setup-claude-nickname"
+    const val ClaudeAdd = "setup-claude-add"
+    const val ClaudeCode = "setup-claude-code"
+    const val ClaudeSubmit = "setup-claude-submit"
+    const val ClaudeOpen = "setup-claude-open"
+    const val ClaudeCancel = "setup-claude-cancel"
+    const val ClaudeRetry = "setup-claude-retry"
+    fun claudeLogin(id: String) = "setup-claude-login:$id"
     fun engine(engine: String) = "setup-engine:$engine"
     fun locator(engine: String) = "setup-locator:$engine"
     fun locate(engine: String) = "setup-locate:$engine"
@@ -561,23 +578,6 @@ internal fun StepWorkspace(model: SetupWizardModel, state: com.tether.app.client
             iconSize = 15.dp,
             modifier = Modifier.testTag(SetupTags.Browse),
         )
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
-// GitHub and Claude accounts: ta-pqui (part 2). The web lets both be skipped (page.tsx :260-262).
-// ---------------------------------------------------------------------------------------------
-
-/**
- * The seam part 2 fills: its step replaces this body through [SetupWizardScreen]'s `githubStep` /
- * `claudeStep`. Until then the station keeps the web's title and its "Optional — skip…" line, and
- * Continue passes it, exactly as the web lets the operator skip it.
- */
-@Composable
-internal fun StepSeam(title: String, footnote: String, tag: String, phone: Boolean) {
-    StepColumn(phone, Modifier.testTag(tag)) {
-        StepTitle(title, phone)
-        SetupFootnote(footnote)
     }
 }
 

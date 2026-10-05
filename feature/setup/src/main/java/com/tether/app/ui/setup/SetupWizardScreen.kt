@@ -127,6 +127,19 @@ private object UnreachableSetupApi : SetupApi {
     override suspend fun validateEngineBinary(engine: String, value: String) = down<com.tether.app.client.BinaryCheck>()
     override suspend fun complete(settings: kotlinx.serialization.json.JsonObject) = down<com.tether.app.client.SetupFinish>()
     override suspend fun configured() = false
+    private fun <T> unreachable(): com.tether.app.client.SetupCall<T> = down()
+    override suspend fun githubStatus() = unreachable<com.tether.app.client.GitHubStatus>()
+    override suspend fun githubLoginStart() = unreachable<Unit>()
+    override suspend fun githubLoginPoll() = unreachable<com.tether.app.client.SetupGitHubPoll>()
+    override suspend fun githubLoginCancel() = Unit
+    override suspend fun githubSaveToken(token: String) = unreachable<Unit>()
+    override suspend fun claudeAccounts() = unreachable<List<com.tether.app.client.ClaudeAccountProfile>>()
+    override suspend fun claudeAccountStatus(id: String) = com.tether.app.client.SetupClaudeStatus(false, null)
+    override suspend fun claudeAccountAdd(nickname: String) = unreachable<String?>()
+    override suspend fun claudeLoginStart(id: String) = unreachable<com.tether.app.client.ClaudeLoginStarted>()
+    override suspend fun claudeLoginPoll(id: String) = unreachable<com.tether.app.client.ClaudeLoginPoll>()
+    override suspend fun claudeLoginCode(id: String, code: String) = unreachable<Unit>()
+    override suspend fun claudeLoginCancel(id: String) = Unit
 }
 
 @Composable
@@ -364,10 +377,10 @@ private fun Stage(model: SetupWizardModel, phone: Boolean, githubStep: (@Composa
                 SetupStep.Harnesses -> if (state != null) StepHarnesses(model, state, phone)
                 SetupStep.Workspace -> if (state != null) StepWorkspace(model, state, phone)
                 SetupStep.GitHub -> if (state != null) {
-                    if (githubStep != null) githubStep() else StepSeam("Connect GitHub.", SetupWords.GITHUB_FOOT, SetupTags.GitHubSeam, phone)
+                    if (githubStep != null) githubStep() else StepGitHub(model.github, phone)
                 }
                 SetupStep.ClaudeAccounts -> if (state != null) {
-                    if (claudeStep != null) claudeStep() else StepSeam("Add a Claude account.", SetupWords.CLAUDE_FOOT, SetupTags.ClaudeSeam, phone)
+                    if (claudeStep != null) claudeStep() else StepClaudeAccounts(model.claude, phone)
                 }
                 SetupStep.Review -> if (state != null) StepReview(model, state, phone)
             }

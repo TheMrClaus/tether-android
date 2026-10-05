@@ -65,7 +65,14 @@ class SetupWizardModel(
     private val scope: CoroutineScope,
     /** page.tsx :222-226: the restart poll's interval. */
     private val restartPollMs: Long = 1_500,
+    accountTiming: SetupAccountTiming = SetupAccountTiming(),
 ) {
+    /** The GitHub station (page.tsx StepGitHub): its state is the wizard's, so a rotation keeps it. */
+    val github = SetupGitHubModel(api, scope, accountTiming)
+
+    /** The Claude accounts station (page.tsx StepClaudeAccounts); it applies only when the Claude harness is ticked. */
+    val claude = SetupClaudeModel(api, scope, claudeAvailable = { "claude" in engines }, timing = accountTiming)
+
     /** Called when the operator goes on to sign in: "Go to sign-in", the restart poll's end, or a 401 (setup is done). */
     var onSignIn: () -> Unit = {}
 
@@ -203,7 +210,14 @@ class SetupWizardModel(
         isolation = Isolation.Open
         workspaceRoot = ""
         finish = null
+        leaveStations()
         closePicker()
+    }
+
+    /** Both optional stations unmount with their step (page.tsx renders one step at a time): nothing on them is kept. */
+    private fun leaveStations() {
+        github.leave()
+        claude.leave()
     }
 
     // ---- steps ------------------------------------------------------------------------------
@@ -230,11 +244,13 @@ class SetupWizardModel(
 
     fun next() {
         error = ""
+        leaveStations()
         step += 1
     }
 
     fun back() {
         error = ""
+        leaveStations()
         step = maxOf(0, step - 1)
     }
 

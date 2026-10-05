@@ -131,10 +131,10 @@ class SetupWizardBehaviourTest {
         assertEquals("/home/op", model.workspaceRoot)
         tap(SetupTags.Continue)
         // GitHub and Claude accounts: the web lets both be skipped.
-        waitFor { exists(SetupTags.GitHubSeam) }
+        waitFor { exists(SetupTags.GitHub) }
         tag(SetupTags.Continue).assertIsEnabled()
         tap(SetupTags.Continue)
-        waitFor { exists(SetupTags.ClaudeSeam) }
+        waitFor { exists(SetupTags.ClaudeAccounts) }
         tap(SetupTags.Continue)
 
         waitFor { shows("Review and switch on.") }

@@ -122,10 +122,10 @@ class SetupApiTest {
     }
 
     @Test fun aBodilessPostIsStillJson() {
-        // Part 2's routes (github login, a Claude account's login) are bodiless: the guard still wants JSON.
+        // The GitHub login (and a Claude account's login) is bodiless: the guard still wants JSON.
         val sent = run { api.post("/api/setup/github/login", null) } as HttpSetupApi.Sent.Got
-        // The fake has no such route (404), which is past the guard (403 would be the refusal).
-        assertEquals(404, sent.reply.status)
+        // Past the guard (403 would be the refusal).
+        assertEquals(200, sent.reply.status)
         val seen = fake.calls("/api/setup/github/login").single()
         assertTrue(seen.contentType!!.startsWith("application/json"))
         assertEquals("", seen.body)

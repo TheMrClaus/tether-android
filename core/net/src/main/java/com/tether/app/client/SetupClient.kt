@@ -15,6 +15,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -56,6 +57,38 @@ data class SetupFinish(val restart: String, val runtime: String) {
     val automatic: Boolean get() = restart == "automatic"
 }
 
+/** `GET /api/setup/github/status` (lib/github-auth.mjs statusGitHubConnection): booleans and the account name, never a token. */
+data class GitHubStatus(
+    val ghInstalled: Boolean,
+    val ghVersion: String?,
+    val authenticated: Boolean,
+    val account: String?,
+    val scopes: List<String>,
+    val managedToken: Boolean,
+)
+
+/**
+ * `GET /api/setup/github/login/poll` (page.tsx DevicePoll). [status] is "idle" | "pending" | "complete" | "error";
+ * [deviceCode] is the one-time code to enter at [verificationUri]. A reply with no usable body is
+ * `{ok:false, status:"error", error:"no response"}`, as page.tsx reads it.
+ */
+data class SetupGitHubPoll(val ok: Boolean, val status: String, val deviceCode: String?, val verificationUri: String?, val error: String?)
+
+/** One row of `GET /api/setup/claude-accounts` (page.tsx ClaudeAccountProfile): what the step shows. */
+data class ClaudeAccountProfile(val id: String, val label: String, val imported: Boolean)
+
+/** `GET /api/setup/claude-accounts/{id}/status`: whether the account is logged in, and as whom. */
+data class SetupClaudeStatus(val loggedIn: Boolean, val email: String?)
+
+/** `POST .../login` 200: where the login stands and the URL to open once the CLI has printed it. */
+data class ClaudeLoginStarted(val status: String, val url: String?)
+
+/**
+ * `GET .../login/poll`: [ok] false is a failed login ([error]); otherwise [status] is "pending-url" |
+ * "awaiting-code" | "success" | "error" and [url] the sign-in URL once known.
+ */
+data class ClaudeLoginPoll(val ok: Boolean, val status: String, val url: String?, val error: String?)
+
 /** One setup call's outcome. Network and HTTP failures carry the sentence the web would show. */
 sealed interface SetupCall<out T> {
     data class Ok<T>(val value: T) : SetupCall<T>
@@ -89,6 +122,46 @@ interface SetupApi {
      * setup mode; false while it is bouncing or still in setup mode.
      */
     suspend fun configured(): Boolean
+
+    // ---- GitHub (ta-pqui; page.tsx StepGitHub :757-970) ---------------------------------------
+
+    /** `GET /api/setup/github/status`. */
+    suspend fun githubStatus(): SetupCall<GitHubStatus>
+
+    /** `POST /api/setup/github/login`: start the device flow. */
+    suspend fun githubLoginStart(): SetupCall<Unit>
+
+    /** `GET /api/setup/github/login/poll`. [SetupCall.Failed] is a poll that did not complete (try again). */
+    suspend fun githubLoginPoll(): SetupCall<SetupGitHubPoll>
+
+    /** `POST /api/setup/github/login/cancel`: best effort. */
+    suspend fun githubLoginCancel()
+
+    /** `POST /api/setup/github/token {token}`: verify and save a personal access token. The token goes nowhere else. */
+    suspend fun githubSaveToken(token: String): SetupCall<Unit>
+
+    // ---- Claude accounts (ta-pqui; page.tsx StepClaudeAccounts :971-1219) ---------------------
+
+    /** `GET /api/setup/claude-accounts`. A 403 is "setup already completed" (the routes close once it is). */
+    suspend fun claudeAccounts(): SetupCall<List<ClaudeAccountProfile>>
+
+    /** `GET .../{id}/status`: never an error; an answer with no `loggedIn: true` is "not logged in". */
+    suspend fun claudeAccountStatus(id: String): SetupClaudeStatus
+
+    /** `POST /api/setup/claude-accounts {nickname}`: the new profile's id. */
+    suspend fun claudeAccountAdd(nickname: String): SetupCall<String?>
+
+    /** `POST .../{id}/login`: start the login. A 409 is [SetupCall.Failed] with status 409 (one is already running). */
+    suspend fun claudeLoginStart(id: String): SetupCall<ClaudeLoginStarted>
+
+    /** `GET .../{id}/login/poll`. [SetupCall.Failed] is a poll that did not complete (try again). */
+    suspend fun claudeLoginPoll(id: String): SetupCall<ClaudeLoginPoll>
+
+    /** `POST .../{id}/login/code {code}`: the authorization code, straight to the server and nowhere else. */
+    suspend fun claudeLoginCode(id: String, code: String): SetupCall<Unit>
+
+    /** `DELETE .../{id}/login`: cancel the login, best effort. */
+    suspend fun claudeLoginCancel(id: String)
 }
 
 /** The page's own words for what failed ([HttpSetupApi] and the wizard model use them). */
@@ -97,6 +170,15 @@ object SetupCopy {
     const val BROWSE_FAILED = "Could not read that folder."
     const val COMPLETE_FAILED = "Setup could not be completed."
     const val BLOCKED = "Local network access is blocked."
+    const val GITHUB_STATUS_FAILED = "Could not reach the GitHub status service."
+    const val GITHUB_LOGIN_FAILED = "Could not start the GitHub login."
+    const val GITHUB_TOKEN_FAILED = "Could not verify that token."
+    const val GITHUB_LOGIN_ERROR = "The login failed."
+    const val CLAUDE_LIST_FAILED = "Could not reach the Claude account service."
+    const val CLAUDE_ADD_FAILED = "Could not add that account."
+    const val CLAUDE_LOGIN_FAILED = "Could not start the Claude login."
+    const val CLAUDE_LOGIN_BUSY = "A login is already in progress for this account."
+    const val CLAUDE_CODE_FAILED = "That code was not accepted."
 }
 
 class HttpSetupApi(
@@ -151,6 +233,10 @@ class HttpSetupApi(
     /** Every POST is JSON, an empty one included: the server refuses a no-Origin write that is not. */
     suspend fun post(path: String, body: JsonObject?): Sent =
         send(Request.Builder().url(url(path)).post((body?.toString() ?: "").toRequestBody(JSON)).build())
+
+    /** A JSON-typed DELETE (the guard lets a no-Origin DELETE through; a body it reads must be JSON). */
+    suspend fun delete(path: String): Sent =
+        send(Request.Builder().url(url(path)).delete("".toRequestBody(JSON)).build())
 
     private fun Reply.error(): String? = (body?.get("error") as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
 
@@ -243,6 +329,154 @@ class HttpSetupApi(
     override suspend fun configured(): Boolean = when (val sent = get("/healthz")) {
         is Sent.Down -> false
         is Sent.Got -> sent.reply.status in 200..299 && sent.reply.body?.bool("setupRequired") != true
+    }
+
+    // ---- GitHub -----------------------------------------------------------------------------
+
+    override suspend fun githubStatus(): SetupCall<GitHubStatus> = when (val sent = get("/api/setup/github/status")) {
+        is Sent.Down -> sent.failed()
+        is Sent.Got -> {
+            val reply = sent.reply
+            val body = reply.body
+            if (reply.status in 200..299 && body != null) {
+                SetupCall.Ok(
+                    GitHubStatus(
+                        ghInstalled = body.bool("ghInstalled") == true,
+                        ghVersion = body.string("ghVersion"),
+                        authenticated = body.bool("authenticated") == true,
+                        account = body.string("account"),
+                        scopes = body["scopes"].strings(),
+                        managedToken = body.bool("managedToken") == true,
+                    ),
+                )
+            } else {
+                SetupCall.Failed(reply.status, reply.error() ?: SetupCopy.GITHUB_STATUS_FAILED)
+            }
+        }
+    }
+
+    override suspend fun githubLoginStart(): SetupCall<Unit> = when (val sent = post("/api/setup/github/login", null)) {
+        is Sent.Down -> sent.failed()
+        is Sent.Got -> if (sent.reply.status in 200..299) SetupCall.Ok(Unit) else SetupCall.Failed(sent.reply.status, sent.reply.error() ?: SetupCopy.GITHUB_LOGIN_FAILED)
+    }
+
+    override suspend fun githubLoginPoll(): SetupCall<SetupGitHubPoll> = when (val sent = get("/api/setup/github/login/poll")) {
+        is Sent.Down -> sent.failed()
+        is Sent.Got -> {
+            val body = sent.reply.body
+            SetupCall.Ok(
+                if (body == null) {
+                    SetupGitHubPoll(ok = false, status = "error", deviceCode = null, verificationUri = null, error = "no response")
+                } else {
+                    SetupGitHubPoll(
+                        ok = body.bool("ok") == true,
+                        status = body.string("status") ?: "error",
+                        deviceCode = body.string("deviceCode"),
+                        verificationUri = body.string("verificationUri"),
+                        error = body.string("error"),
+                    )
+                },
+            )
+        }
+    }
+
+    override suspend fun githubLoginCancel() {
+        post("/api/setup/github/login/cancel", null)
+    }
+
+    override suspend fun githubSaveToken(token: String): SetupCall<Unit> {
+        val body = buildJsonObject { put("token", token) }
+        return when (val sent = post("/api/setup/github/token", body)) {
+            is Sent.Down -> sent.failed()
+            is Sent.Got -> if (sent.reply.status in 200..299) SetupCall.Ok(Unit) else SetupCall.Failed(sent.reply.status, sent.reply.error() ?: SetupCopy.GITHUB_TOKEN_FAILED)
+        }
+    }
+
+    // ---- Claude accounts --------------------------------------------------------------------
+
+    /** One path segment, percent-encoded as a URL needs it (an account id is the caller's, never trusted into a path). */
+    private fun seg(id: String): String =
+        checkNotNull("http://localhost/".toHttpUrlOrNull()).newBuilder().addPathSegment(id).build().encodedPathSegments.first()
+
+    private fun account(id: String, tail: String) = "/api/setup/claude-accounts/${seg(id)}$tail"
+
+    override suspend fun claudeAccounts(): SetupCall<List<ClaudeAccountProfile>> = when (val sent = get("/api/setup/claude-accounts")) {
+        is Sent.Down -> sent.failed()
+        is Sent.Got -> {
+            val reply = sent.reply
+            if (reply.status in 200..299) {
+                // `data.accounts ?? []`
+                SetupCall.Ok(
+                    (reply.body?.get("accounts") as? JsonArray).orEmpty().mapNotNull {
+                        val row = it as? JsonObject ?: return@mapNotNull null
+                        val id = row.string("id") ?: return@mapNotNull null
+                        ClaudeAccountProfile(id, row.string("label") ?: id, row.bool("imported") == true)
+                    },
+                )
+            } else {
+                SetupCall.Failed(reply.status, reply.error() ?: SetupCopy.CLAUDE_LIST_FAILED)
+            }
+        }
+    }
+
+    override suspend fun claudeAccountStatus(id: String): SetupClaudeStatus = when (val sent = get(account(id, "/status"))) {
+        is Sent.Down -> SetupClaudeStatus(false, null)
+        is Sent.Got -> SetupClaudeStatus(sent.reply.body?.bool("loggedIn") == true, sent.reply.body?.string("email"))
+    }
+
+    override suspend fun claudeAccountAdd(nickname: String): SetupCall<String?> {
+        val body = buildJsonObject { put("nickname", nickname) }
+        return when (val sent = post("/api/setup/claude-accounts", body)) {
+            is Sent.Down -> sent.failed()
+            is Sent.Got -> {
+                val reply = sent.reply
+                if (reply.status in 200..299) SetupCall.Ok((reply.body?.get("profile") as? JsonObject)?.string("id")?.takeIf { it.isNotEmpty() })
+                else SetupCall.Failed(reply.status, reply.error() ?: SetupCopy.CLAUDE_ADD_FAILED)
+            }
+        }
+    }
+
+    override suspend fun claudeLoginStart(id: String): SetupCall<ClaudeLoginStarted> = when (val sent = post(account(id, "/login"), null)) {
+        is Sent.Down -> sent.failed()
+        is Sent.Got -> {
+            val reply = sent.reply
+            when {
+                reply.status == 409 -> SetupCall.Failed(409, SetupCopy.CLAUDE_LOGIN_BUSY)
+                reply.status in 200..299 && reply.body?.bool("ok") == true ->
+                    SetupCall.Ok(ClaudeLoginStarted(reply.body.string("status") ?: "pending-url", reply.body.string("url")))
+                else -> SetupCall.Failed(reply.status, reply.error() ?: SetupCopy.CLAUDE_LOGIN_FAILED)
+            }
+        }
+    }
+
+    override suspend fun claudeLoginPoll(id: String): SetupCall<ClaudeLoginPoll> = when (val sent = get(account(id, "/login/poll"))) {
+        is Sent.Down -> sent.failed()
+        is Sent.Got -> {
+            val body = sent.reply.body
+            SetupCall.Ok(
+                if (body == null) {
+                    ClaudeLoginPoll(ok = false, status = "error", url = null, error = "no response")
+                } else {
+                    ClaudeLoginPoll(body.bool("ok") == true, body.string("status") ?: "error", body.string("url"), body.string("error"))
+                },
+            )
+        }
+    }
+
+    override suspend fun claudeLoginCode(id: String, code: String): SetupCall<Unit> {
+        val body = buildJsonObject { put("code", code) }
+        return when (val sent = post(account(id, "/login/code"), body)) {
+            is Sent.Down -> sent.failed()
+            is Sent.Got -> {
+                val reply = sent.reply
+                if (reply.status in 200..299 && reply.body?.bool("ok") == true) SetupCall.Ok(Unit)
+                else SetupCall.Failed(reply.status, reply.error() ?: SetupCopy.CLAUDE_CODE_FAILED)
+            }
+        }
+    }
+
+    override suspend fun claudeLoginCancel(id: String) {
+        delete(account(id, "/login"))
     }
 
     private companion object {

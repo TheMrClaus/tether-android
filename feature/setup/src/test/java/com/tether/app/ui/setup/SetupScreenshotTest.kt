@@ -10,7 +10,13 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performScrollTo
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.tether.app.client.ClaudeAccountProfile
+import com.tether.app.client.ClaudeLoginPoll
+import com.tether.app.client.ClaudeLoginStarted
+import com.tether.app.client.GitHubStatus
 import com.tether.app.client.SetupCall
+import com.tether.app.client.SetupClaudeStatus
+import com.tether.app.client.SetupGitHubPoll
 import com.tether.app.client.SetupFinish
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.TetherSkin
@@ -33,7 +39,9 @@ import org.robolectric.annotation.Config
  * `-operator-mismatch` the account step and its warning; `-harnesses` the detected list (and `-end`, its
  * foot), `-harnesses-locate` an undetected one ticked (browse / paste a path), `-harnesses-bundled` the
  * bundled warning and isolation choice; `-workspace` the mounted-folder picks; `-github` / `-claude` the
- * two skippable stations (ta-pqui fills them); `-review` the plate and its error line; `-done-manual` /
+ * two skippable stations: `-github` its choices, `-github-connected` a host already logged in, `-github-device`
+ * the one-time code and its keys, `-github-token` the paste field with the server's refusal; `-claude` the
+ * accounts list, `-claude-login` an account's sign-in prompt, `-claude-unavailable` a host with no Claude harness; `-review` the plate and its error line; `-done-manual` /
  * `-done-automatic` the restart step. Timing-free: the server is a scripted fake (nothing on a network), the
  * clock is held, focus is cleared (no caret) and the password is a fixed example.
  */
@@ -47,7 +55,12 @@ enum class SetupShot(val id: String, val scrollTo: String? = null) {
     HarnessesBundled("setup-harnesses-bundled", SetupTags.IsolationGuided),
     Workspace("setup-workspace"),
     GitHub("setup-github"),
+    GitHubConnected("setup-github-connected"),
+    GitHubDevice("setup-github-device", SetupTags.GitHubCancel),
+    GitHubToken("setup-github-token", SetupTags.GitHubTokenSave),
     Claude("setup-claude"),
+    ClaudeLogin("setup-claude-login", SetupTags.ClaudeCancel),
+    ClaudeUnavailable("setup-claude-unavailable"),
     Review("setup-review"),
     ReviewError("setup-review-error", SetupTags.Apply),
     DoneManual("setup-done-manual"),
@@ -71,7 +84,8 @@ private fun ComposeContentTestRule.snapSetup(shot: SetupShot, skin: TetherSkin, 
             else -> SetupCall.Ok(SetupFinish("manual", "native"))
         }
     }
-    val model = SetupWizardModel(api, scope, restartPollMs = 3_600_000)
+    // The stations' polls wait out the capture (a first look at once, then an hour): the state is the scripted one.
+    val model = SetupWizardModel(api, scope, restartPollMs = 3_600_000, accountTiming = SetupAccountTiming(initialMs = 0, pollMs = 3_600_000, retryMs = 3_600_000))
     model.load()
     // Welcome is step 0; each shot is the step it names, reached the way the operator reaches it.
     val to = when (shot) {
@@ -79,8 +93,8 @@ private fun ComposeContentTestRule.snapSetup(shot: SetupShot, skin: TetherSkin, 
         SetupShot.Operator, SetupShot.OperatorMismatch -> 1
         SetupShot.Harnesses, SetupShot.HarnessesEnd, SetupShot.HarnessesLocate, SetupShot.HarnessesBundled -> 2
         SetupShot.Workspace -> 3
-        SetupShot.GitHub -> 4
-        SetupShot.Claude -> 5
+        SetupShot.GitHub, SetupShot.GitHubConnected, SetupShot.GitHubDevice, SetupShot.GitHubToken -> 4
+        SetupShot.Claude, SetupShot.ClaudeLogin, SetupShot.ClaudeUnavailable -> 5
         else -> 6
     }
     if (to > 0) model.begin()
@@ -95,7 +109,9 @@ private fun ComposeContentTestRule.snapSetup(shot: SetupShot, skin: TetherSkin, 
         model.isolation = Isolation.Guided
     }
     if (shot == SetupShot.Workspace) model.pickWorkspace("/srv/projects")
+    if (shot == SetupShot.ClaudeUnavailable) model.toggleEngine("claude")
     repeat(to - 1) { model.next() }
+    model.stage(shot, api)
     if (shot == SetupShot.DoneManual || shot == SetupShot.DoneAutomatic) model.applyBlocking()
     if (shot == SetupShot.ReviewError) model.applyBlocking()
     var focus: FocusManager? = null
@@ -122,6 +138,44 @@ private fun ComposeContentTestRule.snapSetup(shot: SetupShot, skin: TetherSkin, 
         "src/test/screenshots/${shot.id}/${skin.id}-$size.png",
         roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),
     )
+}
+
+/** The GitHub / Claude accounts station of [shot] in the state it names (the fake answers at once; nothing waits). */
+private fun SetupWizardModel.stage(shot: SetupShot, api: FakeSetupApi) {
+    when (shot) {
+        SetupShot.GitHubConnected -> {
+            api.githubStatus = SetupCall.Ok(GitHubStatus(true, "2.60.0", true, "octo-operator", listOf("repo", "read:org", "gist"), false))
+            github.enter()
+        }
+        SetupShot.GitHubDevice -> {
+            api.githubPolls += SetupCall.Ok(SetupGitHubPoll(true, "pending", "ABCD-1234", "https://github.com/login/device", null))
+            github.enter()
+            kotlinx.coroutines.runBlocking { github.startDeviceNow() }
+        }
+        SetupShot.GitHubToken -> {
+            api.githubToken = SetupCall.Failed(400, "Bad credentials")
+            github.enter()
+            github.chooseToken()
+            github.typeToken("ghp_exampleexampleexample")
+            kotlinx.coroutines.runBlocking { github.saveTokenNow() }
+        }
+        SetupShot.GitHub -> github.enter()
+        SetupShot.Claude -> {
+            api.claudeList = SetupCall.Ok(listOf(ClaudeAccountProfile("default", "Default", imported = true), ClaudeAccountProfile("claude-work", "work", imported = false)))
+            api.claudeStatuses = mapOf("default" to SetupClaudeStatus(true, "operator@example.com"))
+            claude.enter()
+        }
+        SetupShot.ClaudeLogin -> {
+            api.claudeList = SetupCall.Ok(listOf(ClaudeAccountProfile("default", "Default", imported = true), ClaudeAccountProfile("claude-work", "work", imported = false)))
+            api.claudeStatuses = mapOf("default" to SetupClaudeStatus(true, "operator@example.com"))
+            api.claudeStart = SetupCall.Ok(ClaudeLoginStarted("pending-url", null))
+            api.claudePolls += SetupCall.Ok(ClaudeLoginPoll(true, "awaiting-code", "https://claude.ai/oauth/authorize?code=true&client_id=example", null))
+            claude.enter()
+            kotlinx.coroutines.runBlocking { claude.startLoginNow("claude-work") }
+        }
+        SetupShot.ClaudeUnavailable -> claude.enter()
+        else -> Unit
+    }
 }
 
 /** The Review step's Apply, run to its end on the caller's thread (the scripted fake answers at once). */
