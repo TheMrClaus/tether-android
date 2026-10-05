@@ -293,6 +293,57 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
         assertTrue(backLeavesTheApp)
     }
 
+    /**
+     * ta-coik.43 (dashboard.tsx 90fbb9f :1080-1096, :1110-1118): the Sessions entry behind the
+     * Overview names the chat it showed; Back onto it re-selects THAT chat, though another was
+     * picked since (from the Overview, which pushed a Sessions entry of its own).
+     */
+    @Test fun backOntoAnEarlierSessionsEntryReselectsItsChat() {
+        client.show(session("s2"), freshTree())
+        client.show(session("s1"), freshTree())
+        vm.selectSession("s1")
+        launch()
+        awaitTag(ShellTags.WorkspaceHeader)
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Overview)).performClick()
+        onOverview()
+        rule.runOnIdle { vm.selectSession("s2") } // the Overview's open: a pick, and Sessions
+        awaitTag(ShellTags.WorkspaceHeader)
+        assertEquals("s2", vm.selectedSessionId.value)
+        back()
+        onOverview()
+        back()
+        awaitTag(ShellTags.WorkspaceHeader)
+        assertTrue(selected(ShellTags.nav(TopBarDestination.Sessions)))
+        assertEquals("s1", vm.selectedSessionId.value)
+        assertEquals("s1", vm.pendingSessionId.value)
+        assertTrue(backLeavesTheApp)
+    }
+
+    /** ta-coik.43: an entry naming a chat not listed any more waits for it (the pending path). */
+    @Test fun backOntoAnEntryNamingAnUnlistedChatSelectsItWhenItAppears() {
+        client.show(session("s2"), freshTree())
+        client.show(session("s1"), freshTree())
+        vm.selectSession("s1")
+        launch()
+        awaitTag(ShellTags.WorkspaceHeader)
+        rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Overview)).performClick()
+        onOverview()
+        rule.runOnIdle { vm.selectSession("s2") }
+        awaitTag(ShellTags.WorkspaceHeader)
+        back()
+        onOverview()
+        rule.runOnIdle { client.sessions.value = client.sessions.value.filter { it.id != "s1" } }
+        back()
+        awaitTag(ShellTags.WorkspaceHeader)
+        assertEquals("s1", vm.pendingSessionId.value)
+        assertEquals("the chat on screen stays until the target is listed", "s2", vm.selectedSessionId.value)
+        rule.runOnIdle { client.show(session("s1"), freshTree()) }
+        rule.waitUntil(5_000) { vm.selectedSessionId.value == "s1" }
+        rule.waitForIdle()
+        assertTrue(selected(ShellTags.nav(TopBarDestination.Sessions)))
+        assertTrue(backLeavesTheApp)
+    }
+
     @Test fun usageAndAccountsAreLiveAndFilesNeedsASession() {
         launch()
         onOverview()

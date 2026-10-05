@@ -46,6 +46,27 @@ class DashboardViewTest {
         assertTrue(ViewHistory.decode("sessions,overview").canGoBack)
     }
 
+    /** ta-coik.43: a Sessions entry names its conversation (the web's `?session=`), through Back and the encoding. */
+    @Test fun aSessionsEntryKeepsItsConversation() {
+        val sessions = ViewHistory(DashboardView.Overview).navigate(DashboardView.Sessions, "a")
+        assertEquals("a", sessions.session)
+        // replaceState while Sessions shows; none on another view.
+        val switched = sessions.withSession("b")
+        assertEquals("b", switched.session)
+        assertEquals(ViewHistory(DashboardView.Overview), ViewHistory(DashboardView.Overview).withSession("x"))
+        assertNull("only a Sessions entry names one", ViewHistory(DashboardView.Overview).navigate(DashboardView.Scheduled, "a").session)
+        val away = switched.navigate(DashboardView.Overview).navigate(DashboardView.Scheduled)
+        assertEquals(listOf<String?>(null, "b", null), away.behindSessions)
+        val back = away.back().back()
+        assertEquals(DashboardView.Sessions, back.current)
+        assertEquals("b", back.session)
+        assertEquals(switched, back)
+        // Ids survive the saved state whatever they hold, and an old saved string still reads.
+        val odd = ViewHistory(DashboardView.Sessions, session = "a,b=c%d").navigate(DashboardView.Overview)
+        assertEquals(odd, ViewHistory.decode(odd.encode()))
+        assertEquals(ViewHistory(DashboardView.Sessions, listOf(DashboardView.Overview)), ViewHistory.decode("sessions,overview"))
+    }
+
     @Test fun usageIsADestinationButNotAView() {
         assertEquals(listOf("Overview", "Sessions", "Scheduled", "Usage"), TopBarDestination.entries.map { it.label })
         assertNull(TopBarDestination.Usage.view)

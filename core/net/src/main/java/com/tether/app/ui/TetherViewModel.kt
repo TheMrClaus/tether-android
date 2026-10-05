@@ -621,6 +621,18 @@ class TetherViewModel(
     }
 
     /**
+     * ta-coik.43 (dashboard.tsx 90fbb9f :1110-1118, the popstate handler): Back onto a history entry
+     * that names a conversation makes it [pendingSessionId] and nothing else changes; it is shown once
+     * it is listed (until then the chat on screen stays). Nothing is attached (the mount does), and no
+     * [openRequests] event: the web's popstate neither pushes a view nor closes the drawer.
+     */
+    fun returnToSession(id: String) {
+        _pendingSessionId.value = id
+        loadDraft(id)
+        resolveSelection()
+    }
+
+    /**
      * ta-coik.42 (dashboard.tsx 90fbb9f :1261-1270 `openGlobalHit`, a hit whose conversation is live):
      * the pick and the opening row clear and the live session becomes [pendingSessionId]; the sheet
      * closes. Nothing is attached (the mount does). Plus an [openRequests] event.

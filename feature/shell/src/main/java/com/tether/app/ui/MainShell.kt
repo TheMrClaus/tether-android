@@ -201,7 +201,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var usageOpen by rememberSaveable { mutableStateOf(false) }
     val navigateTo: (DashboardView) -> Unit = { next ->
         usageOpen = false
-        viewHistorySaved = ViewHistory.decode(viewHistorySaved).navigate(next).encode()
+        // ta-coik.43 (dashboard.tsx 90fbb9f :1357-1365, `pushView("sessions", target)`): a Sessions
+        // entry starts out naming the target; the effect below keeps it on the chat shown.
+        val target = vm.pendingSessionId.value ?: vm.activeId.value
+        viewHistorySaved = ViewHistory.decode(viewHistorySaved).navigate(next, target).encode()
     }
     val overviewOpen = view == DashboardView.Overview
     // T9.3: Scheduled (dashboard.tsx:223 `scheduledActionsOpen`), in the workspace area beside the rail.
@@ -250,6 +253,17 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // :1572-1647: Sessions, a listed selection, no create in flight; the Usage page is another route
     // there). Reported on every change; the view model counts only a real mount, so a recomposition
     // or rotation (which reports the same chat again) attaches nothing.
+    // ta-coik.43 (dashboard.tsx 90fbb9f :1080-1096, `replaceState`): while Sessions shows, its entry
+    // names the chat on screen; with chats listed and none shown it names none; an empty list (a
+    // cold boot still waiting for its target) leaves it alone.
+    val noneListed = visibleSessions.isEmpty()
+    LaunchedEffect(sessionsView, showEnded == null, selectedSession?.id, noneListed, viewHistorySaved) {
+        if (!sessionsView || showEnded == null) return@LaunchedEffect
+        val shown = selectedSession?.id
+        if (shown == null && noneListed) return@LaunchedEffect
+        val history = ViewHistory.decode(viewHistorySaved)
+        if (history.current == DashboardView.Sessions) viewHistorySaved = history.withSession(shown).encode()
+    }
     val mountedChat = session?.takeUnless { draftLaunching }?.id
     LaunchedEffect(mountedChat) { vm.chatViewShown(mountedChat) }
     // ta-coik.41: the web's remembered-chat restore, one-time pick and last-opened record.
@@ -627,9 +641,13 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         // T15.4: Back steps to the view behind this one (the web's browser Back between views; from
         // an Overview opened over a session, that session). The shell's own surfaces (menu, drawer,
         // popover, sheet) register later and so close first. Nothing behind: Back leaves the app.
+        // ta-coik.43 (dashboard.tsx 90fbb9f :1110-1118, popstate): Back onto a Sessions entry that
+        // names a conversation makes it the pending target, shown once it is listed.
         androidx.activity.compose.BackHandler(enabled = viewHistory.canGoBack) {
             userNavigated = true
-            viewHistorySaved = ViewHistory.decode(viewHistorySaved).back().encode()
+            val previous = ViewHistory.decode(viewHistorySaved).back()
+            viewHistorySaved = previous.encode()
+            if (previous.current == DashboardView.Sessions) previous.session?.let(vm::returnToSession)
         }
         // T9.2: Back on the Usage page returns to the console view under it (the browser's Back).
         androidx.activity.compose.BackHandler(enabled = usageOpen) { usageOpen = false }

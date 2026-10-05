@@ -11,6 +11,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -85,6 +86,34 @@ class TetherViewModelPendingTargetTest {
     }
 
     private fun attaches(): List<String> = client.attached + client.mounted
+
+    // --- ta-coik.43: Back onto an entry naming a chat (dashboard.tsx 90fbb9f :1110-1118) ---------------
+
+    @Test
+    fun backOntoAnEntryNamingAChatMakesItPendingAndShowsItWhenListed() {
+        aOnScreen()
+        vm.selectSession("b")
+        val before = attaches()
+        var opened = 0
+        val watcher = kotlinx.coroutines.CoroutineScope(main).launch { vm.openRequests.collect { opened++ } }
+        main.scheduler.advanceUntilIdle()
+        // The entry names "x", not listed yet: the chat on screen stays until it is.
+        vm.returnToSession("x")
+        main.scheduler.advanceUntilIdle()
+        assertEquals("x", vm.pendingSessionId.value)
+        assertEquals("the pick stays", "b", vm.activeId.value)
+        assertEquals("b", vm.selectedSessionId.value)
+        list(chat("a"), chat("b"), chat("x"))
+        assertEquals("x", vm.selectedSessionId.value)
+        // A listed one at once (the popstate's setPendingSessionId and nothing else).
+        vm.returnToSession("a")
+        main.scheduler.advanceUntilIdle()
+        assertEquals("a", vm.selectedSessionId.value)
+        assertEquals("b", vm.activeId.value)
+        assertEquals("nothing attached: the mount does", before, attaches())
+        assertEquals("no open request: popstate pushes no view and closes no drawer", 0, opened)
+        watcher.cancel()
+    }
 
     // --- a link arrives ----------------------------------------------------------------------------
 

@@ -57,28 +57,63 @@ object DashboardViews {
  * current one; one to the view already showing is a no-op (`if (readView() === next) return`), so
  * session-to-session selection never grows it (the web's replace-history behaviour). Back pops;
  * empty, Back leaves the app. Bounded so a long day of switching cannot grow the saved state.
+ *
+ * ta-coik.43: a Sessions entry also names its conversation, as the web's URL carries `?session=`
+ * (dashboard.tsx 90fbb9f :110 `pushView("sessions", id)`, kept current by the `replaceState` at
+ * :1080-1096 while Sessions shows): [session] is the current entry's, [behindSessions] those behind
+ * (index for index with [behind]). Back onto an entry that names one re-selects it (:1110-1118).
  */
-data class ViewHistory(val current: DashboardView?, val behind: List<DashboardView> = emptyList()) {
-    /** Show [next]; the view it replaces goes behind it. Null [current] (boot) pushes nothing. */
-    fun navigate(next: DashboardView): ViewHistory = when (current) {
+data class ViewHistory(
+    val current: DashboardView?,
+    val behind: List<DashboardView> = emptyList(),
+    val behindSessions: List<String?> = List(behind.size) { null },
+    val session: String? = null,
+) {
+    /**
+     * Show [next]; the view it replaces goes behind it, with the conversation it named. Null
+     * [current] (boot) pushes nothing. [sessionId] is the new Sessions entry's conversation.
+     */
+    fun navigate(next: DashboardView, sessionId: String? = null): ViewHistory = when (current) {
         next -> this
-        null -> copy(current = next)
-        else -> ViewHistory(next, (behind + current).takeLast(MAX_BEHIND))
+        null -> copy(current = next, session = sessionId.takeIf { next == DashboardView.Sessions })
+        else -> ViewHistory(
+            next,
+            (behind + current).takeLast(MAX_BEHIND),
+            (behindSessions + session).takeLast(MAX_BEHIND),
+            sessionId.takeIf { next == DashboardView.Sessions },
+        )
     }
+
+    /** dashboard.tsx 90fbb9f :1080-1096 (`replaceState`): the Sessions entry on screen names [sessionId]. */
+    fun withSession(sessionId: String?): ViewHistory =
+        if (current != DashboardView.Sessions || session == sessionId) this else copy(session = sessionId)
 
     val canGoBack: Boolean get() = behind.isNotEmpty()
 
-    fun back(): ViewHistory = if (behind.isEmpty()) this else ViewHistory(behind.last(), behind.dropLast(1))
+    fun back(): ViewHistory =
+        if (behind.isEmpty()) this else ViewHistory(behind.last(), behind.dropLast(1), behindSessions.dropLast(1), behindSessions.last())
 
     /** One string for the saved-instance state (`rememberSaveable`). */
-    fun encode(): String = (listOf(current?.key.orEmpty()) + behind.map { it.key }).joinToString(",")
+    fun encode(): String =
+        (listOf(entry(current, session)) + behind.indices.map { entry(behind[it], behindSessions[it]) }).joinToString(",")
 
     companion object {
         const val MAX_BEHIND = 32
 
+        private fun entry(view: DashboardView?, session: String?): String =
+            view?.key.orEmpty() + (session?.let { "=" + java.net.URLEncoder.encode(it, "UTF-8") }.orEmpty())
+
+        private fun parse(part: String): Pair<DashboardView?, String?> {
+            val at = part.indexOf('=')
+            if (at < 0) return DashboardView.of(part) to null
+            return DashboardView.of(part.substring(0, at)) to java.net.URLDecoder.decode(part.substring(at + 1), "UTF-8")
+        }
+
         fun decode(saved: String): ViewHistory {
-            val parts = saved.split(',')
-            return ViewHistory(DashboardView.of(parts.first()), parts.drop(1).mapNotNull(DashboardView::of))
+            val parts = saved.split(',').map(::parse)
+            val (view, session) = parts.first()
+            val behind = parts.drop(1).filter { it.first != null }
+            return ViewHistory(view, behind.map { it.first!! }, behind.map { it.second }, session)
         }
     }
 }
