@@ -45,6 +45,7 @@ import com.tether.app.client.NewSessionRow
 import com.tether.app.client.TextCut
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.ui.components.TetherDialog
+import com.tether.app.ui.icons.ProviderLogoDefaults
 import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.SafeText
@@ -365,7 +366,8 @@ private fun CatalogGlyph(provider: String, glyph: String?) {
         fallback = glyph,
         shape = RoundedCornerShape(7.2.dp),
         background = t.mineral,
-        color = t.ink,
+        // `.provider-glyph` is `--white`, `.provider-claude/-codex/-opencode` `--ink` (globals.css 856-866).
+        color = ProviderLogoDefaults.color(provider),
         markSize = 17.4.dp,
         letterSize = rem(0.62f),
     )

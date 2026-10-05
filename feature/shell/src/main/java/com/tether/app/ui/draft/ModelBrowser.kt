@@ -91,6 +91,7 @@ import com.tether.app.ui.components.LocalKeyboardInset
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.cssSurface
+import com.tether.app.ui.icons.ProviderLogoDefaults
 import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeLabel
@@ -916,7 +917,8 @@ private fun BrowserGlyph(provider: String, providers: List<ProviderInfo>, header
         fallback = glyph ?: provider.take(1).uppercase(),
         shape = RoundedCornerShape(7.2.dp),
         background = if (header) t.graphiteRaised else t.mineral,
-        color = t.ink,
+        // `.provider-glyph` is `--white`, `.provider-claude/-codex/-opencode` `--ink` (globals.css 856-866).
+        color = ProviderLogoDefaults.color(provider),
         markSize = side * 0.58f,
         letterSize = if (header) 12.8.sp else 9.92.sp,
     )

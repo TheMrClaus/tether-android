@@ -55,7 +55,9 @@ import org.robolectric.annotation.Config
 /**
  * ta-2uq: the model browser over the sheet. `all` = the provider rows; `provider` = one profile row's
  * models with its pick checked; `error` = a row whose fetch failed (its words, Retry); `settings` = the
- * cog panel (Discovered, a custom id, Updated 12m ago, Refresh); `empty` = a live catalog offering nothing.
+ * cog panel (Discovered, a custom id, Updated 12m ago, Refresh); `empty` = a live catalog offering nothing;
+ * `letter` (ta-coik.49) = the view of a harness with no verified mark: the header's bare `.provider-glyph`
+ * (2rem on `--graphite-raised`, its 0.8rem letter in `--white`; studio.css 340, globals.css 856).
  */
 enum class BrowserShot(val id: String) {
     All("model-browser-all"),
@@ -63,7 +65,11 @@ enum class BrowserShot(val id: String) {
     Error("model-browser-error"),
     Settings("model-browser-settings"),
     Empty("model-browser-empty"),
+    Letter("model-browser-letter"),
 }
+
+/** ta-coik.49: a harness with no verified mark (the letter fallback), offered beside the fixtures. */
+private val LetterProvider = com.tether.app.protocol.model.ProviderInfo("acp", "ACP agent", "A", true)
 
 /** The goldens' clock (display only: "Updated …"). */
 private const val NOW = 1_700_000_000_000L
@@ -113,6 +119,16 @@ private class Seed(shot: DraftShot, val browser: BrowserShot? = null, val option
                 if (it.key == "codex") it.copy(status = "error", models = emptyList(), error = "codex app-server did not answer in time.", fetchedAt = NOW - 30_000) else it
             }
             BrowserShot.Settings -> providerCatalog.value = DraftFixtures.catalog.map { if (it.key == "claude") it.copy(fetchedAt = NOW - 12 * 60_000) else it }
+            BrowserShot.Letter -> {
+                providers.value = DraftFixtures.providers + LetterProvider
+                providerCatalog.value = DraftFixtures.catalog + com.tether.app.client.ProviderCatalogEntry(
+                    "acp",
+                    "acp",
+                    "ready",
+                    listOf(com.tether.app.protocol.SessionModelOption("m1", "Model 1"), com.tether.app.protocol.SessionModelOption("m2", "Model 2")),
+                    label = "ACP agent",
+                )
+            }
             else -> if (options != null) providerCatalog.value = OptionsFixtures.catalog
         }
     }
@@ -158,12 +174,13 @@ private class Seed(shot: DraftShot, val browser: BrowserShot? = null, val option
         state = model.state.value.let { if (shot == DraftShot.Error) it.copy(error = REFUSAL) else it }
     }
 
-    fun browserInputs() = draftBrowserInputs(state, client.providerCatalog.value, DraftFixtures.providers, com.tether.app.ui.chat.IcuJsCollator.forLocale(java.util.Locale.US), NOW)
+    fun browserInputs() = draftBrowserInputs(state, client.providerCatalog.value, client.providers.value, com.tether.app.ui.chat.IcuJsCollator.forLocale(java.util.Locale.US), NOW)
 
     fun browserState() = when (browser) {
         BrowserShot.Provider -> ModelBrowserState(open = true, view = BrowserView.Provider("work"))
         BrowserShot.Error -> ModelBrowserState(open = true, view = BrowserView.Provider("codex"))
         BrowserShot.Settings -> ModelBrowserState(open = true, view = BrowserView.Provider("claude"), settingsOpen = true)
+        BrowserShot.Letter -> ModelBrowserState(open = true, view = BrowserView.Provider("acp"))
         else -> ModelBrowserState(open = true)
     }
 

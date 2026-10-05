@@ -1,12 +1,10 @@
 package com.tether.app.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,14 +18,17 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherWeights
 
-/** The Tether brand mark: 18.4dp ring with two violet bars rotated 32°. */
+/**
+ * The Tether brand mark: an 18.4dp box with two violet bars rotated 32°. No ring: Studio's
+ * `:root .brand-mark { border: 0 }` (tether 90fbb9f app/studio.css 288) zeroes globals.css's 1px
+ * circle in every context the app draws it (the sign-in wordmark and hub only recolour the border,
+ * studio-login.module.css 37-38; the welcome mark keeps Studio's rule).
+ */
 @Composable
 fun BrandMark(modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     Box(
-        modifier = modifier
-            .size(18.4.dp)
-            .border(1.dp, t.lineStrong, CircleShape),
+        modifier = modifier.size(18.4.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(

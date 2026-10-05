@@ -24,7 +24,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -68,7 +67,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.animateScrollBy
-import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.icons.ProviderTile
 import kotlinx.coroutines.flow.first
 import com.tether.app.protocol.helpers.Elapsed
@@ -112,15 +110,15 @@ private fun RunStatusIcon(status: String, size: Dp, tint: Color) {
 private fun RunHarness(run: SubagentRun, tint: Color) {
     if (run.provider.isNullOrEmpty() || harnessLabel(run) == null) return
     val t = LocalTetherTokens.current
-    // `.provider-glyph` at 1.1rem: the molded round cap (key face, `--line-strong` edge), the mark at 58%.
+    // `.subrun-tab-provider.provider-glyph` (globals.css 4927: 1.1rem) under Studio's `:root .provider-glyph`
+    // (studio.css 340): a 0.45rem rounded square on `--graphite-raised`, no border, the mark at 58%.
     // A verified mark gives it its brand tile instead (globals.css 11204-11224).
     ProviderTile(
         run.provider,
         Modifier.size(17.6.dp),
         fallback = Format.providerGlyph(run.provider),
-        shape = CircleShape,
-        background = t.keyFace,
-        border = CssBorder(1.dp, t.lineStrong),
+        shape = RoundedCornerShape(7.2.dp),
+        background = t.graphiteRaised,
         color = tint,
         markSize = 10.2.dp,
         letterSize = 8.sp,

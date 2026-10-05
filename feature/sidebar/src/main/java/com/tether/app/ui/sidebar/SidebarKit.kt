@@ -89,9 +89,13 @@ internal val FilledStar: ImageVector = ImageVector.Builder("StarFilled", 24.dp, 
 ).build()
 
 /**
- * `.provider-glyph` as a molded round cap (globals.css 1417-1437, 9044-9049; inside a row
- * 11683-11684; Studio 324: flat, `--graphite-raised`, radius 0.45rem). The claude / codex /
- * opencode marks take `--ink`, the others `--white`; a verified mark takes its brand tile instead.
+ * `.provider-glyph` under Studio (tether 90fbb9f studio.css 340: `border: 0`, no shadow,
+ * `--graphite-raised`, radius 0.45rem). [inRow]: a session row's cap, where
+ * `:root .session-item-row .provider-glyph` (globals.css 10844, (0,3,0), outranking studio.css's
+ * (0,2,0)) restores the key face and its `0 1px 0 var(--key-side)` lip; its border colour (and
+ * `.is-current`'s, 10845) stays invisible on Studio's zero-width border, so [selected] draws nothing.
+ * The claude / codex / opencode letters take `--ink`, the others `--white`; a verified mark takes its
+ * brand tile instead (the lip stays: the brand rule leaves shadows alone).
  */
 @Composable
 internal fun ProviderCap(
@@ -105,14 +109,14 @@ internal fun ProviderCap(
     val t = LocalTetherTokens.current
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(0.45f.rem)
     val border = null
-    val shadows = emptyList<CssShadow>()
+    val shadows = if (inRow) listOf(hardShadow(1.dp, t.keySide)) else emptyList<CssShadow>()
     val ink = if (provider == "claude" || provider == "codex" || provider == "opencode") t.ink else t.white
     // A verified mark gives the cap its brand tile (globals.css 11204-11224).
     ProviderTile(
         provider = provider,
         modifier = modifier.size(size),
         shape = shape,
-        background = t.graphiteRaised,
+        background = if (inRow) t.keyFace else t.graphiteRaised,
         border = border,
         shadows = shadows,
         color = ink,

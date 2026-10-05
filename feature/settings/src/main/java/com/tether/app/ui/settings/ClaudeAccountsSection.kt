@@ -317,9 +317,10 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
             )
         }
         Row(verticalAlignment = if (narrow) Alignment.Top else Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            // `.provider-glyph.provider-claude` with the letter C (aria-hidden), Studio's raised square.
+            // `.provider-glyph.provider-claude` with the letter C (aria-hidden), Studio's raised square
+            // (studio.css 340: 0.45rem corner, no border).
             Box(
-                Modifier.size(32.dp).background(t.graphiteRaised, RoundedCornerShape(7.dp)),
+                Modifier.size(32.dp).background(t.graphiteRaised, RoundedCornerShape(7.2.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("C", color = t.ink, style = settingsText(type.mono, 12.8f, 750))
