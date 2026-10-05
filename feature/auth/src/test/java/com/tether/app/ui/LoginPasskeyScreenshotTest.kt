@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import com.github.takahirom.roborazzi.RoborazziOptions
@@ -71,7 +72,14 @@ private object NeverPrompts : PasskeyAuthenticator {
     override suspend fun authenticate(requestJson: String): PasskeyCeremony = throw AssertionError("a shot never prompts")
 }
 
-private fun ComposeContentTestRule.snapLogin(shot: LoginPasskeyShot, surface: LoginSurface, skin: TetherSkin, size: String, scope: CoroutineScope) {
+private fun ComposeContentTestRule.snapLogin(
+    shot: LoginPasskeyShot,
+    surface: LoginSurface,
+    skin: TetherSkin,
+    size: String,
+    scope: CoroutineScope,
+    scrollToTag: String? = null,
+) {
     val answer = CompletableDeferred<LoginResult>()
     if (shot == LoginPasskeyShot.Dismissed) answer.complete(LoginResult.PasskeyDismissed)
     val client = ShotClient(RealTetherClient(settings = InMemorySettings(), httpClient = OkHttpClient(), scope = scope), answer)
@@ -106,6 +114,13 @@ private fun ComposeContentTestRule.snapLogin(shot: LoginPasskeyShot, surface: Lo
         onNodeWithTag(LoginTags.Passkey, useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
         mainClock.advanceTimeBy(1_000)
         waitForIdle()
+    }
+    if (scrollToTag != null) {
+        // The scroll animates: let the clock run for it, then hold it again for the capture.
+        mainClock.autoAdvance = true
+        onNodeWithTag(scrollToTag, useUnmergedTree = true).performScrollTo()
+        waitForIdle()
+        mainClock.autoAdvance = false
     }
     onRoot().captureRoboImage(
         "src/test/screenshots/${shot.id}/${surface.name.lowercase()}-${skin.id}-$size.png",
@@ -152,6 +167,23 @@ class LoginPasskeyTabletScreenshotTest(private val shot: LoginPasskeyShot, priva
 @Config(qualifiers = "w760dp-h900dp-mdpi")
 class LoginPasskeyMediumScreenshotTest(private val skin: TetherSkin) : LoginPasskeyShotBase() {
     @Test fun login() = rule.snapLogin(LoginPasskeyShot.Ready, LoginSurface.Studio, skin, "medium", scope)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
+    }
+}
+
+/**
+ * ta-coik.49: a short wide window (701x480 at 1:1, font 1.3x) scrolled to the bottom: the whole page
+ * scrolls as the web's `.shell { overflow: auto }`, so the brand panel's "Private by design" footer is
+ * on screen, with the brand panel's background running the full height beside the form.
+ */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w701dp-h480dp-mdpi", fontScale = 1.3f)
+class LoginPasskeyShortScreenshotTest(private val skin: TetherSkin) : LoginPasskeyShotBase() {
+    @Test fun login() = rule.snapLogin(LoginPasskeyShot.Ready, LoginSurface.Studio, skin, "short-font-1.3x-scrolled", scope, scrollToTag = LoginTags.BrandFooter)
 
     companion object {
         @JvmStatic

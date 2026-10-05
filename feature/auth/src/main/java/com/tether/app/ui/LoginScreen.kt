@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CredentialRequestData
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -56,6 +57,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -107,6 +110,9 @@ object LoginTags {
     const val PasskeyOr = "login-passkey-or"
     const val PasskeyNeedsHttps = "login-passkey-needs-https"
     const val Connection = "login-connection"
+
+    /** The brand panel's "Private by design" line (studio-login.tsx `.brandFooter`). */
+    const val BrandFooter = "login-brand-footer"
 }
 
 /**
@@ -720,11 +726,18 @@ private fun StudioLogin(ui: LoginUi) {
         val wide = maxWidth > 700.dp
         val narrowViewport = maxWidth <= 900.dp
         if (wide) {
-            Row(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
-                StudioBrandPanel(Modifier.weight(1f).fillMaxSize().background(t.mineralDeep).padding(40.dp), narrowViewport = narrowViewport)
-                Box(Modifier.weight(1f).fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
-                    StudioForm(ui, Modifier.padding(40.dp))
-                }
+            // `.shell { overflow: auto }`: the two-column page scrolls as a whole, not one panel inside it.
+            BoxWithConstraints(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
+                StudioColumns(
+                    viewport = maxHeight,
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    brand = { StudioBrandPanel(Modifier.background(t.mineralDeep).padding(40.dp), narrowViewport = narrowViewport) },
+                    form = {
+                        Box(contentAlignment = Alignment.Center) {
+                            StudioForm(ui, Modifier.padding(40.dp))
+                        }
+                    },
+                )
             }
         } else {
             Column(
@@ -733,6 +746,31 @@ private fun StudioLogin(ui: LoginUi) {
                 StudioBrandPanel(Modifier.fillMaxWidth().background(t.mineralDeep).padding(horizontal = 24.dp, vertical = 20.dp), compact = true)
                 StudioForm(ui, Modifier.padding(horizontal = 24.dp, vertical = 24.dp))
             }
+        }
+    }
+}
+
+/**
+ * studio-login.module.css `.shell` (a two-column grid, `overflow: auto`) over `.brandPanel` and
+ * `.formPanel` (each `min-height: 100dvh`): the columns split the width, both at least [viewport]
+ * tall and both as tall as the taller (the grid row stretches them), so the page grows and scrolls
+ * when either panel's content does not fit. The form is measured once, at least as tall as the
+ * brand panel's own content; the brand panel then takes that height.
+ */
+@Composable
+private fun StudioColumns(viewport: Dp, modifier: Modifier, brand: @Composable () -> Unit, form: @Composable () -> Unit) {
+    Layout(contents = listOf(brand, form), modifier = modifier) { (brandSlot, formSlot), constraints ->
+        val width = constraints.maxWidth
+        val left = width / 2
+        val right = width - left
+        val brandPanel = brandSlot.single()
+        val floor = maxOf(viewport.roundToPx(), brandPanel.maxIntrinsicHeight(left))
+        val formPanel = formSlot.single().measure(Constraints(minWidth = right, maxWidth = right, minHeight = floor))
+        val height = formPanel.height
+        val brandPlaced = brandPanel.measure(Constraints.fixed(left, height))
+        layout(width, height) {
+            brandPlaced.place(0, 0)
+            formPanel.place(left, 0)
         }
     }
 }
@@ -768,7 +806,7 @@ private fun StudioBrandPanel(modifier: Modifier, compact: Boolean = false, narro
             ConnectionPath(narrowViewport)
             MonoText("Your agents · Your workspace · Anywhere", t.faint, fontSize = 11.sp)
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.testTag(LoginTags.BrandFooter), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(TetherIcons.LockKeyhole, contentDescription = null, tint = t.faint, modifier = Modifier.size(14.dp))
             Text("Private by design. Self-hosted by you.", color = t.faint, fontFamily = Manrope, fontSize = 12.sp)
         }

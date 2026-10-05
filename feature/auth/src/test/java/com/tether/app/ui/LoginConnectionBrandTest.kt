@@ -3,10 +3,15 @@ package com.tether.app.ui
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.dp
 import com.tether.app.client.InMemorySettings
 import com.tether.app.client.RealTetherClient
 import com.tether.app.ui.theme.TetherSkin
@@ -111,4 +116,29 @@ class LoginConnectionAtBreakpointTest : LoginConnectionBase() {
 class LoginConnectionBelowBreakpointTest : LoginConnectionBase() {
     @Test
     fun theFigureIsHiddenBelow700dp() = assertFalse(figureShown())
+}
+
+/**
+ * ta-coik.49: studio-login.module.css `.shell { overflow: auto }` scrolls the whole two-column page,
+ * so in a short wide window at a large font the brand panel's "Private by design" footer, below the
+ * fold, is reached by scrolling (it was cut off: only the form panel scrolled).
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w701dp-h480dp-mdpi", fontScale = 1.3f)
+class LoginWideShortWindowTest : LoginConnectionBase() {
+    @Test
+    fun thePageScrollsToTheBrandFooter() {
+        launch()
+        rule.waitForIdle()
+        val footer = rule.onNodeWithTag(LoginTags.BrandFooter, useUnmergedTree = true)
+        val window = rule.onRoot().getUnclippedBoundsInRoot()
+        val before = footer.getUnclippedBoundsInRoot()
+        assertTrue("the footer starts below the fold (else this window proves nothing)", before.bottom > window.bottom)
+        footer.performScrollTo()
+        rule.waitForIdle()
+        val after = footer.getUnclippedBoundsInRoot()
+        assertTrue("the footer has its height", after.bottom - after.top >= 14.dp)
+        assertTrue("the footer is wholly on screen", after.top >= window.top && after.bottom <= window.bottom)
+        footer.assertIsDisplayed()
+    }
 }
