@@ -175,8 +175,12 @@ fun SessionDrawer(
             controller.rediscover(workspaces, current)
         }
     }
-    // dashboard.tsx:966-973 — the visible, settled session's latest report is on screen.
-    val active = sessions.firstOrNull { it.id == selectedId }?.takeIf { selectedOnScreen }
+    // dashboard.tsx:966-973 — the visible, settled session's latest report is on screen. ta-coik.51:
+    // `activeSession` is looked up among the LISTED sessions (:709-717, :725 `visibleSessions`), so an
+    // ended target with "Show ended sessions" off is not on screen and is not marked seen; nothing is
+    // until the stored setting is read.
+    val active = stored?.let { SidebarModel.visibleSessions(sessions, it.showEndedSessions) }
+        ?.firstOrNull { it.id == selectedId }?.takeIf { selectedOnScreen }
     LaunchedEffect(active?.historyId, active?.status, active?.updatedAt) {
         active?.let { controller.onActiveSettled(it) }
     }

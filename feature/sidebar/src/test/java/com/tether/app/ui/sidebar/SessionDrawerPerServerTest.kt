@@ -19,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -29,7 +30,8 @@ import org.robolectric.annotation.Config
 
 /**
  * ta-coik.47: the drawer reads and writes the seen stamps of the server it is drawn for (the web's
- * localStorage is per origin).
+ * localStorage is per origin). ta-coik.51: the chat it marks seen is looked up among the LISTED
+ * sessions, as the web's `activeSession` is (dashboard.tsx 90fbb9f :709-717, :725, :966-973).
  * (One test class per process-wide DataStore file.)
  */
 @RunWith(RobolectricTestRunner::class)
@@ -57,6 +59,8 @@ class SessionDrawerPerServerTest {
 
     private fun stored(): TetherPreferences = runBlocking(Dispatchers.IO) { prefs.preferences.first() }
 
+    private fun markSeenFrames(client: RecordingClient) = client.frames.filter { (it["type"] as JsonPrimitive).content == "mark-seen" }
+
     private fun drawer(client: RecordingClient, sessions: List<AgentSession>, selectedId: String?) {
         val vm = TetherViewModel(client)
         rule.setContent {
@@ -73,6 +77,33 @@ class SessionDrawerPerServerTest {
             }
         }
         rule.waitForIdle()
+    }
+
+    private fun ended() = F.live("gone", "Ended job", cwd = F.APP, status = "exited", ago = 5, historyId = "hist-gone")
+
+    /** ta-coik.51: a link to an ended chat, nothing picked, "Show ended sessions" off: not on screen, not seen. */
+    @Test
+    fun anEndedTargetThatIsNotListedIsNotMarkedSeen() {
+        runBlocking { prefs.setShowEnded(false) }
+        val target = ended()
+        val client = RecordingClient(sessions = listOf(target))
+        drawer(client, listOf(target), selectedId = target.id)
+        // The stored setting is read (the drawer's discover went out), and still nothing is stamped.
+        rule.waitUntil(5_000) { "discover" in client.types() }
+        rule.waitForIdle()
+        assertTrue(markSeenFrames(client).toString(), markSeenFrames(client).isEmpty())
+        assertFalse("hist-gone" in stored().forServer(null).lastSeenSessions)
+    }
+
+    /** The same target with "Show ended sessions" on is listed, so on screen, and its settled report is seen. */
+    @Test
+    fun theSameTargetListedIsMarkedSeen() {
+        val target = ended()
+        val client = RecordingClient(sessions = listOf(target))
+        drawer(client, listOf(target), selectedId = target.id)
+        rule.waitUntil(5_000) { markSeenFrames(client).isNotEmpty() }
+        assertEquals("hist-gone", (markSeenFrames(client).single()["historyId"] as JsonPrimitive).content)
+        rule.waitUntil(5_000) { "hist-gone" in stored().forServer(null).lastSeenSessions }
     }
 
     @Test
