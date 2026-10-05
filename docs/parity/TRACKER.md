@@ -148,13 +148,13 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 ### Phase 10 — Settings & first run
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
-| T10.1 | Settings dialog, all tabs | TODO |  |  | Close-out verification (different actor, at main 8e050340): every tab and control present and writable. Two gaps: (1) Claude account Termin… |
+| T10.1 | Settings dialog, all tabs | VERIFIED |  |  |  |
 | T10.2 | Session settings sheet | VERIFIED |  |  |  |
 | T10.3 | Nodes settings | VERIFIED | security-executor-T10.3 @ 2026-10-01 22… | `bd show` |  |
 | T10.4 | Paired devices + sign-in security (device-token view) | VERIFIED | security-executor-T10.4 @ 2026-10-02 01… |  |  |
 | S10.1 | Server `/.well-known/assetlinks.json` — PR | VERIFIED | TheMrClaus @ 2026-09-28 16:02 |  |  |
 | T10.5 | Passkeys via Credential Manager | VERIFIED | TheMrClaus @ 2026-10-02 09:29 |  |  |
-| T10.6 | `/setup` wizard parity (scope per T0.5) | TODO |  |  |  |
+| T10.6 | `/setup` wizard parity (scope per T0.5) | VERIFIED |  |  |  |
 
 ### Phase 11 — Files
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -175,11 +175,11 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T13.0 | `SYNC_DESIGN.md` + plan-verifier review | VERIFIED | claude-main @ 2026-09-27 09:10 |  |  |
 | T13.1 | Room journal mirror; UI reads Room; delta attach | VERIFIED | TheMrClaus @ 2026-09-27 23:48 |  |  |
 | T13.2 | Offline mode + stale indicators | VERIFIED | TheMrClaus @ 2026-09-29 10:10 |  |  |
-| T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | design refinement r2: ExactlyOnceProperty includes restore with tries>0 while the mirror is at head. The 'with S13.1-C' QueueRemovedElsewhe… |
+| T13.3 | Outbox (dedupe-safe, no turn auto-retry, stale approvals dropped) | TODO |  |  | OWNER DECISION 2026-10-06: defer to after 1.0.0 (no web counterpart; no user-visible bug — wave-check verified no double-send / stale appro… |
 | S13.1 | Server content-free FCM "advanced" hint + sessions-changed cursor — PR | VERIFIED | claude-main @ 2026-09-27 09:38 |  |  |
-| T13.4 | FCM hint → WorkManager catch-up | TODO |  |  | un-parked (coordinator, 2026-09-29): owner clarified push is BOTH bring-your-own-Firebase per instance AND a Firebase-free path; FCM work c… |
-| T13.5 | Cache policy, eviction, migrations | TODO |  |  | From the T13.1 security re-review (R2, Low): the interim per-origin caps count only sync_state rows/bytes - turn_detail (no count/byte cap)… |
-| T13.6 | Conflict rules doc + tests | TODO |  |  | design refinement r2: the debug probe strips removedQueueIds until T13.3b lands, then demands exact equality; test both modes. |
+| T13.4 | FCM hint → WorkManager catch-up | TODO |  |  | OWNER DECISION 2026-10-06: defer to after 1.0.0 (no web counterpart; no user-visible bug — wave-check verified no double-send / stale appro… |
+| T13.5 | Cache policy, eviction, migrations | TODO |  |  | OWNER DECISION 2026-10-06: defer to after 1.0.0 (no web counterpart; no user-visible bug — wave-check verified no double-send / stale appro… |
+| T13.6 | Conflict rules doc + tests | TODO |  |  | OWNER DECISION 2026-10-06: defer to after 1.0.0 (no web counterpart; no user-visible bug — wave-check verified no double-send / stale appro… |
 
 ### Phase 14 — Hardening & release 1.0.0
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -188,7 +188,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T14.2 | Accessibility pass | TODO |  |  | From T3.2: CSS text-transform:uppercase keeps the ORIGINAL words as the accessible name; native uppercase labels must set contentDescriptio… |
 | T14.3 | Security review | TODO |  |  | From security review of T0.6 (508198c), none release-blocking: (1) LOW/UX: on Android 17, a LAN server the classifier misses (IPv6 global, … |
 | T14.4 | Full parity audit (fresh verifier) | TODO |  |  | From the T4.3 r2 verifier (fidelity detail): UsageTrack's colour transition uses Compose's default tween easing; the web uses CSS 'ease' (c… |
-| T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  | `bd show` | owner rule 2026-09-30: the coordinator publishes releases itself (no drafts left for the owner) and bumps the minor version each release (0… |
+| T14.5 | Release 1.0.0 (dry_run → draft; owner publishes) | TODO |  | `bd show` | OWNER DECISIONS 2026-10-06: 1.0.0 waits for the owner's deploy of tether >= 1bf4a465 so ta-m7ef and the #244 slice ship in it. R8: android-… |
 
 ### Phase 15 — Catch-up to web protocol v135 (Overview, Studio-only, v133-v135)
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -337,6 +337,7 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-09-30 | Chat links keep the current direct-open rule (exact short ASCII label==href, no `@`, settled, not clamped); everything else asks first. No "always ask" | Owner answer (card) | owner |
 | 2026-09-30 | T7.4: attachments go **inline on the WebSocket send, like the web** (no upload route). Port the web's image shrinking (long edge 1568, JPEG 0.8), keep the web's limits, and refuse any send frame over a safe cap below OkHttp's 16 MiB queue limit, before sending (a logged divergence for large non-image sets). Sheet rows = the web's four (no camera or text-clipboard rows). Offline sends with attachments are refused; the in-memory queue is T13.3's. The oversized-frame socket drop on main is fixed in T7.4 | The maker found the brief assumed an upload route the web doesn't have, and OkHttp closes the socket on a >16 MiB frame | claude-main (coordinator default) |
 | 2026-09-30 | Releases: the coordinator publishes each APK release itself (no drafts for the owner to publish), and every new release bumps the minor version (0.7.8 -> 0.8.0 -> 0.9.0; versionCode +1). Replaces "publishing is the owner's call" | Owner instruction (chat) | owner |
+| 2026-10-06 | ta-pqui merged (`dd1fd42a`, gate 6788/0/5): /setup GitHub step (host login, device flow, PAT) and Claude accounts step (list, add, login with code, cancel), skippable as page.tsx:260-262. T10.6 (/setup) and T10.1 (Settings) closed. Owner decisions: Phase 13 infra (T13.3-T13.6, ta-gxp) and Firebase-free push (ta-nrq) after 1.0.0; 1.0.0 waits for the owner's deploy of tether >= 1bf4a465 so ta-m7ef (#241 app half, PROTOCOL 143) and ta-06yt (#244 app slice) ship in it; R8 approved with mapping.txt kept by the release workflow | scout CONFIRMED; owner (asked) | owner / claude-main |
 | 2026-10-01 | ta-ylh decodes the v133-v135 fields but the app keeps ADVERTISING protocol 132: the server serves a native hello only when floor <= client <= its own version (lib/hello-compat.mjs), and the owner's deployed server was last known at 133, so advertising 135 would lock the app out until the owner deploys main. Raising the advertised version is owner-gated (server deployed at >= the new version) | Server hello-compat rule; deploy state in RESUME HERE | claude-main (coordinator default, owner to confirm) |
 | 2026-10-01 | **PARITY_BASE -> tether `887c222` (v137) for the protocol corpora and the Parity Matrix; the UI base stays split.** Reducer+helpers and wire re-exported there (each twice, byte-identical) and vendored; v136 `queuedAt` and #222 (over-bound requested permissions are not grantable) ported; the wire types model 137 while the advertised hello stays 132 (owner gate unchanged). Tokens not vendored: the fresh export retires 21 material-layer tokens the app still references (ta-ccu). Screens not regenerated: the exporter fails after the top-bar redesign (ta-lx3, tether-side). #229 UI -> ta-ceo, #231 plan names -> ta-ebc | PLAN §9 catch-up loop (T15.8); a split base is recorded honestly rather than claimed whole | executor-T15.8 (coordinator to confirm) |
 | 2026-10-01 | T15.7 service links: "Open" goes to the web's own console-side link (`proxyAuthUrl` = relative `/api/worktree/open?session&script`, owner-grade, mints a 60 s single-use token then redirects to the service host), pinned to exactly that path with session = this session and script = this row, resolved only against the paired origin, confirm first, opened in the EXTERNAL browser with no app credential (the browser's own console sign-in authenticates; otherwise a 401 page). "On this machine" (`proxyPath`, loopback consoles only) omitted in the app. Service address stays plain text (T9.1) | The maker found the brief's 'capability URL on a service host' premise wrong; this is the web's behaviour with tight pinning | claude-main (coordinator default, owner to confirm) |
