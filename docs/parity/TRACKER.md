@@ -135,7 +135,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | T8.2 | Folder picker, workspaces | IN-PROGRESS | TheMrClaus @ 2026-10-05 14:42 |  |  |
 | T8.3 | Worktree modes/scripts/logs/diff/services/open, repository panel, change request | TODO |  |  |  |
 | T8.4 | GitHub work dialog | VERIFIED | TheMrClaus @ 2026-10-04 22:50 | `bd show` |  |
-| T8.5 | Metadata draft panel, handoff brief + claim | IN-PROGRESS | TheMrClaus @ 2026-10-05 14:42 |  | from T7.3 (coordinator): add the @ picker's 'Sessions on this project' section (takeover); the T7.3 mention picker is ready for it. |
+| T8.5 | Metadata draft panel, handoff brief + claim | IN-PROGRESS | TheMrClaus @ 2026-10-05 14:42 |  | slice a MERGED ff-only 9541cd29 (full gate 6448/0/5, stale 0; verify CONFIRMED by a different actor: core:net 1366, feature:shell 870, scre… |
 | T8.6 | Browser pane (native frame stream) — scope per T0.5 | TODO |  |  |  |
 
 ### Phase 9 — Inspector, usage, scheduled actions
@@ -160,7 +160,7 @@ Status: `TODO` · `IN-PROGRESS` · `BLOCKED` · `DONE` · `VERIFIED` · `DROPPED
 | ID | Task | Status | Claimed by | Evidence | Notes |
 |---|---|---|---|---|---|
 | T11.1 | Workspace file browser (all /api/files ops) | VERIFIED | TheMrClaus @ 2026-09-27 22:25 |  |  |
-| T11.2 | Android share target → session | TODO |  |  |  |
+| T11.2 | Android share target → session | IN-PROGRESS | TheMrClaus @ 2026-10-05 15:12 |  |  |
 
 ### Phase 12 — Notifications
 | ID | Task | Status | Claimed by | Evidence | Notes |
@@ -417,6 +417,7 @@ claude-account-plan (ta-ebc, #231). Retired: `components/login/instrument-login.
 | 2026-10-04 | ta-coik.21, .19 and .33 merged (two green full gates each: 6051, 6097, 6100 tests, 0 failed). ta-coik.33 (owner bug: a chat opened on already-read messages) = the transcript was not keyed per session, so scroll and follow mode carried over; now keyed as the web remounts ChatView. Owner perf report filed as ta-coik.32: diagnosis = an 8 s ping probe on resume of a frozen app's dead socket, a 0.5-1 s first-reconnect backoff, every opened chat re-attached before the open one, serial auth+upgrade; phase 2 approved (immediate reconnect, fresh connect after >=25 s away or a network change, open chat first, pool cleared on network change, parallel auth check, TetherTiming log). No background foreground service | Owner asked for snappy; every change does at least what the web does | claude-main (owner delegation) |
 | 2026-10-04 | ta-6t1 r13: verify REFUTED, security PASS WITH FOLLOW-UPS; both found a setup handing a process outside its cgroup (systemd-run --user, a running tmux/pm2 server, docker) keeps the session contained. r14: **any session whose checkout ran a non-empty owner-approved setup is exposed for its lifetime** (the one provable rule), plus the launch keeps argv[0]-dispatch shims working and the remaining hardening | Owner: ship as is; labels may be conservative, behaviour unchanged | claude-main (owner delegation) |
 | 2026-10-04 | ops: the console's SSO proxy admits /api/github/ (owner's explicit-route list), for ta-coik.21 | Owner instruction (handover) | claude-main |
+| 2026-10-05 | T8.5 slice a merged (`9541cd29`, full gate 6448/0/5): Repository panel Draft commit message / Draft pull request keys (shown when metadataGenerationEnabled === true and not read-only), server-wide draft list (cap 8, client-only dismiss), metadata draft panel with copy keys, as repository-panel.tsx:27-51, use-tether.ts:1171-1193/:1867-1881 and metadata-draft-panel.tsx at 90fbb9f. Also: tether PR #241 merged by the coordinator at the owner's request (1bf4a465, PROTOCOL 143, after a merge-regression fix 536c9f2); Android slice filed as ta-m7ef | Verified CONFIRMED by a different actor | claude-main |
 | 2026-10-05 | ta-coik.53 merged (`9df86e40`, full gate 6415/0/5): Studio sign-in compact footer centred, inputs 50dp/9dp/14dp/graphite, keys 44dp (48dp touch), accent focus outline, 0.6 disabled fade, refused-password danger border, as studio-login.module.css :59-:70 and studio.css :265-269 at 90fbb9f. The bead's 9px/700 key values were wrong: the web's more specific `:root .button-primary` draws 10px/680, which the app already drew | Verified CONFIRMED by a different actor | claude-main |
 | 2026-10-05 | ta-coik.43 merged (`5d0cb361`, full gate 6409/0/5): Android Back onto an earlier Sessions entry re-selects the chat it named through the pending path, as the web's popstate handler (dashboard.tsx 90fbb9f :1110-1118); chat switches add no entry (web replaceState :1072-1096). Follow-up ta-3qyc | Verified CONFIRMED by a different actor | claude-main |
 | 2026-10-05 | **Process for the finish (owner: "focus less on chasing perfect scenarios, finish the project")**: one maker + one different-actor verifier per bead; security review only for auth/tokens/permissions work, one pass; merge bar is ONE clean full gate (a failure is rerun only to classify it); only a regression or a broken claim blocks, everything else becomes a follow-up bead; the P3/P4 long tail is frozen until T14.4. Finish backlog from a read-only gap survey is in the PROG bead notes | Owner instruction | owner / claude-main |
