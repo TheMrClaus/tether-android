@@ -844,6 +844,28 @@ interface TetherClient {
     /** T8.5 (use-tether.ts:1877-1881): drop one draft from [metadataDrafts]; purely client-side. */
     fun dismissMetadataDraft(requestId: String) {}
 
+    /**
+     * T8.5 (use-tether.ts:320-322, 1194-1198): the server's `handoff-brief` replies, by source session
+     * id (a second reply for one source replaces the first). Emptied on a sign-out and a new sign-in.
+     */
+    val handoffBriefs: StateFlow<Map<String, HandoffBriefReading>> get() = NO_HANDOFF_BRIEFS
+
+    /**
+     * T8.5 (use-tether.ts:1889-1893): `handoff-brief` for [sourceId], on behalf of [targetId]. The
+     * reply lands in [handoffBriefs]; a refusal is an `error` frame, shown like every other. False
+     * when not sent, said in [errors].
+     */
+    fun requestHandoffBrief(sourceId: String, targetId: String): Boolean = false
+
+    /**
+     * T8.5 (use-tether.ts:1899-1901): `handoff` — claim [sourceId] and start [targetId]'s turn with
+     * [engineText]. The server refuses a busy source with an `error` frame. False when not sent.
+     */
+    fun handoff(sourceId: String, targetId: String, engineText: String): Boolean = false
+
+    /** T8.5 (use-tether.ts:1906-1913): drop [sourceId]'s brief from [handoffBriefs]; client-side only. */
+    fun clearHandoffBrief(sourceId: String) {}
+
     // ------------------------------------------------------------------
     // v109 multi-host node registry (Settings -> Nodes, UI in T10.3). See NodeRegistry.kt.
     // ------------------------------------------------------------------
@@ -1183,6 +1205,18 @@ private val NO_WORKTREE_SCRIPTS: StateFlow<Map<String, kotlinx.serialization.jso
 private val NO_CHANGE_REQUESTS: StateFlow<Map<String, ChangeRequestReading>> = MutableStateFlow(emptyMap())
 private val NO_WORKTREE_LOGS: StateFlow<Map<String, WorktreeLogsReading>> = MutableStateFlow(emptyMap())
 private val NO_METADATA_DRAFTS: StateFlow<List<PendingMetadataDraft>> = MutableStateFlow(emptyList())
+private val NO_HANDOFF_BRIEFS: StateFlow<Map<String, HandoffBriefReading>> = MutableStateFlow(emptyMap())
+
+/**
+ * protocol.ts:3761 `handoff-brief` as use-tether.ts:322 keeps it: [brief] raw, [markdown] the digest
+ * (the collapsible summary), [instruction] the composer prefill (issue #137).
+ */
+data class HandoffBriefReading(
+    val sourceId: String,
+    val brief: kotlinx.serialization.json.JsonObject,
+    val markdown: String,
+    val instruction: String,
+)
 
 /** use-tether.ts:1185 / 1191 `DRAFT_LIMIT`: the most drafts kept without a dismissal. */
 const val METADATA_DRAFT_LIMIT = 8

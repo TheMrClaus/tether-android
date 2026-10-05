@@ -250,6 +250,56 @@ class DraftComposerSheetBehaviourTest {
         assertTrue("nothing was sent by any of it", client.creates.isEmpty())
     }
 
+    /**
+     * T8.5 (dashboard.tsx 90fbb9f :325-372, use-draft-composer.ts :387-414): the limit card's "Take
+     * over in a new session" (ChatScreen wires it to [TetherViewModel.takeOverInNewSession]) asks for
+     * the source's brief, raises the sheet, seeds the prompt with the brief's instruction when it
+     * lands, and the create sends `handoff` (the edited prompt as engineText), never a first message.
+     */
+    @Test
+    fun takeOverInANewSessionPrefillsTheBriefAndTheCreateSendsHandoff() {
+        launch()
+        rule.runOnUiThread { vm.takeOverInNewSession("limited") }
+        awaitTag(DraftComposerTags.Sheet)
+        until("the brief was asked for") { client.briefRequests.toList() == listOf("limited" to "limited") }
+        // Until the brief lands the prompt is blank, as on the web.
+        assertEquals("", textOf(DraftComposerTags.Input))
+        client.answerBrief("limited", "Resume “limited”.")
+        until("the brief seeded the prompt") { textOf(DraftComposerTags.Input) == "Resume “limited”." }
+        pick("work")
+        type("Resume “limited”. Use the other account.")
+        tap(DraftComposerTags.Send)
+        until("one create went out") { client.creates.size == 1 }
+        client.answer("new-takeover")
+        until("the handoff claimed the source") {
+            client.handoffs.toList() == listOf(Triple("limited", "new-takeover", "Resume “limited”. Use the other account."))
+        }
+        assertTrue("no plain first message", client.firstSends.isEmpty())
+        until("takeover mode ended and the brief was dropped") {
+            composer.state.value.takeoverSourceId == null && client.handoffBriefs.value.isEmpty()
+        }
+        until("the new session is selected") { vm.selectedSessionId.value == "new-takeover" }
+    }
+
+    /** T8.5 (dashboard.tsx :313-322): closing the sheet cancels the takeover; a manual open is ordinary. */
+    @Test
+    fun closingTheTakeoverSheetMakesTheNextCreateAnOrdinaryOne() {
+        launch()
+        rule.runOnUiThread { vm.takeOverInNewSession("limited") }
+        awaitTag(DraftComposerTags.Sheet)
+        tap(DraftComposerTags.Close)
+        awaitGone(DraftComposerTags.Sheet)
+        assertNull(composer.state.value.takeoverSourceId)
+        rule.runOnUiThread { vm.openDraft() }
+        awaitTag(DraftComposerTags.Sheet)
+        compose("work", "Just a new session.")
+        tap(DraftComposerTags.Send)
+        until("one create went out") { client.creates.size == 1 }
+        client.answer("new-plain")
+        until("the first message went out") { client.firstSends.toList() == listOf("new-plain" to "Just a new session.") }
+        assertTrue(client.handoffs.isEmpty())
+    }
+
     @Test
     fun sendCreatesTheSessionAndSendsTheFirstMessage() {
         openSheet()

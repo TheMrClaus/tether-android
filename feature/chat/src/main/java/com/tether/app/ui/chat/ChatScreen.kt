@@ -230,6 +230,8 @@ fun ChatScreen(
                 onDismiss = { key -> vm.client.dismissNotice(s.id, key, drawnFor) },
                 onRateLimit = { control -> vm.client.sessionControl(s.id, control, drawnFor) },
                 onRefused = { message -> vm.reportLocalError(message) },
+                // T8.5 (dashboard.tsx 90fbb9f :325-336, 1688).
+                onTakeOverInNewSession = { vm.takeOverInNewSession(s.id) },
             )
         }
     }

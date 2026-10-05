@@ -32,7 +32,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -148,12 +150,27 @@ class TetherViewModel(
 
     /** dashboard.tsx openDraft: raise the new-session sheet over whatever is on screen (nothing is deselected). */
     fun openDraft() {
+        // T8.5 (dashboard.tsx 90fbb9f :313-315): a manually opened composer never inherits takeover mode.
+        draftComposer.setTakeover(null)
         _draftOpen.value = true
     }
 
     /** dashboard.tsx closeDraft: the sheet goes; the draft (text, folder, provider, attachments) stays. */
     fun closeDraft() {
+        // T8.5 (dashboard.tsx :320-322): cancelling the composer cancels the takeover.
+        draftComposer.setTakeover(null)
         hideDraft()
+    }
+
+    /**
+     * T8.5 (dashboard.tsx 90fbb9f :325-336 takeOverInNewSession): the limit card's "Take over in a new
+     * session" — ask for [sourceId]'s brief (on behalf of the selected session, else the source
+     * itself) and raise the new-session composer in takeover mode; the brief seeds its prompt.
+     */
+    fun takeOverInNewSession(sourceId: String) {
+        draftComposer.setTakeover(sourceId)
+        client.requestHandoffBrief(sourceId, _selectedSessionId.value ?: sourceId)
+        _draftOpen.value = true
     }
 
     /** Every way the sheet goes (close, a selection, a resume, a `created`, another server, sign-out). */
@@ -454,6 +471,11 @@ class TetherViewModel(
         // ta-23f: the answers to the composer's own `worktree-inspect` (it keeps only its own).
         viewModelScope.launch {
             client.worktreeSources.collect { reply -> draftComposer.onWorktreeSource(reply) }
+        }
+        // T8.5 (dashboard.tsx :356-372): the takeover brief seeds the composer once it lands.
+        viewModelScope.launch {
+            combine(client.handoffBriefs, draftComposer.state.map { it.takeoverSourceId }.distinctUntilChanged()) { briefs, _ -> briefs }
+                .collect { briefs -> draftComposer.onHandoffBriefs(briefs) }
         }
         viewModelScope.launch {
             combine(client.connection, client.linkEpoch, ::Pair).collect { (connection, epoch) -> draftComposer.onLink(connection, epoch) }

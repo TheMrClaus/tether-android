@@ -180,6 +180,32 @@ class DraftTestClient(
         createdSessions.value = CreatedReply(session, ++seq, requestId)
     }
 
+    /** T8.5: the takeover's frames, as the real client sends them (use-tether.ts 90fbb9f :1889-1913). */
+    override val handoffBriefs = MutableStateFlow<Map<String, com.tether.app.client.HandoffBriefReading>>(emptyMap())
+    val briefRequests = CopyOnWriteArrayList<Pair<String, String>>()
+    val handoffs = CopyOnWriteArrayList<Triple<String, String, String>>()
+
+    override fun requestHandoffBrief(sourceId: String, targetId: String): Boolean {
+        refuseInGolden("handoff-brief")
+        briefRequests += sourceId to targetId
+        return true
+    }
+
+    override fun handoff(sourceId: String, targetId: String, engineText: String): Boolean {
+        refuseInGolden("handoff")
+        handoffs += Triple(sourceId, targetId, engineText)
+        return true
+    }
+
+    override fun clearHandoffBrief(sourceId: String) {
+        handoffBriefs.value = handoffBriefs.value - sourceId
+    }
+
+    /** T8.5: the server's `handoff-brief` reply for [sourceId]. */
+    fun answerBrief(sourceId: String, instruction: String) {
+        handoffBriefs.value = handoffBriefs.value + (sourceId to com.tether.app.client.HandoffBriefReading(sourceId, kotlinx.serialization.json.JsonObject(emptyMap()), "# digest", instruction))
+    }
+
     /** The server's `error` for the last create. */
     fun refuse(message: String, requestId: String? = creates.last().requestId) {
         createErrors.value = CreateErrorReply(message, ++seq, requestId)

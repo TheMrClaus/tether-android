@@ -605,6 +605,8 @@ class RealTetherClient(
     private val worktreeLogsState = MutableStateFlow<Map<String, WorktreeLogsReading>>(emptyMap())
     // T8.5: the console-wide metadata drafts (use-tether.ts:305), oldest first.
     private val metadataDraftsState = MutableStateFlow<List<PendingMetadataDraft>>(emptyList())
+    // T8.5: the takeover briefs the server derived, by source session (use-tether.ts:322).
+    private val handoffBriefsState = MutableStateFlow<Map<String, HandoffBriefReading>>(emptyMap())
     // L5: the (sessionId, path) pairs this client asked for; a git-diff-file reply for anything
     // else is dropped (a server cannot fill the card with hunks nobody requested).
     private val requestedGitFileDiffs = java.util.concurrent.ConcurrentHashMap.newKeySet<Pair<String, String>>()
@@ -654,6 +656,7 @@ class RealTetherClient(
     override val changeRequests: StateFlow<Map<String, ChangeRequestReading>> = changeRequestsState
     override val worktreeLogs: StateFlow<Map<String, WorktreeLogsReading>> = worktreeLogsState
     override val metadataDrafts: StateFlow<List<PendingMetadataDraft>> = metadataDraftsState
+    override val handoffBriefs: StateFlow<Map<String, HandoffBriefReading>> = handoffBriefsState
     override val errors: SharedFlow<String> = errorsFlow
     override val serverErrors: SharedFlow<ServerErrorText> = serverErrorsFlow
 
@@ -3217,6 +3220,10 @@ class RealTetherClient(
                 }
             }
             // T8.5: use-tether.ts:1171-1193, both replies into the one bounded list.
+            // T8.5: use-tether.ts:1194-1198, keyed by sourceId so a second request replaces the first.
+            is ServerMessage.HandoffBrief -> ifCurrent(webSocket) {
+                handoffBriefsState.update { it + (message.sourceId to HandoffBriefReading(message.sourceId, message.brief, message.markdown, message.instruction)) }
+            }
             is ServerMessage.MetadataDraftResult -> ifCurrent(webSocket) { addMetadataDraft(PendingMetadataDraft(message.requestId, message.result)) }
             is ServerMessage.MetadataDraftError -> ifCurrent(webSocket) {
                 addMetadataDraft(PendingMetadataDraft(message.requestId, com.tether.app.protocol.MetadataDraft.Failure(message.error)))
@@ -4963,6 +4970,18 @@ class RealTetherClient(
         metadataDraftsState.update { current -> current.filterNot { it.requestId == requestId } }
     }
 
+    // T8.5: use-tether.ts:1889-1901. Fire-and-forget as the web's `send`; a frame not sent says so (337-341).
+    override fun requestHandoffBrief(sourceId: String, targetId: String): Boolean =
+        sendFrame(ClientMessage.HandoffBriefRequest(sourceId, targetId)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
+
+    override fun handoff(sourceId: String, targetId: String, engineText: String): Boolean =
+        sendFrame(ClientMessage.Handoff(sourceId, targetId, engineText)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
+
+    /** use-tether.ts:1906-1913: purely client-side. */
+    override fun clearHandoffBrief(sourceId: String) {
+        handoffBriefsState.update { it - sourceId }
+    }
+
     /** use-tether.ts:1175-1185: replace any reply for the same id, append, keep the last [METADATA_DRAFT_LIMIT]. */
     private fun addMetadataDraft(draft: PendingMetadataDraft) {
         metadataDraftsState.update { current -> (current.filterNot { it.requestId == draft.requestId } + draft).takeLast(METADATA_DRAFT_LIMIT) }
@@ -5318,6 +5337,7 @@ class RealTetherClient(
         serverProtocolVersionState.value = null
         // T8.5: the web's pendingDrafts start over with the page.
         metadataDraftsState.value = emptyList()
+        handoffBriefsState.value = emptyMap()
         eventLogState.update { EventLog(generation = it.generation + 1) }
         // T15.1: signed out (Lock) or signed in anew: no overview data or subscription survives it.
         synchronized(lock) { overviewSync.clear() }

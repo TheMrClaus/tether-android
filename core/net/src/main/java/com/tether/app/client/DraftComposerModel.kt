@@ -54,6 +54,11 @@ data class DraftComposerState(
      * folder and socket all matched), else null (isolation off, not asked yet, or no answer yet).
      */
     val worktreeSource: WorktreeSourceInfo? = null,
+    /**
+     * T8.5 (dashboard.tsx 90fbb9f :237-245 `takeoverSourceId`): the limited session this draft takes
+     * over ("Take over in a new session"), else null. The create's first action is then `handoff`.
+     */
+    val takeoverSourceId: String? = null,
 ) {
     /** The wire attachments of [staged], in order. */
     val attachments: List<Attachment> get() = staged.map { it.attachment }
@@ -131,8 +136,10 @@ enum class DraftSubmitResult {
  *   the project's setup is sent at once, as on the web (ta-coik.11: draft-composer.tsx 90fbb9f:789-795
  *   shows a note, no confirmation).
  *
- * Room left for later slices: the handoff / takeover create (T8.5, issue #144: the first action
- * becomes `handoff`) and the GitHub work dialog's prefill (T8.4: [setText], [setCwd]).
+ * - **Takeover** (T8.5, issue #144): [setTakeover] puts the draft in takeover mode for a source; the
+ *   source's brief, when it lands ([onHandoffBriefs]), seeds the prompt once; the create made in that
+ *   mode sends `handoff` (the prompt as engineText) instead of the plain first message
+ *   (use-draft-composer.ts 90fbb9f :355-358, :387-414).
  *
  * Confined to the main thread: every method is called from the view model's collectors or a tap.
  */
@@ -191,7 +198,12 @@ class DraftComposerModel(
         val linkEpoch: Long,
         val createdSnapshot: Long,
         val errorSnapshot: Long,
+        /** T8.5: the takeover source snapshotted with the prompt (use-draft-composer.ts :358). */
+        val takeoverFrom: String? = null,
     )
+
+    /** T8.5 (dashboard.tsx :246-249 takeoverPrefillRef): the source whose brief already seeded the prompt. */
+    private var takeoverPrefilled: String? = null
 
     init {
         // One ordered writer: the latest preferences per origin, in order.
@@ -297,6 +309,27 @@ class DraftComposerModel(
     fun entryForKey(key: String): ProviderCatalogEntry? = entries.firstOrNull { it.key == key }
 
     fun setText(text: String) = _state.update { it.copy(text = text) }
+
+    /**
+     * T8.5: dashboard.tsx :311-336 — [sourceId] for "Take over in a new session" (the prefill is
+     * re-armed), null for a manually opened or a cancelled composer.
+     */
+    fun setTakeover(sourceId: String?) {
+        takeoverPrefilled = null
+        _state.update { it.copy(takeoverSourceId = sourceId) }
+    }
+
+    /**
+     * T8.5 (dashboard.tsx :356-372): the takeover source's brief seeds the prompt with its
+     * `instruction`, once per takeover, never clobbering what was typed after it.
+     */
+    fun onHandoffBriefs(briefs: Map<String, HandoffBriefReading>) {
+        val source = _state.value.takeoverSourceId ?: return
+        val instruction = briefs[source]?.instruction?.takeIf { it.isNotEmpty() } ?: return
+        if (takeoverPrefilled == source) return
+        takeoverPrefilled = source
+        setText(instruction)
+    }
 
     /** Replaces what is staged with [attachments] (each gets a fresh id; its size is its decoded length). */
     fun setAttachments(attachments: List<Attachment>) =
@@ -582,6 +615,7 @@ class DraftComposerModel(
             linkEpoch = epoch,
             createdSnapshot = client.createdSessions.value?.seq ?: 0L,
             errorSnapshot = client.createErrors.value?.seq ?: 0L,
+            takeoverFrom = s.takeoverSourceId,
         )
         submitting = true
         pending = created
@@ -696,6 +730,20 @@ class DraftComposerModel(
         when {
             p.prompt.isEmpty() && p.attachments.isEmpty() ->
                 _state.update { it.copy(creating = false, completed = it.completed + 1) }
+            // T8.5 (use-draft-composer.ts :387-414): the create claims the source in the same step:
+            // the prompt is the takeover turn's engineText. Bound to the create's socket, as sendFirst.
+            p.takeoverFrom != null -> {
+                _state.update { it.copy(creating = false, completed = it.completed + 1) }
+                val sent = client.linkEpoch.value == p.linkEpoch && client.handoff(p.takeoverFrom, sessionId, p.prompt)
+                if (sent) {
+                    // dashboard.tsx :250-255 onTakeoverCommitted: the brief is consumed, takeover mode ends.
+                    client.clearHandoffBrief(p.takeoverFrom)
+                    setTakeover(null)
+                    onFirstSent()
+                } else {
+                    orphan(p, sessionId)
+                }
+            }
             p.attachments.isEmpty() -> {
                 _state.update { it.copy(creating = false, completed = it.completed + 1) }
                 // r2 (security F1): the durable send, recorded only if, in the same step under the

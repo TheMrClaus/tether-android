@@ -103,6 +103,11 @@ class NoticeActions(
     internal val onRateLimit: (SessionControl.RateLimitResume) -> ControlResult,
     /** Says a refusal in words (the screen's error toast). */
     internal val onRefused: (String) -> Unit = {},
+    /**
+     * T8.5 (chat-view.tsx 90fbb9f :1357-1359, :3700): the limit card's "Take over in a new session" —
+     * the new-session composer, prefilled with this session's takeover brief. Null draws no key.
+     */
+    internal val onTakeOverInNewSession: (() -> Unit)? = null,
 ) {
     companion object {
         /** No session: nothing is sent. */
@@ -458,6 +463,16 @@ internal fun RateLimitCard(view: RateLimitPromptView, modifier: Modifier = Modif
                     enabled = armed,
                     modifier = keyModifier.testTag("rate-limit-dismiss"),
                 )
+                // T8.5 (chat-view.tsx 90fbb9f :1395-1399): never disabled by a sent choice, as on the web.
+                actions.onTakeOverInNewSession?.let { takeOver ->
+                    TetherKey(
+                        onClick = takeOver,
+                        classes = KeyClasses.ButtonSecondary,
+                        label = "Take over in a new session",
+                        icon = TetherIcons.ArrowRightLeft,
+                        modifier = keyModifier.testTag("rate-limit-take-over"),
+                    )
+                }
             }
         }
     }

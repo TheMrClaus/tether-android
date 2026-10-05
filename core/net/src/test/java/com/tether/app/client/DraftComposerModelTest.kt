@@ -96,6 +96,21 @@ class DraftComposerModelTest {
         /** ta-2ew (R3): the socket each attachment send was bound to (null: any live one). */
         val attachmentEpochs = mutableListOf<Long?>()
 
+        /** T8.5: every `handoff` (source, target, engineText) and every cleared brief. */
+        val handoffs = mutableListOf<Triple<String, String, String>>()
+        val clearedBriefs = mutableListOf<String>()
+        var handoffResult = true
+
+        override fun handoff(sourceId: String, targetId: String, engineText: String): Boolean {
+            if (!handoffResult) return false
+            handoffs += Triple(sourceId, targetId, engineText)
+            return true
+        }
+
+        override fun clearHandoffBrief(sourceId: String) {
+            clearedBriefs += sourceId
+        }
+
         private var seq = 0L
 
         /** The reply as the real client records it: stamped with the socket it came on. */
@@ -209,6 +224,81 @@ class DraftComposerModelTest {
         h.model.setText("hi")
         assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
         assertEquals("default", h.client.frames.single().permissionMode)
+    }
+
+    // --- T8.5: takeover in a new session (use-draft-composer.ts 90fbb9f :355-358, :387-414) ---------
+
+    private fun brief(source: String, instruction: String) = HandoffBriefReading(source, kotlinx.serialization.json.JsonObject(emptyMap()), "digest", instruction)
+
+    @Test
+    fun theTakeoverBriefSeedsThePromptOnceAndNeverOverEdits() = runTest {
+        val h = harness()
+        h.model.onHandoffBriefs(mapOf("src" to brief("src", "Resume src.")))
+        assertEquals("not in takeover mode: nothing seeded", "", h.model.state.value.text)
+        h.model.setTakeover("src")
+        h.model.onHandoffBriefs(emptyMap())
+        assertEquals("", h.model.state.value.text)
+        h.model.onHandoffBriefs(mapOf("src" to brief("src", "Resume src.")))
+        assertEquals("Resume src.", h.model.state.value.text)
+        h.model.setText("Resume src. Also check CI.")
+        h.model.onHandoffBriefs(mapOf("src" to brief("src", "A newer brief.")))
+        assertEquals("Resume src. Also check CI.", h.model.state.value.text)
+        // A new takeover click re-arms the prefill (dashboard.tsx :326).
+        h.model.setTakeover("src")
+        h.model.onHandoffBriefs(mapOf("src" to brief("src", "A newer brief.")))
+        assertEquals("A newer brief.", h.model.state.value.text)
+    }
+
+    @Test
+    fun aTakeoverCreateSendsHandoffInsteadOfTheFirstMessage() = runTest {
+        val h = harness()
+        h.model.refresh()
+        h.model.selectProvider("codex")
+        h.model.setTakeover("src")
+        h.model.onHandoffBriefs(mapOf("src" to brief("src", "  Resume src.  ")))
+        assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
+        assertTrue("nothing before created", h.client.handoffs.isEmpty())
+        h.client.created("new-1", "req-1")
+        assertEquals("new-1", h.deliverCreated())
+        assertEquals(listOf(Triple("src", "new-1", "Resume src.")), h.client.handoffs)
+        assertTrue("no plain first message", h.client.sends.isEmpty())
+        // onTakeoverCommitted: the brief is dropped and takeover mode ends; the draft starts over.
+        assertEquals(listOf("src"), h.client.clearedBriefs)
+        assertNull(h.model.state.value.takeoverSourceId)
+        assertEquals("", h.model.state.value.text)
+        assertEquals(listOf("new-1"), h.opened)
+    }
+
+    @Test
+    fun aCancelledTakeoverCreatesAnOrdinarySession() = runTest {
+        val h = harness()
+        h.model.refresh()
+        h.model.selectProvider("codex")
+        h.model.setTakeover("src")
+        h.model.setText("Plain first message")
+        h.model.setTakeover(null)
+        h.model.submit(A)
+        h.client.created("new-1", "req-1")
+        h.deliverCreated()
+        assertEquals(listOf("new-1" to "Plain first message"), h.client.sends)
+        assertTrue(h.client.handoffs.isEmpty())
+    }
+
+    @Test
+    fun aHandoffThatCouldNotGoKeepsThePromptAsTheNewSessionsDraft() = runTest {
+        val h = harness()
+        h.model.refresh()
+        h.model.selectProvider("codex")
+        h.model.setTakeover("src")
+        h.model.setText("Resume src.")
+        h.model.submit(A)
+        h.client.handoffResult = false
+        h.client.created("new-1", "req-1")
+        h.deliverCreated()
+        runCurrent()
+        assertTrue(h.client.handoffs.isEmpty())
+        assertEquals(listOf("new-1" to "Resume src."), h.saved.map { it.sessionId to it.text })
+        assertTrue("never resent as a plain message", h.client.sends.isEmpty())
     }
 
     // --- readiness ------------------------------------------------------------------------------------

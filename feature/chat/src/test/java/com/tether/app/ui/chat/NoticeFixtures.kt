@@ -120,6 +120,8 @@ object NoticeFixtures {
         var dismissResult: NoticeResult = NoticeResult.Sent
         var controlResult: ControlResult = ControlResult.Sent
         val refusals = mutableListOf<String>()
+        /** T8.5: each "Take over in a new session" tap. */
+        var takeOvers = 0
 
         fun actions(link: Any? = "link-1", sessionId: String = "s1") = NoticeActions(
             sessionId = sessionId,
@@ -127,6 +129,7 @@ object NoticeFixtures {
             onDismiss = { key -> dismissed.add(key); dismissResult },
             onRateLimit = { c -> controls.add(c); controlResult },
             onRefused = { refusals.add(it) },
+            onTakeOverInNewSession = { takeOvers++ },
         )
     }
 

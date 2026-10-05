@@ -190,6 +190,27 @@ class NoticeBehaviourTest {
     }
 
     /**
+     * T8.5 (chat-view.tsx 90fbb9f :1395-1399): "Take over in a new session" sits after Dismiss, acts on
+     * one tap, sends no limit choice, and stays live while a sent choice rests the other keys.
+     */
+    @Test
+    fun theTakeOverKeyOpensTheTakeoverAndStaysLiveAfterAChoice() {
+        show(NoticeFixtures.limit)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("rate-limit-card"))
+        rule.onNodeWithText("Take over in a new session").assertExists()
+        rule.onNodeWithTag("rate-limit-take-over").assertIsEnabled().performClick()
+        settle()
+        assertEquals(1, rec.takeOvers)
+        assertEquals(emptyList<SessionControl>(), rec.controls)
+        rule.onNodeWithTag("rate-limit-dismiss").performClick()
+        settle()
+        rule.onNodeWithTag("rate-limit-dismiss").assertIsNotEnabled()
+        rule.onNodeWithTag("rate-limit-take-over").assertIsEnabled().performClick()
+        settle()
+        assertEquals(2, rec.takeOvers)
+    }
+
+    /**
      * ta-coik.22: as on the web (chat-view.tsx 90fbb9f :1361-1371), a sent choice rests the card's keys
      * for 4 s while the server's event is awaited, then they re-enable, so a choice a half-open link
      * swallowed can be made again. Each tap is one frame.
