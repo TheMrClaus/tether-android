@@ -92,7 +92,7 @@ import com.tether.app.ui.components.LocalKeyboardInset
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.cssSurface
-import com.tether.app.ui.icons.ProviderLogo
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.theme.JetBrainsMono
@@ -350,6 +350,7 @@ fun ModelSelectorChip(
         onClick = onClick,
         modifier = modifier,
         glyphProvider = selected?.provider,
+        glyphTile = true,
         active = open,
         chevron = chevron,
         maxWidth = 260.dp,
@@ -903,12 +904,18 @@ private fun ModelRow(row: BrowserRow, inputs: ModelBrowserInputs, actions: Model
 private fun BrowserGlyph(provider: String, providers: List<ProviderInfo>) {
     val t = LocalTetherTokens.current
     val glyph = providers.firstOrNull { it.id == provider }?.glyph?.let { LabelText.label(it) }?.takeIf { it.isNotEmpty() }
-    Box(
-        Modifier.size(24.dp).cssSurface(CircleShape, t.keyFace, CssBorder(1.dp, t.lineStrong), emptyList()),
-        contentAlignment = Alignment.Center,
-    ) {
-        ProviderLogo(provider, fallback = glyph ?: provider.take(1).uppercase(), color = t.ink, markSize = 14.dp, letterSize = 9.92.sp)
-    }
+    // A verified mark gives the circle its brand tile (globals.css 11204-11224).
+    ProviderTile(
+        provider,
+        Modifier.size(24.dp),
+        fallback = glyph ?: provider.take(1).uppercase(),
+        shape = CircleShape,
+        background = t.keyFace,
+        border = CssBorder(1.dp, t.lineStrong),
+        color = t.ink,
+        markSize = 14.dp,
+        letterSize = 9.92.sp,
+    )
 }
 
 /** `.model-browser-empty`: a glyph over the words, centred, at least 8rem tall. */

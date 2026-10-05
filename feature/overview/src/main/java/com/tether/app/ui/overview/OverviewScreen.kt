@@ -66,7 +66,7 @@ import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSelect
 import com.tether.app.ui.components.TetherSelectOption
 import com.tether.app.ui.components.cssSurface
-import com.tether.app.ui.icons.ProviderLogo
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.codeLabel
@@ -728,12 +728,11 @@ private fun RowScope.Arrow(tint: Color) {
     Icon(TetherIcons.ArrowRight, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
 }
 
+/** `.providerMark` (overview.module.css 266-277): 1.4rem, the mark 1.15rem; a verified mark's brand tile (globals.css 11204-11224). */
 @Composable
 private fun ProviderMark(provider: String) {
     val t = LocalTetherTokens.current
-    Box(Modifier.size(22.4.dp), contentAlignment = Alignment.Center) {
-        ProviderLogo(provider, color = t.white, markSize = 18.4.dp, letterSize = 12.sp)
-    }
+    ProviderTile(provider, Modifier.size(22.4.dp), color = t.white, markSize = 18.4.dp, letterSize = 12.sp)
 }
 
 @Composable

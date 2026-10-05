@@ -7,6 +7,8 @@ import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -17,12 +19,16 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.filterToOne
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onChildren
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -47,6 +53,8 @@ import com.tether.app.ui.settings.ProfileFixtures.gemini
 import com.tether.app.ui.settings.ProfileFixtures.profiles
 import com.tether.app.ui.settings.ProfileFixtures.zai
 import com.tether.app.ui.text.SafeText
+import com.tether.app.ui.theme.TetherSkin
+import com.tether.app.ui.theme.tokensFor
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -667,6 +675,25 @@ class ProfilesBehaviourTest {
         show(ProfileFixtures.list(profiles(gemini(command = """["gem\u202Eini"]"""), WORK, zai())))
         assertFalse(textOf(ProfileTags.subtitle("gemini")).contains('\u202E'))
         assertEquals("gemini", editable(field("gemini", ProfileTags.COMMAND)))
+    }
+
+    /** ta-coik.45: a profile's glyph is the harness it extends — its mark in its brand tile where verified. */
+    @Test fun aProfileShowsTheMarkAndBrandTileOfTheHarnessItExtends() {
+        show()
+        fun colours(t: String): Map<Color, Int> {
+            val px = tag(t).performScrollTo().captureToImage().toPixelMap()
+            val out = HashMap<Color, Int>()
+            for (x in 0 until px.width) for (y in 0 until px.height) out.merge(px[x, y], 1, Int::plus)
+            return out
+        }
+        val work = colours(ProfileTags.glyph("claude-work"))
+        assertTrue("extends claude: the terracotta tile", (work[Color(0xFFD97757)] ?: 0) > 1000)
+        assertTrue("with the paper mark", (work[Color(0xFFFFFFFF)] ?: 0) > 50)
+        // extends acp: no verified mark, so the web's letter on the neutral tile.
+        val acp = colours(ProfileTags.glyph("gemini"))
+        assertEquals(0, (acp[Color(0xFFD97757)] ?: 0) + (acp[Color(0xFF0D0D0D)] ?: 0))
+        assertTrue("the raised neutral tile", (acp[tokensFor(TetherSkin.Studio).graphiteRaised] ?: 0) + (acp[tokensFor(TetherSkin.StudioDark).graphiteRaised] ?: 0) > 1000)
+        compose.onNodeWithTag(ProfileTags.glyph("gemini"), useUnmergedTree = true).onChildren().filterToOne(hasText("A")).assertExists()
     }
 }
 

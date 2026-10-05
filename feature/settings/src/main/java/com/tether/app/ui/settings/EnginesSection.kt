@@ -42,8 +42,8 @@ import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
-import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.ProviderLogoDefaults
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -145,9 +145,15 @@ private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             // `.provider-glyph` under Studio (studio.css 340): the raised graphite tile, 0.45rem corners.
-            Box(Modifier.size(ProviderLogoDefaults.GlyphSize).cssSurface(RoundedCornerShape(7.2.dp), t.graphiteRaised, null, emptyList()), contentAlignment = Alignment.Center) {
-                ProviderLogo(engine.id, fallback = engine.glyph, color = ProviderLogoDefaults.color(engine.id))
-            }
+            // A verified mark takes its brand tile instead (globals.css 11204-11224).
+            ProviderTile(
+                engine.id,
+                Modifier.size(ProviderLogoDefaults.GlyphSize),
+                fallback = engine.glyph,
+                shape = RoundedCornerShape(7.2.dp),
+                background = t.graphiteRaised,
+                color = ProviderLogoDefaults.color(engine.id),
+            )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(engine.label, color = t.ink, style = settingsText(type.ui, 15f, 700, lineHeight = 1.5f))
                 Text(

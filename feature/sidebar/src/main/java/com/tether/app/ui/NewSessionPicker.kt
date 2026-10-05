@@ -44,8 +44,9 @@ import com.tether.app.client.LabelText
 import com.tether.app.client.NewSessionRow
 import com.tether.app.client.TextCut
 import com.tether.app.protocol.model.ProviderInfo
+import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.TetherDialog
-import com.tether.app.ui.icons.ProviderLogo
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.appendStyled
@@ -355,12 +356,18 @@ private fun StateLabel(icon: ImageVector, text: String) {
 @Composable
 private fun CatalogGlyph(provider: String, glyph: String?) {
     val t = LocalTetherTokens.current
-    Box(
-        Modifier.size(24.dp).background(t.keyFace, CircleShape).border(1.dp, t.lineStrong, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        ProviderLogo(provider, fallback = glyph, color = t.ink, markSize = 14.dp, letterSize = rem(0.62f))
-    }
+    // A verified mark gives the circle its brand tile (globals.css 11204-11224).
+    ProviderTile(
+        provider,
+        Modifier.size(24.dp),
+        fallback = glyph,
+        shape = CircleShape,
+        background = t.keyFace,
+        border = CssBorder(1.dp, t.lineStrong),
+        color = t.ink,
+        markSize = 14.dp,
+        letterSize = rem(0.62f),
+    )
 }
 
 /**

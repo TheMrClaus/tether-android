@@ -64,7 +64,7 @@ import com.tether.app.client.ScheduledContinuation
 import com.tether.app.protocol.ScheduledActionInput
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
-import com.tether.app.ui.icons.ProviderLogo
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.codeLabel
@@ -430,13 +430,14 @@ private fun EmptyState(layout: ScheduledLayout, icon: ImageVector, title: String
     }
 }
 
-/** `.schedule-provider-logo` (studio.css 737-738): 36dp, 9dp corners, the mineral well. */
+/**
+ * `.schedule-provider-logo` (studio.css 737-738): 36dp, 9dp corners, the mineral well; a verified mark
+ * takes its brand tile instead (globals.css 11204-11224).
+ */
 @Composable
 private fun ProviderBadge(provider: String) {
     val t = LocalTetherTokens.current
-    Box(Modifier.size(36.dp).background(t.mineral, RoundedCornerShape(9.dp)), contentAlignment = Alignment.Center) {
-        ProviderLogo(provider, color = t.ink, markSize = 20.dp)
-    }
+    ProviderTile(provider, Modifier.size(36.dp), shape = RoundedCornerShape(9.dp), background = t.mineral, color = t.ink, markSize = 20.dp)
 }
 
 /** `.schedule-status` (globals.css 9793-9812, studio.css 741-744): the word is the status, never the colour alone. */

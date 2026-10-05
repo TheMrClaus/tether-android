@@ -1,6 +1,8 @@
 package com.tether.app.ui.draft
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.semantics.SemanticsActions
@@ -8,6 +10,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -321,7 +324,38 @@ class ModelBrowserBehaviourTest {
         awaitGone(NEW_SESSION_ROW_TAG + "work")
     }
 
+    private fun colours(tag: String): Map<Color, Int> {
+        val px = rule.onNodeWithTag(tag, useUnmergedTree = true).captureToImage().toPixelMap()
+        val out = HashMap<Color, Int>()
+        for (x in 0 until px.width) for (y in 0 until px.height) out.merge(px[x, y], 1, Int::plus)
+        return out
+    }
+
+    /** ta-coik.45: the browser's glyphs and the chip's `.draft-chip-glyph` take the brand tile (globals.css 11204-11224). */
+    @Test
+    fun rowsAndTheChipCarryTheBrandTile() {
+        openBrowser()
+        awaitTag(NEW_SESSION_ROW_TAG + "claude")
+        val claudeRow = colours(NEW_SESSION_ROW_TAG + "claude")
+        assertTrue("claude's glyph is a terracotta tile", (claudeRow[BRAND_CLAUDE] ?: 0) > 400)
+        val codexRow = colours(NEW_SESSION_ROW_TAG + "codex")
+        assertTrue("codex's glyph is an ink tile", (codexRow[BRAND_INK] ?: 0) > 400)
+        typeInto(ModelBrowserTags.SearchAll, "Model 2")
+        awaitTag(ModelBrowserTags.row("codex", "m2"))
+        tap(ModelBrowserTags.row("codex", "m2"))
+        awaitGone(ModelBrowserTags.Browser)
+        until("the chip names it") { spoken(ModelBrowserTags.Chip).contains("Model 2") }
+        rule.waitForIdle()
+        val chip = colours(ModelBrowserTags.Chip)
+        assertTrue("the chip's glyph is an ink tile", (chip[BRAND_INK] ?: 0) > 400)
+        assertTrue("with a paper mark", (chip[BRAND_PAPER] ?: 0) > 0)
+    }
+
     private companion object {
+        val BRAND_CLAUDE = Color(0xFFD97757)
+        val BRAND_INK = Color(0xFF0D0D0D)
+        val BRAND_PAPER = Color(0xFFFFFFFF)
+
         /** LabelText.MAX_LABEL (80) plus the cleaned id as its description and the separator. */
         const val LABEL_BOUND = 100
     }

@@ -79,7 +79,9 @@ import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSheet
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
-import com.tether.app.ui.icons.ProviderLogo
+import com.tether.app.ui.icons.ProviderInlineGlyph
+import com.tether.app.ui.icons.ProviderLogoDefaults
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -332,6 +334,12 @@ fun ControlPill(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     glyphProvider: String? = null,
+    /**
+     * ta-coik.45: how [glyphProvider] is drawn. False: the chat Model select's `.chat-mode-glyph`
+     * (an inline 14px glyph, the mark tinted by its brand). True: the model browser chip's
+     * `.provider-glyph.draft-chip-glyph` (a 1.1rem tile, the mark at 58%, the brand tile when verified).
+     */
+    glyphTile: Boolean = false,
     danger: Boolean = false,
     active: Boolean = false,
     chevron: Boolean = true,
@@ -384,9 +392,21 @@ fun ControlPill(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
         ) {
-            if (glyphProvider != null) {
+            if (glyphProvider != null && glyphTile) {
+                // `.draft-chip-glyph` (globals.css 8931-8937) on Studio's `.provider-glyph` (studio.css 340).
+                ProviderTile(
+                    glyphProvider,
+                    Modifier.size(17.6.dp),
+                    fallback = providerGlyph(glyphProvider),
+                    shape = RoundedCornerShape(7.2.dp),
+                    background = t.graphiteRaised,
+                    color = ink,
+                    markSize = ProviderLogoDefaults.markSize(17.6.dp),
+                    letterSize = 8.8.sp,
+                )
+            } else if (glyphProvider != null) {
                 Box(Modifier.size(14.dp), contentAlignment = Alignment.Center) {
-                    ProviderLogo(glyphProvider, fallback = providerGlyph(glyphProvider), color = ink, markSize = 14.dp, letterSize = 9.6.sp)
+                    ProviderInlineGlyph(glyphProvider, fallback = providerGlyph(glyphProvider), color = ink, markSize = 14.dp, letterSize = 9.6.sp)
                 }
             }
             if (icon != null) Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(13.dp))
@@ -661,9 +681,18 @@ internal fun SessionSettingsTrigger(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
-        Box(Modifier.size(14.dp), contentAlignment = Alignment.Center) {
-            ProviderLogo(provider, fallback = providerGlyph(provider), color = t.white, markSize = 14.dp, letterSize = 9.6.sp)
-        }
+        // `.provider-glyph.settings-sheet-trigger-glyph` (globals.css 6744-6754, studio.css 340): a 14px
+        // tile, the mark at 58%; a verified mark takes its brand tile (globals.css 11204-11224).
+        ProviderTile(
+            provider,
+            Modifier.size(14.dp),
+            fallback = providerGlyph(provider),
+            shape = RoundedCornerShape(7.2.dp),
+            background = t.graphiteRaised,
+            color = t.white,
+            markSize = ProviderLogoDefaults.markSize(14.dp),
+            letterSize = 9.6.sp,
+        )
         Text(
             label,
             style = type.body.copy(fontSize = 11.52.sp, fontWeight = FontWeight(600)),
@@ -922,7 +951,7 @@ internal fun LegacyCodexHintRow(provider: String) {
     val type = LocalTetherTypography.current
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
         Box(Modifier.size(14.dp).clearAndSetSemantics { }, contentAlignment = Alignment.Center) {
-            ProviderLogo(provider, fallback = providerGlyph(provider), color = t.faint, markSize = 14.dp, letterSize = 9.6.sp)
+            ProviderInlineGlyph(provider, fallback = providerGlyph(provider), color = t.faint, markSize = 14.dp, letterSize = 9.6.sp)
         }
         Text(
             "Model, effort, and mode are set outside Tether for this legacy Codex thread — a session on the app server exposes them here.",

@@ -80,9 +80,8 @@ import com.tether.app.ui.components.WaitingPingDot
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.statusColor
 import com.tether.app.ui.components.statusToneOf
-import com.tether.app.ui.icons.ProviderLogo
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
-import com.tether.app.ui.shell.brandTile
 import com.tether.app.ui.shell.cssText
 import com.tether.app.ui.statusline.ReadingEnv
 import com.tether.app.ui.statusline.UsageTrack
@@ -305,22 +304,21 @@ private fun HarnessRow(identity: Identity) {
     val type = LocalTetherTypography.current
     val tone = statusToneOf(identity.status)
     val ink = statusColor(tone)
-    val tile = brandTile(identity.provider)
     Row(
         Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.testTag(InspectorTags.Identity),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(
-            Modifier.size(28.dp).cssSurface(
-                RoundedCornerShape(t.radiusSm),
-                tile?.first ?: t.graphiteRaised,
-                if (tile == null) CssBorder(1.dp, t.line) else null,
-            ),
-            contentAlignment = Alignment.Center,
-        ) {
-            ProviderLogo(identity.provider, color = tile?.second ?: t.ink, markSize = 15.2.dp, letterSize = 12.8.sp)
-        }
+        ProviderTile(
+            identity.provider,
+            Modifier.size(28.dp),
+            shape = RoundedCornerShape(t.radiusSm),
+            background = t.graphiteRaised,
+            border = CssBorder(1.dp, t.line),
+            color = t.ink,
+            markSize = 15.2.dp,
+            letterSize = 12.8.sp,
+        )
         RuledText(
             listOf(identity.providerLabel),
             cssText(type.ui, 0.8f, 650),

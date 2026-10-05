@@ -54,6 +54,7 @@ import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.ProviderLogos
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.icons.providerBrandTile
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 
@@ -288,23 +289,6 @@ private fun WorkflowBody(text: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * The tile a verified mark gives its container (globals.css 11207-11224,
- * `:root :where(*):has(> svg.provider-logo-svg[data-brand=…])`, which outranks
- * `.studio-welcome-providers .is-available`): the background and the ink.
- */
-@Composable
-internal fun brandTile(provider: String): Pair<Color, Color>? {
-    if (ProviderLogos.mark(provider) == null) return null
-    val c = LocalTetherTokens.current.css
-    return when (provider) {
-        "claude" -> c.brandClaude to c.brandPaper
-        "codex", "opencode", "pi" -> c.brandInk to c.brandPaper
-        "reasonix", "dsh", "gemini" -> c.brandPaper to c.brandBlue
-        else -> null
-    }
-}
-
-/**
  * `.studio-welcome-providers` ("Available agents"): wrapped, `gap: 1rem`; each entry the logo
  * (1rem) and the label at 0.72rem, `--ink` when available, else `--muted`, titled "Available" or
  * "Not configured" (TalkBack hears that state; never the colour alone). A provider with no mark
@@ -326,12 +310,14 @@ private fun ProvidersFooter(providers: List<ProviderAvailability>) {
     ) {
         providers.forEachIndexed { index, p ->
             val label = LabelText.label(p.label).ifEmpty { LabelText.visibleValue(p.id) }
-            val tile = brandTile(p.id)
-            val ink = tile?.second ?: if (p.available) t.ink else t.muted
+            // The span holding the mark is its container: the brand tile (globals.css 11207-11224,
+            // which outranks `.studio-welcome-providers .is-available`) covers the label too.
+            val tile = providerBrandTile(p.id)
+            val ink = tile?.content ?: if (p.available) t.ink else t.muted
             val mark = ProviderLogos.mark(p.id)
             Row(
                 Modifier
-                    .then(if (tile != null) Modifier.background(tile.first) else Modifier)
+                    .then(if (tile != null) Modifier.background(tile.background) else Modifier)
                     .clearAndSetSemantics {
                         contentDescription = label
                         stateDescription = if (p.available) "Available" else "Not configured"

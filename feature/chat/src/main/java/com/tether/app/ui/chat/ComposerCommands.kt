@@ -52,7 +52,7 @@ import com.tether.app.protocol.DelegateMention
 import com.tether.app.protocol.SessionCommandOption
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.cssSurface
-import com.tether.app.ui.icons.ProviderLogo
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -314,9 +314,8 @@ internal fun MentionMenu(agents: List<ProviderCatalogEntry>, onPick: (ProviderCa
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
             ) {
-                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                    ProviderLogo(entry.provider, fallback = providerGlyph(entry.provider), color = t.muted, markSize = 16.dp, letterSize = 11.sp)
-                }
+                // `.chat-mention-logo` (globals.css 7244-7251); a verified mark takes its brand tile.
+                ProviderTile(entry.provider, Modifier.size(20.dp), fallback = providerGlyph(entry.provider), color = t.muted, markSize = 16.dp, letterSize = 11.sp)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(name, style = type.body.copy(fontSize = rem(0.82f), fontWeight = FontWeight(650)), color = t.white, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(status, style = type.body.copy(fontSize = rem(0.72f)), color = if (entry.status == "ready" && modelName(entry) != null) t.faint else t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -385,9 +384,8 @@ internal fun DelegateBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
             ) {
-                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                    ProviderLogo(mention.provider, fallback = providerGlyph(mention.provider), color = t.muted, markSize = 16.dp, letterSize = 11.sp)
-                }
+                // `.chat-mention-logo` (globals.css 7244-7251); a verified mark takes its brand tile.
+                ProviderTile(mention.provider, Modifier.size(20.dp), fallback = providerGlyph(mention.provider), color = t.muted, markSize = 16.dp, letterSize = 11.sp)
                 Text("@$name", style = type.body.copy(fontSize = rem(0.8f), fontWeight = FontWeight(650)), color = t.ink, maxLines = 1)
                 if (modelLabel != null) {
                     Text(modelLabel, style = type.body.copy(fontSize = rem(0.72f)), color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 140.dp))

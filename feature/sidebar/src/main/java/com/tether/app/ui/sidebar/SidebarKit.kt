@@ -1,11 +1,9 @@
 package com.tether.app.ui.sidebar
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -21,10 +19,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.tether.app.ui.components.CssBorder
-import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
-import com.tether.app.ui.icons.ProviderLogo
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.theme.CssLineHeight
 import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -95,7 +91,7 @@ internal val FilledStar: ImageVector = ImageVector.Builder("StarFilled", 24.dp, 
 /**
  * `.provider-glyph` as a molded round cap (globals.css 1417-1437, 9044-9049; inside a row
  * 11683-11684; Studio 324: flat, `--graphite-raised`, radius 0.45rem). The claude / codex /
- * opencode marks take `--ink`, the others `--white`.
+ * opencode marks take `--ink`, the others `--white`; a verified mark takes its brand tile instead.
  */
 @Composable
 internal fun ProviderCap(
@@ -111,17 +107,18 @@ internal fun ProviderCap(
     val border = null
     val shadows = emptyList<CssShadow>()
     val ink = if (provider == "claude" || provider == "codex" || provider == "opencode") t.ink else t.white
-    Box(
-        modifier.size(size).cssSurface(shape, t.graphiteRaised, border, shadows),
-        contentAlignment = Alignment.Center,
-    ) {
-        ProviderLogo(
-            provider = provider,
-            color = ink,
-            markSize = size * 0.58f,
-            letterSize = (letterRem * 16f).sp,
-        )
-    }
+    // A verified mark gives the cap its brand tile (globals.css 11204-11224).
+    ProviderTile(
+        provider = provider,
+        modifier = modifier.size(size),
+        shape = shape,
+        background = t.graphiteRaised,
+        border = border,
+        shadows = shadows,
+        color = ink,
+        markSize = size * 0.58f,
+        letterSize = (letterRem * 16f).sp,
+    )
 }
 
 @Composable

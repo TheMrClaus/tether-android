@@ -68,6 +68,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.animateScrollBy
+import com.tether.app.ui.components.CssBorder
+import com.tether.app.ui.icons.ProviderTile
 import kotlinx.coroutines.flow.first
 import com.tether.app.protocol.helpers.Elapsed
 import com.tether.app.protocol.helpers.Format
@@ -78,7 +80,6 @@ import com.tether.app.protocol.tree.JsStr
 import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.currentLayoutClass
-import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -112,12 +113,18 @@ private fun RunHarness(run: SubagentRun, tint: Color) {
     if (run.provider.isNullOrEmpty() || harnessLabel(run) == null) return
     val t = LocalTetherTokens.current
     // `.provider-glyph` at 1.1rem: the molded round cap (key face, `--line-strong` edge), the mark at 58%.
-    Box(
-        Modifier.size(17.6.dp).background(t.keyFace, CircleShape).border(1.dp, t.lineStrong, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        ProviderLogo(run.provider, fallback = Format.providerGlyph(run.provider), color = tint, markSize = 10.2.dp, letterSize = 8.sp)
-    }
+    // A verified mark gives it its brand tile instead (globals.css 11204-11224).
+    ProviderTile(
+        run.provider,
+        Modifier.size(17.6.dp),
+        fallback = Format.providerGlyph(run.provider),
+        shape = CircleShape,
+        background = t.keyFace,
+        border = CssBorder(1.dp, t.lineStrong),
+        color = tint,
+        markSize = 10.2.dp,
+        letterSize = 8.sp,
+    )
 }
 
 /** A CSS `border: 1px dashed` on a rounded box (the muted chip, the empty / thread-note boxes). */

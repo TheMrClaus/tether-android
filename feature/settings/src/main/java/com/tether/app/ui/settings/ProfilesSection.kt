@@ -65,6 +65,7 @@ import com.tether.app.client.ProvidersWriteStatus
 import com.tether.app.client.jsTrim
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
+import com.tether.app.ui.icons.ProviderTile
 import kotlinx.coroutines.delay
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
@@ -72,7 +73,6 @@ import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSelect
 import com.tether.app.ui.components.TetherSelectOption
 import com.tether.app.ui.components.cssSurface
-import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.ProviderLogoDefaults
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeLabel
@@ -86,6 +86,7 @@ object ProfileTags {
     const val Empty = "profiles-empty"
     const val Add = "profiles-add"
     fun card(id: String) = "profile-card:$id"
+    fun glyph(id: String) = "profile-glyph:$id"
     fun switch(id: String) = "profile-switch:$id"
     fun subtitle(id: String) = "profile-subtitle:$id"
     fun row(id: String, what: String) = "profile-row:$id:$what"
@@ -279,9 +280,16 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
             .padding(if (narrow) 16.dp else 20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.size(ProviderLogoDefaults.GlyphSize).cssSurface(RoundedCornerShape(7.2.dp), t.graphiteRaised, null, emptyList()), contentAlignment = Alignment.Center) {
-                ProviderLogo(null, fallback = ProfileRows.glyph(p.extends), color = ProviderLogoDefaults.color(p.extends))
-            }
+            // The harness the profile extends: its mark and brand tile (globals.css 11204-11224) where
+            // verified, else the web's letter (:645) on the raised tile.
+            ProviderTile(
+                p.extends,
+                Modifier.size(ProviderLogoDefaults.GlyphSize).testTag(ProfileTags.glyph(p.id)),
+                fallback = ProfileRows.glyph(p.extends),
+                shape = RoundedCornerShape(7.2.dp),
+                background = t.graphiteRaised,
+                color = ProviderLogoDefaults.color(p.extends),
+            )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(ProfileRows.name(p), color = t.ink, style = settingsText(type.ui, 15f, 700, lineHeight = 1.5f))
                 // :652 `extends · command.join(" ")`: the command is server text, drawn by the code rule.

@@ -45,10 +45,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CredentialRequestData
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -75,6 +77,7 @@ import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.Wordmark
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -103,6 +106,7 @@ object LoginTags {
     const val Passkey = "login-passkey"
     const val PasskeyOr = "login-passkey-or"
     const val PasskeyNeedsHttps = "login-passkey-needs-https"
+    const val Connection = "login-connection"
 }
 
 /**
@@ -712,9 +716,10 @@ private fun StudioLogin(ui: LoginUi) {
     val t = LocalTetherTokens.current
     BoxWithConstraints(Modifier.fillMaxSize().background(t.mineral)) {
         val wide = maxWidth >= 840.dp
+        val narrowViewport = maxWidth <= 900.dp
         if (wide) {
             Row(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
-                StudioBrandPanel(Modifier.weight(1f).fillMaxSize().background(t.mineralDeep).padding(40.dp))
+                StudioBrandPanel(Modifier.weight(1f).fillMaxSize().background(t.mineralDeep).padding(40.dp), narrowViewport = narrowViewport)
                 Box(Modifier.weight(1f).fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
                     StudioForm(ui, Modifier.padding(40.dp))
                 }
@@ -731,7 +736,7 @@ private fun StudioLogin(ui: LoginUi) {
 }
 
 @Composable
-private fun StudioBrandPanel(modifier: Modifier, compact: Boolean = false) {
+private fun StudioBrandPanel(modifier: Modifier, compact: Boolean = false, narrowViewport: Boolean = false) {
     val t = LocalTetherTokens.current
     Column(modifier, verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 18.dp)) {
         Row(
@@ -758,11 +763,49 @@ private fun StudioBrandPanel(modifier: Modifier, compact: Boolean = false) {
                 fontWeight = TetherWeights.body,
                 fontSize = 14.sp,
             )
+            ConnectionPath(narrowViewport)
             MonoText("Your agents · Your workspace · Anywhere", t.faint, fontSize = 11.sp)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(TetherIcons.LockKeyhole, contentDescription = null, tint = t.faint, modifier = Modifier.size(14.dp))
             Text("Private by design. Self-hosted by you.", color = t.faint, fontFamily = Manrope, fontSize = 12.sp)
+        }
+    }
+}
+
+/**
+ * studio-login.tsx:71-79 `.connectionPath` (studio-login.module.css 46-54, 97-105): the three harness
+ * marks in their brand tiles (globals.css 11204-11224 outranks `.providers > span`: 34x40, 27 wide at
+ * most 900px), a line, the hub holding the brand mark, a line, the laptop and phone. The web hides it
+ * at most 700px, as the compact panel does here. The figure's label is the web's `aria-label`.
+ */
+@Composable
+private fun ConnectionPath(narrowViewport: Boolean) {
+    val t = LocalTetherTokens.current
+    val lineGap = if (narrowViewport) 6.dp else 10.dp
+    Row(
+        Modifier
+            .widthIn(max = 365.dp)
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .clearAndSetSemantics {
+                contentDescription = "Your coding agents connect through Tether to your laptop and phone"
+                testTag = LoginTags.Connection
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (provider in listOf("claude", "codex", "opencode")) {
+            ProviderTile(provider, Modifier.size(width = if (narrowViewport) 27.dp else 34.dp, height = 40.dp), color = t.white, markSize = 22.dp)
+        }
+        Box(Modifier.weight(1f).widthIn(min = 16.dp).padding(horizontal = lineGap).height(1.dp).background(t.lineStrong))
+        Box(
+            Modifier.size(if (narrowViewport) 50.dp else 58.dp).border(1.dp, t.lineStrong, RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center,
+        ) { BrandMark() }
+        Box(Modifier.weight(1f).widthIn(min = 16.dp).padding(horizontal = lineGap).height(1.dp).background(t.lineStrong))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Icon(TetherIcons.Laptop, contentDescription = null, tint = t.muted, modifier = Modifier.size(26.dp))
+            Icon(TetherIcons.Smartphone, contentDescription = null, tint = t.muted, modifier = Modifier.size(21.dp))
         }
     }
 }
