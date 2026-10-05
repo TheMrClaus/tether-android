@@ -53,7 +53,14 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // T14.1: R8 + resource shrinking. Rules: app/proguard-rules.pro (reflection audit and the
+            // reason for every keep live there); libraries bring their own consumer rules.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             if (releaseStoreFile != null) {
                 signingConfig = signingConfigs.getByName("release")
             }

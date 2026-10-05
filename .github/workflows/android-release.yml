@@ -190,6 +190,28 @@ jobs:
           echo "path=$apk" >> "$GITHUB_OUTPUT"
           echo "Built $apk"
 
+      # R8 mapping (T14.1): needed to de-obfuscate crash traces from this APK. Gzipped (the raw file
+      # is ~100 MB); `gunzip` then `retrace` it. Attached to the Release and kept as a workflow artifact.
+      - name: Locate R8 mapping
+        id: mapping
+        env:
+          META_VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          mapping=app/build/outputs/mapping/release/mapping.txt
+          if [ ! -s "$mapping" ]; then echo "No R8 mapping.txt produced." >&2; exit 1; fi
+          out="$RUNNER_TEMP/tether-android-${META_VERSION_NAME}-mapping.txt.gz"
+          gzip -9 -c "$mapping" > "$out"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+          echo "Mapping: $out ($(du -h "$out" | cut -f1))"
+
+      - name: Upload R8 mapping artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: tether-android-${{ steps.meta.outputs.version_name }}-mapping
+          path: ${{ steps.mapping.outputs.path }}
+          if-no-files-found: error
+
       - name: Upload dry-run artifacts
         if: ${{ inputs.release_mode == 'dry_run' }}
         uses: actions/upload-artifact@v7
@@ -208,6 +230,7 @@ jobs:
           RELEASE_TAG: ${{ steps.meta.outputs.tag }}
           RELEASE_TITLE: ${{ steps.meta.outputs.title }}
           APK_PATH: ${{ steps.apk.outputs.path }}
+          MAPPING_PATH: ${{ steps.mapping.outputs.path }}
           NOTES_FILE: ${{ steps.notes.outputs.notes_file }}
           TARGET_SHA: ${{ github.sha }}
         run: |
@@ -254,13 +277,14 @@ jobs:
             gh release edit "$RELEASE_TAG" \
               --title "$RELEASE_TITLE" \
               --notes-file "$NOTES_FILE"
-            gh release upload "$RELEASE_TAG" "$APK_PATH" --clobber
+            gh release upload "$RELEASE_TAG" "$APK_PATH" "$MAPPING_PATH" --clobber
             if [ "$RELEASE_MODE" = "publish" ]; then
               gh release edit "$RELEASE_TAG" --draft=false
             fi
           else
             gh release create "$RELEASE_TAG" \
               "$APK_PATH" \
+              "$MAPPING_PATH" \
               --title "$RELEASE_TITLE" \
               --notes-file "$NOTES_FILE" \
               --target "$TARGET_SHA" \
