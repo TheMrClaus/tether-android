@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import com.tether.app.client.ClaudeAccount
 import com.tether.app.client.ClaudeAccountActions
+import com.tether.app.client.ClaudeAccountAlias
 import com.tether.app.client.ClaudeAccountsJson
 import com.tether.app.client.ClaudeAccountsSource
 import com.tether.app.client.ClaudeAccountsSync
@@ -106,6 +107,27 @@ object ClaudeAccountsCopy {
     const val NOT_SENT_OTHER = "Nothing was sent: the app is now signed in to another server."
     const val NOT_SENT = "Nothing was sent."
     fun blocked(code: Int) = "A sign-in page answered instead of Tether (HTTP $code). Nothing was sent past it."
+
+    // ta-89k: the Terminal alias rows (settings-dialog.tsx 90fbb9f :1810-1832, :1639-1648).
+    const val ALIAS_TITLE = "Terminal alias"
+    const val ALIAS_CAPTION = "Run this same account directly from a terminal, outside Tether"
+    const val ALIAS_SHOW = "Show"
+    const val ALIAS_HIDE = "Hide"
+    const val ALIAS_LOADING = "Loading alias…"
+    const val ALIAS_FAILED = "Could not load the alias for this account."
+    const val ALIAS_SNIPPET_LEAD = "Add this once to your "
+    const val ALIAS_SNIPPET_MID = " to keep aliases in sync automatically: "
+    const val COPY = "Copy"
+    const val COPIED = "Copied"
+    /** `window.setTimeout(…, 1500)` in `copyAlias`. */
+    const val COPIED_MS = 1_500L
+}
+
+/** settings-dialog.tsx `aliases[id]`: `"loading"`, `"error"`, or the alias. */
+sealed interface AliasState {
+    data object Loading : AliasState
+    data object Failed : AliasState
+    data class Shown(val alias: ClaudeAccountAlias) : AliasState
 }
 
 /** What a write is (each row's own busy key, as on the web: settings-dialog.tsx addBusy, renameBusyId, removeBusyId, logoutBusyId, login busy, saving, running). */
@@ -252,6 +274,14 @@ class ClaudeAccountsController(
         private set
     private var armJob: Job? = null
 
+    /** ta-89k: settings-dialog.tsx `aliasOpenId`, `aliases`, `aliasCopiedId` (read-only, so not a change: no busy key, no owner note). */
+    var aliasOpen: String? by mutableStateOf(null)
+        private set
+    var aliases: Map<String, AliasState> by mutableStateOf(emptyMap())
+        private set
+    var aliasCopied: String? by mutableStateOf(null)
+        private set
+
     private val generations = HashMap<String, Int>()
     // r3 (ta-9q2): the ids being asked, checked and set synchronously at click time (main thread
     // only). An id stays here until the frame AFTER its answer lands, so a second same-frame tap is
@@ -307,6 +337,50 @@ class ClaudeAccountsController(
             } finally {
                 asked -= id
             }
+        }
+    }
+
+    // ---- Terminal alias (ta-89k) ---------------------------------------------------------------
+
+    /**
+     * settings-dialog.tsx `toggleAlias` (90fbb9f :1630-1643): Hide closes; Show opens one account's
+     * (closing any other) and fetches its alias unless it is already shown or loading: a failed one is
+     * asked again. Any failure is the one sentence ([ClaudeAccountsCopy.ALIAS_FAILED]).
+     */
+    fun toggleAlias(id: String) {
+        if (aliasOpen == id) {
+            aliasOpen = null
+            return
+        }
+        aliasOpen = id
+        val existing = aliases[id]
+        if (existing != null && existing != AliasState.Failed) return
+        val o = origin
+        if (o == null) {
+            aliases = aliases + (id to AliasState.Failed)
+            return
+        }
+        aliases = aliases + (id to AliasState.Loading)
+        scope.launch {
+            val next = try {
+                val r = source.alias(id)
+                if (r.origin != null && r.origin != o) return@launch
+                if (r is com.tether.app.client.ClaudeAccountsResult.Ok) AliasState.Shown(r.value) else AliasState.Failed
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                AliasState.Failed
+            }
+            aliases = aliases + (id to next)
+        }
+    }
+
+    /** `copyAlias`: after the clipboard took the line, "Copied" for 1.5 s (each copy its own timer, as the web's). */
+    fun aliasWasCopied(id: String) {
+        aliasCopied = id
+        scope.launch {
+            delay(ClaudeAccountsCopy.COPIED_MS)
+            if (aliasCopied == id) aliasCopied = null
         }
     }
 

@@ -37,6 +37,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -46,6 +48,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.withStyle
@@ -72,6 +75,7 @@ import com.tether.app.ui.theme.LocalTetherTypography
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** Tags of the Claude accounts section. */
 object ClaudeAccountsTags {
@@ -116,6 +120,12 @@ object ClaudeAccountsTags {
     fun loginNotAnthropic(id: String) = "claude-account-login-not-anthropic:$id"
     fun code(id: String) = "claude-account-code:$id"
     fun codeSubmit(id: String) = "claude-account-code-submit:$id"
+    fun alias(id: String) = "claude-account-alias:$id"
+    fun aliasLoading(id: String) = "claude-account-alias-loading:$id"
+    fun aliasFailed(id: String) = "claude-account-alias-failed:$id"
+    fun aliasLine(id: String) = "claude-account-alias-line:$id"
+    fun aliasCopy(id: String) = "claude-account-alias-copy:$id"
+    fun aliasSnippet(id: String) = "claude-account-alias-snippet:$id"
 }
 
 /**
@@ -437,6 +447,7 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
                 c.tapRemove(account, card.title)
             }
         }
+        AliasRows(card, c, narrow)
         c.lines[id]?.let { NoteLine(it, ClaudeAccountsTags.cardLine(id)) }
     }
 }
@@ -506,6 +517,99 @@ private fun LoginRows(card: ClaudeAccountsPresentation.Card, login: LoginPanel, 
                 )
             }
             login.error?.let { NoteLine(AccountsLine(it, error = true), ClaudeAccountsTags.loginStatus(id) + ":error") }
+        }
+    }
+}
+
+/**
+ * ta-89k: settings-dialog.tsx 90fbb9f :1810-1832, the Terminal alias row with Show / Hide, then
+ * (open) "Loading alias…", the failure sentence, or the shell line with Copy and the
+ * `.bashrc`/`.zshrc` snippet. The line and snippet are drawn by the one-line code rule; Copy puts
+ * the raw line on the clipboard, as the web's `navigator.clipboard.writeText`.
+ */
+@Composable
+private fun AliasRows(card: ClaudeAccountsPresentation.Card, c: ClaudeAccountsController, narrow: Boolean) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val id = card.id
+    val open = c.aliasOpen == id
+    CardRow(narrow = narrow, title = ClaudeAccountsCopy.ALIAS_TITLE, caption = AnnotatedString(ClaudeAccountsCopy.ALIAS_CAPTION)) {
+        TetherKey(
+            onClick = { c.toggleAlias(id) },
+            classes = KeyClasses.ButtonSecondary,
+            label = if (open) ClaudeAccountsCopy.ALIAS_HIDE else ClaudeAccountsCopy.ALIAS_SHOW,
+            icon = if (open) TetherIcons.ChevronDown else TetherIcons.ChevronRight,
+            iconSize = 14.dp,
+            contentDescription = "${if (open) ClaudeAccountsCopy.ALIAS_HIDE else ClaudeAccountsCopy.ALIAS_SHOW} the terminal alias for ${card.title}",
+            modifier = Modifier.testTag(ClaudeAccountsTags.alias(id)),
+        )
+    }
+    if (!open) return
+    when (val state = c.aliases[id]) {
+        null, AliasState.Loading -> {
+            RowRule()
+            Text(
+                ClaudeAccountsCopy.ALIAS_LOADING,
+                color = t.muted,
+                style = settingsText(type.ui, 12f, 400, lineHeight = 1.6f),
+                modifier = Modifier.testTag(ClaudeAccountsTags.aliasLoading(id)).padding(vertical = 14.dp),
+            )
+        }
+        AliasState.Failed -> {
+            RowRule()
+            NoteLine(AccountsLine(ClaudeAccountsCopy.ALIAS_FAILED, error = true), ClaudeAccountsTags.aliasFailed(id))
+        }
+        is AliasState.Shown -> {
+            val alias = state.alias
+            val clipboard = LocalClipboard.current
+            val scope = rememberCoroutineScope()
+            RowRule()
+            val line: @Composable (Modifier) -> Unit = { m ->
+                Text(codeLabel(alias.shellLine), color = t.ink, style = settingsText(type.mono, 12f, 400, lineHeight = 1.6f), modifier = m.testTag(ClaudeAccountsTags.aliasLine(id)))
+            }
+            val copy: @Composable () -> Unit = {
+                TetherKey(
+                    onClick = {
+                        scope.launch {
+                            // The web's `catch {}`: a clipboard that refuses leaves the line on screen to select.
+                            val took = runCatching { clipboard.setClipEntry(ClipEntry(android.content.ClipData.newPlainText(ClaudeAccountsCopy.ALIAS_TITLE, alias.shellLine))) }.isSuccess
+                            if (took) c.aliasWasCopied(id)
+                        }
+                    },
+                    classes = KeyClasses.ButtonSecondary,
+                    label = if (c.aliasCopied == id) ClaudeAccountsCopy.COPIED else ClaudeAccountsCopy.COPY,
+                    icon = TetherIcons.Copy,
+                    iconSize = 14.dp,
+                    contentDescription = "Copy the terminal alias for ${card.title}",
+                    modifier = Modifier.testTag(ClaudeAccountsTags.aliasCopy(id)),
+                )
+            }
+            if (narrow) {
+                Column(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    line(Modifier.fillMaxWidth())
+                    copy()
+                }
+            } else {
+                Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    line(Modifier.weight(1f))
+                    copy()
+                }
+            }
+            if (alias.sourceSnippet.isNotEmpty()) {
+                RowRule()
+                val code = SpanStyle(fontFamily = type.mono)
+                val text = remember(alias.sourceSnippet, t, type) {
+                    AnnotatedString.Builder().apply {
+                        append(ClaudeAccountsCopy.ALIAS_SNIPPET_LEAD)
+                        withStyle(code) { append(".bashrc") }
+                        append("/")
+                        withStyle(code) { append(".zshrc") }
+                        append(ClaudeAccountsCopy.ALIAS_SNIPPET_MID)
+                        withStyle(code) { appendStyled(SafeText.encode(alias.sourceSnippet, SafeText.Rule.Line), tokenStyle(t)) }
+                    }.toAnnotatedString()
+                }
+                Text(text, color = t.muted, style = settingsText(type.ui, 12f, 400, lineHeight = 1.6f), modifier = Modifier.testTag(ClaudeAccountsTags.aliasSnippet(id)).padding(vertical = 14.dp))
+            }
         }
     }
 }

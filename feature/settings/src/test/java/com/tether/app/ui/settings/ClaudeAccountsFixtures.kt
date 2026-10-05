@@ -60,6 +60,9 @@ class FakeAccounts(
     private val hangList: Boolean = false,
     private val listGate: (suspend () -> Unit)? = null,
     private val statusGate: (suspend () -> Unit)? = null,
+    /** ta-89k: alias() answers from here (else 404 "No such Claude account."), after [aliasGate]. */
+    private val aliases: Map<String, ClaudeAccountsResult<com.tether.app.client.ClaudeAccountAlias>> = emptyMap(),
+    private val aliasGate: (suspend () -> Unit)? = null,
 ) : ClaudeAccountsSource {
     val calls: MutableList<String> = Collections.synchronizedList(mutableListOf())
     private var listed = 0
@@ -80,6 +83,12 @@ class FakeAccounts(
         calls += "status:$accountId"
         statusGate?.invoke()
         return statuses[accountId] ?: ClaudeAccountsResult.Refused(404, ClaudeAccountRefusal.NoSuchAccount, origin)
+    }
+
+    override suspend fun alias(accountId: String): ClaudeAccountsResult<com.tether.app.client.ClaudeAccountAlias> {
+        calls += "alias:$accountId"
+        aliasGate?.invoke()
+        return aliases[accountId] ?: ClaudeAccountsResult.Refused(404, ClaudeAccountRefusal.NoSuchAccount, origin)
     }
 
     fun binding() = ClaudeAccountsBinding(this, origin, AccountsFixtures.TIME)

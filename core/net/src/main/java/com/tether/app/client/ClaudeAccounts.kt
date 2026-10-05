@@ -23,15 +23,17 @@ import okhttp3.Response
 // ─────────────────────────────────────────────────────────────────────────────
 // ta-9q2 (T10.1 slice 2) + ta-ebc (#231): the Settings Engines tab's Claude accounts, READ ONLY.
 // ta-7rh: the changes (add, rename, remove, log in/out, sync) are a separate source,
-// ClaudeAccountActions.kt, over FixedRouteHttp; this reader still sends nothing but its three GETs.
+// ClaudeAccountActions.kt, over FixedRouteHttp; this reader still sends nothing but its four GETs.
 // tether 887c222 server.mjs ~8117-8297 (/api/claude-accounts):
 //   GET /api/claude-accounts             { accounts: ClaudeAccountRow[] }   (each row carries `plan`, #231)
 //   GET /api/claude-accounts/sync        { config, lastResult }
 //   GET /api/claude-accounts/<id>/status { ok, id, loggedIn, authMethod, email? } | 404/409 { error }
+//   GET /api/claude-accounts/<id>/alias  { ok, shellLine, sourceSnippet, path } | 404/409 { error }
+//     (ta-89k; tether 90fbb9f server.mjs:8474, lib/claude-accounts.mjs:741 `accountAlias`)
 // These sit behind the ordinary /api/ gate: any authenticated principal may read them. EVERY
 // mutation (add, rename, remove, login, login code, cancel login, logout, sync PUT, sync run) is
 // `requireOwnerGrade` and answers a device token 403. This file has no way to send one: the only
-// method is GET and the only paths are the three above.
+// method is GET and the only paths are the four above.
 //
 // #231 (lib/protocol.ts `ClaudeAccountPlan`): `plan.raw` carries Anthropic's internal tier codenames
 // for debugging and must never be shown. It is NEVER DECODED here: no model below has a field it
@@ -102,6 +104,13 @@ data class ClaudeSyncResult(
     val error: String?,
 )
 
+/**
+ * ta-89k: `GET /api/claude-accounts/<id>/alias` (lib/claude-accounts.mjs `accountAlias`), the two
+ * fields the web reads (settings-dialog.tsx 90fbb9f :1636-1638). Raw server text, kept whole (it is
+ * copied to a terminal, so it is never cut: an over-long one is not the server's answer).
+ */
+data class ClaudeAccountAlias(val shellLine: String, val sourceSnippet: String)
+
 /** `GET /api/claude-accounts/sync`. */
 data class ClaudeAccountsSync(val config: ClaudeSyncConfig, val lastResult: ClaudeSyncResult?)
 
@@ -154,7 +163,7 @@ enum class ClaudeAccountRefusal(val sentence: String) {
     ),
 }
 
-/** The three device-readable GETs, with the paired credential. There is deliberately no write here. */
+/** The four device-readable GETs, with the paired credential. There is deliberately no write here. */
 interface ClaudeAccountsSource {
     suspend fun list(): ClaudeAccountsResult<List<ClaudeAccount>>
     suspend fun sync(): ClaudeAccountsResult<ClaudeAccountsSync>
@@ -162,17 +171,22 @@ interface ClaudeAccountsSource {
     /** [accountId] must be [ClaudeAccount.checkable]; any other id is refused here, before a request. */
     suspend fun status(accountId: String): ClaudeAccountsResult<ClaudeAccountStatus>
 
+    /** ta-89k: the account's terminal alias; [accountId] as for [status]. */
+    suspend fun alias(accountId: String): ClaudeAccountsResult<ClaudeAccountAlias>
+
     /** No client (previews, fakes): nothing is ever fetched. */
     object Unavailable : ClaudeAccountsSource {
         override suspend fun list(): ClaudeAccountsResult<List<ClaudeAccount>> = ClaudeAccountsResult.SignedOut()
         override suspend fun sync(): ClaudeAccountsResult<ClaudeAccountsSync> = ClaudeAccountsResult.SignedOut()
         override suspend fun status(accountId: String): ClaudeAccountsResult<ClaudeAccountStatus> = ClaudeAccountsResult.SignedOut()
+        override suspend fun alias(accountId: String): ClaudeAccountsResult<ClaudeAccountAlias> = ClaudeAccountsResult.SignedOut()
     }
 
     companion object {
         const val LIST_PATH = "/api/claude-accounts"
         const val SYNC_PATH = "/api/claude-accounts/sync"
         fun statusPath(accountId: String) = "/api/claude-accounts/$accountId/status"
+        fun aliasPath(accountId: String) = "/api/claude-accounts/$accountId/alias"
 
         /**
          * The most body read. A list of the registry's 64 profiles with their plans is ~40 KiB; a sync
@@ -212,18 +226,26 @@ class HttpClaudeAccounts(
 
     override suspend fun sync(): ClaudeAccountsResult<ClaudeAccountsSync> = get(ClaudeAccountsSource.SYNC_PATH, ClaudeAccountsJson::sync)
 
-    override suspend fun status(accountId: String): ClaudeAccountsResult<ClaudeAccountStatus> {
-        // The id is server data: only the registry's own shape ([a-z][a-z0-9-]*, no dot, slash or
-        // escape) is ever put in a path, so it can never name another route.
-        if (!ClaudeAccountsJson.isAccountId(accountId)) {
-            return when (val a = authority()) {
-                FilesAuthority.SignedOut -> ClaudeAccountsResult.SignedOut()
-                FilesAuthority.LocalNetworkBlocked -> ClaudeAccountsResult.LocalNetworkBlocked
-                is FilesAuthority.Paired -> serverOrigin(a.origin.toString())?.let { ClaudeAccountsResult.Unavailable(null, it) }
-                    ?: ClaudeAccountsResult.SignedOut()
-            }
+    override suspend fun status(accountId: String): ClaudeAccountsResult<ClaudeAccountStatus> =
+        refuseOddId(accountId) ?: get(ClaudeAccountsSource.statusPath(accountId), ClaudeAccountsJson::status, ClaudeAccountsJson::statusRefusal)
+
+    // ta-89k: the same route family and refusals as the status read (`claudeAccountReply`); the web
+    // shows one sentence for any failure, so the refusal is named here only as the status's is.
+    override suspend fun alias(accountId: String): ClaudeAccountsResult<ClaudeAccountAlias> =
+        refuseOddId(accountId) ?: get(ClaudeAccountsSource.aliasPath(accountId), ClaudeAccountsJson::alias, ClaudeAccountsJson::statusRefusal)
+
+    /**
+     * The id is server data: only the registry's own shape ([a-z][a-z0-9-]*, no dot, slash or
+     * escape) is ever put in a path, so it can never name another route. Null: the id may be asked.
+     */
+    private fun refuseOddId(accountId: String): ClaudeAccountsResult<Nothing>? {
+        if (ClaudeAccountsJson.isAccountId(accountId)) return null
+        return when (val a = authority()) {
+            FilesAuthority.SignedOut -> ClaudeAccountsResult.SignedOut()
+            FilesAuthority.LocalNetworkBlocked -> ClaudeAccountsResult.LocalNetworkBlocked
+            is FilesAuthority.Paired -> serverOrigin(a.origin.toString())?.let { ClaudeAccountsResult.Unavailable(null, it) }
+                ?: ClaudeAccountsResult.SignedOut()
         }
-        return get(ClaudeAccountsSource.statusPath(accountId), ClaudeAccountsJson::status, ClaudeAccountsJson::statusRefusal)
     }
 
     private suspend fun <T> get(
@@ -420,6 +442,21 @@ object ClaudeAccountsJson {
             email = string(obj["email"], MAX_TEXT)?.takeIf { it.isNotBlank() },
             error = string(obj["error"], MAX_TEXT)?.takeIf { it.isNotBlank() },
         )
+    }
+
+    /** ta-89k: an alias line or snippet longer than this is not the server's answer (a path is at most [MAX_PATH]). */
+    const val MAX_ALIAS = 2 * MAX_PATH + 512
+
+    /**
+     * ta-89k: `{ ok, shellLine, sourceSnippet, path }`. Null without a string `shellLine` (the web's
+     * `typeof data.shellLine !== "string"` is its error), or when either text is over [MAX_ALIAS]
+     * (never cut: it is copied to a terminal whole). A missing snippet is "" (the web's `?? ""`).
+     */
+    fun alias(obj: JsonObject): ClaudeAccountAlias? {
+        val line = (obj["shellLine"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+        val snippet = (obj["sourceSnippet"] as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
+        if (line.length > MAX_ALIAS || snippet.length > MAX_ALIAS) return null
+        return ClaudeAccountAlias(line, snippet)
     }
 
     /** `{ config, lastResult }`. Null without a `config` object. */

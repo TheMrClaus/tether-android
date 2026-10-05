@@ -383,6 +383,7 @@ private object NeverAsked : ClaudeAccountsSource {
     override suspend fun list(): ClaudeAccountsResult<List<ClaudeAccount>> = error("a seeded shot must not read the list")
     override suspend fun sync(): ClaudeAccountsResult<ClaudeAccountsSync> = error("a seeded shot must not read the sync state")
     override suspend fun status(accountId: String): ClaudeAccountsResult<ClaudeAccountStatus> = error("a seeded shot must not read a status")
+    override suspend fun alias(accountId: String): ClaudeAccountsResult<com.tether.app.client.ClaudeAccountAlias> = error("a seeded shot must not read an alias")
 }
 
 fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, skin: TetherSkin, size: String, name: String = shot.id) {

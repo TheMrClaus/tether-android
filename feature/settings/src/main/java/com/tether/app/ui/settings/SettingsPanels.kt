@@ -206,7 +206,7 @@ private fun NodesPanel(narrow: Boolean, nodes: NodesBinding) {
 
 /**
  * Engines (settings-dialog.tsx:2107-2249), in the web's order: the engines (Scan again, then one
- * card per engine; ta-dh1, EnginesSection.kt), Claude accounts (ta-9q2, read only), Custom
+ * card per engine; ta-dh1, EnginesSection.kt), Claude accounts (ta-9q2 reads, ta-7rh changes, ta-89k terminal alias), Custom
  * providers (`ProfilesEditor`, :2237; ta-q6p, ProfilesSection.kt) and Host config
  * (`shareHostConfig`; ta-dh1). The engine parts and the profiles are keyed on the server, so
  * another server's cards start from nothing (no half-typed field, no revealed env value, no

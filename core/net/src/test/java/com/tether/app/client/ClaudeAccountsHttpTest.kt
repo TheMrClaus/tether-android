@@ -78,6 +78,57 @@ class ClaudeAccountsHttpTest {
         }
     }
 
+    /**
+     * ta-89k: `GET /api/claude-accounts/<id>/alias` (tether 90fbb9f server.mjs:8474, device-readable),
+     * read as the status is: the fixed route, by GET, with the credential; the web's two fields.
+     */
+    @Test fun theAliasIsReadOnItsFixedRouteWithTheCredential() = runBlocking<Unit> {
+        val line = """alias claude-work='CLAUDE_CONFIG_DIR="/srv/tether/state/claude-accounts/claude-work" claude'"""
+        val snippet = """[ -f "/srv/tether/state/claude-aliases.sh" ] && . "/srv/tether/state/claude-aliases.sh""""
+        val body = """{"ok":true,"shellLine":${kotlinx.serialization.json.JsonPrimitive(line)},"sourceSnippet":${kotlinx.serialization.json.JsonPrimitive(snippet)},"path":"/srv/tether/state/claude-aliases.sh"}"""
+        server.enqueue(ok(body))
+        assertEquals(ClaudeAccountsResult.Ok(ClaudeAccountAlias(line, snippet), origin), accounts.alias("claude-work"))
+        take().let {
+            assertEquals("GET", it.method)
+            assertEquals("/api/claude-accounts/claude-work/alias", it.path)
+            assertEquals("Bearer tthr_test", it.getHeader("Authorization"))
+            assertEquals("no-store", it.getHeader("Cache-Control"))
+            assertEquals(0L, it.bodySize)
+        }
+        // The web's `data.sourceSnippet ?? ""`.
+        server.enqueue(ok("""{"ok":true,"shellLine":"alias claude-a='x'"}"""))
+        assertEquals(ClaudeAccountsResult.Ok(ClaudeAccountAlias("alias claude-a='x'", ""), origin), accounts.alias("claude-a"))
+        take()
+    }
+
+    @Test fun anAliasThatIsNotTheServersAnswerIsAFailure() = runBlocking<Unit> {
+        // The route's own refusals (`claudeAccountReply`), as the status's.
+        server.enqueue(MockResponse().setResponseCode(404).setHeader("Content-Type", json).setBody("""{"error":"No such Claude account."}"""))
+        assertEquals(ClaudeAccountsResult.Refused(404, ClaudeAccountRefusal.NoSuchAccount, origin), accounts.alias("claude-gone"))
+        take()
+        server.enqueue(MockResponse().setResponseCode(409).setHeader("Content-Type", json).setBody("""{"error":"x","error_code":"not-managed"}"""))
+        assertEquals(ClaudeAccountsResult.Refused(409, ClaudeAccountRefusal.NotManaged, origin), accounts.alias("claude-zai"))
+        take()
+        // Without a string shellLine, or over the bound (never cut), it is not the answer.
+        val long = "a".repeat(ClaudeAccountsJson.MAX_ALIAS + 1)
+        for (body in listOf("""{"ok":true}""", """{"shellLine":42}""", """{"error":"login required"}""", """{"shellLine":"$long"}""", """{"shellLine":"x","sourceSnippet":"$long"}""")) {
+            server.enqueue(ok(body))
+            assertEquals(ClaudeAccountsResult.Unavailable(200, origin), accounts.alias("claude-a"))
+            take()
+        }
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", elsewhere.url("/api/claude-accounts/claude-a/alias")))
+        assertEquals(ClaudeAccountsResult.Blocked(302, origin), accounts.alias("claude-a"))
+        take()
+        server.enqueue(MockResponse().setResponseCode(500).setHeader("Content-Type", json).setBody("""{"error":"boom"}"""))
+        assertEquals(ClaudeAccountsResult.Unavailable(500, origin), accounts.alias("claude-a"))
+        take()
+        // An id outside the registry's shape asks nothing.
+        val before = server.requestCount
+        assertEquals(ClaudeAccountsResult.Unavailable(null, origin), accounts.alias("../devices"))
+        assertEquals(before, server.requestCount)
+        assertEquals(0, elsewhere.requestCount)
+    }
+
     /** A server-supplied id is put in a path only in the registry's shape: nothing else is ever asked. */
     @Test fun anIdOutsideTheRegistrysShapeSendsNothing() = runBlocking<Unit> {
         for (id in listOf("", ".", "..", "../devices", "claude/../../api/devices", "claude%2F..", "claude?x=1", "claude#f", "Claude", "claude.work")) {
