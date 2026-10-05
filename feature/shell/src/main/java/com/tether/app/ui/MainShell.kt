@@ -471,8 +471,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         // ta-coik.22: live as on the web (workspace-header.tsx 90fbb9f :133); bound to
                         // the server ([endSessionServer]); offline the client says it was not ended.
                         val server = com.tether.app.ui.chat.endSessionServer(consentOrigin, vm.client.serverUrl.value)
-                        if (confirmBeforeEnd) confirmEnd = EndTarget(it, server)
-                        else vm.client.kill(it.id, server)
+                        // dashboard.tsx 1bf4a465 :1192-1198: an isolated session's end asks about its teardown
+                        // first (TeardownConfirmDialog), and that dialog is the confirmation.
+                        if (confirmBeforeEnd && it.worktree == null) confirmEnd = EndTarget(it, server)
+                        else vm.client.endSession(it.id, server)
                     }
                 },
                 onTogglePinned = { session?.let { vm.client.pin(it.id, !it.pinned) } },
@@ -766,6 +768,18 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         settingsOpen = true
     })
 
+    // ta-m7ef (dashboard.tsx 1bf4a465 :1933-1941): ending an isolated session asks about its teardown first; the
+    // client holds the pending end (EndSessionFlow), this draws its confirmation.
+    val endConfirmation by vm.client.endConfirmation.collectAsStateWithLifecycle()
+    endConfirmation?.let { pending ->
+        com.tether.app.ui.chat.TeardownConfirmDialog(
+            confirmation = pending,
+            onRun = vm.client::runTeardown,
+            onSkip = vm.client::endWithoutTeardown,
+            onCancel = vm.client::cancelEnd,
+        )
+    }
+
     renaming?.let { target ->
         var name by remember(target.id) { mutableStateOf(target.name) }
         val submit = {
@@ -797,7 +811,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
             endable = endable,
             onConfirm = {
                 confirmEnd = null
-                vm.client.kill(target.id, drawnFor)
+                vm.client.endSession(target.id, drawnFor)
             },
             onCancel = { confirmEnd = null },
         )

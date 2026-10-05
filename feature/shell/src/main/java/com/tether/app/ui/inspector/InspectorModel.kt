@@ -5,6 +5,7 @@ import com.tether.app.client.ChangeRequestReading
 import com.tether.app.client.ConsentGuard
 import com.tether.app.client.LabelText
 import com.tether.app.client.WorktreeLogsReading
+import com.tether.app.client.WorktreeSkipCopy
 import com.tether.app.protocol.fold.numberToString
 import com.tether.app.protocol.helpers.ClaudeResetGrantsView
 import com.tether.app.protocol.helpers.Format
@@ -350,6 +351,11 @@ data class PullRequestLine(val headline: String, val state: String?, val url: St
 data class ServicesSection(
     val count: String,
     val setup: ServiceSetup?,
+    /**
+     * ta-m7ef (v143, worktree-services-card.tsx 1bf4a465): why this checkout's setup / teardown did NOT run
+     * (`setupSkipped`, then `teardownSkipped`), each as the web's sentence; empty when both ran or neither was declared.
+     */
+    val skipped: List<String> = emptyList(),
     val configWarnings: List<Seg>,
     val scripts: List<ServiceRow>,
     /** The session's last `worktree-logs` reply (null = none yet); shown under the row it names. */
@@ -901,7 +907,13 @@ internal fun services(
     val running = setupStatus == "running" || setupStatus == "pending"
     val failed = setupStatus == "failed"
     val warnings = snapshot.strings("configWarnings").take(LabelText.MAX_ITEMS)
-    if (scripts.isEmpty() && !running && !failed && warnings.isEmpty()) return null
+    // v143 (ta-6t1): the hooks were stripped at create for want of a matching approval / a declared teardown
+    // was refused at archive. An unknown reason still says it did not run.
+    val skipped = listOfNotNull(
+        snapshot.string("setupSkipped")?.let(WorktreeSkipCopy::setup),
+        snapshot.string("teardownSkipped")?.let(WorktreeSkipCopy::teardown),
+    )
+    if (scripts.isEmpty() && !running && !failed && skipped.isEmpty() && warnings.isEmpty()) return null
     val log = snapshot.strings("setupLog").takeLast(8)
     val setup = if (running || failed) {
         ServiceSetup(
@@ -919,6 +931,7 @@ internal fun services(
     return ServicesSection(
         count = if (scripts.isEmpty()) "none declared" else "${scripts.size} declared",
         setup = setup,
+        skipped = skipped,
         configWarnings = warnings.map(::prose),
         scripts = scripts.mapNotNull { serviceRow(it, sessionId, serverOrigin) },
         logs = logs?.let { ServiceLogs(it.name, it.lines.takeIf { l -> l.isNotEmpty() }?.let { l -> Seg(l.joinToString("\n"), Rule.Code) }) },
@@ -1036,6 +1049,14 @@ internal fun runtime(session: AgentSession, state: SessionView?): RuntimeSection
                     "Running this project's setup commands. The first turn starts when they finish."
                 }
                 add(SpecRow("Setup", listOf(app(if (failed) "Failed" else "Running")), listOf(Note(listOf(app(text)), status = true))))
+            }
+            // v143 (ta-6t1, inspector.tsx 1bf4a465): the hooks were stripped at create for want of a matching approval.
+            w.setupSkipped?.let { reason ->
+                add(SpecRow("Setup", listOf(app("Not run")), listOf(Note(listOf(app(WorktreeSkipCopy.setup(reason))), status = true))))
+            }
+            // v143 r2: a declared teardown was refused at archive.
+            w.teardownSkipped?.let { reason ->
+                add(SpecRow("Teardown", listOf(app("Not run")), listOf(Note(listOf(app(WorktreeSkipCopy.teardown(reason))), status = true))))
             }
             w.configWarningList.take(LabelText.MAX_ITEMS).forEach { warning ->
                 add(SpecRow("Config", emptyList(), listOf(Note(listOf(prose(warning)), status = true))))

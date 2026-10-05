@@ -121,6 +121,8 @@ import kotlinx.coroutines.launch
  */
 
 object InspectorTags {
+    /** ta-m7ef: the Services card's i-th "did not run" sentence (setup first, then teardown). */
+    fun serviceSkipped(i: Int) = "inspector-service-skipped:$i"
     const val Root = "inspector"
     const val UseCodexReset = "inspector-codex-reset-use"
     const val Identity = "inspector-identity"
@@ -1193,6 +1195,15 @@ private fun ServicesCard(
                 Text(setup.text, style = setupStyle, color = if (setup.failed) t.warning else t.muted)
                 setup.log?.let { RuledText(listOf(it), cssText(type.mono, 0.68f, 400, lineHeight = 1.5f), if (setup.failed) t.warning else t.muted) }
             }
+        }
+        // ta-m7ef (worktree-services-card.tsx 1bf4a465): why the setup / teardown did not run, as problems.
+        services.skipped.forEachIndexed { i, sentence ->
+            RuledText(
+                listOf(Seg(sentence, Rule.App)),
+                setupStyle,
+                t.warning,
+                Modifier.fillMaxWidth().topRule(t.line).padding(top = 1.dp).padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm).semantics { liveRegion = LiveRegionMode.Polite }.testTag(InspectorTags.serviceSkipped(i)),
+            )
         }
         services.configWarnings.forEach { warning ->
             RuledText(

@@ -474,6 +474,26 @@ interface TetherClient {
     fun inspectSetup(cwd: String, worktree: com.tether.app.protocol.WorktreeCreateRequest, requestId: String, expectedEpoch: Long): Boolean = false
 
     /**
+     * ta-m7ef (v143 r3): End the session with the owner's teardown decision. For a session with an isolated
+     * worktree it first asks `archive-inspect`, ends at once when nothing would run, and otherwise waits for the
+     * confirmation ([endConfirmation]); a session with none is killed as [kill] does. Bound to the server that
+     * drew the End ([expectedOrigin]).
+     */
+    fun endSession(sessionId: String, expectedOrigin: String?) = kill(sessionId, expectedOrigin)
+
+    /** ta-m7ef: the teardown confirmation to draw (use-end-session.ts `confirmation`), or null. */
+    val endConfirmation: StateFlow<EndConfirmation?> get() = NO_END_CONFIRMATION
+
+    /** The owner approved the listed teardown: end with exactly the consent its preview reported. */
+    fun runTeardown() {}
+
+    /** End without running the teardown (`teardownConsent` "none"). */
+    fun endWithoutTeardown() {}
+
+    /** Back out of the teardown confirmation; nothing is ended. */
+    fun cancelEnd() {}
+
+    /**
      * ta-8cv: every `error` frame of the live socket, as the web's `createError` holds it
      * (use-tether.ts: `{message, seq, requestId?}`, seq monotonic): the draft composer acts only on
      * the one whose `requestId` echoes its in-flight create. The message is cleaned by the error
@@ -1194,6 +1214,7 @@ sealed interface CreateReplyRecord {
 
 private val NO_CREATED: StateFlow<CreatedReply?> = MutableStateFlow(null)
 private val NO_CREATE_ERRORS: StateFlow<CreateErrorReply?> = MutableStateFlow(null)
+private val NO_END_CONFIRMATION: StateFlow<EndConfirmation?> = MutableStateFlow(null)
 private val NO_LINK_EPOCH: StateFlow<Long> = MutableStateFlow(0L)
 private val NO_CREDENTIAL_EPOCH: StateFlow<Long> = MutableStateFlow(0L)
 

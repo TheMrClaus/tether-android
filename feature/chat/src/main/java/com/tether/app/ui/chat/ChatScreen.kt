@@ -729,8 +729,10 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
             if (session.status != "exited") {
                 TetherKey(
                     onClick = {
-                        if (confirmBeforeEnd) confirmEnd = ChatEndDraw(session.id, server)
-                        else vm.client.kill(session.id, server)
+                        // dashboard.tsx 1bf4a465 :1192-1198: an isolated session's end asks about its teardown
+                        // first (TeardownConfirmDialog), and that dialog is the confirmation.
+                        if (confirmBeforeEnd && session.worktree == null) confirmEnd = ChatEndDraw(session.id, server)
+                        else vm.client.endSession(session.id, server)
                     },
                     classes = KeyClasses.EndSession,
                     icon = TetherIcons.CircleStop,
@@ -822,7 +824,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
             endable = endable,
             onConfirm = {
                 confirmEnd = null
-                vm.client.kill(drawn.sessionId, drawn.drawnFor)
+                vm.client.endSession(drawn.sessionId, drawn.drawnFor)
             },
             onCancel = { confirmEnd = null },
         )

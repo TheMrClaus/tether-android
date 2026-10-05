@@ -754,6 +754,28 @@ class RealTetherClient(
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
     override val worktreeSources: Flow<WorktreeSourceReply> = worktreeSourcesFlow
+
+    // ta-m7ef (v143 r3, tether #241): End a session with the owner's teardown decision (EndSessionFlow.kt).
+    // Passive: this client feeds it the `archive-preview` and `error` frames and the link, and it sends
+    // through [sendArchiveInspect] / [sendKill], each under the client's own lock.
+    private val endFlow = EndSessionFlow(
+        transport = object : EndSessionFlow.EndTransport {
+            override fun inspect(sessionId: String, requestId: String, expectedOrigin: String?): Boolean =
+                sendArchiveInspect(sessionId, requestId, expectedOrigin)
+
+            override fun kill(sessionId: String, teardownConsent: String?, expectedOrigin: String?) =
+                sendKill(sessionId, teardownConsent, expectedOrigin)
+        },
+        worktreeOf = { id -> sessionsState.value.firstOrNull { it.id == id }?.worktree },
+        nameOf = { id -> sessionsState.value.firstOrNull { it.id == id }?.name },
+        latestErrorSeq = { createErrorSeq },
+    )
+    override val endConfirmation: StateFlow<EndConfirmation?> = endFlow.confirmation
+
+    init {
+        // A link that is not connected drops a pending End (use-end-session.ts: `connection !== "connected"`).
+        scope.launch { connectionState.collect { endFlow.onLink(it == ConnectionState.Connected) } }
+    }
     /** Guarded by [lock]; bounded (oldest dropped), emptied with the other per-server views. */
     private val createRepliesByRequest = LinkedHashMap<String, CreateReplyRecord>()
 
@@ -3160,13 +3182,17 @@ class RealTetherClient(
                 emitServerErrorIfCurrent(webSocket, message.message)
                 // ta-8cv: use-tether.ts:1201 setCreateError — every error, with its echo; the draft
                 // composer acts only on the one that names its in-flight create.
+                var errorReply: CreateErrorReply? = null
                 ifCurrent(webSocket) {
                     createErrorSeq += 1
                     val reply = CreateErrorReply(LabelText.error(message.message), createErrorSeq, message.requestId, epoch, socketOrigin)
                     createErrorsState.value = reply
                     createErrorRepliesFlow.tryEmit(reply)
                     message.requestId?.let { recordCreateReplyLocked(it, CreateReplyRecord.Failed(reply)) }
+                    errorReply = reply
                 }
+                // ta-m7ef: a refusal of the pending `archive-inspect` ends its check (outside the lock).
+                errorReply?.let(endFlow::onError)
                 // T10.3 r2 (security F3): only an error of the CURRENT socket ends a node request,
                 // checked and ended in one step under the lock, as onNodeResult does.
                 message.requestId?.let { completeNodeRequestOn(webSocket, it, NodeRequestOutcome.ServerError(message.message)) }
@@ -3175,6 +3201,15 @@ class RealTetherClient(
             // the draft composer takes only the reply to its own inspect (DraftComposerModel.onWorktreeSource).
             is ServerMessage.WorktreeSource -> ifCurrent(webSocket) {
                 worktreeSourcesFlow.tryEmit(WorktreeSourceReply(WorktreeSourceInfo.parse(message.info), message.requestId, epoch))
+            }
+            // ta-m7ef (v143 r3): the answer to the pending End's `archive-inspect` (use-tether.ts archivePreviewReply),
+            // taken only from the live socket and only when it echoes the pending check's own requestId.
+            is ServerMessage.ArchivePreview -> {
+                val reply = synchronized(lock) {
+                    if (socket !== webSocket) null
+                    else ArchivePreviewReply(message.sessionId, message.preview?.let(TeardownPreview::parse), message.malformed, message.requestId, epoch)
+                }
+                reply?.let(endFlow::onPreview)
             }
             // v109: the registry is replaced wholesale (use-tether.ts setNodes).
             is ServerMessage.Nodes -> ifCurrent(webSocket) { nodesState.value = message.nodes }
@@ -5089,17 +5124,45 @@ class RealTetherClient(
      * :1533 through use-tether.ts :337-344), and the server answers a session it does not hold with a
      * shown `error` ("That session no longer exists.", server.mjs 90fbb9f :9602-9603).
      */
-    override fun kill(sessionId: String, expectedOrigin: String?) {
+    override fun kill(sessionId: String, expectedOrigin: String?) = sendKill(sessionId, null, expectedOrigin)
+
+    /** The one `kill` send ([kill], and the End flow with its `teardownConsent`), under the rules above. */
+    private fun sendKill(sessionId: String, teardownConsent: String?, expectedOrigin: String?) {
         if (sessionId.isEmpty()) return
         val sent = synchronized(lock) {
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
             if (expectedOrigin != origin) return@synchronized false
-            ws.send(ClientMessage.Kill(sessionId).encode())
+            ws.send(ClientMessage.Kill(sessionId, teardownConsent).encode())
         }
         if (sent == false) emitError("The secure link is reconnecting. The session was not ended.")
     }
+
+    /**
+     * ta-m7ef (v143 r3): `archive-inspect` for the End flow. A read: the same gate as [kill] (a live handshaken
+     * socket of the server that drew the End), never queued or resent. False when not sent (the link says so).
+     */
+    private fun sendArchiveInspect(sessionId: String, requestId: String, expectedOrigin: String?): Boolean {
+        if (sessionId.isEmpty() || requestId.isEmpty() || requestId.length > INSPECT_REQUEST_ID_MAX) return false
+        val sent = synchronized(lock) {
+            val ws = socket
+            val origin = socketOrigin
+            if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
+            if (expectedOrigin != origin) return@synchronized false
+            ws.send(ClientMessage.ArchiveInspect(sessionId, requestId).encode())
+        }
+        if (!sent) emitError("The secure link is reconnecting. The session was not ended.")
+        return sent
+    }
+
+    override fun endSession(sessionId: String, expectedOrigin: String?) = endFlow.end(sessionId, expectedOrigin)
+
+    override fun runTeardown() = endFlow.runTeardown()
+
+    override fun endWithoutTeardown() = endFlow.endWithoutTeardown()
+
+    override fun cancelEnd() = endFlow.cancel()
 
     // T5.1 sidebar sync (SidebarSync.kt): the exact frames, sent on the current handshaken socket.
     override fun discoverWorkspace(cwd: String, lastSeen: Map<String, Long>, watch: List<String>): Boolean {

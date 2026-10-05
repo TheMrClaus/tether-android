@@ -5,8 +5,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.FlowRowScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -58,12 +60,13 @@ object ConsentTags {
 }
 
 /** `.draft-setup-confirm`: a warning-bordered panel holding a title, [content] and the [actions]. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ConsentPanel(
     title: String,
     modifier: Modifier = Modifier,
     titleTag: String = ConsentTags.Title,
-    actions: @Composable RowScope.() -> Unit,
+    actions: @Composable FlowRowScope.() -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -85,7 +88,14 @@ fun ConsentPanel(
             )
         }
         content()
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs, Alignment.End), verticalAlignment = Alignment.CenterVertically, content = actions)
+        // The keys wrap under each other when the panel is too narrow for them side by side (a phone).
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+            itemVerticalAlignment = Alignment.CenterVertically,
+            content = actions,
+        )
     }
 }
 
