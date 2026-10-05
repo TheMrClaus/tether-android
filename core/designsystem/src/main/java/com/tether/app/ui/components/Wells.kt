@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
@@ -47,9 +48,9 @@ import com.tether.app.ui.theme.TetherTokens
 fun wellShadows(t: TetherTokens, focused: Boolean): List<CssShadow> =
     if (focused) listOf(CssShadow(false, 0.dp, 0.dp, 0.dp, 3.dp, t.focusGlow)) else emptyList()
 
-/** The well surface on any shape; content goes inside. */
-fun Modifier.tetherWell(t: TetherTokens, shape: Shape, focused: Boolean = false): Modifier =
-    cssSurface(shape, t.mineralDeep, CssBorder(1.dp, if (focused) t.violetStrong else t.lineStrong), wellShadows(t, focused))
+/** The well surface on any shape; content goes inside. [face] defaults to the well floor, `--mineral-deep`. */
+fun Modifier.tetherWell(t: TetherTokens, shape: Shape, focused: Boolean = false, face: Color? = null): Modifier =
+    cssSurface(shape, face ?: t.mineralDeep, CssBorder(1.dp, if (focused) t.violetStrong else t.lineStrong), wellShadows(t, focused))
 
 /** A recessed plate / frame (e.g. `.session-elapsed`, `.chat-frame`) holding arbitrary content. */
 @Composable
@@ -95,12 +96,20 @@ fun TetherInputWell(
      * field's suggestions. Ignored below API 35.
      */
     credentialRequest: CredentialRequestData? = null,
+    /** Null: `--radius-md`. A screen whose CSS sets its own input radius passes it (ta-coik.53: the sign-in's 9px). */
+    radius: Dp? = null,
+    /** Null: the touch floor (44dp). Otherwise the input's CSS height, held as a floor so a larger font scale still fits. */
+    minHeight: Dp? = null,
+    /** Null: `space-md` inline padding. */
+    horizontalPadding: Dp? = null,
+    /** Null: the well floor, `--mineral-deep`. */
+    face: Color? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(t.radiusMd)
+    val shape = RoundedCornerShape(radius ?: t.radiusMd)
     val base = type.body.let { if (fontFamily != null) it.copy(fontFamily = fontFamily) else it }
         .let { if (letterSpacing != TextUnit.Unspecified) it.copy(letterSpacing = letterSpacing) else it }
 
@@ -110,8 +119,8 @@ fun TetherInputWell(
                 alpha = if (enabled) 1f else DisabledOpacity
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
-            .tetherWell(t, shape, focused)
-            .heightIn(min = TetherDimens.touchTargetDp),
+            .tetherWell(t, shape, focused, face)
+            .heightIn(min = minHeight ?: TetherDimens.touchTargetDp),
         contentAlignment = Alignment.CenterStart,
     ) {
         BasicTextField(
@@ -129,7 +138,7 @@ fun TetherInputWell(
                     },
                 )
                 .fillMaxWidth()
-                .padding(horizontal = t.css.spaceMd, vertical = 11.dp),
+                .padding(horizontal = horizontalPadding ?: t.css.spaceMd, vertical = 11.dp),
             enabled = enabled,
             textStyle = base.copy(color = t.ink),
             cursorBrush = SolidColor(t.violet),

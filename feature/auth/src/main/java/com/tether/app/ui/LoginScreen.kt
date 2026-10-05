@@ -606,8 +606,18 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
+/**
+ * studio-login.module.css:67 `.field input`: `height: 50px`, `border-radius: 9px`, `padding: 0 14px`,
+ * `background: var(--graphite)`, `font-size: 16px` (the well's body role already is 1rem). Held as a
+ * floor, so a larger font scale still fits. Retro's prompts keep the plain well.
+ */
+private class FieldInput(val radius: Dp, val minHeight: Dp, val horizontalPadding: Dp, val face: Color)
+
 @Composable
-private fun ServerUrlField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope) {
+private fun studioFieldInput(): FieldInput = FieldInput(9.dp, 50.dp, 14.dp, LocalTetherTokens.current.graphite)
+
+@Composable
+private fun ServerUrlField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope, input: FieldInput? = null) {
     TetherInputWell(
         value = ui.baseUrl,
         onValueChange = ui.onBaseUrl,
@@ -617,11 +627,15 @@ private fun ServerUrlField(ui: LoginUi, modifier: Modifier = Modifier, fontFamil
         enabled = !ui.busy,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
         fontFamily = fontFamily,
+        radius = input?.radius,
+        minHeight = input?.minHeight,
+        horizontalPadding = input?.horizontalPadding,
+        face = input?.face,
     )
 }
 
 @Composable
-private fun UsernameField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope) {
+private fun UsernameField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope, input: FieldInput? = null) {
     TetherInputWell(
         value = ui.username,
         onValueChange = ui.onUsername,
@@ -639,11 +653,21 @@ private fun UsernameField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily
         ),
         fontFamily = fontFamily,
         contentType = ContentType.Username,
+        radius = input?.radius,
+        minHeight = input?.minHeight,
+        horizontalPadding = input?.horizontalPadding,
+        face = input?.face,
     )
 }
 
 @Composable
-private fun PasswordField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope, description: String = "Dashboard password") {
+private fun PasswordField(
+    ui: LoginUi,
+    modifier: Modifier = Modifier,
+    fontFamily: FontFamily = Manrope,
+    description: String = "Dashboard password",
+    input: FieldInput? = null,
+) {
     TetherInputWell(
         value = ui.password,
         onValueChange = ui.onPassword,
@@ -658,11 +682,15 @@ private fun PasswordField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily
         contentType = ContentType.Password,
         // ta-coik.1: studio-login.tsx:137 / retro-login.tsx:208 `autocomplete="current-password webauthn"`.
         credentialRequest = ui.passkeyAutofill,
+        radius = input?.radius,
+        minHeight = input?.minHeight,
+        horizontalPadding = input?.horizontalPadding,
+        face = input?.face,
     )
 }
 
 @Composable
-private fun CodeField(ui: LoginUi, modifier: Modifier = Modifier, description: String = "Pairing code") {
+private fun CodeField(ui: LoginUi, modifier: Modifier = Modifier, description: String = "Pairing code", input: FieldInput? = null) {
     TetherInputWell(
         value = ui.code,
         onValueChange = ui.onCode,
@@ -679,6 +707,10 @@ private fun CodeField(ui: LoginUi, modifier: Modifier = Modifier, description: S
         keyboardActions = KeyboardActions(onGo = { ui.onSubmit() }),
         fontFamily = JetBrainsMono,
         letterSpacing = 0.18.em,
+        radius = input?.radius,
+        minHeight = input?.minHeight,
+        horizontalPadding = input?.horizontalPadding,
+        face = input?.face,
     )
 }
 
@@ -810,7 +842,17 @@ private fun StudioLogin(ui: LoginUi) {
             ) {
                 // `@media (max-width: 700px)`: `.brandPanel { padding: 28px }`, `.formPanel { padding: 38px 28px 26px }`.
                 StudioBrandPanel(Modifier.fillMaxWidth().background(StudioLoginColors.Cobalt).padding(28.dp), compact = true)
-                StudioForm(ui, Modifier.padding(start = 28.dp, end = 28.dp, top = 38.dp, bottom = 26.dp), compact = true)
+                // `.formPanel { align-items: center }` (studio-login.module.css:59, kept at most 700px):
+                // the 380px `.formContent` and the static `.formFooter` below it are centred across the panel.
+                Column(
+                    Modifier.testTag(LoginTags.FormPanel).fillMaxWidth().padding(start = 28.dp, end = 28.dp, top = 38.dp, bottom = 26.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    StudioForm(ui, Modifier, compact = true)
+                    // `.formFooter { position: static; margin-top: 40px }` (studio-login.module.css:117).
+                    Spacer(Modifier.height(40.dp))
+                    Text("One private console. Every agent.", color = t.faint, style = loginText(11f), modifier = Modifier.testTag(LoginTags.FormFooter))
+                }
             }
         }
     }
@@ -1046,20 +1088,21 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier, compact: Boolean = false
         Spacer(Modifier.height(if (compact) 28.dp else 34.dp))
 
         // `.form { gap: 20px }`, each `.field` a label over its input 9px apart.
+        val input = studioFieldInput()
         Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
             if (ui.probing) Text("Connecting to your workspace…", color = t.muted, style = loginText(13f))
-            StudioField("Server") { ServerUrlField(ui, Modifier.fillMaxWidth()) }
+            StudioField("Server") { ServerUrlField(ui, Modifier.fillMaxWidth(), input = input) }
             ModeSwitch(ui, passwordLabel = "Password", pairingLabel = "Pairing code")
             when (ui.mode) {
                 AuthMode.Password -> if (ui.passwordEnabled) {
                     StudioPasskey(ui)
                     if (ui.usernameShown) {
                         StudioField(if (ui.usernameOptional) "Username (optional)" else "Username") {
-                            UsernameField(ui, Modifier.fillMaxWidth())
+                            UsernameField(ui, Modifier.fillMaxWidth(), input = input)
                             if (ui.usernameOptional) Text(USERNAME_OPTIONAL_HINT, color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
                         }
                     }
-                    StudioField("Password") { PasswordField(ui, Modifier.fillMaxWidth()) }
+                    StudioField("Password") { PasswordField(ui, Modifier.fillMaxWidth(), input = input) }
                     StudioSubmit(
                         label = when (ui.phase) {
                             LoginPhase.Checking -> "Checking sign-in…"
@@ -1081,7 +1124,7 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier, compact: Boolean = false
                     // ta-coik.1: the passkey on this path too (the web offers it wherever you sign in).
                     StudioPasskey(ui)
                     StudioField("Pairing code") {
-                        CodeField(ui, Modifier.fillMaxWidth())
+                        CodeField(ui, Modifier.fillMaxWidth(), input = input)
                         Text(PAIRING_HELP, color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
                     }
                     StudioSubmit(label = if (ui.phase == LoginPhase.Verifying) "Pairing…" else "Pair this device", ui = ui)
@@ -1109,11 +1152,6 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier, compact: Boolean = false
                     Text(ui.hostname, color = t.faint, style = loginText(12f, lineHeight = 1.6f), modifier = Modifier.padding(top = 3.dp))
                 }
             }
-        }
-        if (compact) {
-            // `.formFooter { position: static; margin-top: 40px }` at most 700px.
-            Spacer(Modifier.height(40.dp))
-            Text("One private console. Every agent.", color = t.faint, style = loginText(11f), modifier = Modifier.testTag(LoginTags.FormFooter))
         }
     }
 }

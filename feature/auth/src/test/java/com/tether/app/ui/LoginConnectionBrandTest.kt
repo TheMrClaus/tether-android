@@ -8,6 +8,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performScrollTo
@@ -205,5 +206,24 @@ class LoginStudioCompactTest : LoginConnectionBase() {
         assertTrue(rule.onAllNodesWithTag(LoginTags.WelcomeMark, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         assertTrue(rule.onAllNodesWithTag(LoginTags.BrandFooter, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         assertEquals(1, rule.onAllNodesWithTag(LoginTags.FormFooter, useUnmergedTree = true).fetchSemanticsNodes().size)
+    }
+
+    /** ta-coik.53: `.formPanel { align-items: center }` (studio-login.module.css:59) centres the static footer. */
+    @Test
+    fun theCompactFooterIsCentred() {
+        launch()
+        rule.waitForIdle()
+        val panel = rule.onNodeWithTag(LoginTags.FormPanel, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val footer = rule.onNodeWithTag(LoginTags.FormFooter, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertEquals((panel.left + panel.right).value / 2f, (footer.left + footer.right).value / 2f, 0.5f)
+    }
+
+    /** ta-coik.53: `.field input { height: 50px }` (studio-login.module.css:67). */
+    @Test
+    fun theInputsAre50dpTall() {
+        launch()
+        rule.waitForIdle()
+        val field = rule.onNodeWithContentDescription("Server URL", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertEquals(50f, (field.bottom - field.top).value, 0.5f)
     }
 }
