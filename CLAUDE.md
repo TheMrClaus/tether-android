@@ -46,3 +46,32 @@ exits 13, so re-read instead of retrying.
 - Never write a credential, token or secret into a bead — the store is versioned and pushed.
 - `bd` is pinned (v1.3.0, `~/bin/bd`) — never upgrade it mid-program: the store carries a Dolt schema
   version and an older binary refuses a newer store.
+
+<!-- app-orchestration:begin (managed by ~/bin/game-orchestration --fleet app — do not edit by hand) -->
+## Orchestration policy (binding — every session in this repo)
+
+This repo runs the fleet's **app** orchestration policy: **the session is a lead that orchestrates**,
+work goes to the repo roster in `.claude/agents/` (pinned models), and no piece is judged by the
+agent that made it. A run's lead never builds; an interactive session may make one small,
+single-file, non-design, non-core edit itself (policy rule 3).
+
+- Spawn roster roles **by name, no model/effort override**; prove the models before wave 1 and at
+  every wave end (`game-orchestration models --fleet app <session-id>`).
+- All design → `design`. Every raster asset (icons, buttons, illustrations, textures, reference
+  images) → the **Codex image lane** the design lane drives: `codex exec -m gpt-6-astra -c
+  model_reasoning_effort=high` + the built-in `imagegen` skill — one lane at a time, recipe
+  committed with the asset. **No 3D in this fleet** (no Meshy/Blender/Unity). Complex code →
+  `builder`. Light code/recon → `scout`. **Models and efforts are pinned in `.claude/agents/`
+  frontmatter — never restate them here.**
+- **Budget:** one pass + one check + a written receipt per lane, then stop — lanes never self-iterate
+  (the judges judge), and their answer back is that receipt, never raw output.
+- Plans are challenged by `wave-check` **before** briefs go out; design verdicts come from the
+  critics against one reference, with `design-director` ruling where they disagree. Never
+  self-judge. UI claims are verified with a real-browser capture at the run doc's viewports.
+- The lead keeps the build gates, the shared dev instance (single-instance: wait, never kill), the
+  pushes and the deploys — and verifies a deploy against the served artifact.
+- Jev (TypeSafe) is **advisory**: triage, evidence filtering and the tool-call gate — never the
+  design critic, never a verdict, never who does the work.
+- Full policy: `docs/agents/orchestration.md`; how a run works: `docs/agents/gauntlet-core.md`.
+<!-- app-orchestration:end -->
+

@@ -46,3 +46,15 @@ exits 13, so re-read instead of retrying.
 - Never write a credential, token or secret into a bead — the store is versioned and pushed.
 - `bd` is pinned (v1.3.0, `~/bin/bd`) — never upgrade it mid-program: the store carries a Dolt schema
   version and an older binary refuses a newer store.
+
+<!-- app-orchestration:begin (managed by ~/bin/game-orchestration --fleet app — do not edit by hand) -->
+## Orchestration policy (binding)
+
+Read `docs/agents/orchestration.md` and follow it: orchestrate, don't implement (an interactive,
+non-run session may make one small single-file, non-design, non-core edit); dispatch the repo roster
+in `.claude/agents/` by name with no model/effort override; all design work goes to `design`; every
+raster asset goes to the Codex image lane (`astra`, High) the design lane drives; no 3D in this
+fleet; no agent grades its own work. Commit by explicit path, never `git add -A`. Jev (TypeSafe) is
+advisory only — never the design critic, never a verdict.
+<!-- app-orchestration:end -->
+
