@@ -74,7 +74,7 @@ class SetupServer : Dispatcher() {
             val bouncing = configured && healthzBouncing > 0
             if (bouncing) healthzBouncing -= 1
             return if (!configured || bouncing) json(200, """{"ok":true,"setupRequired":true,"runtime":"native"}""")
-            else json(200, """{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129,"pairing":true}""")
+            else json(200, """{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129,"pairing":true}""")
         }
         if (!path.startsWith("/api/setup/")) return json(503, """{"error":"Setup required.","setupRequired":true}""")
         if (configured) return json(401, """{"error":"Authentication required."}""")

@@ -102,7 +102,7 @@ class SetupDetectionTest {
     }
 
     @Test fun aServerThatPredatesPairingIsStillNotSupported() = runBlocking {
-        healthz = """{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}"""
+        healthz = """{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129}"""
         assertTrue(client.pair(base, "ABCD-EFGH", "Pixel") is PairResult.NotSupported)
     }
 
@@ -113,6 +113,6 @@ class SetupDetectionTest {
 
     private companion object {
         const val SETUP_HEALTH = """{"ok":true,"setupRequired":true,"runtime":"native"}"""
-        const val NORMAL_HEALTH = """{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129,"pairing":true}"""
+        const val NORMAL_HEALTH = """{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129,"pairing":true}"""
     }
 }

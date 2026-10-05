@@ -53,7 +53,7 @@ class LoginSetupRedirectTest {
                     "/healthz" -> if (setupMode.get()) {
                         MockResponse().setBody("""{"ok":true,"setupRequired":true,"runtime":"native"}""")
                     } else {
-                        MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129,"pairing":true}""")
+                        MockResponse().setBody("""{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129,"pairing":true}""")
                     }
                     "/api/auth/session" -> if (setupMode.get()) {
                         MockResponse().setResponseCode(503).setBody("""{"error":"Setup required.","setupRequired":true}""")
