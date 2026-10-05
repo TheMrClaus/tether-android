@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.os.Build
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -40,7 +42,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.testTag
@@ -52,11 +58,17 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -74,14 +86,17 @@ import com.tether.app.client.PairResult
 import com.tether.app.client.SignInRequirements
 import com.tether.app.client.SignedOutReason
 import com.tether.app.client.TetherClient
-import com.tether.app.ui.components.BrandMark
 import com.tether.app.ui.components.KeyClasses
+import com.tether.app.ui.components.KeyState
 import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.TetherInputWell
 import com.tether.app.ui.components.TetherKey
+import com.tether.app.ui.components.currentLayoutClass
+import com.tether.app.ui.components.resolveKey
 import com.tether.app.ui.components.Wordmark
 import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.theme.CssLineHeight
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
@@ -89,6 +104,7 @@ import com.tether.app.ui.theme.TetherWeights
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
  * Upper bound on the code field. The code itself is 8 characters, but a pasted
@@ -113,6 +129,14 @@ object LoginTags {
 
     /** The brand panel's "Private by design" line (studio-login.tsx `.brandFooter`). */
     const val BrandFooter = "login-brand-footer"
+
+    /** studio-login.tsx `.brandPanel` and `.formPanel`, the wide layout's two columns (ta-coik.50). */
+    const val BrandPanel = "login-brand-panel"
+    const val FormPanel = "login-form-panel"
+
+    /** `.welcomeMark` (the form's brand mark in its 46px box) and `.formFooter`. */
+    const val WelcomeMark = "login-welcome-mark"
+    const val FormFooter = "login-form-footer"
 }
 
 /**
@@ -717,51 +741,96 @@ private fun Modifier.politeLiveRegion(): Modifier = semantics { liveRegion = Liv
 // Studio (studio-login.tsx): brand panel + welcome form
 // ---------------------------------------------------------------------------
 
+/**
+ * studio-login.module.css literals (tether 90fbb9f). "The brand panel is always cobalt, whichever
+ * lighting the form panel wears": the same in both skins, and not tokens on the web either.
+ */
+private object StudioLoginColors {
+    /** `.brandPanel { background: #2548b8; color: #fff }`. */
+    val Cobalt = Color(0xFF2548B8)
+
+    /** `.brandPeriod`. */
+    val Period = Color(0xFFB7C8FF)
+
+    /** `.brandStory > p`, `.connection figcaption`, `.brandFooter`. */
+    val Story = Color(0xFFD3DFFF)
+
+    /** `.connectionLine`. */
+    val Line = Color(0xFF7C97E3)
+
+    /** `.connectionHub { border: 1px solid #90a8ed }`. */
+    val HubEdge = Color(0xFF90A8ED)
+
+    /** `.devices` (and `.providers > span`, which the brand tiles outrank). */
+    val Device = Color(0xFFE4ECFF)
+}
+
+/** A text rule of the sign-in CSS in the UI face: [px] at 1px = 1sp, a unitless line-height as em, CSS's centred line box. */
+private fun loginText(px: Float, weight: Int = 400, trackingEm: Float = 0f, lineHeight: Float? = null): TextStyle = TextStyle(
+    fontFamily = Manrope,
+    fontSize = px.sp,
+    fontWeight = FontWeight(weight),
+    letterSpacing = if (trackingEm == 0f) TextUnit.Unspecified else trackingEm.em,
+    lineHeight = lineHeight?.em ?: TextUnit.Unspecified,
+    lineHeightStyle = CssLineHeight,
+)
+
 @Composable
 private fun StudioLogin(ui: LoginUi) {
     val t = LocalTetherTokens.current
-    BoxWithConstraints(Modifier.fillMaxSize().background(t.mineral)) {
+    // `.shell` and `.formPanel`: the canvas colour, --graphite.
+    BoxWithConstraints(Modifier.fillMaxSize().background(t.graphite)) {
         // studio-login.module.css `@media (max-width: 700px)` stacks the panels (and drops the
         // connection figure); above 700px they sit side by side, as here.
         val wide = maxWidth > 700.dp
         val narrowViewport = maxWidth <= 900.dp
         if (wide) {
+            // `.brandPanel { padding: clamp(32px, 4.8vw, 76px) }` and `.brandStory h2 { font-size:
+            // clamp(44px, 4.5vw, 64px) }`; 36px and 48px at most 900px.
+            val brandPadding = if (narrowViewport) 36.dp else (maxWidth * 0.048f).coerceIn(32.dp, 76.dp)
+            val storySize = if (narrowViewport) 48f else (maxWidth.value * 0.045f).coerceIn(44f, 64f)
             // `.shell { overflow: auto }`: the two-column page scrolls as a whole, not one panel inside it.
             BoxWithConstraints(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
                 StudioColumns(
                     viewport = maxHeight,
                     modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                    brand = { StudioBrandPanel(Modifier.background(t.mineralDeep).padding(40.dp), narrowViewport = narrowViewport) },
-                    form = {
-                        Box(contentAlignment = Alignment.Center) {
-                            StudioForm(ui, Modifier.padding(40.dp))
-                        }
+                    brand = {
+                        StudioBrandPanel(
+                            Modifier.background(StudioLoginColors.Cobalt).padding(brandPadding),
+                            narrowViewport = narrowViewport,
+                            storySize = storySize,
+                        )
                     },
+                    form = { StudioFormPanel(ui, narrowViewport) },
                 )
             }
         } else {
             Column(
                 Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState()),
             ) {
-                StudioBrandPanel(Modifier.fillMaxWidth().background(t.mineralDeep).padding(horizontal = 24.dp, vertical = 20.dp), compact = true)
-                StudioForm(ui, Modifier.padding(horizontal = 24.dp, vertical = 24.dp))
+                // `@media (max-width: 700px)`: `.brandPanel { padding: 28px }`, `.formPanel { padding: 38px 28px 26px }`.
+                StudioBrandPanel(Modifier.fillMaxWidth().background(StudioLoginColors.Cobalt).padding(28.dp), compact = true)
+                StudioForm(ui, Modifier.padding(start = 28.dp, end = 28.dp, top = 38.dp, bottom = 26.dp), compact = true)
             }
         }
     }
 }
 
+/** `.shell { grid-template-columns: minmax(0, 0.96fr) minmax(0, 1.04fr) }`: the brand column's share of the width. */
+internal fun studioBrandColumnWidth(width: Int): Int = (width * 0.48f).roundToInt()
+
 /**
- * studio-login.module.css `.shell` (a two-column grid, `overflow: auto`) over `.brandPanel` and
- * `.formPanel` (each `min-height: 100dvh`): the columns split the width, both at least [viewport]
- * tall and both as tall as the taller (the grid row stretches them), so the page grows and scrolls
- * when either panel's content does not fit. The form is measured once, at least as tall as the
- * brand panel's own content; the brand panel then takes that height.
+ * studio-login.module.css `.shell` (a two-column grid, 0.96fr / 1.04fr, `overflow: auto`) over
+ * `.brandPanel` and `.formPanel` (each `min-height: 100dvh`): the columns split the width, both at
+ * least [viewport] tall and both as tall as the taller (the grid row stretches them), so the page
+ * grows and scrolls when either panel's content does not fit. The form is measured once, at least
+ * as tall as the brand panel's own content; the brand panel then takes that height.
  */
 @Composable
 private fun StudioColumns(viewport: Dp, modifier: Modifier, brand: @Composable () -> Unit, form: @Composable () -> Unit) {
     Layout(contents = listOf(brand, form), modifier = modifier) { (brandSlot, formSlot), constraints ->
         val width = constraints.maxWidth
-        val left = width / 2
+        val left = studioBrandColumnWidth(width)
         val right = width - left
         val brandPanel = brandSlot.single()
         val floor = maxOf(viewport.roundToPx(), brandPanel.maxIntrinsicHeight(left))
@@ -775,181 +844,284 @@ private fun StudioColumns(viewport: Dp, modifier: Modifier, brand: @Composable (
     }
 }
 
+/**
+ * Studio's `.brand-mark` (studio.css 288-290): a 1.85rem tile of radius 0.58rem, no border, two
+ * white 0.19x0.72rem bars of radius 3px, `rotate(32deg) translateY(-0.22rem)` and `translateY(0.32rem)`,
+ * both opaque. [tile] is the face: --accent by default (the form's welcome mark), transparent in the
+ * brand panel (`.brandPanel .wordmark .brand-mark`, `.connectionHub .brand-mark`: `background:
+ * transparent`, bars `#fff`; their `border-color` draws nothing on Studio's `border: 0`).
+ */
 @Composable
-private fun StudioBrandPanel(modifier: Modifier, compact: Boolean = false, narrowViewport: Boolean = false) {
-    val t = LocalTetherTokens.current
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 18.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.semantics { contentDescription = "Tether" },
-        ) {
-            BrandMark()
-            Text("Tether", color = t.white, fontFamily = Manrope, fontWeight = TetherWeights.heading, fontSize = 17.sp)
-            Text(".", color = t.violet, fontFamily = Manrope, fontWeight = TetherWeights.heading, fontSize = 17.sp)
-        }
-        Text(
-            text = "Good work.\nWithin reach.",
-            color = t.white,
-            fontFamily = Manrope,
-            fontWeight = TetherWeights.heading,
-            fontSize = if (compact) 22.sp else 34.sp,
-        )
-        if (!compact) {
-            Text(
-                text = "Your agents, on your machine.\nOne quiet place to keep them moving,\nfrom any screen.",
-                color = t.muted,
-                fontFamily = Manrope,
-                fontWeight = TetherWeights.body,
-                fontSize = 14.sp,
-            )
-            ConnectionPath(narrowViewport)
-            MonoText("Your agents · Your workspace · Anywhere", t.faint, fontSize = 11.sp)
-        }
-        Row(Modifier.testTag(LoginTags.BrandFooter), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(TetherIcons.LockKeyhole, contentDescription = null, tint = t.faint, modifier = Modifier.size(14.dp))
-            Text("Private by design. Self-hosted by you.", color = t.faint, fontFamily = Manrope, fontSize = 12.sp)
+private fun StudioBrandMark(tile: Color, modifier: Modifier = Modifier, size: Dp = 29.6.dp) {
+    Canvas(modifier.size(size)) {
+        if (tile.alpha > 0f) drawRoundRect(tile, cornerRadius = CornerRadius(9.28.dp.toPx()))
+        val w = 3.04.dp.toPx()
+        val h = 11.52.dp.toPx()
+        val radius = CornerRadius(minOf(3.dp.toPx(), w / 2f))
+        val c = center
+        rotate(32f, c) {
+            for (d in listOf(-3.52.dp.toPx(), 5.12.dp.toPx())) {
+                drawRoundRect(Color.White, Offset(c.x - w / 2f, c.y - h / 2f + d), Size(w, h), radius)
+            }
         }
     }
 }
 
 /**
- * studio-login.tsx:71-79 `.connectionPath` (studio-login.module.css 46-54, 97-105): the three harness
- * marks in their brand tiles (globals.css 11204-11224 outranks `.providers > span`: 34x40, 27 wide at
- * most 900px), a line, the hub holding the brand mark, a line, the laptop and phone. The web hides it
- * at most 700px, where the compact panel takes over here too. The figure's label is the web's `aria-label`.
+ * `.brandPanel`: wordmark, story and footer spread down the panel (`justify-content: space-between`,
+ * so in a tall window the footer sits at its foot). The compact panel (`@media (max-width: 700px)`)
+ * keeps the wordmark (23px) and the heading (36px / 1.09) only.
  */
 @Composable
-private fun ConnectionPath(narrowViewport: Boolean) {
-    val t = LocalTetherTokens.current
-    val lineGap = if (narrowViewport) 6.dp else 10.dp
-    Row(
-        Modifier
-            .widthIn(max = 365.dp)
-            .fillMaxWidth()
-            .padding(vertical = 8.dp)
-            .clearAndSetSemantics {
-                contentDescription = "Your coding agents connect through Tether to your laptop and phone"
-                testTag = LoginTags.Connection
-            },
-        verticalAlignment = Alignment.CenterVertically,
+private fun StudioBrandPanel(modifier: Modifier, compact: Boolean = false, narrowViewport: Boolean = false, storySize: Float = 48f) {
+    Column(
+        Modifier.testTag(LoginTags.BrandPanel).then(modifier),
+        verticalArrangement = if (compact) Arrangement.Top else Arrangement.SpaceBetween,
     ) {
-        for (provider in listOf("claude", "codex", "opencode")) {
-            ProviderTile(provider, Modifier.size(width = if (narrowViewport) 27.dp else 34.dp, height = 40.dp), color = t.white, markSize = 22.dp)
-        }
-        Box(Modifier.weight(1f).widthIn(min = 16.dp).padding(horizontal = lineGap).height(1.dp).background(t.lineStrong))
-        Box(
-            Modifier.size(if (narrowViewport) 50.dp else 58.dp).border(1.dp, t.lineStrong, RoundedCornerShape(14.dp)),
-            contentAlignment = Alignment.Center,
+        // `.wordmark`: 26px, 750, -0.035em, line-height 1, an 11px gap; "Tether" then the period, no gap.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+            modifier = Modifier.semantics { contentDescription = "Tether" },
         ) {
-            // `.connectionHub .brand-mark` (studio-login.module.css:51): 29px; the outer size wins over
-            // BrandMark's own 18.4dp, which stays as it is everywhere else.
-            BrandMark(Modifier.size(29.dp))
+            StudioBrandMark(Color.Transparent)
+            Text(
+                buildAnnotatedString {
+                    append("Tether")
+                    withStyle(SpanStyle(color = StudioLoginColors.Period)) { append(".") }
+                },
+                color = Color.White,
+                style = loginText(if (compact) 23f else 26f, 750, trackingEm = -0.035f, lineHeight = 1f),
+            )
         }
-        Box(Modifier.weight(1f).widthIn(min = 16.dp).padding(horizontal = lineGap).height(1.dp).background(t.lineStrong))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            Icon(TetherIcons.Laptop, contentDescription = null, tint = t.muted, modifier = Modifier.size(26.dp))
-            Icon(TetherIcons.Smartphone, contentDescription = null, tint = t.muted, modifier = Modifier.size(21.dp))
+        // `.brandStory { padding: 72px 0 64px }` (30px 0 4px compact).
+        Column(Modifier.padding(top = if (compact) 30.dp else 72.dp, bottom = if (compact) 4.dp else 64.dp)) {
+            Text(
+                text = "Good work.\nWithin reach.",
+                color = Color.White,
+                style = loginText(if (compact) 36f else storySize, 650, trackingEm = -0.04f, lineHeight = if (compact) 1.09f else 1.07f),
+            )
+            if (!compact) {
+                Spacer(Modifier.height(26.dp))
+                Text(
+                    text = "Your agents, on your machine.\nOne quiet place to keep them moving,\nfrom any screen.",
+                    color = StudioLoginColors.Story,
+                    style = loginText(16f, lineHeight = 1.75f),
+                )
+                ConnectionFigure(narrowViewport)
+            }
+        }
+        if (!compact) {
+            // `.brandFooter`: #d3dfff, 12px / 1.6, a 9px gap after the 14px lock.
+            Row(Modifier.testTag(LoginTags.BrandFooter), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Icon(TetherIcons.LockKeyhole, contentDescription = null, tint = StudioLoginColors.Story, modifier = Modifier.size(14.dp))
+                Text("Private by design. Self-hosted by you.", color = StudioLoginColors.Story, style = loginText(12f, lineHeight = 1.6f))
+            }
         }
     }
 }
 
+/**
+ * studio-login.tsx:71-80 `.connection` (studio-login.module.css 46-55, 97-105): 64px below the story
+ * (48px at most 900px), at most 365px wide. The path: the three harness marks in their brand tiles
+ * (globals.css 11204-11224 outranks `.providers > span`: 34x40, 27 wide at most 900px), a #7c97e3
+ * line, the hub (58px, 50 at most 900px, a #90a8ed edge) holding the 29px brand mark, a line, the
+ * laptop and phone in #e4ecff. Under it the caption's three words spread apart (11px / 1.4, 10px at
+ * most 900px, 17px below). The web hides it at most 700px, where the compact panel takes over here
+ * too. The figure's label is the web's `aria-label`.
+ */
 @Composable
-private fun StudioForm(ui: LoginUi, modifier: Modifier) {
+private fun ConnectionFigure(narrowViewport: Boolean) {
+    val lineGap = if (narrowViewport) 6.dp else 10.dp
+    Column(Modifier.padding(top = if (narrowViewport) 48.dp else 64.dp).widthIn(max = 365.dp).fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clearAndSetSemantics {
+                    contentDescription = "Your coding agents connect through Tether to your laptop and phone"
+                    testTag = LoginTags.Connection
+                },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            for (provider in listOf("claude", "codex", "opencode")) {
+                ProviderTile(provider, Modifier.size(width = if (narrowViewport) 27.dp else 34.dp, height = 40.dp), color = Color.White, markSize = 22.dp)
+            }
+            Box(Modifier.weight(1f).widthIn(min = 16.dp).padding(horizontal = lineGap).height(1.dp).background(StudioLoginColors.Line))
+            Box(
+                Modifier.size(if (narrowViewport) 50.dp else 58.dp).border(1.dp, StudioLoginColors.HubEdge, RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                // `.connectionHub .brand-mark` (studio-login.module.css:53): 29px.
+                StudioBrandMark(Color.Transparent, size = 29.dp)
+            }
+            Box(Modifier.weight(1f).widthIn(min = 16.dp).padding(horizontal = lineGap).height(1.dp).background(StudioLoginColors.Line))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Icon(TetherIcons.Laptop, contentDescription = null, tint = StudioLoginColors.Device, modifier = Modifier.size(26.dp))
+                Icon(TetherIcons.Smartphone, contentDescription = null, tint = StudioLoginColors.Device, modifier = Modifier.size(21.dp))
+            }
+        }
+        val caption = loginText(if (narrowViewport) 10f else 11f, lineHeight = 1.4f)
+        Row(Modifier.fillMaxWidth().padding(top = 17.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Your agents", color = StudioLoginColors.Story, style = caption)
+            Text("Your workspace", color = StudioLoginColors.Story, style = caption, modifier = Modifier.padding(start = 4.dp))
+            Text("Anywhere", color = StudioLoginColors.Story, style = caption)
+        }
+    }
+}
+
+/**
+ * `.formPanel`: the form centred in the column (`padding: 80px 48px`, 64px 32px at most 900px), and
+ * `.formFooter` held 28px off the panel's foot (`position: absolute; bottom: 28px`), centred.
+ */
+@Composable
+private fun StudioFormPanel(ui: LoginUi, narrowViewport: Boolean) {
     val t = LocalTetherTokens.current
+    Box(Modifier.testTag(LoginTags.FormPanel), contentAlignment = Alignment.Center) {
+        StudioForm(ui, Modifier.padding(horizontal = if (narrowViewport) 32.dp else 48.dp, vertical = if (narrowViewport) 64.dp else 80.dp))
+        Text(
+            "One private console. Every agent.",
+            color = t.faint,
+            style = loginText(11f),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp).testTag(LoginTags.FormFooter),
+        )
+    }
+}
+
+/** The primary key's legend colour, for a trailing icon drawn beside it. */
+@Composable
+private fun primaryInk(enabled: Boolean): Color =
+    resolveKey(LocalTetherTokens.current, KeyClasses.ButtonPrimary, if (enabled) KeyState.Rest else KeyState.Disabled, layout = currentLayoutClass()).ink
+
+/** `.submitButton`: at least 49px, `padding: 10px 16px`, the legend left and the 17px arrow right. */
+@Composable
+private fun StudioSubmit(label: String, ui: LoginUi, modifier: Modifier = Modifier) {
+    val ink = primaryInk(!ui.busy)
+    TetherKey(
+        onClick = ui.onSubmit,
+        modifier = modifier.fillMaxWidth().padding(top = 4.dp),
+        classes = KeyClasses.ButtonPrimary,
+        label = label,
+        enabled = !ui.busy,
+        minHeight = 49.dp,
+        contentArrangement = Arrangement.SpaceBetween,
+        contentPadding = 16.dp,
+        trailing = { Icon(TetherIcons.ArrowRight, contentDescription = null, tint = ink, modifier = Modifier.size(17.dp)) },
+    )
+}
+
+@Composable
+private fun StudioForm(ui: LoginUi, modifier: Modifier, compact: Boolean = false) {
+    val t = LocalTetherTokens.current
+    // `.feedback[data-tone]`: busy --accent, success --running, error --danger, a notice in .feedback's --muted.
     val (feedback, feedbackColor) = when (ui.phase) {
-        LoginPhase.Checking -> "Checking sign-in…" to t.violet
+        LoginPhase.Checking -> "Checking sign-in…" to t.accent
         LoginPhase.Verifying ->
-            (if (ui.mode == AuthMode.Pairing) "Pairing this device…" else "Checking your password…") to t.violet
-        LoginPhase.VerifyingPasskey -> "Waiting for your passkey…" to t.violet
+            (if (ui.mode == AuthMode.Pairing) "Pairing this device…" else "Checking your password…") to t.accent
+        LoginPhase.VerifyingPasskey -> "Waiting for your passkey…" to t.accent
         LoginPhase.Success -> "You’re in. Opening your workspace…" to t.running
         LoginPhase.Error -> ui.error.orEmpty() to t.danger
-        LoginPhase.Ready -> ui.notice.orEmpty() to t.warning
+        LoginPhase.Ready -> ui.notice.orEmpty() to t.muted
     }
-    Column(modifier.widthIn(max = 380.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        BrandMark()
+    Column(modifier.widthIn(max = 380.dp).fillMaxWidth()) {
+        if (!compact) {
+            // `.welcomeMark`: a 46px box, 12px radius, 1px --line edge on --mineral, Studio's accent brand mark
+            // inside, 32px above the heading; hidden at most 700px.
+            val box = RoundedCornerShape(12.dp)
+            Box(
+                Modifier.testTag(LoginTags.WelcomeMark).size(46.dp).background(t.mineral, box).border(1.dp, t.line, box),
+                contentAlignment = Alignment.Center,
+            ) { StudioBrandMark(t.accent) }
+            Spacer(Modifier.height(32.dp))
+        }
+        // `.heading`: --white, 34px / 1.18, 700, -0.035em (28px compact).
         Text(
             text = "Welcome back.",
             color = t.white,
-            fontFamily = Manrope,
-            fontWeight = TetherWeights.heading,
-            fontSize = 24.sp,
+            style = loginText(if (compact) 28f else 34f, 700, trackingEm = -0.035f, lineHeight = 1.18f),
             modifier = Modifier.semantics { heading() },
         )
-        Text("Your workspace is right where you left it.", color = t.muted, fontFamily = Manrope, fontSize = 14.sp)
-        if (ui.probing) Text("Connecting to your workspace…", color = t.faint, fontFamily = Manrope, fontSize = 12.5.sp)
+        // `.subheading`: --muted, 14px / 1.6, `margin: 12px 0 34px` (13px, 10px 0 28px compact).
+        Spacer(Modifier.height(if (compact) 10.dp else 12.dp))
+        Text("Your workspace is right where you left it.", color = t.muted, style = loginText(if (compact) 13f else 14f, lineHeight = 1.6f))
+        Spacer(Modifier.height(if (compact) 28.dp else 34.dp))
 
-        StudioLabel("Server")
-        ServerUrlField(ui, Modifier.fillMaxWidth())
-        ModeSwitch(ui, passwordLabel = "Password", pairingLabel = "Pairing code")
-        when (ui.mode) {
-            AuthMode.Password -> if (ui.passwordEnabled) {
-                StudioPasskey(ui)
-                if (ui.usernameShown) {
-                    StudioLabel(if (ui.usernameOptional) "Username (optional)" else "Username")
-                    UsernameField(ui, Modifier.fillMaxWidth())
-                    if (ui.usernameOptional) Text(USERNAME_OPTIONAL_HINT, color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
+        // `.form { gap: 20px }`, each `.field` a label over its input 9px apart.
+        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            if (ui.probing) Text("Connecting to your workspace…", color = t.muted, style = loginText(13f))
+            StudioField("Server") { ServerUrlField(ui, Modifier.fillMaxWidth()) }
+            ModeSwitch(ui, passwordLabel = "Password", pairingLabel = "Pairing code")
+            when (ui.mode) {
+                AuthMode.Password -> if (ui.passwordEnabled) {
+                    StudioPasskey(ui)
+                    if (ui.usernameShown) {
+                        StudioField(if (ui.usernameOptional) "Username (optional)" else "Username") {
+                            UsernameField(ui, Modifier.fillMaxWidth())
+                            if (ui.usernameOptional) Text(USERNAME_OPTIONAL_HINT, color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
+                        }
+                    }
+                    StudioField("Password") { PasswordField(ui, Modifier.fillMaxWidth()) }
+                    StudioSubmit(
+                        label = when (ui.phase) {
+                            LoginPhase.Checking -> "Checking sign-in…"
+                            LoginPhase.Verifying -> "Opening workspace…"
+                            else -> "Open workspace"
+                        },
+                        ui = ui,
+                        modifier = Modifier.semantics { contentDescription = "Unlock Tether" },
+                    )
+                } else {
+                    StudioPasskey(ui)
+                    Text(
+                        "Password sign-in is turned off for this workspace. Pair this device with a code instead.",
+                        color = t.muted,
+                        style = loginText(13f, lineHeight = 1.7f),
+                    )
                 }
-                StudioLabel("Password")
-                PasswordField(ui, Modifier.fillMaxWidth())
-                TetherKey(
-                    onClick = ui.onSubmit,
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Unlock Tether" },
-                    classes = KeyClasses.ButtonPrimary,
-                    label = when (ui.phase) {
-                        LoginPhase.Checking -> "Checking sign-in…"
-                        LoginPhase.Verifying -> "Opening workspace…"
-                        else -> "Open workspace"
-                    },
-                    icon = TetherIcons.ArrowRight,
-                    enabled = !ui.busy,
-                )
-            } else {
-                StudioPasskey(ui)
-                Text(
-                    "Password sign-in is turned off for this workspace. Pair this device with a code instead.",
-                    color = t.muted,
-                    fontFamily = Manrope,
-                    fontSize = 13.sp,
-                )
-            }
-            AuthMode.Pairing -> {
-                // ta-coik.1: the passkey on this path too (the web offers it wherever you sign in).
-                StudioPasskey(ui)
-                StudioLabel("Pairing code")
-                CodeField(ui, Modifier.fillMaxWidth())
-                Text(PAIRING_HELP, color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
-                TetherKey(
-                    onClick = ui.onSubmit,
-                    modifier = Modifier.fillMaxWidth(),
-                    classes = KeyClasses.ButtonPrimary,
-                    label = if (ui.phase == LoginPhase.Verifying) "Pairing…" else "Pair this device",
-                    icon = TetherIcons.ArrowRight,
-                    enabled = !ui.busy,
-                )
+                AuthMode.Pairing -> {
+                    // ta-coik.1: the passkey on this path too (the web offers it wherever you sign in).
+                    StudioPasskey(ui)
+                    StudioField("Pairing code") {
+                        CodeField(ui, Modifier.fillMaxWidth())
+                        Text(PAIRING_HELP, color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
+                    }
+                    StudioSubmit(label = if (ui.phase == LoginPhase.Verifying) "Pairing…" else "Pair this device", ui = ui)
+                }
             }
         }
-        if (feedback.isNotEmpty()) {
-            Text(
-                feedback,
-                color = feedbackColor,
-                fontFamily = Manrope,
-                fontWeight = TetherWeights.label,
-                fontSize = 12.8.sp,
-                modifier = Modifier.politeLiveRegion(),
-            )
+
+        // `.feedback`: always holds its line (min-height 20px), `margin: 15px 0 22px` (18px below compact), 12px / 1.6.
+        Spacer(Modifier.height(15.dp))
+        Box(Modifier.heightIn(min = 20.dp)) {
+            if (feedback.isNotEmpty()) {
+                Text(feedback, color = feedbackColor, style = loginText(12f, lineHeight = 1.6f), modifier = Modifier.politeLiveRegion())
+            }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(TetherIcons.LockKeyhole, contentDescription = null, tint = t.faint, modifier = Modifier.size(15.dp))
-            Text("Your private workspace", color = t.muted, fontFamily = Manrope, fontSize = 12.5.sp)
-            if (ui.hostname.isNotEmpty()) MonoText(ui.hostname, t.faint, fontSize = 11.5.sp)
+        Spacer(Modifier.height(if (compact) 18.dp else 22.dp))
+
+        // `.workspaceNote`: a --line rule, 24px (20px compact) above the 15px lock and its two lines:
+        // "Your private workspace" in --muted, the host below it in --faint, 12px / 1.6.
+        Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+        Row(Modifier.padding(top = if (compact) 20.dp else 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(TetherIcons.LockKeyhole, contentDescription = null, tint = t.muted, modifier = Modifier.padding(top = 2.dp).size(15.dp))
+            Column {
+                Text("Your private workspace", color = t.muted, style = loginText(12f, lineHeight = 1.6f))
+                if (ui.hostname.isNotEmpty()) {
+                    Text(ui.hostname, color = t.faint, style = loginText(12f, lineHeight = 1.6f), modifier = Modifier.padding(top = 3.dp))
+                }
+            }
         }
-        Spacer(Modifier.height(8.dp))
-        Text("One private console. Every agent.", color = t.faint, fontFamily = Manrope, fontSize = 12.sp)
+        if (compact) {
+            // `.formFooter { position: static; margin-top: 40px }` at most 700px.
+            Spacer(Modifier.height(40.dp))
+            Text("One private console. Every agent.", color = t.faint, style = loginText(11f), modifier = Modifier.testTag(LoginTags.FormFooter))
+        }
     }
 }
 
-/** studio-login.tsx's passkey key, above the password form, with its "or" separator (T10.5). */
+/**
+ * studio-login.tsx's passkey key (`.promptButton`: at least 49px, the 19px fingerprint 10px before the
+ * legend), above the password form, with its "or" separator (T10.5).
+ */
 @Composable
 private fun StudioPasskey(ui: LoginUi) {
     val t = LocalTetherTokens.current
@@ -964,7 +1136,11 @@ private fun StudioPasskey(ui: LoginUi) {
         classes = KeyClasses.ButtonPrimary,
         label = if (ui.phase == LoginPhase.VerifyingPasskey) "Waiting for your passkey…" else "Sign in with a passkey",
         icon = TetherIcons.Fingerprint,
+        iconSize = 19.dp,
         enabled = !ui.busy,
+        minHeight = 49.dp,
+        contentArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+        contentPadding = 16.dp,
     )
     // studio-login.tsx:112's separator, and the app's own for its Pairing path (ta-coik.1).
     val or = when {
@@ -973,21 +1149,27 @@ private fun StudioPasskey(ui: LoginUi) {
         else -> null
     }
     if (or != null) {
-        Text(
-            or,
-            color = t.faint,
-            fontFamily = Manrope,
-            fontSize = 12.5.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().testTag(LoginTags.PasskeyOr),
-        )
+        // `.or`: --muted 11px between two --line rules, 14px apart, `margin: 24px 0` (the form's 20px gap plus 4).
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag(LoginTags.PasskeyOr),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(Modifier.weight(1f).height(1.dp).background(t.line))
+            Text(or, color = t.muted, style = loginText(11f), textAlign = TextAlign.Center)
+            Box(Modifier.weight(1f).height(1.dp).background(t.line))
+        }
     }
 }
 
+/** `.field`: the label (`.fieldLabel`: --ink, 13px, 650) 9px over its input, and anything under it. */
 @Composable
-private fun StudioLabel(text: String) {
+private fun StudioField(label: String, content: @Composable () -> Unit) {
     val t = LocalTetherTokens.current
-    Text(text, color = t.muted, fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = 12.5.sp)
+    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        Text(label, color = t.ink, style = loginText(13f, 650))
+        content()
+    }
 }
 
 // ---------------------------------------------------------------------------

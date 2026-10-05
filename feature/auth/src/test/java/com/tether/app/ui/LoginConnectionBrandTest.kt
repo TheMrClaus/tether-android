@@ -142,3 +142,68 @@ class LoginWideShortWindowTest : LoginConnectionBase() {
         footer.assertIsDisplayed()
     }
 }
+
+/**
+ * ta-coik.50: studio-login.module.css `.shell { grid-template-columns: minmax(0, 0.96fr) minmax(0, 1.04fr) }`
+ * splits a 1280dp window 614 / 666, and the form's brand mark sits in its 46px `.welcomeMark` box.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi")
+class LoginStudioColumnsTest : LoginConnectionBase() {
+    @Test
+    fun theColumnsSplitTheWidth096To104() {
+        launch()
+        rule.waitForIdle()
+        val brand = rule.onNodeWithTag(LoginTags.BrandPanel, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val form = rule.onNodeWithTag(LoginTags.FormPanel, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertEquals(614f, (brand.right - brand.left).value, 0.5f)
+        assertEquals(666f, (form.right - form.left).value, 0.5f)
+        assertEquals(brand.right.value, form.left.value, 0.5f)
+        assertEquals("both panels as tall as the window", 800f, (brand.bottom - brand.top).value, 0.5f)
+        assertEquals(800f, (form.bottom - form.top).value, 0.5f)
+    }
+
+    @Test
+    fun theWelcomeMarkIsA46dpBox() {
+        launch()
+        rule.waitForIdle()
+        val mark = rule.onNodeWithTag(LoginTags.WelcomeMark, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertEquals(46f, (mark.right - mark.left).value, 0.01f)
+        assertEquals(46f, (mark.bottom - mark.top).value, 0.01f)
+    }
+}
+
+/**
+ * ta-coik.50: `.brandPanel { justify-content: space-between }` and `.formFooter { bottom: 28px }`: in a
+ * window taller than the content, the brand footer sits at the panel's foot (inside its 61dp padding,
+ * clamp(32px, 4.8vw, 76px) at 1280) and the form footer 28dp off the form panel's, not under the content.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h1600dp-mdpi")
+class LoginStudioTallWindowTest : LoginConnectionBase() {
+    @Test
+    fun theFootersSitAtThePanelsFeet() {
+        launch()
+        rule.waitForIdle()
+        val panel = rule.onNodeWithTag(LoginTags.BrandPanel, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertEquals(1600f, panel.bottom.value, 0.5f)
+        val footer = rule.onNodeWithTag(LoginTags.BrandFooter, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertEquals("the brand footer at the panel's foot, inside its padding", panel.bottom.value - 61.44f, footer.bottom.value, 1f)
+        val formFooter = rule.onNodeWithTag(LoginTags.FormFooter, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertEquals("the form footer 28dp off the form panel's foot", panel.bottom.value - 28f, formFooter.bottom.value, 0.5f)
+    }
+}
+
+/** ta-coik.50: `@media (max-width: 700px)` hides `.welcomeMark` and `.brandFooter`; the form footer follows the note. */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class LoginStudioCompactTest : LoginConnectionBase() {
+    @Test
+    fun theCompactLayoutDropsTheWelcomeMarkAndTheBrandFooter() {
+        launch()
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithTag(LoginTags.WelcomeMark, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        assertTrue(rule.onAllNodesWithTag(LoginTags.BrandFooter, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        assertEquals(1, rule.onAllNodesWithTag(LoginTags.FormFooter, useUnmergedTree = true).fetchSemanticsNodes().size)
+    }
+}
