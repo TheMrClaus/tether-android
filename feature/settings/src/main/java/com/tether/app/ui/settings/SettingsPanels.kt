@@ -192,7 +192,7 @@ private fun DevicesPanel(prefs: UiPrefs, narrow: Boolean, devices: DevicesBindin
             AnnotatedString("Private, generic alerts for approvals, agent questions, and completed turns."),
             narrow,
         ) {
-            PushNotificationsRow(prefs)
+            PushNotificationsRow(prefs, narrow)
         }
         DevicesSecuritySections(devices, narrow)
     }

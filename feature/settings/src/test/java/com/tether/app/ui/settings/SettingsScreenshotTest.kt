@@ -54,6 +54,8 @@ enum class SettingsShot(
     val nodes: NodesShot? = null,
     val devices: DevicesShot? = null,
     val github: GitHubShot? = null,
+    /** T12.2: the push registration's status behind the Devices tab's push row. */
+    val push: com.tether.app.push.PushRegistrationStatus = com.tether.app.push.PushRegistrationStatus.Registered,
 ) {
     General("settings-general", SettingsTab.General),
     Appearance("settings-appearance", SettingsTab.Appearance),
@@ -71,6 +73,8 @@ enum class SettingsShot(
     DevicesPasskeyAdding("settings-devices-passkey-adding", SettingsTab.Devices, devices = DevicesShot.PasskeyAdding),
     DevicesPasskeyDuplicate("settings-devices-passkey-duplicate", SettingsTab.Devices, devices = DevicesShot.PasskeyDuplicate),
     DevicesPasskeyAdded("settings-devices-passkey-added", SettingsTab.Devices, devices = DevicesShot.PasskeyAdded),
+    /** T12.2: the push row stale (the server names another Firebase project): Re-enable. */
+    DevicesPushStale("settings-devices-push-stale", SettingsTab.Devices, devices = DevicesShot.Top, push = com.tether.app.push.PushRegistrationStatus.ProjectChanged),
     Engines("settings-engines", SettingsTab.Engines, accounts = AccountsShot.Loaded),
     EnginesSync("settings-engines-sync", SettingsTab.Engines, accounts = AccountsShot.Sync),
     EnginesLoading("settings-engines-loading", SettingsTab.Engines, accounts = AccountsShot.Loading),
@@ -391,6 +395,8 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
     val stored = runBlocking { store.prefs.preferences.first() }
     val state = SettingsDialogState(shot.tab, GeneralDraft.of(stored))
     mainClock.autoAdvance = false
+    // T12.2: notifications allowed, so the push row shows the registration (not the permission).
+    grantNotificationPermission()
     var focus: androidx.compose.ui.focus.FocusManager? = null
     setContent {
         focus = androidx.compose.ui.platform.LocalFocusManager.current
@@ -411,6 +417,7 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
             nodes = if (shot.nodes != null && nodeActions != null) shot.nodes.binding(nodeActions) else NodesBinding.None,
             devices = devicesController?.let { DevicesBinding(it, now = { DevicesFixtures.NOW }) } ?: DevicesBinding.None,
             github = github?.let { GitHubBinding(it) } ?: GitHubBinding.None,
+            push = androidx.compose.runtime.remember { FakePushRegistration(shot.push) },
         )
     }
     mainClock.advanceTimeBy(600)

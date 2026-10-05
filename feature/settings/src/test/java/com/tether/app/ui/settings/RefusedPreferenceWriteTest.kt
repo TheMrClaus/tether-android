@@ -60,6 +60,7 @@ class RefusedPreferenceWriteTest {
     private fun read() = runBlocking(Dispatchers.IO) { prefs.preferences.first().forServer(null) }
 
     private fun show(tab: SettingsTab) {
+        grantNotificationPermission()
         compose.setContent { SettingsUnderTest(prefs, state) }
         compose.waitUntil(5_000) { state.draft != null }
         compose.onNodeWithTag(SettingsDialogTags.tab(tab)).performClick()
@@ -83,8 +84,9 @@ class RefusedPreferenceWriteTest {
         show(SettingsTab.Devices)
         compose.onNodeWithText("Pinned sessions").performScrollTo().performClick()
         compose.waitUntil(5_000) { runBlocking(Dispatchers.IO) { prefs.pushScope.first() } == PushScope.Pinned }
-        compose.onNodeWithText("ON").performScrollTo().performClick()
-        compose.waitUntil(5_000) { compose.onAllNodesWithText("OFF").fetchSemanticsNodes().isNotEmpty() }
+        // T12.2: the web's Disable (notifications allowed, the registration in place).
+        compose.onNodeWithText("Disable").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Enable").fetchSemanticsNodes().isNotEmpty() }
         assertFalse(runBlocking(Dispatchers.IO) { prefs.pushEnabled.first() })
         assertTrue("both were written, and refused", disk.attempts >= 2)
     }

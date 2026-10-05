@@ -258,4 +258,71 @@ class PushSyncCoordinatorTest {
         SyncHintsSource.Off.optedIn().collect { value = it }
         assertEquals(false, value)
     }
+
+    // ── T12.2: the registration status the Settings push row derives its phase from ──
+
+    @Test
+    fun eachOutcomeIsPublishedAsTheRegistrationStatus() = runBlocking {
+        val cases = listOf(
+            PushRegistrarResult.Success to PushRegistrationStatus.Registered,
+            PushRegistrarResult.ServerUnconfigured to PushRegistrationStatus.ServerUnconfigured,
+            PushRegistrarResult.ProjectChanged to PushRegistrationStatus.ProjectChanged,
+            PushRegistrarResult.Error("Push register returned HTTP 500.") to PushRegistrationStatus.Failed("Push register returned HTTP 500."),
+        )
+        for ((result, expected) in cases) {
+            val status = kotlinx.coroutines.flow.MutableStateFlow<PushRegistrationStatus>(PushRegistrationStatus.Idle)
+            PushSyncCoordinator(RecordingRegistrar(syncResult = result), status).onRequest(request())
+            assertEquals(expected, status.value)
+        }
+    }
+
+    @Test
+    fun noDeviceAndDisabledArePublished() = runBlocking {
+        val status = kotlinx.coroutines.flow.MutableStateFlow<PushRegistrationStatus>(PushRegistrationStatus.Idle)
+        val coordinator = PushSyncCoordinator(RecordingRegistrar(), status)
+        coordinator.onRequest(request(server = null))
+        assertEquals(PushRegistrationStatus.NoDevice, status.value)
+        coordinator.onRequest(request())
+        assertEquals(PushRegistrationStatus.Registered, status.value)
+        coordinator.onRequest(request(enabled = false))
+        assertEquals(PushRegistrationStatus.Idle, status.value)
+    }
+
+    @Test
+    fun refreshRepostsTheRowLikeTheWebOnOpen() = runBlocking {
+        val registrar = RecordingRegistrar()
+        val coordinator = PushSyncCoordinator(registrar)
+        coordinator.refresh() // nothing requested yet: nothing to send
+        coordinator.onRequest(request())
+        coordinator.refresh()
+        assertEquals(listOf("POST attached [s1] [] syncHints=true", "POST attached [s1] [] syncHints=true"), registrar.calls)
+    }
+
+    @Test
+    fun reEnableDropsTheOldProjectAndTokenThenRegistersAfresh() = runBlocking {
+        val registrar = RecordingRegistrar(syncResult = PushRegistrarResult.ProjectChanged)
+        val status = kotlinx.coroutines.flow.MutableStateFlow<PushRegistrationStatus>(PushRegistrationStatus.Idle)
+        val coordinator = PushSyncCoordinator(registrar, status, deleteToken = { registrar.calls += "deleteToken" })
+        coordinator.onRequest(request())
+        assertEquals(PushRegistrationStatus.ProjectChanged, status.value)
+        registrar.syncResult = PushRegistrarResult.Success
+        coordinator.reEnable()
+        assertEquals(
+            listOf("POST attached [s1] [] syncHints=true", "deleteToken", "POST attached [s1] [] syncHints=true"),
+            registrar.calls,
+        )
+        assertEquals(PushRegistrationStatus.Registered, status.value)
+    }
+
+    @Test
+    fun reEnableWhileOffOrSignedOutDeletesNothing() = runBlocking {
+        val registrar = RecordingRegistrar()
+        val coordinator = PushSyncCoordinator(registrar, deleteToken = { registrar.calls += "deleteToken" })
+        coordinator.reEnable()
+        coordinator.onRequest(request(enabled = false))
+        coordinator.reEnable()
+        coordinator.onRequest(request(server = null))
+        coordinator.reEnable()
+        assertEquals(emptyList<String>(), registrar.calls)
+    }
 }

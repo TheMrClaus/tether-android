@@ -10,6 +10,9 @@ import com.tether.app.ui.prefs.UiPrefs
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
@@ -50,13 +53,18 @@ class PushController(
     private val firebase: FirebaseInitializer = AndroidFirebaseInitializer(app),
     private val syncHints: SyncHintsSource = SyncHintsSource.Off,
     private val registrarFactory: (PushRegistrar) -> PushRegistrar = { it },
-) {
+) : PushRegistration {
+    private val statusFlow = MutableStateFlow<PushRegistrationStatus>(PushRegistrationStatus.Idle)
+
+    /** T12.2: the registration's outcome, for the Settings push row. */
+    override val status: StateFlow<PushRegistrationStatus> = statusFlow.asStateFlow()
+
     /** Lazily-created registrar; tests inject a fake via [registrarFactory]. */
     private val registrar: PushRegistrar by lazy {
         registrarFactory(PushRegistrar(settings, httpClient, tokenProvider, firebase))
     }
 
-    private val coordinator: PushSyncCoordinator by lazy { PushSyncCoordinator(registrar) {
+    private val coordinator: PushSyncCoordinator by lazy { PushSyncCoordinator(registrar, statusFlow) {
             // Local first (ta-ouu): forget the accepted project, so a re-pair may
             // accept another one from the same server, before the network
             // delete. A hung delete (cut by the 5 s logout bound) or a failed one
@@ -64,6 +72,16 @@ class PushController(
             firebase.forget()
             tokenProvider.delete()
         } }
+
+    /** T12.2: the web's refresh on the settings dialog's mount; see [PushRegistration.refresh]. */
+    override fun refresh() {
+        scope.launch { guarded { coordinator.refresh() } }
+    }
+
+    /** T12.2: the web's Re-enable on a stale registration; see [PushRegistration.reEnable]. */
+    override fun reEnable() {
+        scope.launch { guarded { coordinator.reEnable() } }
+    }
 
     fun start() {
         // Bring FirebaseApp up from the last server config that worked, before
@@ -159,6 +177,7 @@ class PushController(
             val controller = PushController(app, settings, PushPrefs.fromUiPrefs(prefs), httpClient, scope)
             controller.start()
             instance = controller
+            PushRegistration.current = controller
             return controller
         }
 
@@ -219,7 +238,12 @@ internal data class PushServerIdentity(val baseUrl: String, val credential: Cred
  */
 internal class PushSyncCoordinator(
     private val registrar: PushRegistrar,
-    /** Logout: invalidate the FCM token everywhere (best-effort; see [FirebaseTokenProvider.delete]). */
+    /** T12.2: where each reconcile's outcome is published, for the Settings push row. */
+    private val status: MutableStateFlow<PushRegistrationStatus> = MutableStateFlow(PushRegistrationStatus.Idle),
+    /**
+     * Logout, and Re-enable: forget the accepted project and invalidate the FCM token everywhere
+     * (best-effort; see [FirebaseTokenProvider.delete]).
+     */
     private val deleteToken: suspend () -> Unit = {},
 ) {
     private val mutex = Mutex()
@@ -238,12 +262,42 @@ internal class PushSyncCoordinator(
         latest?.let { reconcile(it) }
     }
 
+    /** The web's refresh (use-push-notifications.ts:189-191): a full POST of the latest request. */
+    suspend fun refresh() = mutex.withLock {
+        needsFullSync = true
+        latest?.let { reconcile(it) }
+    }
+
+    /**
+     * The web's Re-enable on a stale subscription (use-push-notifications.ts:240-255: drop the
+     * old subscription, subscribe with the server's current key, register). Here: forget the
+     * accepted Firebase project and its token, so the full POST that follows accepts the
+     * project the server names now and registers a fresh token.
+     */
+    suspend fun reEnable() = mutex.withLock {
+        val request = latest ?: return@withLock
+        if (request.server == null || !request.enabled) return@withLock reconcile(request)
+        status.value = PushRegistrationStatus.Registering
+        try {
+            deleteToken()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: RuntimeException) {
+            // Best-effort by contract; the POST below reports what came of it.
+        }
+        lastSyncKey = null
+        syncedServer = null
+        needsFullSync = true
+        reconcile(request)
+    }
+
     suspend fun onLoggedOut(baseUrl: String, credential: Credential) = mutex.withLock {
         // Reset first: the logout bound may cancel what follows, and nothing
         // synced belongs to a signed-in server any more.
         lastSyncKey = null
         syncedServer = null
         needsFullSync = true
+        status.value = PushRegistrationStatus.Idle
         registrar.unregister(baseUrl, credential)
         // Also kill the token itself: any other server that still holds it (a
         // failed DELETE, an earlier pairing) prunes its row on the next send.
@@ -264,6 +318,7 @@ internal class PushSyncCoordinator(
             lastSyncKey = null
             syncedServer = null
             needsFullSync = true
+            status.value = PushRegistrationStatus.NoDevice
             return
         }
         // A new sign-in, re-pair or server switch: the current server has no row
@@ -281,19 +336,36 @@ internal class PushSyncCoordinator(
                 lastSyncKey = null
             }
             needsFullSync = true
+            status.value = PushRegistrationStatus.Idle
             return
         }
         val key = "${request.scope.wire}|${request.attached.sorted()}|${request.pinned.sorted()}|${request.syncHints}"
         if (key == lastSyncKey && !needsFullSync) return
-        val result = if (needsFullSync) {
-            registrar.sync(request.scope, request.attached, request.pinned, request.syncHints)
-        } else {
-            val patched = registrar.update(request.scope, request.attached, request.pinned, request.syncHints)
-            if (patched is PushRegistrarResult.Error && patched.message.contains("Not registered")) {
+        if (needsFullSync) status.value = PushRegistrationStatus.Registering
+        val result = try {
+            if (needsFullSync) {
                 registrar.sync(request.scope, request.attached, request.pinned, request.syncHints)
             } else {
-                patched
+                val patched = registrar.update(request.scope, request.attached, request.pinned, request.syncHints)
+                if (patched is PushRegistrarResult.Error && patched.message.contains("Not registered")) {
+                    registrar.sync(request.scope, request.attached, request.pinned, request.syncHints)
+                } else {
+                    patched
+                }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The registrar never throws by contract; if something under it does, the row still
+            // leaves "checking" (the web's catch-all, use-push-notifications.ts:186-193).
+            status.value = PushRegistrationStatus.Failed(e.message ?: "Push status could not be checked.")
+            throw e
+        }
+        status.value = when (result) {
+            PushRegistrarResult.Success -> PushRegistrationStatus.Registered
+            PushRegistrarResult.ServerUnconfigured -> PushRegistrationStatus.ServerUnconfigured
+            PushRegistrarResult.ProjectChanged -> PushRegistrationStatus.ProjectChanged
+            is PushRegistrarResult.Error -> PushRegistrationStatus.Failed(result.message)
         }
         if (result is PushRegistrarResult.Success || result is PushRegistrarResult.ServerUnconfigured) {
             lastSyncKey = key

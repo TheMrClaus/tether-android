@@ -91,9 +91,11 @@ fun SettingsUnderTest(
     github: GitHubBinding = GitHubBinding.None,
     /** ta-coik.52: the server the preferences are kept for (null: the frame's default, no server). */
     serverUrl: kotlinx.coroutines.flow.StateFlow<String?>? = null,
+    /** T12.2: the push registration the Devices tab's push row reads (registered by default). */
+    push: com.tether.app.push.PushRegistration = FakePushRegistration(),
 ) {
     TetherTheme(mode) {
-        CompositionLocalProvider(LocalReducedMotion provides true) {
+        CompositionLocalProvider(LocalReducedMotion provides true, LocalPushRegistration provides push) {
             SettingsFrame(
                 prefs = prefs,
                 serverUrl = serverUrl ?: NoServerUrl,
