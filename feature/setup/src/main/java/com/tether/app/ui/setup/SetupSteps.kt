@@ -150,7 +150,7 @@ internal fun WelcomeCopy(model: SetupWizardModel, phone: Boolean, modifier: Modi
             minHeight = 50.dp,
             contentPadding = 24.dp,
             trailing = if (ready) {
-                { Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.white, modifier = Modifier.size(16.dp)) }
+                { Icon(TetherIcons.ArrowRight, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(16.dp)) }
             } else {
                 null
             },
