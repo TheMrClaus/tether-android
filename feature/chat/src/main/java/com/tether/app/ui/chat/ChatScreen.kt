@@ -84,7 +84,8 @@ fun ChatScreen(
     showWorkspaceHeader: Boolean = true,
 ) {
     val t = LocalTetherTokens.current
-    val showThinking by prefs.showThinking.collectAsStateWithLifecycle(
+    // ta-coik.52: every preference is the server's own (the web's localStorage is per origin).
+    val showThinking by remember(prefs, vm.client) { prefs.showThinking(vm.client.serverUrl) }.collectAsStateWithLifecycle(
         initialValue = TetherPreferences.Default.showThinking,
     )
     val controlsMap by vm.client.sessionControls.collectAsStateWithLifecycle()
@@ -179,7 +180,7 @@ fun ChatScreen(
     }
     val codexMap by vm.client.codexControls.collectAsStateWithLifecycle()
     val opencodeMap by vm.client.opencodeControls.collectAsStateWithLifecycle()
-    val pinnedModels by remember(prefs) { prefs.preferences.map { it.pinnedModels }.distinctUntilChanged() }.collectAsStateWithLifecycle(emptyList())
+    val pinnedModels by remember(prefs, vm.client) { prefs.preferencesFor(vm.client.serverUrl).map { it.pinnedModels }.distinctUntilChanged() }.collectAsStateWithLifecycle(emptyList())
     // T13.2 / T6.6 r3: the session controls and the auto-continue grant (and its pending
     // confirmation, which closes on any lock). ta-coik.24: neither locks offline or catching up, as
     // on the web (chat-view.tsx 90fbb9f :2503, :2970, :3018, :4491, :4495 call `send` whatever the
@@ -320,7 +321,7 @@ fun ChatScreen(
     Column(Modifier.fillMaxSize().background(t.mineralDeep)) {
         if (session != null && showWorkspaceHeader) {
             // T10.1: Settings → General's "Confirm before ending" (dashboard.tsx:1170-1180); until read, it asks.
-            val confirmBeforeEnd by remember(prefs) { prefs.preferences.map { it.confirmBeforeEnd }.distinctUntilChanged() }.collectAsStateWithLifecycle(true)
+            val confirmBeforeEnd by remember(prefs, vm.client) { prefs.preferencesFor(vm.client.serverUrl).map { it.confirmBeforeEnd }.distinctUntilChanged() }.collectAsStateWithLifecycle(true)
             WorkspaceHeader(vm = vm, session = session, workspaceRoot = workspaceRoot, origin = consentOrigin, server = endSessionServer(consentOrigin, serverUrl), confirmBeforeEnd = confirmBeforeEnd)
         }
 

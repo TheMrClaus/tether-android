@@ -8,9 +8,11 @@ import com.tether.app.ui.theme.ThemeMigration
 import com.tether.app.ui.theme.ThemeMode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
@@ -23,10 +25,16 @@ import kotlinx.serialization.json.longOrNull
  * `scrollback` and `showQuickKeys` are declared and defaulted on the web but read by nothing
  * (the xterm terminal they configured is gone), so there is no behaviour to match.
  *
- * Persistence is one DataStore key per field ([PreferenceKeys]) rather than one JSON blob, so
- * the keys the app already shipped (showThinking/showEnded/pinnedProjects/loginVariant) keep
- * their stored values with no migration; the appearance is migrated onto the Studio mode (T15.5,
- * [ThemeMigration]). Parsing ([parse]) is fail-soft per field: a
+ * Persistence (ta-coik.52): the web keeps this object in per-origin localStorage, so every field is
+ * per server here too, keyed by the canonical server origin (`serverOrigin`; "" = no server
+ * configured): [preferencesByOrigin] ([ServerPreferences], the object's own JSON shape),
+ * [collapsedByOrigin], [lastSeenByOrigin] and [lastOpenedByOrigin]. The one-key-per-field layout the
+ * app shipped before ([PreferenceKeys]) is the device-wide record of before: read through until
+ * [migrateToServer] moves it to the first server known (a server's own record wins), then removed.
+ * With no server configured (a sign-in screen before any server is set, or after the server is
+ * forgotten) a screen reads the "" record, else the device-wide values not yet migrated, else the web
+ * defaults; a write then goes to the "" record and migrates nothing. The appearance is migrated onto
+ * the Studio mode (T15.5, [ThemeMigration]). Parsing ([parse]) is fail-soft per field: a
  * missing, wrongly-typed or out-of-vocabulary value reads as that field's web default and
  * never throws. The web itself only repairs the theme mode, `sidebarSort`, `loginVariant` and
  * the two panel widths (use-preferences.ts:331-343) and otherwise spreads stored junk through
@@ -76,6 +84,13 @@ data class TetherPreferences(
     val collapsedByOrigin: Map<String, List<String>> = emptyMap(),
     /** ta-coik.47: the web's `lastSeenSessions` per server origin (key "": no server configured). */
     val lastSeenByOrigin: Map<String, Map<String, Long>> = emptyMap(),
+    /**
+     * ta-coik.52: every other field of the web's `tether.preferences.v1` per server origin (the web's
+     * localStorage is per origin; key "": no server configured). In the stored model the top-level
+     * fields of [ServerPreferences] are the device-wide values of before, read only until they are
+     * migrated to the current server ([migrateToServer]); in a [forServer] view: that server's.
+     */
+    val preferencesByOrigin: Map<String, ServerPreferences> = emptyMap(),
     val sidebarActiveOnly: Boolean = false,
     val sidebarUnreadOnly: Boolean = false,
     val sidebarHideAgentRuns: Boolean = true,
@@ -99,39 +114,60 @@ data class TetherPreferences(
         return copy(lastOpenedSession = null, lastOpenedByOrigin = byOrigin)
     }
 
-    /** ta-coik.47: a device-wide value of before is still waiting for [migrateToServer]. */
+    /**
+     * ta-coik.47: a device-wide value of before is still waiting for [migrateToServer]; ta-coik.52: the
+     * device-wide [ServerPreferences] too, while any of them differs from the web default.
+     */
     val hasDeviceWideServerRecords: Boolean
-        get() = lastOpenedSession != null || collapsedWorkspaces.isNotEmpty() || lastSeenSessions.isNotEmpty()
+        get() = lastOpenedSession != null || collapsedWorkspaces.isNotEmpty() || lastSeenSessions.isNotEmpty() ||
+            ServerPreferences.of(this) != ServerPreferences.Default
 
     /**
      * ta-coik.47: every device-wide value of before (the remembered chat, the folded blocks, the
-     * seen stamps) becomes [origin]'s, once: each is cleared, and a server's own record wins.
+     * seen stamps; ta-coik.52: and every other preference) becomes [origin]'s, once: each is cleared
+     * (back to the web default), and a server's own record wins.
      */
     fun migrateToServer(origin: String): TetherPreferences {
         if (!hasDeviceWideServerRecords) return this
         val opened = migrateLastOpened(origin)
-        return opened.copy(
-            collapsedWorkspaces = emptyList(),
-            lastSeenSessions = emptyMap(),
-            collapsedByOrigin = if (collapsedWorkspaces.isEmpty() || origin in collapsedByOrigin) collapsedByOrigin else collapsedByOrigin + (origin to collapsedWorkspaces),
-            lastSeenByOrigin = if (lastSeenSessions.isEmpty() || origin in lastSeenByOrigin) lastSeenByOrigin else lastSeenByOrigin + (origin to lastSeenSessions),
+        val general = ServerPreferences.of(this)
+        return ServerPreferences.Default.applyTo(
+            opened.copy(
+                collapsedWorkspaces = emptyList(),
+                lastSeenSessions = emptyMap(),
+                collapsedByOrigin = if (collapsedWorkspaces.isEmpty() || origin in collapsedByOrigin) collapsedByOrigin else collapsedByOrigin + (origin to collapsedWorkspaces),
+                lastSeenByOrigin = if (lastSeenSessions.isEmpty() || origin in lastSeenByOrigin) lastSeenByOrigin else lastSeenByOrigin + (origin to lastSeenSessions),
+                preferencesByOrigin = if (general == ServerPreferences.Default || origin in preferencesByOrigin) preferencesByOrigin else preferencesByOrigin + (origin to general),
+            ),
         )
     }
 
     /**
      * ta-coik.47: the model as the server at [origin] sees it (the web's localStorage is per origin):
      * [collapsedWorkspaces], [lastSeenSessions] and [lastOpenedSession] are that server's (the
-     * device-wide value of before until it is migrated). Write it back with [updateForServer].
+     * device-wide value of before until it is migrated); ta-coik.52: and so is every
+     * [ServerPreferences] field. Write it back with [updateForServer].
      */
-    fun forServer(origin: String?): TetherPreferences = copy(
-        collapsedWorkspaces = collapsedByOrigin[origin.orEmpty()] ?: collapsedWorkspaces,
-        lastSeenSessions = lastSeenByOrigin[origin.orEmpty()] ?: lastSeenSessions,
-        lastOpenedSession = lastOpenedFor(origin),
+    fun forServer(origin: String?): TetherPreferences = (preferencesByOrigin[origin.orEmpty()] ?: ServerPreferences.of(this)).applyTo(
+        copy(
+            collapsedWorkspaces = collapsedByOrigin[origin.orEmpty()] ?: collapsedWorkspaces,
+            lastSeenSessions = lastSeenByOrigin[origin.orEmpty()] ?: lastSeenSessions,
+            lastOpenedSession = lastOpenedFor(origin),
+        ),
     )
 
     /**
+     * ta-coik.52: the server at [origin] already kept preferences of its own (the web's
+     * `localStorage.getItem("tether.preferences.v1") !== null` on that origin).
+     */
+    fun hasRecordFor(origin: String?): Boolean = origin.orEmpty().let {
+        it in preferencesByOrigin || it in collapsedByOrigin || it in lastSeenByOrigin || it in lastOpenedByOrigin
+    }
+
+    /**
      * ta-coik.47: [transform] a [forServer] view and store it: the per-server fields go to [origin]'s
-     * records (the device-wide values of before migrate there first), the rest as they are.
+     * records (the device-wide values of before migrate there first; ta-coik.52: every preference
+     * is a per-server field).
      */
     fun updateForServer(origin: String?, transform: (TetherPreferences) -> TetherPreferences): TetherPreferences {
         val key = origin.orEmpty()
@@ -139,13 +175,14 @@ data class TetherPreferences(
         val scoped = base.forServer(origin)
         val next = transform(scoped)
         val opened = next.lastOpenedSession?.takeIf { it != scoped.lastOpenedSession }
-        return next.copy(
+        return ServerPreferences.of(base).applyTo(next).copy(
             collapsedWorkspaces = base.collapsedWorkspaces,
             lastSeenSessions = base.lastSeenSessions,
             lastOpenedSession = base.lastOpenedSession,
             collapsedByOrigin = base.collapsedByOrigin + (key to next.collapsedWorkspaces),
             lastSeenByOrigin = base.lastSeenByOrigin + (key to next.lastSeenSessions),
             lastOpenedByOrigin = if (opened != null) base.lastOpenedByOrigin + (key to opened) else base.lastOpenedByOrigin,
+            preferencesByOrigin = base.preferencesByOrigin + (key to ServerPreferences.of(next)),
         )
     }
 
@@ -198,6 +235,7 @@ data class TetherPreferences(
                     ?: legacyOpenedMap(str(PreferenceKeys.LAST_OPENED_BY_ORIGIN)),
                 collapsedByOrigin = str(PreferenceKeys.COLLAPSED_BY_ORIGIN_JSON)?.let(::collapsedJson).orEmpty(),
                 lastSeenByOrigin = str(PreferenceKeys.LAST_SEEN_BY_ORIGIN_JSON)?.let(::seenJson).orEmpty(),
+                preferencesByOrigin = str(PreferenceKeys.PREFERENCES_BY_ORIGIN_JSON)?.let(::preferencesJson).orEmpty(),
                 sidebarActiveOnly = bool(PreferenceKeys.SIDEBAR_ACTIVE_ONLY, d.sidebarActiveOnly),
                 sidebarUnreadOnly = bool(PreferenceKeys.SIDEBAR_UNREAD_ONLY, d.sidebarUnreadOnly),
                 sidebarHideAgentRuns = bool(PreferenceKeys.SIDEBAR_HIDE_AGENT_RUNS, d.sidebarHideAgentRuns),
@@ -277,6 +315,22 @@ data class TetherPreferences(
         private fun jsonObject(value: String): JsonObject? = runCatching { Json.parseToJsonElement(value) }.getOrNull() as? JsonObject
 
         /**
+         * ta-coik.52: `{ origin: { themeMode, loginVariant, … } }`, the web's own `tether.preferences.v1`
+         * object per origin. Fail-soft: unreadable JSON is no record, an origin whose value is not an
+         * object is dropped, and a field that is missing or unusable reads as its web default.
+         */
+        private fun preferencesJson(value: String): Map<String, ServerPreferences> {
+            val root = jsonObject(value) ?: return emptyMap()
+            val out = LinkedHashMap<String, ServerPreferences>()
+            for ((origin, entry) in root) out[origin] = ServerPreferences.fromJson(entry) ?: continue
+            return out
+        }
+
+        internal fun joinPreferencesByOrigin(values: Map<String, ServerPreferences>): String = buildJsonObject {
+            for ((origin, p) in values) put(origin, p.toJson())
+        }.toString()
+
+        /**
          * ta-coik.47: `{ origin: [cwd, …] }`, the web's `collapsedWorkspaces` per origin. Fail-soft:
          * unreadable JSON is no record, an origin whose value is not an array is dropped, and so is
          * an entry that is not a non-empty string.
@@ -345,6 +399,149 @@ data class TetherPreferences(
     }
 }
 
+/**
+ * ta-coik.52: the fields of the web's `tether.preferences.v1` object that the app kept device-wide until
+ * then, as one server's record (the web's localStorage is per origin, so each server has its own).
+ * Stored as that object's own JSON shape; read fail-soft per field, as [TetherPreferences.parse].
+ */
+data class ServerPreferences(
+    val themeMode: ThemeMode = ThemeMode.Default,
+    val loginVariant: LoginVariant = LoginVariant.Default,
+    val defaultWorkspace: String = "",
+    val showEndedSessions: Boolean = true,
+    val confirmBeforeEnd: Boolean = true,
+    val showThinking: Boolean = false,
+    val sidebarCollapsed: Boolean = false,
+    val sidebarWidth: Int? = null,
+    val inspectorWidth: Int? = null,
+    val pinnedProjects: List<String> = emptyList(),
+    val sidebarActiveOnly: Boolean = false,
+    val sidebarUnreadOnly: Boolean = false,
+    val sidebarHideAgentRuns: Boolean = true,
+    val sidebarSort: SidebarSort = SidebarSort.Created,
+    val pinnedModels: List<String> = emptyList(),
+) {
+    /** These values as [p]'s fields. */
+    fun applyTo(p: TetherPreferences): TetherPreferences = p.copy(
+        themeMode = themeMode,
+        loginVariant = loginVariant,
+        defaultWorkspace = defaultWorkspace,
+        showEndedSessions = showEndedSessions,
+        confirmBeforeEnd = confirmBeforeEnd,
+        showThinking = showThinking,
+        sidebarCollapsed = sidebarCollapsed,
+        sidebarWidth = sidebarWidth,
+        inspectorWidth = inspectorWidth,
+        pinnedProjects = pinnedProjects,
+        sidebarActiveOnly = sidebarActiveOnly,
+        sidebarUnreadOnly = sidebarUnreadOnly,
+        sidebarHideAgentRuns = sidebarHideAgentRuns,
+        sidebarSort = sidebarSort,
+        pinnedModels = pinnedModels,
+    )
+
+    /** The web's field names and value types (use-preferences.ts `TetherPreferences`). */
+    fun toJson(): JsonObject = buildJsonObject {
+        put("themeMode", JsonPrimitive(themeMode.id))
+        put("loginVariant", JsonPrimitive(loginVariant.id))
+        put("defaultWorkspace", JsonPrimitive(defaultWorkspace))
+        put("showEndedSessions", JsonPrimitive(showEndedSessions))
+        put("confirmBeforeEnd", JsonPrimitive(confirmBeforeEnd))
+        put("showThinking", JsonPrimitive(showThinking))
+        put("sidebarCollapsed", JsonPrimitive(sidebarCollapsed))
+        put("sidebarWidth", sidebarWidth?.let(::JsonPrimitive) ?: JsonNull)
+        put("inspectorWidth", inspectorWidth?.let(::JsonPrimitive) ?: JsonNull)
+        put("pinnedProjects", JsonArray(pinnedProjects.filter(String::isNotEmpty).map(::JsonPrimitive)))
+        put("sidebarActiveOnly", JsonPrimitive(sidebarActiveOnly))
+        put("sidebarUnreadOnly", JsonPrimitive(sidebarUnreadOnly))
+        put("sidebarHideAgentRuns", JsonPrimitive(sidebarHideAgentRuns))
+        put("sidebarSort", JsonPrimitive(sidebarSort.id))
+        put("pinnedModels", JsonArray(pinnedModels.filter(String::isNotEmpty).map(::JsonPrimitive)))
+    }
+
+    companion object {
+        val Default = ServerPreferences()
+
+        fun of(p: TetherPreferences): ServerPreferences = ServerPreferences(
+            themeMode = p.themeMode,
+            loginVariant = p.loginVariant,
+            defaultWorkspace = p.defaultWorkspace,
+            showEndedSessions = p.showEndedSessions,
+            confirmBeforeEnd = p.confirmBeforeEnd,
+            showThinking = p.showThinking,
+            sidebarCollapsed = p.sidebarCollapsed,
+            sidebarWidth = p.sidebarWidth,
+            inspectorWidth = p.inspectorWidth,
+            pinnedProjects = p.pinnedProjects,
+            sidebarActiveOnly = p.sidebarActiveOnly,
+            sidebarUnreadOnly = p.sidebarUnreadOnly,
+            sidebarHideAgentRuns = p.sidebarHideAgentRuns,
+            sidebarSort = p.sidebarSort,
+            pinnedModels = p.pinnedModels,
+        )
+
+        /**
+         * One origin's record, fail-soft per field (a missing, wrongly-typed or out-of-vocabulary value
+         * reads as that field's web default; the widths through the ported lib/panel-widths.mjs parse);
+         * null when [element] is not an object.
+         */
+        fun fromJson(element: JsonElement?): ServerPreferences? {
+            val o = element as? JsonObject ?: return null
+            val d = Default
+            fun str(key: String) = (o[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            fun bool(key: String, default: Boolean) = (o[key] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull ?: default
+            fun list(key: String) = (o[key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.takeIf(String::isNotEmpty) }.orEmpty()
+            fun width(key: String): Int? {
+                val p = o[key] as? JsonPrimitive ?: return null
+                val js: JsValue = if (p.isString) JsStr(p.content) else JsNum(p.doubleOrNull ?: return null)
+                return PanelWidths.parseStoredPanelWidth(js)?.toInt()
+            }
+            return ServerPreferences(
+                themeMode = ThemeMigration.normalize(str("themeMode"), null),
+                loginVariant = LoginVariant.fromId(str("loginVariant")),
+                defaultWorkspace = str("defaultWorkspace") ?: d.defaultWorkspace,
+                showEndedSessions = bool("showEndedSessions", d.showEndedSessions),
+                confirmBeforeEnd = bool("confirmBeforeEnd", d.confirmBeforeEnd),
+                showThinking = bool("showThinking", d.showThinking),
+                sidebarCollapsed = bool("sidebarCollapsed", d.sidebarCollapsed),
+                sidebarWidth = width("sidebarWidth"),
+                inspectorWidth = width("inspectorWidth"),
+                pinnedProjects = list("pinnedProjects"),
+                sidebarActiveOnly = bool("sidebarActiveOnly", d.sidebarActiveOnly),
+                sidebarUnreadOnly = bool("sidebarUnreadOnly", d.sidebarUnreadOnly),
+                sidebarHideAgentRuns = bool("sidebarHideAgentRuns", d.sidebarHideAgentRuns),
+                sidebarSort = SidebarSort.fromId(str("sidebarSort")),
+                pinnedModels = list("pinnedModels"),
+            )
+        }
+    }
+}
+
+/**
+ * ta-coik.52: the web's `tether:overviewFilters` (overview.tsx 90fbb9f :35-62 `OverviewFilterChoice`),
+ * per server origin. [status] is the tab's key ("active", "waiting", …); the shell maps it.
+ */
+data class OverviewFilters(val workspace: String? = null, val provider: String? = null, val status: String = "active") {
+    fun toJson(): JsonObject = buildJsonObject {
+        put("workspace", workspace?.let(::JsonPrimitive) ?: JsonNull)
+        put("provider", provider?.let(::JsonPrimitive) ?: JsonNull)
+        put("status", JsonPrimitive(status))
+    }
+
+    companion object {
+        /** overview.tsx :43-55 `readChoice`: an empty or non-string scope is none, a non-string status "active". */
+        fun fromJson(element: JsonElement?): OverviewFilters {
+            val o = element as? JsonObject ?: return OverviewFilters()
+            fun str(key: String) = (o[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            return OverviewFilters(
+                workspace = str("workspace")?.takeIf(String::isNotEmpty),
+                provider = str("provider")?.takeIf(String::isNotEmpty),
+                status = str("status") ?: "active",
+            )
+        }
+    }
+}
+
 /** The web's `lastOpenedSession` (use-preferences.ts:190): restored on boot. */
 data class LastOpenedSession(val cwd: String, val sessionId: String, val historyId: String?)
 
@@ -392,6 +589,13 @@ object PreferenceKeys {
     const val COLLAPSED_BY_ORIGIN_JSON = "collapsed_workspaces_by_origin_json"
     /** ta-coik.47: `lastSeenSessions` per server origin, JSON; replaces [LAST_SEEN_SESSIONS] (read only to migrate). */
     const val LAST_SEEN_BY_ORIGIN_JSON = "last_seen_by_origin_json"
+    /**
+     * ta-coik.52: every other `tether.preferences.v1` field per server origin, JSON ([ServerPreferences]);
+     * replaces the device-wide keys above (read only to migrate).
+     */
+    const val PREFERENCES_BY_ORIGIN_JSON = "preferences_by_origin_json"
+    /** ta-coik.52: the web's `tether:overviewFilters` per server origin, JSON ([OverviewFilters]). */
+    const val OVERVIEW_FILTERS_BY_ORIGIN_JSON = "overview_filters_by_origin_json"
     /** ta-coik.47: the web's `tether:lastView` per server origin, JSON; replaces `last_view` (read only to migrate). */
     const val LAST_VIEW_BY_ORIGIN_JSON = "last_view_by_origin_json"
     const val SIDEBAR_ACTIVE_ONLY = "sidebar_active_only"

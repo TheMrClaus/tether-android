@@ -300,7 +300,7 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHu
     val root by client.workspaceRoot.collectAsStateWithLifecycle()
     val directories by client.directories.collectAsStateWithLifecycle()
     val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
-    val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
+    val preferences by remember(prefs, client) { prefs.preferencesFor(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
     val linkEpoch by client.linkEpoch.collectAsStateWithLifecycle()
     val connected = connection == ConnectionState.Connected
     LaunchedEffect(connected) { if (connected) client.requestProviderCatalog() }

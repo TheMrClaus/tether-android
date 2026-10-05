@@ -84,11 +84,23 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
         val lastOpenedByOriginJson = stringPreferencesKey(PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON)
         val collapsedByOriginJson = stringPreferencesKey(PreferenceKeys.COLLAPSED_BY_ORIGIN_JSON)
         val lastSeenByOriginJson = stringPreferencesKey(PreferenceKeys.LAST_SEEN_BY_ORIGIN_JSON)
+        val preferencesByOriginJson = stringPreferencesKey(PreferenceKeys.PREFERENCES_BY_ORIGIN_JSON)
+        val overviewFiltersByOriginJson = stringPreferencesKey(PreferenceKeys.OVERVIEW_FILTERS_BY_ORIGIN_JSON)
         val sidebarActiveOnly = booleanPreferencesKey(PreferenceKeys.SIDEBAR_ACTIVE_ONLY)
         val sidebarUnreadOnly = booleanPreferencesKey(PreferenceKeys.SIDEBAR_UNREAD_ONLY)
         val sidebarHideAgentRuns = booleanPreferencesKey(PreferenceKeys.SIDEBAR_HIDE_AGENT_RUNS)
         val sidebarSort = stringPreferencesKey(PreferenceKeys.SIDEBAR_SORT)
         val pinnedModels = stringPreferencesKey(PreferenceKeys.PINNED_MODELS)
+
+        /**
+         * ta-coik.52: the device-wide keys of the fields now kept per server ([ServerPreferences]),
+         * written only while a device-wide value waits to be migrated.
+         */
+        val deviceWide: List<Preferences.Key<*>> = listOf(
+            themeMode, loginVariant, defaultWorkspace, showEnded, confirmBeforeEnd, showThinking, sidebarCollapsed,
+            sidebarWidth, inspectorWidth, pinnedProjects, sidebarActiveOnly, sidebarUnreadOnly, sidebarHideAgentRuns,
+            sidebarSort, pinnedModels,
+        )
 
         // Native-only (no web counterpart).
         val pushEnabled = booleanPreferencesKey("push_enabled")
@@ -109,8 +121,10 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     }
 
     /**
-     * The whole web preference model, parsed fail-soft per field ([TetherPreferences.parse]):
-     * a wrongly-typed or junk stored value reads as that field's default, never a crash.
+     * The whole web preference model as stored, parsed fail-soft per field ([TetherPreferences.parse]):
+     * a wrongly-typed or junk stored value reads as that field's default, never a crash. ta-coik.52:
+     * every web preference is per server, so a screen reads [preferencesFor] its server; this is the
+     * stored model (the migration's input).
      */
     val preferences: Flow<TetherPreferences> = data.map(::parse).distinctUntilChanged()
 
@@ -121,7 +135,9 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
 
     /**
      * ta-coik.47: the model as the server at the origin of [serverUrl] sees it
-     * ([TetherPreferences.forServer]: its folded blocks, seen stamps and remembered chat).
+     * ([TetherPreferences.forServer]: its folded blocks, seen stamps and remembered chat; ta-coik.52:
+     * and every other preference, the web's localStorage being per origin). A null URL (no server
+     * configured) reads the "" record, else the device-wide values not yet migrated, else the defaults.
      */
     fun preferencesFor(serverUrl: Flow<String?>): Flow<TetherPreferences> =
         combine(preferences, serverUrl) { p, url -> p.forServer(serverOrigin(url)) }.distinctUntilChanged()
@@ -130,40 +146,54 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     suspend fun updatePreferencesFor(origin: String?, transform: (TetherPreferences) -> TetherPreferences) =
         updatePreferences { it.updateForServer(origin, transform) }
 
-    private fun <T> field(select: (TetherPreferences) -> T): Flow<T> = preferences.map(select).distinctUntilChanged()
+    private fun <T> field(serverUrl: Flow<String?>, select: (TetherPreferences) -> T): Flow<T> =
+        preferencesFor(serverUrl).map(select).distinctUntilChanged()
 
     /**
-     * The web's `loginVariant` preference (Settings → Sign-in screen): Retro is
-     * the opt-in, anything else (the former `instrument` included) is Default
-     * (lib/theme-mode.mjs normalizeLoginVariant). The
-     * Settings control arrives with the settings surface; the login screen
-     * already honours the stored value.
+     * The web's `loginVariant` preference (Settings → Sign-in screen) for the server at [serverUrl]
+     * (ta-coik.52: the web's sign-in page reads its own origin's): Retro is the opt-in, anything else
+     * (the former `instrument` included) is Default (lib/theme-mode.mjs normalizeLoginVariant).
      */
-    val loginVariant: Flow<LoginVariant> = field { it.loginVariant }
+    fun loginVariant(serverUrl: Flow<String?>): Flow<LoginVariant> = field(serverUrl) { it.loginVariant }
 
-    suspend fun setLoginVariant(variant: LoginVariant) = updatePreferences { it.copy(loginVariant = variant) }
+    suspend fun setLoginVariant(origin: String?, variant: LoginVariant) = updatePreferencesFor(origin) { it.copy(loginVariant = variant) }
 
-    /** Studio light / dark / follow system (web `themeMode`); retired theme keys are migrated on read. */
-    val themeMode: Flow<ThemeMode> = field { it.themeMode }
+    /** Studio light / dark / follow system (web `themeMode`) for the server at [serverUrl]; retired theme keys are migrated on read. */
+    fun themeMode(serverUrl: Flow<String?>): Flow<ThemeMode> = field(serverUrl) { it.themeMode }
 
-    suspend fun setThemeMode(mode: ThemeMode) = updatePreferences { it.copy(themeMode = mode) }
+    suspend fun setThemeMode(origin: String?, mode: ThemeMode) = updatePreferencesFor(origin) { it.copy(themeMode = mode) }
 
-    val showThinking: Flow<Boolean> = field { it.showThinking }
+    fun showThinking(serverUrl: Flow<String?>): Flow<Boolean> = field(serverUrl) { it.showThinking }
 
-    suspend fun setShowThinking(value: Boolean) = updatePreferences { it.copy(showThinking = value) }
+    suspend fun setShowThinking(origin: String?, value: Boolean) = updatePreferencesFor(origin) { it.copy(showThinking = value) }
 
-    val showEnded: Flow<Boolean> = field { it.showEndedSessions }
+    fun showEnded(serverUrl: Flow<String?>): Flow<Boolean> = field(serverUrl) { it.showEndedSessions }
 
-    suspend fun setShowEnded(value: Boolean) = updatePreferences { it.copy(showEndedSessions = value) }
+    suspend fun setShowEnded(origin: String?, value: Boolean) = updatePreferencesFor(origin) { it.copy(showEndedSessions = value) }
+
+    /** Starred project folders of the server at [serverUrl], in pin order (index caps and switch shortcuts key off position). */
+    fun pinnedProjects(serverUrl: Flow<String?>): Flow<List<String>> = field(serverUrl) { it.pinnedProjects }
+
+    suspend fun setPinnedProjects(origin: String?, projects: List<String>) = updatePreferencesFor(origin) { it.copy(pinnedProjects = projects) }
 
     /**
-     * Starred project folders, in pin order (index caps + switch shortcuts key
-     * off position, so order matters — newline-joined since paths can't
-     * contain newlines and DataStore string sets are unordered).
+     * ta-coik.52: the Overview's filter choice the server at [origin] last had (overview.tsx 90fbb9f
+     * :43-55 `readChoice` on the per-origin `tether:overviewFilters`; read when the Overview opens).
+     * Fail-soft: unreadable storage or a corrupt record reads as the default choice.
      */
-    val pinnedProjects: Flow<List<String>> = field { it.pinnedProjects }
+    suspend fun overviewFilters(origin: String?): OverviewFilters = runCatching {
+        overviewFiltersJson(data.first()[Keys.overviewFiltersByOriginJson])[origin.orEmpty()]
+    }.getOrNull() ?: OverviewFilters()
 
-    suspend fun setPinnedProjects(projects: List<String>) = updatePreferences { it.copy(pinnedProjects = projects) }
+    /** overview.tsx :56-62 `writeChoice`, on every change; a refused write only costs persistence. */
+    suspend fun setOverviewFilters(origin: String?, filters: OverviewFilters) {
+        runCatching {
+            save { prefs ->
+                val all = overviewFiltersJson(prefs[Keys.overviewFiltersByOriginJson]) + (origin.orEmpty() to filters)
+                prefs[Keys.overviewFiltersByOriginJson] = buildJsonObject { for ((o, f) in all) put(o, f.toJson()) }.toString()
+            }
+        }
+    }
 
     companion object {
         /** T15.4: preferences on a store of the caller's own (a shell test's, so its boot view's inputs are its own). */
@@ -177,16 +207,29 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
             return root.entries.mapNotNull { (o, v) -> (v as? JsonPrimitive)?.takeIf { it.isString }?.let { o to it.content } }.toMap()
         }
 
+        /** ta-coik.52: `{ origin: { workspace, provider, status } }`; unreadable JSON is no record. */
+        private fun overviewFiltersJson(value: String?): Map<String, OverviewFilters> {
+            val root = value?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() } as? JsonObject ?: return emptyMap()
+            return root.mapValues { (_, v) -> OverviewFilters.fromJson(v) }
+        }
+
         private fun parse(prefs: Preferences): TetherPreferences =
             TetherPreferences.parse(prefs.asMap().entries.associate { (key, value) -> key.name to value })
 
         /** Every model field is written back, like the web's whole-object save. */
         private fun write(prefs: MutablePreferences, next: TetherPreferences) {
-            prefs[Keys.themeMode] = next.themeMode.id
             // Like the web (lib/theme-mode.mjs DEPRECATED_THEME_KEYS), the retired family and the
             // legacy flat id are consumed by the read and never saved again.
             prefs.remove(Keys.theme)
             prefs.remove(Keys.themeFamily)
+            // ta-coik.52: every server's own record, as JSON; the device-wide keys of before only while a
+            // device-wide value (one that is not the web default) waits for the migration.
+            prefs.putOrRemove(Keys.preferencesByOriginJson, next.preferencesByOrigin.takeIf { it.isNotEmpty() }?.let(TetherPreferences::joinPreferencesByOrigin))
+            if (ServerPreferences.of(next) == ServerPreferences.Default) {
+                Keys.deviceWide.forEach { prefs.remove(it) }
+                return writeServerRecords(prefs, next)
+            }
+            prefs[Keys.themeMode] = next.themeMode.id
             prefs[Keys.loginVariant] = next.loginVariant.id
             prefs[Keys.defaultWorkspace] = next.defaultWorkspace
             prefs[Keys.showEnded] = next.showEndedSessions
@@ -196,6 +239,15 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
             prefs.putOrRemove(Keys.sidebarWidth, next.sidebarWidth)
             prefs.putOrRemove(Keys.inspectorWidth, next.inspectorWidth)
             prefs[Keys.pinnedProjects] = TetherPreferences.joinLines(next.pinnedProjects)
+            prefs[Keys.sidebarActiveOnly] = next.sidebarActiveOnly
+            prefs[Keys.sidebarUnreadOnly] = next.sidebarUnreadOnly
+            prefs[Keys.sidebarHideAgentRuns] = next.sidebarHideAgentRuns
+            prefs[Keys.sidebarSort] = next.sidebarSort.id
+            prefs[Keys.pinnedModels] = TetherPreferences.joinLines(next.pinnedModels)
+            writeServerRecords(prefs, next)
+        }
+
+        private fun writeServerRecords(prefs: MutablePreferences, next: TetherPreferences) {
             // ta-coik.47: per server origin as JSON; the device-wide keys of before only until migrated.
             prefs.putOrRemove(Keys.collapsedWorkspaces, TetherPreferences.joinLines(next.collapsedWorkspaces).takeIf { it.isNotEmpty() })
             prefs.putOrRemove(Keys.lastSeenSessions, TetherPreferences.joinSeen(next.lastSeenSessions).takeIf { it.isNotEmpty() })
@@ -208,11 +260,6 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
             // ta-coik.46: written as JSON; the tab-line key it replaces is consumed by the read and dropped.
             prefs.remove(Keys.lastOpenedByOrigin)
             prefs.putOrRemove(Keys.lastOpenedByOriginJson, next.lastOpenedByOrigin.takeIf { it.isNotEmpty() }?.let(TetherPreferences::joinOpened))
-            prefs[Keys.sidebarActiveOnly] = next.sidebarActiveOnly
-            prefs[Keys.sidebarUnreadOnly] = next.sidebarUnreadOnly
-            prefs[Keys.sidebarHideAgentRuns] = next.sidebarHideAgentRuns
-            prefs[Keys.sidebarSort] = next.sidebarSort.id
-            prefs[Keys.pinnedModels] = TetherPreferences.joinLines(next.pinnedModels)
         }
 
         private fun <T> MutablePreferences.putOrRemove(key: Preferences.Key<T>, value: T?) {
@@ -229,15 +276,17 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
      * kept Tether preferences before that record existed (the web tests its preferences key; here the
      * model's stored theme mode, written by every save of the model, or a retired theme key an older
      * version wrote) while no server has a view record yet: once one has, a server without one is a
-     * fresh origin, as a browser's never-visited origin is. Unreadable storage reads as a fresh
-     * install, like the web's blocked localStorage.
+     * fresh origin, as a browser's never-visited origin is. ta-coik.52: and a server with a
+     * preference record of its own ([TetherPreferences.hasRecordFor]) is an existing origin. Unreadable
+     * storage reads as a fresh install, like the web's blocked localStorage.
      */
     suspend fun viewBoot(origin: String?): ViewBoot = runCatching {
         val stored = data.first()
         val views = viewsJson(stored[Keys.lastViewByOrigin])
+        val deviceWide = Keys.deviceWide.any { it in stored } || Keys.themeFamily in stored || Keys.theme in stored
         ViewBoot(
             storedView = views[origin.orEmpty()] ?: stored[Keys.lastView],
-            hasExistingPreferences = views.isEmpty() && (Keys.themeMode in stored || Keys.themeFamily in stored || Keys.theme in stored),
+            hasExistingPreferences = parse(stored).hasRecordFor(origin) || (views.isEmpty() && deviceWide),
         )
     }.getOrElse { ViewBoot(storedView = null, hasExistingPreferences = false) }
 

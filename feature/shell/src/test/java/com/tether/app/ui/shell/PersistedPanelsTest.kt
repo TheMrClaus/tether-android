@@ -39,12 +39,15 @@ abstract class PersistedPanelsBase {
 
     @Before fun resetStore() {
         prefs = UiPrefs(ApplicationProvider.getApplicationContext())
-        runBlocking { prefs.updatePreferences { PanelPrefs().applyTo(it) } }
+        runBlocking { prefs.updatePreferences { PanelPrefs().applyTo(it).copy(preferencesByOrigin = emptyMap()) } }
     }
+
+    /** ta-coik.52: no server configured (the "" record). */
+    private val noServer = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
     protected fun seed(panels: PanelPrefs) = runBlocking { prefs.updatePreferences { panels.applyTo(it) } }
 
-    protected fun stored(): PanelPrefs = runBlocking { PanelPrefs.from(prefs.preferences.first()) }
+    protected fun stored(): PanelPrefs = runBlocking { PanelPrefs.from(prefs.preferences.first().forServer(null)) }
 
     protected fun awaitStored(expected: PanelPrefs) {
         rule.waitUntil(5_000) { stored() == expected }
@@ -54,7 +57,7 @@ abstract class PersistedPanelsBase {
     protected fun show() {
         rule.setContent {
             key(generation) {
-                ExpandedShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), ExpandedFixtures.idle, persisted = rememberPersistedPanels(prefs))
+                ExpandedShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), ExpandedFixtures.idle, persisted = rememberPersistedPanels(prefs, noServer))
             }
         }
     }
@@ -111,6 +114,27 @@ class PersistedPanelsTest : PersistedPanelsBase() {
         awaitStored(PanelPrefs(sidebarWidth = 300, sidebarCollapsed = false))
         recompose()
         awaitWidth(ShellTags.Sidebar, 300f)
+    }
+}
+
+/** ta-coik.52: the columns are the signed-in server's own (the web's preferences are per origin). */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi")
+class PersistedPanelsPerServerTest : PersistedPanelsBase() {
+    @Test fun eachServerKeepsItsOwnColumns() {
+        val server = kotlinx.coroutines.flow.MutableStateFlow<String?>("https://a.example")
+        runBlocking { prefs.updatePreferencesFor("https://b.example:443") { PanelPrefs(sidebarWidth = 360).applyTo(it) } }
+        rule.setContent { ExpandedShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), ExpandedFixtures.idle, persisted = rememberPersistedPanels(prefs, server)) }
+        awaitWidth(ShellTags.Sidebar, 272f)
+        rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput {
+            down(center)
+            moveBy(Offset(dpPx(60f), 0f))
+            up()
+        }
+        rule.waitUntil(5_000) { runBlocking { PanelPrefs.from(prefs.preferences.first().forServer("https://a.example:443")) } == PanelPrefs(sidebarWidth = 332) }
+        assertEquals("B's are as they were", PanelPrefs(sidebarWidth = 360), runBlocking { PanelPrefs.from(prefs.preferences.first().forServer("https://b.example:443")) })
+        rule.runOnIdle { server.value = "https://b.example" }
+        awaitWidth(ShellTags.Sidebar, 360f)
     }
 }
 

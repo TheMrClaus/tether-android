@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.tether.app.ui.components.TetherLayoutClass
+import com.tether.app.ui.prefs.PreferenceKeys
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.ThemeMode
@@ -47,7 +48,29 @@ class PrefsStore(private val tmp: TemporaryFolder) : ExternalResource() {
     }
 
     fun stored(): Map<String, Any> = runBlocking { store.data.first().asMap().mapKeys { it.key.name } }
+
+    /** ta-coik.52: the record of the server at [origin] (null: no server configured), by the fields' key names. */
+    fun storedFor(origin: String? = null): Map<String, Any?> = storedRecord(store, origin)
 }
+
+/**
+ * ta-coik.52: [store]'s preference record for the server at [origin] (null: no server configured; the
+ * web's preferences are per origin), by the fields' key names; empty while that server has none.
+ */
+fun storedRecord(store: DataStore<Preferences>, origin: String? = null): Map<String, Any?> = runBlocking {
+    val r = UiPrefs.on(store).preferences.first().preferencesByOrigin[origin.orEmpty()] ?: return@runBlocking emptyMap()
+    mapOf(
+        PreferenceKeys.THEME_MODE to r.themeMode.id,
+        PreferenceKeys.LOGIN_VARIANT to r.loginVariant.id,
+        PreferenceKeys.DEFAULT_WORKSPACE to r.defaultWorkspace,
+        PreferenceKeys.SHOW_ENDED_SESSIONS to r.showEndedSessions,
+        PreferenceKeys.CONFIRM_BEFORE_END to r.confirmBeforeEnd,
+        PreferenceKeys.SHOW_THINKING to r.showThinking,
+    )
+}
+
+/** ta-coik.52: no server configured (the "" record), as the frame's own default. */
+private val NoServerUrl = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
 /** The dialog in place, in [mode], at [layout], motion reduced so a capture is settled. */
 @Composable
@@ -66,11 +89,14 @@ fun SettingsUnderTest(
     nodes: NodesBinding = NodesBinding.None,
     devices: DevicesBinding = DevicesBinding.None,
     github: GitHubBinding = GitHubBinding.None,
+    /** ta-coik.52: the server the preferences are kept for (null: the frame's default, no server). */
+    serverUrl: kotlinx.coroutines.flow.StateFlow<String?>? = null,
 ) {
     TetherTheme(mode) {
         CompositionLocalProvider(LocalReducedMotion provides true) {
             SettingsFrame(
                 prefs = prefs,
+                serverUrl = serverUrl ?: NoServerUrl,
                 state = state,
                 restartRequired = restartRequired,
                 currentWorkspace = currentWorkspace,

@@ -83,6 +83,8 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.protocol.ClientMessage
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.JsonObject
 import kotlinx.coroutines.launch
@@ -251,6 +253,7 @@ fun SettingsDialog(
         val progress = rememberDialogIn()
         SettingsFrame(
             prefs = prefs,
+            serverUrl = client.serverUrl,
             state = state,
             restartRequired = serverSettings?.restartRequired == true,
             currentWorkspace = currentWorkspace,
@@ -304,12 +307,18 @@ fun SettingsFrame(
     devices: DevicesBinding = DevicesBinding.None,
     /** ta-coik.21: Advanced's GitHub connection. */
     github: GitHubBinding = GitHubBinding.None,
+    /**
+     * ta-coik.52: the server whose preferences these are (the web's are per origin); null URL: no
+     * server configured.
+     */
+    serverUrl: StateFlow<String?> = NoServerUrl,
 ) {
     val t = LocalTetherTokens.current
-    val live by prefs.preferences.collectAsStateWithLifecycle(initialValue = initialPreferences)
+    val stored = remember(prefs, serverUrl) { prefs.preferencesFor(serverUrl) }
+    val live by stored.collectAsStateWithLifecycle(initialValue = initialPreferences)
     // settings-dialog.tsx:1935: the draft starts as the stored preferences (read once, so a value
     // that lands later never overwrites an edit).
-    LaunchedEffect(prefs) { if (state.draft == null) state.draft = GeneralDraft.of(prefs.preferences.first()) }
+    LaunchedEffect(prefs) { if (state.draft == null) state.draft = GeneralDraft.of(stored.first()) }
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
     val save: () -> Unit = save@{
@@ -322,7 +331,7 @@ fun SettingsFrame(
         // is written in one edit. ta-t7l r3: the write is NonCancellable, so the dialog leaving
         // composition while it is in flight (Back during a slow write) cannot drop it.
         scope.launch {
-            withContext(NonCancellable) { runCatching { prefs.updatePreferences(draft::applyTo) } }
+            withContext(NonCancellable) { runCatching { prefs.updatePreferencesFor(serverOrigin(serverUrl.value), draft::applyTo) } }
             saving = false
             onClose()
         }
@@ -364,6 +373,7 @@ fun SettingsFrame(
                     SettingsPanel(
                         tab = state.tab,
                         prefs = prefs,
+                        origin = serverOrigin(serverUrl.collectAsStateWithLifecycle().value),
                         live = live ?: TetherPreferences.Default,
                         state = state,
                         currentWorkspace = currentWorkspace,
@@ -595,3 +605,6 @@ private class ClientSettingsWriter(private val client: TetherClient) : ServerSet
     override fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String) = client.setAdvancedSettings(message, origin)
     override fun detectEngines(origin: String) = client.detectEngines(origin)
 }
+
+/** ta-coik.52: a [SettingsFrame] with no server configured (the screenshot harness). */
+private val NoServerUrl: StateFlow<String?> = MutableStateFlow(null)

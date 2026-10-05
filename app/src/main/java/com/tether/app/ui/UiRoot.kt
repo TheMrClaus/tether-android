@@ -60,7 +60,8 @@ import com.tether.app.ui.theme.ThemeMode
 fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     val context = LocalContext.current
     val prefs = remember { UiPrefs(context) }
-    val themeMode by prefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.Default)
+    // ta-coik.52: the server's own theme (the web's preferences are per origin), its sign-in page included.
+    val themeMode by remember(prefs, client) { prefs.themeMode(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = ThemeMode.Default)
 
     val vm: TetherViewModel = viewModel(
         factory = remember(client) { TetherViewModelFactory(client, DataStoreDraftStore(context)) },
@@ -161,7 +162,8 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     }
 
     // app/login/page.tsx: Retro is the opt-in layout, otherwise Studio's own sign-in.
-    val loginVariant by prefs.loginVariant.collectAsStateWithLifecycle(initialValue = LoginVariant.Default)
+    // ta-coik.52: the configured server's own choice, as the web's sign-in page reads its origin's.
+    val loginVariant by remember(prefs, client) { prefs.loginVariant(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = LoginVariant.Default)
     val logoutNotice by vm.logoutNotice.collectAsStateWithLifecycle()
 
     // Android 17 local-network permission. The client reports LocalNetworkBlocked

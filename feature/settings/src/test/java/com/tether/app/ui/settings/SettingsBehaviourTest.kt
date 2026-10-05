@@ -87,8 +87,8 @@ class SettingsBehaviourTest {
 
     /** r3: wait until the store holds every one of [expected], rather than reading it once right after the close. */
     private fun waitStored(vararg expected: Pair<String, Any?>) {
-        compose.waitUntil(5_000) { store.stored().let { raw -> expected.all { (k, v) -> raw[k] == v } } }
-        val raw = store.stored()
+        compose.waitUntil(5_000) { store.storedFor().let { raw -> expected.all { (k, v) -> raw[k] == v } } }
+        val raw = store.storedFor()
         for ((k, v) in expected) assertEquals(k, v, raw[k])
     }
 
@@ -170,7 +170,7 @@ class SettingsBehaviourTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithText(CURRENT, substring = true).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(CURRENT, substring = true).assertExists()
         compose.onNodeWithText("Workspace root").assertDoesNotExist()
-        assertEquals("", store.stored()[PreferenceKeys.DEFAULT_WORKSPACE])
+        assertEquals("nothing written before Save", null, store.storedFor()[PreferenceKeys.DEFAULT_WORKSPACE])
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
         waitClosed()
         waitStored(PreferenceKeys.DEFAULT_WORKSPACE to CURRENT)
@@ -202,13 +202,13 @@ class SettingsBehaviourTest {
         tab(SettingsTab.Appearance).performClick()
         compose.waitForIdle()
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performClick()
-        compose.waitUntil(5_000) { store.stored()[PreferenceKeys.THEME_MODE] == "dark" }
+        compose.waitUntil(5_000) { store.storedFor()[PreferenceKeys.THEME_MODE] == "dark" }
         waitSelected(SettingsPanelTags.themeMode(ThemeMode.Dark))
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).assertIsSelected()
         compose.onNodeWithTag(SettingsPanelTags.loginVariant("retro")).performClick()
-        compose.waitUntil(5_000) { store.stored()[PreferenceKeys.LOGIN_VARIANT] == "retro" }
+        compose.waitUntil(5_000) { store.storedFor()[PreferenceKeys.LOGIN_VARIANT] == "retro" }
         // The General draft is still unsaved (the appearance write keeps the stored value).
-        assertEquals(false, store.stored()[PreferenceKeys.SHOW_THINKING])
+        assertEquals(false, store.storedFor()[PreferenceKeys.SHOW_THINKING])
 
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
         waitClosed()
@@ -232,7 +232,7 @@ class SettingsBehaviourTest {
         waitSelected(SettingsPanelTags.themeMode(ThemeMode.Dark))
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).assertIsSelected()
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Light)).performClick()
-        compose.waitUntil(5_000) { store.stored()[PreferenceKeys.THEME_MODE] == "light" }
+        compose.waitUntil(5_000) { store.storedFor()[PreferenceKeys.THEME_MODE] == "light" }
         val raw = store.stored()
         assertEquals(null, raw[PreferenceKeys.THEME_FAMILY])
         assertEquals(null, raw[PreferenceKeys.LEGACY_THEME])

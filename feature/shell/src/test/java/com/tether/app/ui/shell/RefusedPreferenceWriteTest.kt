@@ -67,7 +67,8 @@ class RefusedPreferenceWriteTest {
 
     private fun pickerShown() = rule.onAllNodesWithText("Choose a folder").fetchSemanticsNodes().isNotEmpty()
 
-    private fun pinned(): List<String> = runBlocking { prefs.preferences.first().pinnedProjects }
+    // ta-coik.52: the pins of the server the shell is signed in to (the web's preferences are per origin).
+    private fun pinned(): List<String> = runBlocking { prefs.preferences.first().forServer(com.tether.app.client.serverOrigin(client.serverUrl.value)).pinnedProjects }
 
     private fun choose(folder: String, open: () -> Unit) {
         client.directories.value = DirectoryListing(current = folder)

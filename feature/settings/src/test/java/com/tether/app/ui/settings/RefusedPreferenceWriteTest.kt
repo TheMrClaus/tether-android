@@ -57,7 +57,7 @@ class RefusedPreferenceWriteTest {
     private val prefs = UiPrefs.on(disk)
     private val state = SettingsDialogState()
 
-    private fun read() = runBlocking(Dispatchers.IO) { prefs.preferences.first() }
+    private fun read() = runBlocking(Dispatchers.IO) { prefs.preferences.first().forServer(null) }
 
     private fun show(tab: SettingsTab) {
         compose.setContent { SettingsUnderTest(prefs, state) }

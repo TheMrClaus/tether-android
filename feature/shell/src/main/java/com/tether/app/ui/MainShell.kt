@@ -109,17 +109,25 @@ import com.tether.app.ui.statusline.ContextGauge
 import com.tether.app.ui.statusline.SessionStatusline
 import com.tether.app.ui.statusline.TelemetryMetrics
 
+/** ta-coik.52: the Overview's filter choice and the server it was read for (null origin: no server). */
+internal data class OverviewChoiceFor(val origin: String?, val choice: com.tether.app.ui.overview.OverviewChoice)
+
 /** T15.2: the Overview's filter choice survives a rotation and a return to the Overview (overview.tsx:42). */
-private val OverviewChoiceSaver = androidx.compose.runtime.saveable.listSaver<com.tether.app.ui.overview.OverviewChoice, String>(
-    save = { listOf(it.workspace.orEmpty(), it.provider.orEmpty(), it.status.key) },
-    restore = { saved ->
-        com.tether.app.ui.overview.OverviewChoice(
-            workspace = saved[0].ifEmpty { null },
-            provider = saved[1].ifEmpty { null },
-            status = com.tether.app.ui.overview.StatusTab.entries.firstOrNull { it.key == saved[2] } ?: com.tether.app.ui.overview.StatusTab.Active,
-        )
-    },
+private val OverviewChoiceSaver = androidx.compose.runtime.saveable.listSaver<OverviewChoiceFor?, String?>(
+    save = { listOf(it?.origin, it?.choice?.workspace, it?.choice?.provider, it?.choice?.status?.key) },
+    restore = { saved -> saved[3]?.let { OverviewChoiceFor(saved[0], overviewChoiceOf(com.tether.app.ui.prefs.OverviewFilters(saved[1], saved[2], it))) } },
 )
+
+/** overview.tsx 90fbb9f :43-55 `readChoice`: a status that is not one of the tabs reads as Active. */
+internal fun overviewChoiceOf(filters: com.tether.app.ui.prefs.OverviewFilters) = com.tether.app.ui.overview.OverviewChoice(
+    workspace = filters.workspace?.takeIf(String::isNotEmpty),
+    provider = filters.provider?.takeIf(String::isNotEmpty),
+    status = com.tether.app.ui.overview.StatusTab.entries.firstOrNull { it.key == filters.status } ?: com.tether.app.ui.overview.StatusTab.Active,
+)
+
+/** overview.tsx :56-62 `writeChoice`'s record. */
+internal fun overviewFiltersOf(choice: com.tether.app.ui.overview.OverviewChoice) =
+    com.tether.app.ui.prefs.OverviewFilters(choice.workspace, choice.provider, choice.status.key)
 
 /** How long a copy control reads "Copied" (dashboard.tsx:1202, 1221, 1233). */
 private const val CopiedFeedbackMs = 1_500L
@@ -150,7 +158,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     cardStates.bindTo(configuredServer)
     val windowWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
     val layout = shellLayoutFor(windowWidthDp)
-    val persisted = rememberPersistedPanels(prefs)
+    val persisted = rememberPersistedPanels(prefs, vm.client.serverUrl)
     val projectionTrees by vm.client.projectionTrees.collectAsStateWithLifecycle()
 
     val sessions by vm.client.sessions.collectAsStateWithLifecycle()
@@ -207,7 +215,22 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var settingsTab by rememberSaveable { mutableStateOf(com.tether.app.ui.settings.SettingsTab.General) }
     // ta-3e7: the Studio welcome's "Open workspace" (dashboard.tsx folderDialogRef), at shell level.
     var workspacePickerOpen by rememberSaveable { mutableStateOf(false) }
-    var overviewChoice by rememberSaveable(stateSaver = OverviewChoiceSaver) { mutableStateOf(com.tether.app.ui.overview.OverviewChoice()) }
+    // ta-coik.52 (overview.tsx 90fbb9f :24, :43-62): the filter choice is kept per server, as the web's
+    // per-origin `tether:overviewFilters`: read for the server on screen (the Overview waits for that
+    // read, as the web's first render already has it) and written on every change.
+    val overviewServer = com.tether.app.client.serverOrigin(vm.client.serverUrl.collectAsStateWithLifecycle().value)
+    var overviewChoiceFor by rememberSaveable(stateSaver = OverviewChoiceSaver) { mutableStateOf<OverviewChoiceFor?>(null) }
+    LaunchedEffect(prefs, overviewServer) {
+        if (overviewChoiceFor?.origin != overviewServer || overviewChoiceFor == null) {
+            overviewChoiceFor = OverviewChoiceFor(overviewServer, overviewChoiceOf(prefs.overviewFilters(overviewServer)))
+        }
+    }
+    val overviewChoice = overviewChoiceFor?.takeIf { it.origin == overviewServer }?.choice
+    val overviewScope = rememberCoroutineScope()
+    val setOverviewChoice: (com.tether.app.ui.overview.OverviewChoice) -> Unit = { next ->
+        overviewChoiceFor = OverviewChoiceFor(overviewServer, next)
+        overviewScope.launch { prefs.setOverviewFilters(overviewServer, overviewFiltersOf(next)) }
+    }
     var reviewTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     // ta-coik.41 (dashboard.tsx 90fbb9f :609-611, :709-717): the selection is on screen only while
     // its chat is listed (`visibleSessions`: an ended one only with "Show ended sessions" on); one that
@@ -215,7 +238,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // Until the stored setting is first read (null) nothing is on screen, so an ended chat never
     // flashes in; saved, so a rotation does not pass through that state (and remount the chat).
     var showEnded by rememberSaveable { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(prefs) { prefs.showEnded.distinctUntilChanged().collect { showEnded = it } }
+    LaunchedEffect(prefs) { prefs.showEnded(vm.client.serverUrl).distinctUntilChanged().collect { showEnded = it } }
     LaunchedEffect(showEnded) { vm.setShowEnded(showEnded) }
     val visibleSessions = if (showEnded == false) sessions.filter { it.status != "exited" } else sessions
     // ta-coik.42 (dashboard.tsx 90fbb9f :710-717): the pending target while it is listed, else the pick;
@@ -298,7 +321,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     var confirmEnd by remember { mutableStateOf<EndTarget?>(null) }
     // T10.1 (dashboard.tsx:1170-1180 `endSession`): Settings → General's "Confirm before ending".
     // Off, the header's End session sends at once; on (and until the stored value is read), it asks.
-    val confirmBeforeEndFlow = remember(prefs) { prefs.preferences.map { it.confirmBeforeEnd }.distinctUntilChanged() }
+    val confirmBeforeEndFlow = remember(prefs) { prefs.preferencesFor(vm.client.serverUrl).map { it.confirmBeforeEnd }.distinctUntilChanged() }
     val confirmBeforeEnd by confirmBeforeEndFlow.collectAsStateWithLifecycle(initialValue = true)
     // ta-28i: the working directory and the session id are server text: a copy carries them the SAFE
     // way (a hidden control as its visible token), and the notice's "Copy raw" is the only raw path.
@@ -563,6 +586,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     }
                 } else if (!overviewOpen) {
                     null
+                } else if (overviewChoice == null) {
+                    // ta-coik.52: until this server's stored filters are read, nothing (no feed asked for).
+                    { Box(Modifier.fillMaxSize()) }
                 } else {
                     {
                         // Read-only: every action hands off to an existing handler the operator taps.
@@ -577,7 +603,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                         com.tether.app.ui.overview.OverviewHost(
                             client = vm.client,
                             choice = overviewChoice,
-                            onChoice = { overviewChoice = it },
+                            onChoice = setOverviewChoice,
                             actions = com.tether.app.ui.overview.OverviewActions(
                                 onOpenSession = openFromOverview,
                                 onReviewRequest = { id, requestId ->
@@ -763,7 +789,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
  */
 @Composable
 private fun ShellSettings(vm: TetherViewModel, prefs: UiPrefs, workspaceRoot: String?, tab: com.tether.app.ui.settings.SettingsTab, onDismiss: () -> Unit) {
-    val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = com.tether.app.ui.prefs.TetherPreferences.Default)
+    val preferences by remember(prefs, vm.client) { prefs.preferencesFor(vm.client.serverUrl) }.collectAsStateWithLifecycle(initialValue = com.tether.app.ui.prefs.TetherPreferences.Default)
     val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
     val current = com.tether.app.ui.sidebar.SidebarController.resolveCurrentWorkspace(picked, preferences, workspaceRoot)
     com.tether.app.ui.settings.SettingsDialog(vm.client, prefs, currentWorkspace = current.orEmpty(), onDismiss = onDismiss, initialTab = tab)

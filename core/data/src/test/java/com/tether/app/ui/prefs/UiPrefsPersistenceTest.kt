@@ -83,6 +83,8 @@ class UiPrefsPersistenceTest {
             // ta-coik.47: per server origin, any character.
             collapsedByOrigin = mapOf(A to listOf("/srv/line\nbreak"), B to emptyList()),
             lastSeenByOrigin = mapOf(A to mapOf("h\t1" to 7L), "" to mapOf("h0" to 0L)),
+            // ta-coik.52: every other preference per server origin, any character.
+            preferencesByOrigin = mapOf(A to ServerPreferences(themeMode = ThemeMode.Light, defaultWorkspace = "/srv/line\nbreak"), B to ServerPreferences()),
             sidebarActiveOnly = true,
             sidebarUnreadOnly = true,
             sidebarHideAgentRuns = false,
@@ -96,11 +98,12 @@ class UiPrefsPersistenceTest {
         withPrefs { prefs ->
             assertEquals(edited, prefs.preferences.first())
             // The per-field flows read the same model.
-            assertEquals(ThemeMode.Dark, prefs.themeMode.first())
-            assertEquals(LoginVariant.Retro, prefs.loginVariant.first())
-            assertTrue(prefs.showThinking.first())
-            assertFalse(prefs.showEnded.first())
-            assertEquals(listOf("/srv/b", "/srv/a"), prefs.pinnedProjects.first())
+            // (no server configured, nothing migrated yet: the device-wide values)
+            assertEquals(ThemeMode.Dark, prefs.themeMode(kotlinx.coroutines.flow.flowOf(null)).first())
+            assertEquals(LoginVariant.Retro, prefs.loginVariant(kotlinx.coroutines.flow.flowOf(null)).first())
+            assertTrue(prefs.showThinking(kotlinx.coroutines.flow.flowOf(null)).first())
+            assertFalse(prefs.showEnded(kotlinx.coroutines.flow.flowOf(null)).first())
+            assertEquals(listOf("/srv/b", "/srv/a"), prefs.pinnedProjects(kotlinx.coroutines.flow.flowOf(null)).first())
             // Clearing optional fields removes them.
             prefs.updatePreferences { it.copy(sidebarWidth = null, lastOpenedSession = null, lastOpenedByOrigin = emptyMap()) }
         }
@@ -122,7 +125,7 @@ class UiPrefsPersistenceTest {
         val expected = mapOf(A to LastOpenedSession("/srv/with\ttab", "s1", "h1"))
         withPrefs { prefs ->
             assertEquals(expected, prefs.preferences.first().lastOpenedByOrigin)
-            prefs.setShowEnded(false)
+            prefs.updatePreferences { it.copy(showEndedSessions = false) }
         }
         withStore(prefsFile) { ds ->
             val stored = ds.data.first()
@@ -151,7 +154,7 @@ class UiPrefsPersistenceTest {
             assertEquals(ThemeMode.Dark, p.themeMode)
             assertTrue(p.showThinking)
             assertEquals(listOf("/srv/x"), p.pinnedProjects)
-            prefs.setShowEnded(false)
+            prefs.updatePreferences { it.copy(showEndedSessions = false) }
             assertEquals(com.tether.app.push.PushScope.Pinned, prefs.pushScope.first())
         }
         withStore(prefsFile) { ds ->
@@ -184,9 +187,9 @@ class UiPrefsPersistenceTest {
             prefsFile.delete()
             withStore(prefsFile) { ds -> ds.edit { p -> stored.forEach { (k, v) -> p[stringPreferencesKey(k)] = v } } }
             withPrefs { prefs ->
-                assertEquals("$stored", expected, prefs.themeMode.first())
+                assertEquals("$stored", expected, prefs.themeMode(kotlinx.coroutines.flow.flowOf(null)).first())
                 assertTrue("$stored predates the view record", prefs.viewBoot(null).hasExistingPreferences)
-                prefs.setShowThinking(true) // any save of the model
+                prefs.updatePreferences { it.copy(showThinking = true) } // any save of the model
             }
             withStore(prefsFile) { ds ->
                 val raw = ds.data.first().asMap().mapKeys { it.key.name }
@@ -194,7 +197,7 @@ class UiPrefsPersistenceTest {
                 assertFalse("$stored: flat id consumed", PreferenceKeys.LEGACY_THEME in raw)
                 assertEquals("$stored", expected.id, raw[PreferenceKeys.THEME_MODE])
             }
-            withPrefs { prefs -> assertEquals("$stored after the save", expected, prefs.themeMode.first()) }
+            withPrefs { prefs -> assertEquals("$stored after the save", expected, prefs.themeMode(kotlinx.coroutines.flow.flowOf(null)).first()) }
         }
     }
 
@@ -209,9 +212,9 @@ class UiPrefsPersistenceTest {
             }
         }
         withPrefs { prefs ->
-            assertEquals(LoginVariant.Default, prefs.loginVariant.first())
-            prefs.setThemeMode(ThemeMode.Light)
-            assertEquals(ThemeMode.Light, prefs.themeMode.first())
+            assertEquals(LoginVariant.Default, prefs.loginVariant(kotlinx.coroutines.flow.flowOf(null)).first())
+            prefs.updatePreferences { it.copy(themeMode = ThemeMode.Light) }
+            assertEquals(ThemeMode.Light, prefs.themeMode(kotlinx.coroutines.flow.flowOf(null)).first())
         }
         withStore(prefsFile) { ds ->
             val raw = ds.data.first().asMap().mapKeys { it.key.name }
@@ -231,9 +234,9 @@ class UiPrefsPersistenceTest {
         }
         withPrefs { prefs ->
             assertEquals(TetherPreferences.Default, prefs.preferences.first())
-            assertFalse(prefs.showThinking.first())
-            prefs.setShowThinking(true) // and the next save repairs the stored type
-            assertTrue(prefs.showThinking.first())
+            assertFalse(prefs.showThinking(kotlinx.coroutines.flow.flowOf(null)).first())
+            prefs.updatePreferences { it.copy(showThinking = true) } // and the next save repairs the stored type
+            assertTrue(prefs.showThinking(kotlinx.coroutines.flow.flowOf(null)).first())
         }
     }
 
@@ -372,6 +375,10 @@ class UiPrefsPersistenceTest {
         prefsFile.delete()
         withStore(prefsFile) { ds -> ds.edit { it[stringPreferencesKey(PreferenceKeys.LEGACY_THEME)] = "night" } }
         withPrefs { prefs -> assertTrue(prefs.viewBoot(null).hasExistingPreferences) }
+        // ta-coik.52: so does any device-wide preference key of before (a pre-T2.3 install wrote no theme).
+        prefsFile.delete()
+        withStore(prefsFile) { ds -> ds.edit { it[booleanPreferencesKey(PreferenceKeys.SHOW_THINKING)] = false } }
+        withPrefs { prefs -> assertTrue(prefs.viewBoot(A).hasExistingPreferences) }
     }
 
     /** ta-coik.47: each server remembers its own last view (the web's `tether:lastView` is per origin). */
@@ -475,6 +482,127 @@ class UiPrefsPersistenceTest {
             assertEquals(mapOf("h\t2" to 9L), stored.forServer(B).lastSeenSessions)
             // A server's view by its URL (the canonical origin).
             assertEquals(listOf("/srv/x", "/srv/y"), prefs.preferencesFor(kotlinx.coroutines.flow.flowOf("https://A.example/")).first().collapsedWorkspaces)
+        }
+    }
+
+    /** ta-coik.52: the device-wide keys of the preferences now kept per server. */
+    private val deviceWideKeys = setOf(
+        PreferenceKeys.THEME_MODE, PreferenceKeys.LOGIN_VARIANT, PreferenceKeys.DEFAULT_WORKSPACE, PreferenceKeys.SHOW_ENDED_SESSIONS,
+        PreferenceKeys.CONFIRM_BEFORE_END, PreferenceKeys.SHOW_THINKING, PreferenceKeys.SIDEBAR_COLLAPSED, PreferenceKeys.SIDEBAR_WIDTH,
+        PreferenceKeys.INSPECTOR_WIDTH, PreferenceKeys.PINNED_PROJECTS, PreferenceKeys.SIDEBAR_ACTIVE_ONLY, PreferenceKeys.SIDEBAR_UNREAD_ONLY,
+        PreferenceKeys.SIDEBAR_HIDE_AGENT_RUNS, PreferenceKeys.SIDEBAR_SORT, PreferenceKeys.PINNED_MODELS,
+    )
+
+    private fun on(url: String?) = kotlinx.coroutines.flow.flowOf(url)
+
+    /**
+     * ta-coik.52: every preference is stored per server as JSON (the web's per-origin
+     * `tether.preferences.v1`); the device-wide keys of before are read until the migration moves
+     * them to the current server, and are then gone from the file.
+     */
+    @Test
+    fun everyPreferenceIsPerServerOnDisk() = runBlocking {
+        withStore(prefsFile) { ds ->
+            ds.edit {
+                it[stringPreferencesKey(PreferenceKeys.THEME_MODE)] = "dark"
+                it[booleanPreferencesKey(PreferenceKeys.SHOW_THINKING)] = true
+                it[stringPreferencesKey(PreferenceKeys.PINNED_MODELS)] = "m1\nm2"
+                it[stringPreferencesKey(PreferenceKeys.SIDEBAR_SORT)] = "last-active"
+                it[intPreferencesKey(PreferenceKeys.SIDEBAR_WIDTH)] = 300
+                it[stringPreferencesKey(PreferenceKeys.LOGIN_VARIANT)] = "retro"
+            }
+        }
+        val legacy = ServerPreferences(themeMode = ThemeMode.Dark, showThinking = true, pinnedModels = listOf("m1", "m2"), sidebarSort = SidebarSort.LastActive, sidebarWidth = 300, loginVariant = LoginVariant.Retro)
+        withPrefs { prefs ->
+            assertEquals(legacy, ServerPreferences.of(prefs.preferencesFor(on(A)).first()))
+            assertEquals("until migrated, any server reads them", ThemeMode.Dark, prefs.themeMode(on(B)).first())
+            assertEquals(LoginVariant.Retro, prefs.loginVariant(on(null)).first())
+            prefs.updatePreferences { it.migrateToServer(A) }
+        }
+        withStore(prefsFile) { ds ->
+            val raw = ds.data.first().asMap().mapKeys { it.key.name }
+            assertEquals("no device-wide key is left", emptySet<String>(), raw.keys intersect deviceWideKeys)
+            assertTrue(raw[PreferenceKeys.PREFERENCES_BY_ORIGIN_JSON].toString().startsWith("{"))
+        }
+        withPrefs { prefs ->
+            assertEquals(legacy, ServerPreferences.of(prefs.preferencesFor(on("https://A.example/")).first()))
+            assertEquals("another server starts from the web defaults", ServerPreferences.Default, ServerPreferences.of(prefs.preferencesFor(on(B)).first()))
+            assertEquals(ServerPreferences.Default, ServerPreferences.of(prefs.preferencesFor(on(null)).first()))
+            // Each setter writes that server's record, nothing device-wide.
+            suspend fun nothingDeviceWide() = assertEquals(ServerPreferences.Default, ServerPreferences.of(prefs.preferences.first()))
+            prefs.setThemeMode(B, ThemeMode.Light)
+            nothingDeviceWide()
+            prefs.setLoginVariant(B, LoginVariant.Retro)
+            nothingDeviceWide()
+            prefs.setShowEnded(B, false)
+            nothingDeviceWide()
+            prefs.setPinnedProjects(B, listOf("/srv/new\nline", "/srv/x"))
+            nothingDeviceWide()
+            prefs.setShowThinking(null, true)
+            nothingDeviceWide()
+        }
+        withPrefs { prefs ->
+            assertEquals(legacy, ServerPreferences.of(prefs.preferencesFor(on(A)).first()))
+            assertEquals(
+                ServerPreferences(themeMode = ThemeMode.Light, loginVariant = LoginVariant.Retro, showEndedSessions = false, pinnedProjects = listOf("/srv/new\nline", "/srv/x")),
+                ServerPreferences.of(prefs.preferencesFor(on(B)).first()),
+            )
+            assertEquals(ThemeMode.Light, prefs.themeMode(on(B)).first())
+            assertEquals(LoginVariant.Retro, prefs.loginVariant(on(B)).first())
+            assertFalse(prefs.showEnded(on(B)).first())
+            assertTrue(prefs.showEnded(on(A)).first())
+            assertEquals(listOf("/srv/new\nline", "/srv/x"), prefs.pinnedProjects(on(B)).first())
+            assertTrue("no server configured: the \"\" record", prefs.showThinking(on(null)).first())
+            assertFalse(prefs.showThinking(on(B)).first())
+            assertEquals(ThemeMode.System, prefs.themeMode(on("https://c.example:443")).first())
+        }
+        withStore(prefsFile) { ds -> assertEquals(emptySet<String>(), ds.data.first().asMap().keys.map { it.name }.toSet() intersect deviceWideKeys) }
+    }
+
+    /** ta-coik.52: a server that kept preferences of its own is an existing origin (dashboard.tsx bootView). */
+    @Test
+    fun aServerWithItsOwnPreferencesBootsAsAnExistingOrigin() = runBlocking {
+        withPrefs { prefs ->
+            prefs.setLastView(B, "overview")
+            prefs.setShowThinking(A, false)
+        }
+        withPrefs { prefs ->
+            assertEquals(ViewBoot(storedView = null, hasExistingPreferences = true), prefs.viewBoot(A))
+            assertEquals(ViewBoot(storedView = "overview", hasExistingPreferences = false), prefs.viewBoot(B))
+            assertEquals(ViewBoot(storedView = null, hasExistingPreferences = false), prefs.viewBoot("https://c.example:443"))
+        }
+    }
+
+    /** ta-coik.52: the web's `tether:overviewFilters` (overview.tsx 90fbb9f :24, :43-62), per server. */
+    @Test
+    fun overviewFiltersArePerServerAndSurviveARestart() = runBlocking {
+        val odd = "\n\t\"\\😀"
+        val onA = OverviewFilters("/srv/line\nbreak", "codex", "ready")
+        val onB = OverviewFilters(null, null, "waiting")
+        withPrefs { prefs ->
+            assertEquals(OverviewFilters(), prefs.overviewFilters(A))
+            prefs.setOverviewFilters(A, onA)
+            prefs.setOverviewFilters(B, onB)
+            prefs.setOverviewFilters(odd, onA)
+        }
+        withPrefs { prefs ->
+            assertEquals(onA, prefs.overviewFilters(A))
+            assertEquals(onB, prefs.overviewFilters(B))
+            assertEquals(onA, prefs.overviewFilters(odd))
+            assertEquals("a server never used has the default", OverviewFilters(), prefs.overviewFilters("https://c.example:443"))
+            assertEquals(OverviewFilters(), prefs.overviewFilters(null))
+            prefs.setOverviewFilters(A, OverviewFilters())
+            assertEquals(OverviewFilters(), prefs.overviewFilters(A))
+            assertEquals(onB, prefs.overviewFilters(B))
+        }
+        for (garbage in listOf("not json", "[1]", "{\"$A\":3}", "{", "null")) {
+            prefsFile.delete()
+            withStore(prefsFile) { ds -> ds.edit { it[stringPreferencesKey(PreferenceKeys.OVERVIEW_FILTERS_BY_ORIGIN_JSON)] = garbage } }
+            withPrefs { prefs ->
+                assertEquals(garbage, OverviewFilters(), prefs.overviewFilters(A))
+                prefs.setOverviewFilters(B, onB)
+                assertEquals(garbage, onB, prefs.overviewFilters(B))
+            }
         }
     }
 }

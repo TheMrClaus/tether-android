@@ -202,6 +202,29 @@ class MainShellEndSessionTest {
         assertTrue(client.killCalls.isEmpty())
     }
 
+    /**
+     * ta-coik.52: "Confirm before ending" is the signed-in server's own (the web's preferences are per
+     * origin): off on this server ends at once though another server, and the device-wide default, ask.
+     */
+    @Test
+    fun confirmBeforeEndIsTheServersOwn() {
+        val store = PreferenceDataStoreFactory.create(scope = CoroutineScope(Dispatchers.IO + storeJob)) { File(tmp.root, "ui.preferences_pb") }
+        val prefs = UiPrefs.on(store)
+        runBlocking {
+            prefs.updatePreferencesFor("https://a.example:443") { it.copy(confirmBeforeEnd = false) }
+            prefs.updatePreferencesFor("https://b.example:443") { it.copy(confirmBeforeEnd = true) }
+        }
+        val client = ShellConsentClient().also { it.show(session, tree) }
+        client.server.value = "https://a.example"
+        host(client, prefs)
+        rule.mainClock.advanceTimeBy(700)
+        rule.waitForIdle()
+        rule.onNodeWithTag(ShellTags.EndSessionKey).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("End session?").assertDoesNotExist()
+        assertEquals(listOf("s1@$SHELL_TEST_ORIGIN"), client.killCalls)
+    }
+
     private companion object {
         const val OTHER_ORIGIN = "https://other.example"
     }

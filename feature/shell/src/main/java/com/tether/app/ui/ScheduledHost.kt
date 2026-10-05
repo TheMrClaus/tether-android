@@ -3,6 +3,7 @@ package com.tether.app.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
@@ -26,7 +27,7 @@ internal fun ScheduledHost(vm: TetherViewModel, prefs: UiPrefs, workspaceRoot: S
     val state by client.scheduledActions.collectAsStateWithLifecycle()
     val catalog by client.providerCatalog.collectAsStateWithLifecycle()
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
-    val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
+    val preferences by remember(prefs, client) { prefs.preferencesFor(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
     val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
     val server by client.serverUrl.collectAsStateWithLifecycle()
     key(server) {

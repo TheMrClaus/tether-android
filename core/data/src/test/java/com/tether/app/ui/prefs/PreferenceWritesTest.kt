@@ -79,19 +79,21 @@ class PreferenceWritesTest {
     fun aRefusedModelWriteThrowsButTheChangeStillShows() = runBlocking {
         val store = RefusingPrefsStore()
         val prefs = UiPrefs.on(store)
-        assertThrows(IOException::class.java) { runBlocking { prefs.setThemeMode(ThemeMode.Dark) } }
-        assertEquals(ThemeMode.Dark, prefs.themeMode.first())
+        val a = "https://a.example:443"
+        assertThrows(IOException::class.java) { runBlocking { prefs.setThemeMode(a, ThemeMode.Dark) } }
+        assertEquals(ThemeMode.Dark, prefs.themeMode(kotlinx.coroutines.flow.flowOf(a)).first())
         // Kept per store: another UiPrefs on the same file sees it too (the web's module-level cache).
-        assertEquals(ThemeMode.Dark, UiPrefs.on(store).preferences.first().themeMode)
+        assertEquals(ThemeMode.Dark, UiPrefs.on(store).preferences.first().forServer(a).themeMode)
         assertTrue("nothing reached the disk", store.onDisk().asMap().isEmpty())
 
         // The next write that lands carries the kept change with it, and the disk is current again.
         store.refuse = false
-        prefs.setShowThinking(true)
-        val stored = prefs.preferences.first()
+        prefs.setShowThinking(a, true)
+        val stored = prefs.preferences.first().forServer(a)
         assertEquals(ThemeMode.Dark, stored.themeMode)
         assertTrue(stored.showThinking)
-        assertEquals(2, store.onDisk().asMap().count { (k, _) -> k.name == PreferenceKeys.THEME_MODE || k.name == PreferenceKeys.SHOW_THINKING })
+        val disk = TetherPreferences.parse(store.onDisk().asMap().mapKeys { it.key.name })
+        assertEquals(ServerPreferences(themeMode = ThemeMode.Dark, showThinking = true), disk.preferencesByOrigin[a])
     }
 
     @Test

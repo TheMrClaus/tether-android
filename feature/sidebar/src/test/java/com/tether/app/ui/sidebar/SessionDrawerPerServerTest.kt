@@ -53,6 +53,7 @@ class SessionDrawerPerServerTest {
                 collapsedWorkspaces = emptyList(),
                 lastSeenByOrigin = emptyMap(),
                 collapsedByOrigin = emptyMap(),
+                preferencesByOrigin = emptyMap(),
             )
         }
     }
@@ -84,7 +85,7 @@ class SessionDrawerPerServerTest {
     /** ta-coik.51: a link to an ended chat, nothing picked, "Show ended sessions" off: not on screen, not seen. */
     @Test
     fun anEndedTargetThatIsNotListedIsNotMarkedSeen() {
-        runBlocking { prefs.setShowEnded(false) }
+        runBlocking { prefs.setShowEnded(null, false) }
         val target = ended()
         val client = RecordingClient(sessions = listOf(target))
         drawer(client, listOf(target), selectedId = target.id)

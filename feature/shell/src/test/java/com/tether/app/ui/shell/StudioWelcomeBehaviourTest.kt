@@ -131,7 +131,8 @@ abstract class StudioWelcomeBase(private val width: Int, private val height: Int
         until("the picker closed") { !pickerShown() }
     }
 
-    protected fun pinned(): List<String> = runBlocking { prefs.preferences.first().pinnedProjects }
+    // ta-coik.52: the pins of the server the shell is signed in to (the web's preferences are per origin).
+    protected fun pinned(): List<String> = runBlocking { prefs.preferences.first().forServer(com.tether.app.client.serverOrigin(client.serverUrl.value)).pinnedProjects }
 
     /** The picker lists [folder]; "Use this folder" chooses it; the pin must reach the stored preferences. */
     private fun chooseAndAwaitPin(folder: String, open: () -> Unit) {

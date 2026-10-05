@@ -78,6 +78,7 @@ class MainShellSelectionModelTest {
                 defaultWorkspace = "",
                 showEndedSessions = showEnded,
                 pinnedProjects = emptyList(),
+                preferencesByOrigin = emptyMap(),
             )
         }
         prefs.setLastView(origin, view)
@@ -198,6 +199,7 @@ class MainShellSelectionModelTest {
                     collapsedWorkspaces = listOf("/w/folded"),
                     lastSeenSessions = mapOf("h-old" to 3L),
                     collapsedByOrigin = emptyMap(),
+                    preferencesByOrigin = emptyMap(),
                     lastSeenByOrigin = emptyMap(),
                 )
             }
@@ -343,9 +345,32 @@ class MainShellSelectionModelTest {
         client.base.sessions.value = listOf(chat("a", status = "exited"), chat("b")) // End session
         rule.waitForIdle()
         assertEquals("kept, nothing picked over it", "a", vm.selectedSessionId.value)
-        runBlocking { prefs.updatePreferences { it.copy(showEndedSessions = true) } }
+        runBlocking { prefs.updatePreferencesFor(com.tether.app.client.serverOrigin(client.serverUrl.value)) { it.copy(showEndedSessions = true) } }
         rule.waitUntil(5_000) { client.base.mountCalls.size == 2 }
         assertEquals("listed again: mounted again", listOf("a", "a"), client.base.mountCalls.toList())
+    }
+
+    /** ta-coik.52: "Show ended sessions" is the signed-in server's own (the web's preferences are per origin). */
+    @Test
+    fun showEndedSessionsIsTheServersOwn() {
+        val a = "https://a.example:443"
+        storedState("sessions", remembered = null, showEnded = true, origin = a)
+        runBlocking { prefs.updatePreferencesFor(a) { it.copy(showEndedSessions = false) } }
+        val client = Client()
+        client.base.server.value = "https://a.example"
+        list(client, chat("a"), chat("b"))
+        val vm = TetherViewModel(client)
+        vm.selectSession("a")
+        compose(vm)
+        assertEquals(listOf("a"), client.base.mountCalls.toList())
+        client.base.sessions.value = listOf(chat("a", status = "exited"), chat("b")) // End session
+        rule.waitForIdle()
+        // Another server's setting changes nothing here.
+        runBlocking { prefs.updatePreferencesFor("https://b.example:443") { it.copy(showEndedSessions = true) } }
+        rule.waitForIdle()
+        assertEquals("off on this server: the ended chat stays off screen", listOf("a"), client.base.mountCalls.toList())
+        runBlocking { prefs.updatePreferencesFor(a) { it.copy(showEndedSessions = true) } }
+        rule.waitUntil(5_000) { client.base.mountCalls.size == 2 }
     }
 
     @Test
@@ -357,7 +382,7 @@ class MainShellSelectionModelTest {
         vm.selectSession("ended") // its open's attach waits for the chat view it causes
         compose(vm)
         assertEquals(listOf("ended"), client.base.mountCalls.toList())
-        runBlocking { prefs.updatePreferences { it.copy(showEndedSessions = true) } }
+        runBlocking { prefs.updatePreferencesFor(com.tether.app.client.serverOrigin(client.serverUrl.value)) { it.copy(showEndedSessions = true) } }
         rule.waitForIdle()
         // Listed now: the chat view mounts for the first time, and that mount is the open's.
         assertEquals("never mounted (and unmounted) before the setting was read", listOf("ended"), client.base.mountCalls.toList())

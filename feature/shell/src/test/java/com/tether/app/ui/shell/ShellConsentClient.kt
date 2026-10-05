@@ -163,8 +163,11 @@ class ShellConsentClient : TetherClient {
     val overviewState = MutableStateFlow(com.tether.app.protocol.overview.OverviewClientState())
     override val overview: StateFlow<com.tether.app.protocol.overview.OverviewClientState> get() = overviewState
     val feedCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    /** ta-coik.52: every subscription asked for, in order. */
+    val subscriptions = java.util.concurrent.CopyOnWriteArrayList<com.tether.app.protocol.overview.OverviewSubscription>()
     override fun subscribeOverview(subscription: com.tether.app.protocol.overview.OverviewSubscription): Boolean {
         feedCalls += "overview-subscribe"
+        subscriptions += subscription
         return true
     }
     override fun unsubscribeOverview() {

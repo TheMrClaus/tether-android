@@ -41,6 +41,8 @@ object SettingsPanelTags {
 internal fun SettingsPanel(
     tab: SettingsTab,
     prefs: UiPrefs,
+    /** ta-coik.52: the server these preferences are written for (the web's are per origin). */
+    origin: String?,
     live: TetherPreferences,
     state: SettingsDialogState,
     currentWorkspace: String,
@@ -54,7 +56,7 @@ internal fun SettingsPanel(
 ) {
     when (tab) {
         SettingsTab.General -> GeneralPanel(live, state, currentWorkspace, narrow)
-        SettingsTab.Appearance -> AppearancePanel(prefs, live, narrow)
+        SettingsTab.Appearance -> AppearancePanel(prefs, origin, live, narrow)
         // T10.4: keyed on the server, so another server's panel starts from nothing (no pending
         // confirmation, no rename half typed); the controller itself is one per server.
         SettingsTab.Devices -> key(devices.controller?.origin) { DevicesPanel(prefs, narrow, devices) }
@@ -125,7 +127,7 @@ private fun GeneralPanel(live: TetherPreferences, state: SettingsDialogState, cu
  * preference. The caption names the finish the mode resolves to.
  */
 @Composable
-private fun AppearancePanel(prefs: UiPrefs, live: TetherPreferences, narrow: Boolean) {
+private fun AppearancePanel(prefs: UiPrefs, origin: String?, live: TetherPreferences, narrow: Boolean) {
     val scope = rememberCoroutineScope()
     val dark = live.themeMode.isDark(isSystemInDarkTheme())
     val t = LocalTetherTokens.current
@@ -147,7 +149,7 @@ private fun AppearancePanel(prefs: UiPrefs, live: TetherPreferences, narrow: Boo
                         label = mode.label,
                         hint = mode.hint,
                         selected = live.themeMode == mode,
-                        onClick = { scope.launchPreferenceWrite { prefs.setThemeMode(mode) } },
+                        onClick = { scope.launchPreferenceWrite { prefs.setThemeMode(origin, mode) } },
                         narrow = narrow,
                         modifier = Modifier.testTag(SettingsPanelTags.themeMode(mode)),
                     )
@@ -167,7 +169,7 @@ private fun AppearancePanel(prefs: UiPrefs, live: TetherPreferences, narrow: Boo
                         label = choice.label,
                         hint = choice.hint,
                         selected = live.loginVariant == choice.value,
-                        onClick = { scope.launchPreferenceWrite { prefs.setLoginVariant(choice.value) } },
+                        onClick = { scope.launchPreferenceWrite { prefs.setLoginVariant(origin, choice.value) } },
                         narrow = narrow,
                         modifier = Modifier.testTag(SettingsPanelTags.loginVariant(choice.value.id)),
                     )

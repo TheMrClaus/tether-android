@@ -82,6 +82,9 @@ class MainShellOverviewTest {
         val vm = TetherViewModel(client)
         vm.selectSession("s1")
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
+        // ta-coik.52: the process-wide store starts empty here (another class's per-server records,
+        // the no-server one included, would otherwise carry over).
+        kotlinx.coroutines.runBlocking { prefs.updatePreferences { com.tether.app.ui.prefs.TetherPreferences.Default } }
         rule.setContent { TetherTheme { CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, prefs) } } }
         rule.waitForIdle()
         assertEquals(emptyList<String>(), client.seenCalls)

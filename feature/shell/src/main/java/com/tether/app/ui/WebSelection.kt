@@ -55,13 +55,13 @@ internal fun WebSelectionEffects(
     val serverUrl by client.serverUrl.collectAsStateWithLifecycle()
     // r2: each server remembers its own chat (the web's localStorage is per origin).
     val origin = com.tether.app.client.serverOrigin(serverUrl)
-    // ta-coik.47: and its own folded blocks and seen stamps.
+    // ta-coik.47: and its own folded blocks and seen stamps; ta-coik.52: and every other preference.
     val scoped = loaded.forServer(origin)
     val remembered = scoped.lastOpenedSession
 
-    val visible = SidebarModel.visibleSessions(sessions, loaded.showEndedSessions)
+    val visible = SidebarModel.visibleSessions(sessions, scoped.showEndedSessions)
     val current = SidebarController.resolveCurrentWorkspace(picked, scoped, workspaceRoot)
-    val workspaces = SidebarModel.sidebarWorkspaces(SidebarController.pinnedWorkspacesOf(serverSettings, loaded), current)
+    val workspaces = SidebarModel.sidebarWorkspaces(SidebarController.pinnedWorkspacesOf(serverSettings, scoped), current)
     val histories = current?.let { historiesByCwd[it] }.orEmpty()
 
     val latestPrefs by rememberUpdatedState(scoped)
@@ -77,7 +77,7 @@ internal fun WebSelectionEffects(
     }
 
     // r2: the single chat remembered before per-server memory becomes this server's, once; ta-coik.47:
-    // with the folded blocks and seen stamps the app kept device-wide.
+    // with the folded blocks and seen stamps the app kept device-wide; ta-coik.52: and every other preference.
     LaunchedEffect(origin, loaded.hasDeviceWideServerRecords) {
         if (origin != null && loaded.hasDeviceWideServerRecords) {
             scope.launchPreferenceWrite { prefs.updatePreferences { it.migrateToServer(origin) } }

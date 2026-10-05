@@ -99,7 +99,8 @@ class SettingsLoadingTest {
         thinking.assertIsOff()
         save.performClick()
         compose.waitUntil(5_000) { closes == 1 }
-        val raw = runBlocking { store.store.data.first().asMap().mapKeys { it.key.name } }
+        // ta-coik.52: written to the server's own record (here no server is configured: the "" one).
+        val raw = store.storedFor()
         assertEquals(false, raw[PreferenceKeys.SHOW_ENDED_SESSIONS])
         assertEquals(false, raw[PreferenceKeys.CONFIRM_BEFORE_END])
         assertEquals(false, raw[PreferenceKeys.SHOW_THINKING])
@@ -130,7 +131,7 @@ class SettingsSaveTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    private fun stored() = runBlocking { store.store.data.first().asMap().mapKeys { it.key.name } }
+    private fun stored() = store.storedFor()
 
     /** ta-b72: the draft (read on the store's IO thread) is drawn: the switch and Save are live. */
     private fun waitReady() = compose.waitUntil(5_000) {

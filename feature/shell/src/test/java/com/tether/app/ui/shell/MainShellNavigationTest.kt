@@ -163,6 +163,9 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
         runBlocking {
             prefs.updatePreferences { it.copy(showThinking = true) }
             prefs.updatePreferencesFor(a) { it.copy(collapsedWorkspaces = listOf("/w/folded"), lastSeenSessions = mapOf("h-seen" to 7L)) }
+            // ta-coik.52: and every other preference, and the Overview's filters.
+            prefs.setThemeMode(a, com.tether.app.ui.theme.ThemeMode.Dark)
+            prefs.setOverviewFilters(a, com.tether.app.ui.prefs.OverviewFilters(provider = "codex", status = "attention"))
             prefs.setLastView(a, "scheduled")
             prefs.setLastView(b, "sessions")
         }
@@ -181,12 +184,15 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
         rule.waitForIdle()
         assertEquals(records, runBlocking { prefs.preferences.first() })
         assertEquals("scheduled", runBlocking { prefs.viewBoot(a) }.storedView)
+        assertEquals(com.tether.app.ui.prefs.OverviewFilters(provider = "codex", status = "attention"), runBlocking { prefs.overviewFilters(a) })
 
         // A server never used here starts on the Overview, though this install kept preferences.
         client.server.value = "https://c.example"
         rule.runOnIdle { signedIn = true }
         onOverview()
         assertTrue(selected(ShellTags.nav(TopBarDestination.Overview)))
+        // Its view is written (the web's write is synchronous) before the sign-out takes the screen away.
+        rule.waitUntil(5_000) { runBlocking { prefs.viewBoot("https://c.example:443") }.storedView == "overview" }
         rule.runOnIdle { signedIn = false }
         rule.waitForIdle()
 
@@ -198,6 +204,13 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
         assertEquals(listOf("/w/folded"), after.forServer(a).collapsedWorkspaces)
         assertEquals(mapOf("h-seen" to 7L), after.forServer(a).lastSeenSessions)
         assertTrue(after.forServer(b).collapsedWorkspaces.isEmpty())
+        // ta-coik.52: the device-wide setting of before became A's (the first server written to), and
+        // A's theme is A's own: B starts from the web defaults.
+        assertTrue(after.forServer(a).showThinking)
+        assertEquals(com.tether.app.ui.theme.ThemeMode.Dark, after.forServer(a).themeMode)
+        assertFalse(after.forServer(b).showThinking)
+        assertEquals(com.tether.app.ui.theme.ThemeMode.System, after.forServer(b).themeMode)
+        assertFalse(after.hasDeviceWideServerRecords)
         assertEquals("scheduled", runBlocking { prefs.viewBoot(a) }.storedView)
         assertEquals("overview", runBlocking { prefs.viewBoot("https://c.example:443") }.storedView)
     }
