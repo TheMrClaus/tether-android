@@ -234,6 +234,8 @@ fun Composer(
     inserts: kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.emptyFlow(),
     /** T8.5: the `@` picker's Sessions and the takeover draft (null: neither is offered). */
     takeover: ComposerTakeover? = null,
+    /** T8.6: the in-console browser toggle beside the paperclip (null: no key, as the web without `onToggleBrowser`). */
+    browser: ComposerBrowser? = null,
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
@@ -1030,6 +1032,7 @@ fun Composer(
                         // room for the moment it is open (its price must be read whole; the web phone
                         // hides the words instead, globals.css:7894).
                         showAttach = !(metrics.phone && confirmingStop),
+                        browser = browser,
                         // The web keeps the paperclip live while a turn runs; submit() asks the operator to wait.
                         attachEnabled = session != null,
                         totals = if (projection != null && session != null) {
@@ -1164,6 +1167,7 @@ private fun ComposerToolbar(
     attachEnabled: Boolean,
     totals: (@Composable () -> Unit)?,
     showAttach: Boolean = true,
+    browser: ComposerBrowser? = null,
     options: (@Composable () -> Unit)? = null,
     settingsKey: (@Composable (Modifier) -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit,
@@ -1190,6 +1194,8 @@ private fun ComposerToolbar(
                 modifier = Modifier.size(attachSize),
                 contentDescription = "Add attachment",
             )
+            // T8.6 (chat-view.tsx 90fbb9f :4510-4524): the browser key, next to "add context".
+            if (browser != null) ComposerBrowserKey(browser, attachSize)
         }
         // Phone (globals.css:11936): the sheet key takes the free width; wider it sits at content width.
         if (settingsKey != null) {

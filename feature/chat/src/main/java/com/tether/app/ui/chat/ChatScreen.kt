@@ -324,6 +324,8 @@ fun ChatScreen(
         request?.let { find.apply(it.query, it.nonce) }
     }
     var focusFind by remember { mutableStateOf(0) }
+    // T8.6 (dashboard.tsx 90fbb9f :229-236): the in-console browser pane's open flag, over sessions.
+    var browserOpen by remember { mutableStateOf(false) }
     LaunchedEffect(focusFind) { if (focusFind > 0) runCatching { findFocus.requestFocus() } }
 
     Box(
@@ -477,6 +479,7 @@ fun ChatScreen(
             sendRows = sends.pending,
             github = composerGitHub,
             takeover = takeover,
+            browser = if (session != null) ComposerBrowser(browserOpen) { browserOpen = !browserOpen } else null,
         )
     }
     CommandOutputDialog(
@@ -484,6 +487,15 @@ fun ChatScreen(
         actions = commandActions,
         onClose = { openCommandId = null },
     )
+    // dashboard.tsx 90fbb9f :1762-1772: over the chat, keyed by session.
+    if (browserOpen && session != null) {
+        BrowserPaneHost(
+            opener = vm.client.browserSockets,
+            sessionId = session.id,
+            onClose = { browserOpen = false },
+            modifier = Modifier.align(Alignment.TopEnd),
+        )
+    }
     if (find.open && session != null) {
         ChatFindBar(
             query = find.query,

@@ -759,6 +759,12 @@ interface TetherClient {
     val serviceOpen: ServiceOpenSource get() = ServiceOpenSource.Unavailable
 
     /**
+     * T8.6: the in-console browser's `/ws-browser` socket, opened with the credential, console Origin
+     * and transport of the `/ws` upgrade (see [BrowserChannel]). The default opens nothing.
+     */
+    val browserSockets: BrowserSocketOpener get() = BrowserSocketOpener.Unavailable
+
+    /**
      * T9.2: the Usage page and the Accounts dialog (`GET /api/usage`, `/api/usage/accounts`) and their
      * two reset actions (`POST /api/codex/reset-credits/consume`, `/api/usage/claude-reset-grants/claim`)
      * on the paired server, with the credential in force and never following a redirect (see

@@ -4277,6 +4277,30 @@ class RealTetherClient(
     })
 
     /**
+     * T8.6: `/ws-browser?sessionId=<id>`, authenticated exactly as [openSocket]'s `/ws` upgrade
+     * (server.mjs 90fbb9f :8745-8765 checks both the same way): the same credential and console
+     * Origin, the same [TetherWebSocket] transport on [authHttp] (no redirects), with the server and
+     * the credential read together under [lock] so the socket can only carry a credential to its own
+     * origin.
+     */
+    override val browserSockets: BrowserSocketOpener = BrowserSocketOpener { sessionId, listener ->
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> BrowserSocketOpen.Refused(BrowserSocketOpener.SIGNED_OUT)
+            blockedBeforeConnect(base) -> BrowserSocketOpen.Refused(BrowserSocketOpener.LOCAL_NETWORK)
+            else -> {
+                val url = base.resolve(BrowserSocketOpener.PATH)!!.newBuilder().addQueryParameter("sessionId", sessionId).build()
+                val request = Request.Builder()
+                    .url(url)
+                    .authorize(credential, base)
+                    .header("Origin", consoleOrigin(base))
+                    .build()
+                BrowserSocketOpen.Opened(OkHttpBrowserSocket.connect(authHttp, request, listener))
+            }
+        }
+    }
+
+    /**
      * ta-7rh: the Claude account changes, over [authHttp] with the same per-call (server, credential)
      * read as [claudeAccounts]; each call is made only when that server is the one the screen names.
      */
