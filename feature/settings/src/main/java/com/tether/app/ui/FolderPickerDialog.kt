@@ -127,6 +127,11 @@ fun FolderPickerDialog(
     onCreateFolder: ((cwd: String, name: String) -> Unit)? = null,
     browseStatus: BrowseStatus? = null,
     selectStatus: StateFlow<WorkspaceSelectStatus?>? = null,
+    /**
+     * What a failed listing says. The default is the console's (the secure link is reconnecting); the
+     * setup wizard has no link and shows its own sentence (page.tsx FolderBrowser: the server's error).
+     */
+    loadErrorText: String = FolderPickerCopy.LOAD_ERROR,
 ) {
     val state = rememberFolderPickerState()
     val select = selectStatus?.collectAsState()?.value
@@ -139,7 +144,7 @@ fun FolderPickerDialog(
         onDismiss()
     }
     TetherDialog(onDismiss = onDismiss, footer = { FolderPickerFooter(state, directories, current, select, onDismiss, onChoose) }) {
-        FolderPickerBody(state, directories, current, title, onDismiss, onBrowse, onCreateFolder, browseStatus, select)
+        FolderPickerBody(state, directories, current, title, onDismiss, onBrowse, onCreateFolder, browseStatus, select, loadErrorText)
     }
 }
 
@@ -190,6 +195,7 @@ private fun ColumnScope.FolderPickerBody(
     onCreateFolder: ((cwd: String, name: String) -> Unit)?,
     browseStatus: BrowseStatus?,
     select: WorkspaceSelectStatus?,
+    loadErrorText: String = FolderPickerCopy.LOAD_ERROR,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -250,7 +256,7 @@ private fun ColumnScope.FolderPickerBody(
             )
         }
         // :101-106: a lost `browse` reply — the picker is NOT showing the folder that was tapped.
-        if (browseStatus?.phase == BrowseStatus.Phase.Error) FolderStatusError(FolderPickerCopy.LOAD_ERROR, FolderPickerTags.LoadError)
+        if (browseStatus?.phase == BrowseStatus.Phase.Error) FolderStatusError(loadErrorText, FolderPickerTags.LoadError)
         Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
             directories?.parent?.let { parent ->
                 FolderRow(

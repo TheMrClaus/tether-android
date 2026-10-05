@@ -236,6 +236,16 @@ fun LoginScreen(
      * passkey is offered only when the probe says one is registered and usable (use-login-flow.ts).
      */
     passkeys: PasskeyAuthenticator? = null,
+    /**
+     * T10.6: the typed server is a first-run server (`/healthz` says `setupRequired: true`): the host opens
+     * the setup wizard for this address, as the web's /login redirects to /setup. Called by a sign-in or
+     * pairing attempt that learns it, and by the address probe once it settles ([autoOpenSetup]).
+     */
+    onSetupRequired: (baseUrl: String) -> Unit = {},
+    /** T10.6: the address to start from (after the wizard: the server just set up); else the saved one. */
+    initialBaseUrl: String? = null,
+    /** T10.6: false right after the wizard was left, so the address probe does not open it again at once. */
+    autoOpenSetup: Boolean = true,
 ) {
     val context = LocalContext.current
     val authenticator = passkeys ?: remember(context) {
@@ -249,7 +259,7 @@ fun LoginScreen(
     var mode by rememberSaveable {
         mutableStateOf(if (signedOutReason == SignedOutReason.DeviceUnpaired) AuthMode.Pairing else AuthMode.Password)
     }
-    var baseUrl by rememberSaveable { mutableStateOf("") }
+    var baseUrl by rememberSaveable { mutableStateOf(initialBaseUrl.orEmpty()) }
     var username by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
@@ -292,6 +302,8 @@ fun LoginScreen(
         probeFailed = false
     }
 
+    val onSetupRequiredNow by rememberUpdatedState(onSetupRequired)
+
     // use-login-flow.ts probes /api/auth/session on load; natively the URL is
     // typed first, so probe once it settles. No credential is sent.
     LaunchedEffect(baseUrl) {
@@ -299,7 +311,10 @@ fun LoginScreen(
         forgetRequirements()
         if (hostnameOf(url).isEmpty()) return@LaunchedEffect
         delay(PROBE_DEBOUNCE_MS)
-        adoptProbe(url, client.signInRequirements(url))
+        val probe = client.signInRequirements(url)
+        adoptProbe(url, probe)
+        // T10.6: a first-run server has no sign-in reading (its /api answers 503); its /healthz says why.
+        if (probe == null && autoOpenSetup && client.setupRequired(url)) onSetupRequiredNow(url.trim())
     }
 
     // The local-network retry re-enters submit (so it re-probes too); set below.
@@ -345,6 +360,11 @@ fun LoginScreen(
         val blocked = result is LoginResult.LocalNetworkBlocked
         when {
             blocked -> phase = LoginPhase.Ready
+            // T10.6: a first-run server: the wizard, not an error line.
+            result is LoginResult.SetupRequired -> {
+                phase = LoginPhase.Ready
+                onSetupRequiredNow(baseUrl.trim())
+            }
             result is LoginResult.Success -> {
                 phase = LoginPhase.Success
                 password = ""
@@ -453,15 +473,18 @@ fun LoginScreen(
         scope.launch {
             var blocked = false
             var superseded = false
+            var setup = false
             val failure = when (attemptMode) {
                 AuthMode.Password -> client.login(url, password, sentUsername).let {
                     blocked = it is LoginResult.LocalNetworkBlocked
                     superseded = it is LoginResult.Superseded
+                    setup = it is LoginResult.SetupRequired
                     loginErrorCopy(it, usernameHint)
                 }
                 AuthMode.Pairing -> client.pair(url, code, deviceLabel).let {
                     blocked = it is PairResult.LocalNetworkBlocked
                     superseded = it is PairResult.Superseded
+                    setup = it is PairResult.SetupRequired
                     pairErrorCopy(it)
                 }
             }
@@ -472,6 +495,13 @@ fun LoginScreen(
             if (!attempts.settle(attempt)) return@launch
             when {
                 blocked -> phase = LoginPhase.Ready
+                // T10.6: a first-run server has no sign-in: its setup wizard opens (nothing typed is kept).
+                setup -> {
+                    phase = LoginPhase.Ready
+                    password = ""
+                    code = ""
+                    onSetupRequiredNow(url)
+                }
                 failure != null -> {
                     error = failure
                     phase = LoginPhase.Error

@@ -17,6 +17,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalFocusManager
 import com.tether.app.nav.DeepLinkIntents
@@ -50,6 +53,7 @@ import com.tether.app.ui.localnet.rememberLocalNetworkPrompt
 import com.tether.app.ui.prefs.LoginVariant
 import com.tether.app.ui.prefs.DataStoreDraftStore
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.setup.SetupWizard
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherTheme
 import com.tether.app.ui.theme.ThemeMode
@@ -172,6 +176,13 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
         }
     }
 
+    // T10.6: a typed server whose /healthz says `setupRequired: true` is set up here, in the wizard (the web's
+    // /login redirects to /setup), and the address goes on to sign-in. Only the address is saved across
+    // process death; what the wizard holds (the operator's password) is not.
+    var setupUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    var signInUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    var autoOpenSetup by rememberSaveable { mutableStateOf(true) }
+
     // app/login/page.tsx: Retro is the opt-in layout, otherwise Studio's own sign-in.
     // ta-coik.52: the configured server's own choice, as the web's sign-in page reads its origin's.
     val loginVariant by remember(prefs, client) { prefs.loginVariant(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = LoginVariant.Default)
@@ -252,13 +263,34 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                     // A notice already cleared the status bar.
                     .then(if (denied || mismatch != null) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier),
             ) {
-                if (needsSetup) {
+                val wizardUrl = setupUrl
+                if (needsSetup && wizardUrl != null) {
+                    SetupWizard(
+                        client = client,
+                        baseUrl = wizardUrl,
+                        // Done (or already done: a 401), or left: on to sign-in for that server, which is not
+                        // sent straight back into the wizard it just left.
+                        onSignIn = {
+                            signInUrl = wizardUrl
+                            autoOpenSetup = false
+                            setupUrl = null
+                        },
+                        onCancel = {
+                            signInUrl = wizardUrl
+                            autoOpenSetup = false
+                            setupUrl = null
+                        },
+                    )
+                } else if (needsSetup) {
                     LoginScreen(
                         client = client,
                         surface = loginSurfaceFor(loginVariant),
                         logoutNotice = logoutNotice,
                         onLocalNetworkBlocked = { retry -> localNetwork.onBlocked(LocalNetworkSource.Login, retry) },
                         onLocalNetworkClear = { localNetwork.clear(LocalNetworkSource.Login) },
+                        onSetupRequired = { url -> setupUrl = url },
+                        initialBaseUrl = signInUrl,
+                        autoOpenSetup = autoOpenSetup,
                     )
                 } else {
                     CompositionLocalProvider(LocalLinkOpener provides linkOpener) {

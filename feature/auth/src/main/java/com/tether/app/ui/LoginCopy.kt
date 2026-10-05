@@ -139,6 +139,9 @@ const val USERNAME_MISSING_HINT = "If this console has a username, enter it too.
 fun usernameHintFor(requirements: SignInRequirements?, username: String): Boolean =
     username.isBlank() && requirements?.usernameRequired != false
 
+/** T10.6: a first-run server (`/healthz` says `setupRequired: true`) has no sign-in yet. */
+const val SETUP_REQUIRED_COPY = "This server has not been set up yet. Open its setup to configure it."
+
 /** Which side must update is known from /healthz (the D5 native window). */
 fun versionCopy(incompatibility: Incompatibility): String = when (incompatibility.reason) {
     IncompatibleReason.ClientTooOld -> "This server needs a newer version of the app. Update Tether, then connect."
@@ -154,6 +157,8 @@ fun loginErrorCopy(result: LoginResult, usernameHint: Boolean = false): String? 
     is LoginResult.Success, is LoginResult.LocalNetworkBlocked, is LoginResult.PasskeyDismissed -> null
     // ta-coik.1 r3: an earlier outcome stands; the screen ignores this one ([LoginScreen]).
     is LoginResult.Superseded -> null
+    // T10.6: the screen opens the setup wizard instead ([LoginScreen]); the line is only for a host without one.
+    is LoginResult.SetupRequired -> SETUP_REQUIRED_COPY
     is LoginResult.PasskeyFailed -> serverText(result.message, "Passkey sign-in failed.")
     is LoginResult.BadPassword -> serverText(result.message, "Those credentials are not correct.") +
         if (usernameHint) " $USERNAME_MISSING_HINT" else ""
@@ -180,6 +185,7 @@ fun gatewayRefusedCopy(result: LoginResult.GatewayRefused): String =
 /** Error line for a pairing attempt; null = success or the local-network flow takes over. */
 fun pairErrorCopy(result: PairResult): String? = when (result) {
     is PairResult.Success, is PairResult.LocalNetworkBlocked, is PairResult.Superseded -> null
+    is PairResult.SetupRequired -> SETUP_REQUIRED_COPY
     is PairResult.Rejected -> serverText(result.message, "That pairing code is not valid or has expired.")
     is PairResult.RateLimited -> serverText(result.message, "Too many pairing attempts. Try again in a few minutes.")
     is PairResult.NotSupported -> serverText(result.message, "This server does not support device pairing.")

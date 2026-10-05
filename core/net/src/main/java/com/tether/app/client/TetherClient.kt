@@ -127,6 +127,15 @@ interface TetherClient {
     suspend fun signInRequirements(baseUrl: String): SignInRequirements? = null
 
     /**
+     * T10.6: is [baseUrl] a first-run server (`/healthz` answers `setupRequired: true`, no credential
+     * sent)? The sign-in screen then opens the setup wizard, as the web's /login redirects to /setup.
+     */
+    suspend fun setupRequired(baseUrl: String): Boolean = false
+
+    /** T10.6: the first-run wizard's HTTP calls to [baseUrl] (`/api/setup routes`, no credential); null when there is none. */
+    fun setupApi(baseUrl: String): SetupApi? = null
+
+    /**
      * Sign out (user action). Cookie session: `POST /api/auth/logout`, which
      * REVOKES the session server-side for every holder of the cookie. Device
      * token: local forget only — `/api/auth/logout` revokes cookie sessions only,
@@ -1367,6 +1376,12 @@ sealed interface LoginResult {
     /** See [ConnectionState.LocalNetworkBlocked]: ask for local-network access, then retry. */
     data object LocalNetworkBlocked : LoginResult
 
+    /**
+     * T10.6: `/healthz` says `setupRequired: true`: a first-run server with no sign-in yet. Checked before
+     * the native window (a setup server carries no protocolVersion). The sign-in screen opens the wizard.
+     */
+    data object SetupRequired : LoginResult
+
     /** T10.5: the operator closed the passkey prompt. Not an error (the web returns to ready with a notice). */
     data object PasskeyDismissed : LoginResult
 
@@ -1398,6 +1413,9 @@ sealed interface PairResult {
     data class NotSupported(val message: String) : PairResult
 
     data class VersionMismatch(val incompatibility: Incompatibility) : PairResult
+
+    /** T10.6: as [LoginResult.SetupRequired]: a first-run server has nothing to pair with yet. */
+    data object SetupRequired : PairResult
     data class Unreachable(val message: String) : PairResult
 
     /** See [ConnectionState.LocalNetworkBlocked]: ask for local-network access, then retry. */

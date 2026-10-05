@@ -867,6 +867,8 @@ class RealTetherClient(
             if (blockedAfterFailure(normalized, e)) return@withContext LoginResult.LocalNetworkBlocked
             return@withContext LoginResult.Unreachable(e.message ?: "The server could not be reached.")
         }
+        // T10.6: a first-run server has no sign-in to offer (and no protocolVersion): the wizard, first.
+        if (health.setupRequired) return@withContext LoginResult.SetupRequired
         health.incompatibility()?.let { return@withContext LoginResult.VersionMismatch(it) }
 
         // 2. Password login, the same JSON body the web's login form posts. A
@@ -989,6 +991,7 @@ class RealTetherClient(
             if (blockedAfterFailure(normalized, e)) return@withContext refused(LoginResult.LocalNetworkBlocked)
             return@withContext refused(LoginResult.Unreachable(e.message ?: "The server could not be reached."))
         }
+        if (health.setupRequired) return@withContext refused(LoginResult.SetupRequired)
         health.incompatibility()?.let { return@withContext refused(LoginResult.VersionMismatch(it)) }
 
         // 2. The challenge.
@@ -1136,6 +1139,7 @@ class RealTetherClient(
             if (blockedAfterFailure(normalized, e)) return@withContext PairResult.LocalNetworkBlocked
             return@withContext PairResult.Unreachable(e.message ?: "The server could not be reached.")
         }
+        if (health.setupRequired) return@withContext PairResult.SetupRequired
         health.incompatibility()?.let { return@withContext PairResult.VersionMismatch(it) }
         if (!health.pairing) {
             return@withContext PairResult.NotSupported(
@@ -2299,6 +2303,34 @@ class RealTetherClient(
                 LogoutResult.ServerNotReached
             }
         }
+    }
+
+    /**
+     * T10.6: `/healthz` says `setupRequired: true` (no credential sent, nothing else read): this is a
+     * first-run server, and the wizard is where it goes. False for anything else, including a failed probe.
+     */
+    override suspend fun setupRequired(baseUrl: String): Boolean = withContext(Dispatchers.IO) {
+        val normalized = normalizeBaseUrl(baseUrl) ?: return@withContext false
+        if (blockedBeforeConnect(normalized)) return@withContext false
+        try {
+            // Unauthenticated, as login()'s own probe of a server just typed: no other server's credential.
+            authHttp.newCall(Request.Builder().url(normalized.resolve("/healthz")!!).build()).execute().use { response ->
+                response.isSuccessful && parseJsonObject(response)?.get("setupRequired")?.jsonPrimitive?.content == "true"
+            }
+        } catch (_: IOException) {
+            false
+        }
+    }
+
+    /** T10.6: the wizard's one HTTP seam for [baseUrl] (no credential: setup mode has none); null for a bad URL. */
+    override fun setupApi(baseUrl: String): SetupApi? {
+        val normalized = normalizeBaseUrl(baseUrl) ?: return null
+        return HttpSetupApi(
+            http = authHttp,
+            base = normalized,
+            blockedBefore = ::blockedBeforeConnect,
+            blockedAfter = ::blockedAfterFailure,
+        )
     }
 
     override suspend fun signInRequirements(baseUrl: String): SignInRequirements? = withContext(Dispatchers.IO) {
@@ -5478,7 +5510,13 @@ class RealTetherClient(
     }
 
     /** What /healthz tells an unauthenticated client: the native window + pairing capability. */
-    private class Health(val protocolVersion: Int?, val nativeProtocolFloor: Int?, val pairing: Boolean) {
+    private class Health(
+        val protocolVersion: Int?,
+        val nativeProtocolFloor: Int?,
+        val pairing: Boolean,
+        /** T10.6: `setupRequired: true` (lib/setup-server.mjs :810-816): a first-run server, no sign-in yet. */
+        val setupRequired: Boolean = false,
+    ) {
         /**
          * No protocolVersion at all = a probe this client cannot read; the WS
          * handshake (ready + hello) decides then. Otherwise a missing floor is a
@@ -5510,6 +5548,7 @@ class RealTetherClient(
                 nativeProtocolFloor = obj?.get("nativeProtocolFloor")?.jsonPrimitive?.content?.toIntOrNull(),
                 // Absent flag = an older server, which cannot pair.
                 pairing = obj?.get("pairing")?.jsonPrimitive?.content == "true",
+                setupRequired = obj?.get("setupRequired")?.jsonPrimitive?.content == "true",
             )
         }
     }

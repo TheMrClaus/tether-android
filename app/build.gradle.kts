@@ -153,6 +153,7 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:designsystem"))
     implementation(project(":feature:auth"))
+    implementation(project(":feature:setup"))
     implementation(project(":feature:shell"))
     // Previews.kt renders sidebar and chat components side by side.
     implementation(project(":feature:chat"))

@@ -36,6 +36,7 @@ include(":feature:files")
 include(":feature:overview")
 include(":feature:scheduled")
 include(":feature:settings")
+include(":feature:setup")
 include(":feature:sidebar")
 include(":feature:shell")
 
