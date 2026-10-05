@@ -715,7 +715,9 @@ private fun Modifier.politeLiveRegion(): Modifier = semantics { liveRegion = Liv
 private fun StudioLogin(ui: LoginUi) {
     val t = LocalTetherTokens.current
     BoxWithConstraints(Modifier.fillMaxSize().background(t.mineral)) {
-        val wide = maxWidth >= 840.dp
+        // studio-login.module.css `@media (max-width: 700px)` stacks the panels (and drops the
+        // connection figure); above 700px they sit side by side, as here.
+        val wide = maxWidth > 700.dp
         val narrowViewport = maxWidth <= 900.dp
         if (wide) {
             Row(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
@@ -777,7 +779,7 @@ private fun StudioBrandPanel(modifier: Modifier, compact: Boolean = false, narro
  * studio-login.tsx:71-79 `.connectionPath` (studio-login.module.css 46-54, 97-105): the three harness
  * marks in their brand tiles (globals.css 11204-11224 outranks `.providers > span`: 34x40, 27 wide at
  * most 900px), a line, the hub holding the brand mark, a line, the laptop and phone. The web hides it
- * at most 700px, as the compact panel does here. The figure's label is the web's `aria-label`.
+ * at most 700px, where the compact panel takes over here too. The figure's label is the web's `aria-label`.
  */
 @Composable
 private fun ConnectionPath(narrowViewport: Boolean) {
@@ -801,7 +803,11 @@ private fun ConnectionPath(narrowViewport: Boolean) {
         Box(
             Modifier.size(if (narrowViewport) 50.dp else 58.dp).border(1.dp, t.lineStrong, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center,
-        ) { BrandMark() }
+        ) {
+            // `.connectionHub .brand-mark` (studio-login.module.css:51): 29px; the outer size wins over
+            // BrandMark's own 18.4dp, which stays as it is everywhere else.
+            BrandMark(Modifier.size(29.dp))
+        }
         Box(Modifier.weight(1f).widthIn(min = 16.dp).padding(horizontal = lineGap).height(1.dp).background(t.lineStrong))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             Icon(TetherIcons.Laptop, contentDescription = null, tint = t.muted, modifier = Modifier.size(26.dp))

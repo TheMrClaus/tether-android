@@ -143,3 +143,19 @@ class LoginPasskeyTabletScreenshotTest(private val shot: LoginPasskeyShot, priva
         fun params(): List<Array<Any>> = LoginPasskeyShot.entries.flatMap { s -> LoginSurface.entries.flatMap { f -> TetherSkin.entries.map { arrayOf<Any>(s, f, it) } } }
     }
 }
+
+/**
+ * ta-coik.48: a 760dp-wide window (1:1), between the web's 700px stacking point and the 840dp the app
+ * used to wait for: Studio's two panels side by side with the connection figure, both skins.
+ */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w760dp-h900dp-mdpi")
+class LoginPasskeyMediumScreenshotTest(private val skin: TetherSkin) : LoginPasskeyShotBase() {
+    @Test fun login() = rule.snapLogin(LoginPasskeyShot.Ready, LoginSurface.Studio, skin, "medium", scope)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
+    }
+}
