@@ -132,7 +132,7 @@ abstract class PasskeyLoginBehaviourBase(private val surface: LoginSurface) {
         }
 
         override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
-            "/healthz" -> MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}""")
+            "/healthz" -> MockResponse().setBody("""{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129}""")
             "/api/auth/session" -> if (request.getHeader("Cookie") != null) {
                 MockResponse().setBody("""{"authenticated":true}""")
             } else {

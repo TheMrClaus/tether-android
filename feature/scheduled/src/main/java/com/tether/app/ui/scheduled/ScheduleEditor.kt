@@ -73,11 +73,16 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.tether.app.client.ProviderCatalogEntry
 import com.tether.app.client.ScheduledAction
+import com.tether.app.ui.components.CommandList
+import com.tether.app.ui.components.ConsentPanel
+import com.tether.app.ui.components.ConsentText
+import com.tether.app.ui.components.HiddenCharactersWarning
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.StudioDialog
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSelectMenu
 import com.tether.app.ui.components.TetherSelectOption
+import com.tether.app.ui.components.consentSentence
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.dialogScrim
 import com.tether.app.ui.icons.TetherIcons
@@ -122,7 +127,21 @@ object ScheduleEditorTags {
     const val Cancel = "schedule-cancel"
     const val Submit = "schedule-submit"
     const val Close = "schedule-close"
+
+    /** ta-m7ef (v143 r3): the setup check's status line, the approval panel and its three keys. */
+    const val SetupChecking = "schedule-setup-checking"
+    const val SetupConfirm = "schedule-setup-confirm"
+    const val SetupBack = "schedule-setup-back"
+    const val SetupWithout = "schedule-setup-without"
+    const val SetupApprove = "schedule-setup-approve"
 }
+
+/** ta-m7ef: the approval panel's three keys (scheduled-actions-view.tsx 1bf4a465: Back, Save without setup, Approve setup and save). */
+data class ScheduleSetupActions(
+    val onBack: () -> Unit = {},
+    val onSaveWithoutSetup: () -> Unit = {},
+    val onApprove: () -> Unit = {},
+)
 
 /**
  * The open editor (scheduled-actions-view.tsx `editingId`, `form`, `cadenceMode`, `onceValue`,
@@ -229,6 +248,8 @@ fun ScheduleEditorDialog(
     onChange: (ScheduleEditor) -> Unit,
     onClose: () -> Unit,
     onSubmit: () -> Unit,
+    setup: ScheduleSetupCheck? = null,
+    setupActions: ScheduleSetupActions = ScheduleSetupActions(),
 ) {
     Dialog(
         onDismissRequest = onClose,
@@ -250,6 +271,8 @@ fun ScheduleEditorDialog(
             onChange = onChange,
             onClose = onClose,
             onSubmit = onSubmit,
+            setup = setup,
+            setupActions = setupActions,
             autoFocus = true,
             modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
             surfaceModifier = Modifier.graphicsLayer {
@@ -282,6 +305,8 @@ fun ScheduleEditorFrame(
     surfaceModifier: Modifier = Modifier,
     clock: () -> Long = System::currentTimeMillis,
     autoFocus: Boolean = false,
+    setup: ScheduleSetupCheck? = null,
+    setupActions: ScheduleSetupActions = ScheduleSetupActions(),
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -339,7 +364,7 @@ fun ScheduleEditorFrame(
                     .padding(horizontal = if (layout.phone) 20.dp else 28.dp, vertical = if (layout.phone) 24.dp else 28.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                EditorFields(editor, entries, workspaces, layout, zone, clock, onChange, autoFocus)
+                EditorFields(editor, entries, workspaces, layout, zone, clock, onChange, autoFocus, setup, setupActions)
             }
             // footer
             Row(
@@ -355,6 +380,8 @@ fun ScheduleEditorFrame(
                     onClick = onSubmit,
                     classes = KeyClasses.ButtonPrimary,
                     label = if (editor.editingId != null) "Save changes" else "Create schedule",
+                    // v143 r3: not while the setup check is running or waiting for approval.
+                    enabled = setup == null,
                     modifier = Modifier.testTag(ScheduleEditorTags.Submit),
                 )
             }
@@ -372,6 +399,8 @@ private fun EditorFields(
     clock: () -> Long,
     onChange: (ScheduleEditor) -> Unit,
     autoFocus: Boolean,
+    setup: ScheduleSetupCheck? = null,
+    setupActions: ScheduleSetupActions = ScheduleSetupActions(),
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -536,6 +565,37 @@ private fun EditorFields(
         }
     }
     WorktreeCheckbox(form.useWorktree) { set(form.copy(useWorktree = !form.useWorktree)) }
+    // v143 r3 (ta-6t1, scheduled-actions-view.tsx 1bf4a465): an isolated schedule's save approves its setup first.
+    if (setup != null && !setup.confirming) {
+        ConsentText(ScheduleSetup.CHECKING, tag = ScheduleEditorTags.SetupChecking)
+    }
+    setup?.approval?.takeIf { setup.confirming }?.let { approval ->
+        ConsentPanel(
+            title = ScheduleSetup.TITLE,
+            modifier = Modifier.testTag(ScheduleEditorTags.SetupConfirm).semantics { contentDescription = ScheduleSetup.CONFIRM_LABEL },
+            actions = {
+                TetherKey(onClick = setupActions.onBack, classes = KeyClasses.ButtonSecondary, label = ScheduleSetup.BACK, modifier = Modifier.testTag(ScheduleEditorTags.SetupBack))
+                TetherKey(onClick = setupActions.onSaveWithoutSetup, classes = KeyClasses.ButtonSecondary, label = ScheduleSetup.SAVE_WITHOUT, modifier = Modifier.testTag(ScheduleEditorTags.SetupWithout))
+                TetherKey(onClick = setupActions.onApprove, classes = KeyClasses.ButtonPrimary, label = ScheduleSetup.APPROVE, modifier = Modifier.testTag(ScheduleEditorTags.SetupApprove))
+            },
+        ) {
+            ConsentText(
+                consentSentence(
+                    "Its committed ", "tether.json", " on ", approval.baseRef,
+                    " declares setup that runs outside the agent's sandbox. Approving saves these exact commands with the schedule; a run whose setup " +
+                        "differs runs none. The files they run come from the branch as it is at each run. Teardown is not approved here: it is asked " +
+                        "for when a run's session is ended.",
+                ),
+            )
+            if (approval.hiddenCharacters) HiddenCharactersWarning()
+            if (approval.commands.isNotEmpty()) CommandList(ScheduleSetup.SETUP_LABEL, approval.commands, tagPrefix = "schedule-setup-command")
+            approval.portScript?.takeIf { it.isNotEmpty() }?.let { CommandList(ScheduleSetup.PORT_SCRIPT_LABEL, listOf(it), tagPrefix = "schedule-port-script") }
+            val sha = approval.portScriptSha256
+            if (!approval.portScript.isNullOrEmpty() && !sha.isNullOrEmpty()) {
+                ConsentText(consentSentence("Port script contents (SHA-256): ", sha))
+            }
+        }
+    }
     if (editor.error.isNotEmpty()) {
         Text(editor.error, color = t.danger, style = css(type.ui, 13f, 400), modifier = Modifier.alertRegion().testTag(ScheduleEditorTags.Error))
     }

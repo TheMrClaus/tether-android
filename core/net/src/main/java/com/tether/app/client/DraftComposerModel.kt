@@ -1,6 +1,7 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.WorktreeCreateRequest
 import com.tether.app.protocol.helpers.DraftForm
 import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsBool
@@ -59,6 +60,16 @@ data class DraftComposerState(
      * over ("Take over in a new session"), else null. The create's first action is then `handoff`.
      */
     val takeoverSourceId: String? = null,
+    /**
+     * ta-m7ef (v143, use-draft-composer.ts `setupChecking`): an isolated create asked the server what it would
+     * run from the ref it resolves, and the answer has not come. Send is off meanwhile.
+     */
+    val setupChecking: Boolean = false,
+    /**
+     * ta-m7ef (use-draft-composer.ts `setupConfirmation`): the setup and teardown the ref declares, waiting for
+     * the operator's approval (the create is sent only on [DraftComposerModel.confirmSetup]).
+     */
+    val setupConfirmation: DraftSetupConfirmation? = null,
 ) {
     /** The wire attachments of [staged], in order. */
     val attachments: List<Attachment> get() = staged.map { it.attachment }
@@ -72,8 +83,20 @@ data class DraftComposerState(
             "error=${if (error.isEmpty()) "none" else "set"}, completed=$completed, entries=${entries.size})"
 }
 
+/** What the setup confirmation shows (use-draft-composer.ts DraftSetupConfirmation): the hooks, and the create they belong to. */
+data class DraftSetupConfirmation(
+    val approval: SetupApproval,
+    val prNumber: Long?,
+    val branch: String?,
+) {
+    override fun toString(): String = "DraftSetupConfirmation($approval)"
+}
+
 /** ta-8cv: what became of a submit. */
 enum class DraftSubmitResult {
+    /** ta-m7ef: an isolated create is checking what its setup would run; the create follows the answer. */
+    Checking,
+
     /** The `create` went out; the draft is [DraftComposerState.creating] until its reply. */
     Sent,
 
@@ -132,9 +155,14 @@ enum class DraftSubmitResult {
  *   folder's repo offers (`worktree-inspect` with a fresh requestId, on the current socket); only the
  *   `worktree-source` echoing that requestId, for that folder, on that socket, is taken
  *   ([onWorktreeSource]); a folder change, isolation off or a new socket drops the question and its
- *   answer. The answer only feeds the web's notes ([WorktreeCopy.setupNote]); a create that may run
- *   the project's setup is sent at once, as on the web (ta-coik.11: draft-composer.tsx 90fbb9f:789-795
- *   shows a note, no confirmation).
+ *   answer. That answer feeds the web's notes ([WorktreeCopy.setupNote]).
+ * - **Setup consent** (ta-m7ef, tether #241, use-draft-composer.ts 1bf4a465): an isolated create first asks
+ *   what THIS create would run (`worktree-inspect` with its own `worktree` block, [TetherClient.inspectSetup])
+ *   and is sent only with the consent the answer carries ([SetupConsentSteps.create]): at once with "none"
+ *   when the ref declares nothing, after [confirmSetup] when it declares hooks, never when the intent did
+ *   not resolve ([DraftComposerState.error] says why). Any edit to what the check was made for (the
+ *   provider, model, mode, folder, isolation block, prompt or attachments), a dropped link or [cancelSetup]
+ *   ends it.
  *
  * - **Takeover** (T8.5, issue #144): [setTakeover] puts the draft in takeover mode for a source; the
  *   source's brief, when it lands ([onHandoffBriefs]), seeds the prompt once; the create made in that
@@ -277,6 +305,7 @@ class DraftComposerModel(
             s.copy(form = store["form"] as JsObj, modified = store["userModified"] as JsObj)
         }
         reconcileWorktree()
+        reconcileSetupCheck()
     }
 
     private fun entriesJs(): JsArr =
@@ -308,7 +337,10 @@ class DraftComposerModel(
 
     fun entryForKey(key: String): ProviderCatalogEntry? = entries.firstOrNull { it.key == key }
 
-    fun setText(text: String) = _state.update { it.copy(text = text) }
+    fun setText(text: String) {
+        _state.update { it.copy(text = text) }
+        reconcileSetupCheck()
+    }
 
     /**
      * T8.5: dashboard.tsx :311-336 — [sourceId] for "Take over in a new session" (the prefill is
@@ -335,7 +367,10 @@ class DraftComposerModel(
     fun setAttachments(attachments: List<Attachment>) =
         setStagedAttachments(attachments.map { StagedAttachment(newAttachmentId(), it, decodedSize(it.data)) })
 
-    fun setStagedAttachments(items: List<StagedAttachment>) = _state.update { it.copy(staged = items) }
+    fun setStagedAttachments(items: List<StagedAttachment>) {
+        _state.update { it.copy(staged = items) }
+        reconcileSetupCheck()
+    }
 
     private var nextAttachmentId = 1L
 
@@ -356,6 +391,7 @@ class DraftComposerModel(
     fun addAttachments(items: List<StagedAttachment>, generation: Long): Boolean {
         if (items.isEmpty() || generation != attachmentGeneration || _state.value.creating) return false
         _state.update { it.copy(staged = (it.staged + items).take(com.tether.app.protocol.helpers.AttachmentDraft.MAX_ATTACHMENTS)) }
+        reconcileSetupCheck()
         return true
     }
 
@@ -363,9 +399,15 @@ class DraftComposerModel(
      * r2 (F2, T7.4 r2 L4b): a sign-out or a revocation drops what is staged and bumps the generation,
      * so a pick still being read is discarded too. The text, folder and pick stay (memory only).
      */
-    fun clearAttachments() = _state.update { dropAttachments(it) }
+    fun clearAttachments() {
+        _state.update { dropAttachments(it) }
+        reconcileSetupCheck()
+    }
 
-    fun removeAttachment(id: Long) = _state.update { s -> s.copy(staged = s.staged.filterNot { it.id == id }) }
+    fun removeAttachment(id: Long) {
+        _state.update { s -> s.copy(staged = s.staged.filterNot { it.id == id }) }
+        reconcileSetupCheck()
+    }
 
     private fun dropAttachments(s: DraftComposerState): DraftComposerState {
         attachmentGeneration++
@@ -508,6 +550,7 @@ class DraftComposerModel(
      * changes nothing.
      */
     fun onWorktreeSource(reply: WorktreeSourceReply): Boolean {
+        if (onSetupAnswer(reply)) return true
         val request = inspect ?: return false
         if (reply.requestId == null || reply.requestId != request.requestId) return false
         if (reply.linkEpoch != request.epoch || client.linkEpoch.value != request.epoch) return false
@@ -586,7 +629,7 @@ class DraftComposerModel(
      * for). One attempt, one fresh requestId; never retried.
      */
     fun submit(expectedOrigin: String?, requirePrompt: Boolean = true): DraftSubmitResult {
-        if (_state.value.creating || submitting) return DraftSubmitResult.Busy
+        if (_state.value.creating || submitting || setupCheck != null) return DraftSubmitResult.Busy
         val reason = readiness(requirePrompt)
         if (reason.isNotEmpty()) {
             _state.update { it.copy(error = reason) }
@@ -597,12 +640,14 @@ class DraftComposerModel(
             _state.update { it.copy(error = DRAFT_NOT_LIVE_COPY) }
             return DraftSubmitResult.NotLive
         }
-        // ta-coik.11: a create that may run the project's setup goes at once, as on the web (a note only).
-        return send(expectedOrigin, entry)
+        // ta-m7ef (use-draft-composer.ts submit): an isolated create first asks what it would run.
+        val intent = WorktreeDraft.request(_state.value.form)
+        if (_state.value.form["useWorktree"] == JsBool.TRUE && intent != null) return startSetupCheck(expectedOrigin, entry, CreateFrame.worktreeRequest(intent))
+        return send(expectedOrigin, entry, setupConsent = null)
     }
 
     /** The one send: the create built from the state as it is NOW, one fresh requestId, never retried. */
-    private fun send(expectedOrigin: String, entry: ProviderCatalogEntry): DraftSubmitResult {
+    private fun send(expectedOrigin: String, entry: ProviderCatalogEntry, setupConsent: String?): DraftSubmitResult {
         val s = _state.value
         val requestId = newRequestId()
         val epoch = client.linkEpoch.value
@@ -620,7 +665,7 @@ class DraftComposerModel(
         submitting = true
         pending = created
         _state.update { it.copy(creating = true, error = "") }
-        val request = NewSessionRequest(NewSessionChoice(entry.key, entry.provider, entry.profileId), s.form, s.modified, requestId, epoch)
+        val request = NewSessionRequest(NewSessionChoice(entry.key, entry.provider, entry.profileId), s.form, s.modified, requestId, epoch, setupConsent)
         val result = try {
             client.createNewSession(request, expectedOrigin)
         } finally {
@@ -670,6 +715,132 @@ class DraftComposerModel(
         NewSessionResult.NotLive -> DRAFT_NOT_LIVE_COPY
         NewSessionResult.NotOffered -> DRAFT_NOT_OFFERED_COPY
         NewSessionResult.Sent -> ""
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Setup consent (ta-m7ef; use-draft-composer.ts 1bf4a465 SetupCheck, submit, confirmSetup, cancelSetup)
+    // ---------------------------------------------------------------------------------------------
+
+    private enum class SetupPhase { Checking, Confirm }
+
+    /**
+     * One setup check: everything the create needs is captured at Send, so the frame finally sent is the one
+     * the confirmation described. [formKey], [text] and [staged] are what the check was made for; any edit
+     * cancels it ([reconcileSetupCheck]).
+     */
+    private class SetupCheck(
+        val phase: SetupPhase,
+        val inspectRequestId: String,
+        /** The latest error's seq when the inspect went out: a newer requestId-less error ends the check. */
+        val errorSeq: Long,
+        val origin: String,
+        val epoch: Long,
+        val entryKey: String,
+        val formKey: List<Any?>,
+        val text: String,
+        val staged: List<StagedAttachment>,
+        val block: WorktreeCreateRequest,
+        val confirmation: DraftSetupConfirmation?,
+    ) {
+        fun confirm(confirmation: DraftSetupConfirmation) =
+            SetupCheck(SetupPhase.Confirm, inspectRequestId, errorSeq, origin, epoch, entryKey, formKey, text, staged, block, confirmation)
+    }
+
+    private var setupCheck: SetupCheck? = null
+
+    /** use-draft-composer.ts setupFormKey: [key, model, effort, mode, cwd, useWorktree, worktree block]. */
+    private fun setupFormKey(): List<Any?> {
+        val form = _state.value.form
+        return listOf(
+            formStr("key"), formStr("model"), formStr("reasoningEffort"), formStr("mode"), formStr("cwd"),
+            form["useWorktree"] == JsBool.TRUE, WorktreeDraft.request(form)?.let(CreateFrame::worktreeRequest),
+        )
+    }
+
+    private fun startSetupCheck(expectedOrigin: String, entry: ProviderCatalogEntry, block: WorktreeCreateRequest): DraftSubmitResult {
+        val s = _state.value
+        val requestId = newRequestId()
+        val epoch = client.linkEpoch.value
+        val errorSeq = client.createErrors.value?.seq ?: 0L
+        if (!client.inspectSetup(formStr("cwd"), block, requestId, epoch)) {
+            _state.update { it.copy(error = DRAFT_NOT_CONNECTED_COPY) }
+            return DraftSubmitResult.NotConnected
+        }
+        setupCheck = SetupCheck(SetupPhase.Checking, requestId, errorSeq, expectedOrigin, epoch, entry.key, setupFormKey(), s.text, s.staged, block, null)
+        _state.update { it.copy(error = "", setupChecking = true, setupConfirmation = null) }
+        return DraftSubmitResult.Checking
+    }
+
+    /**
+     * The `worktree-source` that answers THIS submit's inspect (matched by its own requestId, on the socket it
+     * went out on); any other is not this check's. True when it was.
+     */
+    private fun onSetupAnswer(reply: WorktreeSourceReply): Boolean {
+        val check = setupCheck ?: return false
+        if (check.phase != SetupPhase.Checking || reply.requestId == null || reply.requestId != check.inspectRequestId) return false
+        if (reply.linkEpoch != check.epoch || client.linkEpoch.value != check.epoch) return false
+        when (val step = SetupConsentSteps.create(reply.info)) {
+            is SetupConsentStep.Create -> {
+                setupCheck = null
+                _state.update { it.copy(setupChecking = false, setupConfirmation = null) }
+                sendChecked(check, step.setupConsent)
+            }
+            is SetupConsentStep.Confirm -> {
+                val confirmation = DraftSetupConfirmation(step.preview, check.block.prNumber, check.block.branch)
+                setupCheck = check.confirm(confirmation)
+                _state.update { it.copy(setupChecking = false, setupConfirmation = confirmation) }
+            }
+            is SetupConsentStep.Refuse -> {
+                // The server's own words for an intent that did not resolve.
+                setupCheck = null
+                _state.update { it.copy(setupChecking = false, setupConfirmation = null, error = step.message) }
+            }
+        }
+        return true
+    }
+
+    /** The checked create goes out with [consent], on the row and server it was composed for. */
+    private fun sendChecked(check: SetupCheck, consent: String): DraftSubmitResult {
+        val entry = entryForKey(check.entryKey)
+        if (entry == null || entry.status == "unavailable") {
+            _state.update { it.copy(error = DRAFT_NOT_OFFERED_COPY) }
+            return DraftSubmitResult.NotOffered
+        }
+        return send(check.origin, entry, consent)
+    }
+
+    /** The operator approved the listed setup: create with exactly that consent ("Run setup and start"). */
+    fun confirmSetup(): DraftSubmitResult? {
+        val check = setupCheck?.takeIf { it.phase == SetupPhase.Confirm } ?: return null
+        val approval = check.confirmation?.approval ?: return null
+        setupCheck = null
+        _state.update { it.copy(setupChecking = false, setupConfirmation = null) }
+        return sendChecked(check, approval.consent)
+    }
+
+    /** Back to the draft; nothing is created. */
+    fun cancelSetup() {
+        if (setupCheck != null) {
+            setupCheck = null
+            _state.update { it.copy(setupChecking = false, setupConfirmation = null) }
+        }
+    }
+
+    /** The check ends with [message] shown in the draft. */
+    private fun cancelSetupWith(message: String) {
+        setupCheck = null
+        _state.update { it.copy(setupChecking = false, setupConfirmation = null, error = message) }
+    }
+
+    /**
+     * Any edit to what the check was made for (provider, model, mode, folder, isolation block, prompt,
+     * attachments) cancels it: the confirmation must describe the create that would actually be sent.
+     */
+    private fun reconcileSetupCheck() {
+        val check = setupCheck ?: return
+        val s = _state.value
+        if (check.formKey == setupFormKey() && check.text == s.text && check.staged == s.staged) return
+        cancelSetupWith(DRAFT_SETUP_CHECK_CANCELLED_COPY)
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -799,6 +970,13 @@ class DraftComposerModel(
      * in-flight create ([answers]); true when it did.
      */
     fun onCreateError(reply: CreateErrorReply): Boolean {
+        // ta-m7ef (use-draft-composer.ts setupCheckErrorApplies): a refusal of the setup check itself ends it.
+        setupCheck?.let { check ->
+            if (SetupConsentSteps.errorEndsCheck(check.phase == SetupPhase.Checking, check.inspectRequestId, check.errorSeq, reply)) {
+                cancelSetupWith(reply.message)
+                return true
+            }
+        }
         val p = pending ?: return false
         if (!_state.value.creating) return false
         if (settleIfServerChanged(p)) return false
@@ -843,6 +1021,8 @@ class DraftComposerModel(
         // ta-23f: a question or answer from another socket no longer stands.
         inspect?.let { if (it.epoch != linkEpoch) inspect = null }
         sourceFor?.let { if (it.epoch != linkEpoch) dropSource() }
+        // ta-m7ef (use-draft-composer.ts): a dropped link or a replaced socket cancels the setup check.
+        setupCheck?.let { if (connection != ConnectionState.Connected || it.epoch != linkEpoch) cancelSetupWith(DRAFT_LINK_DROPPED_COPY) }
         val p = pending ?: return
         if (settleIfServerChanged(p)) return
         if (connection == ConnectionState.Connected && linkEpoch == p.linkEpoch) return
@@ -899,6 +1079,9 @@ const val READINESS_NEED_BRANCH = "Enter the branch to check out."
 
 /** use-draft-composer.ts: `send` returned false. */
 const val DRAFT_NOT_CONNECTED_COPY = "The secure link is reconnecting — the session was not created."
+
+/** use-draft-composer.ts: an edit ended the setup check. */
+const val DRAFT_SETUP_CHECK_CANCELLED_COPY = "The setup check was cancelled because the draft changed. Press Send again."
 
 /** use-draft-composer.ts: the link dropped before `created`. */
 const val DRAFT_LINK_DROPPED_COPY = "The secure link dropped before the session was created — your message was not sent."

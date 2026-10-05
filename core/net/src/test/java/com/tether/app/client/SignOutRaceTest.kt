@@ -407,7 +407,7 @@ class SignOutRaceTest {
             throw java.io.IOException("disk full")
         }
         client.stop()
-        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_137))
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_143))
         h.server.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=cookie-b; Path=/").setBody("{}"))
         h.enqueueConnect()
         val started = System.currentTimeMillis()
@@ -454,7 +454,7 @@ class SignOutRaceTest {
             throw java.io.IOException("disk full")
         }
         client.stop()
-        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_137))
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_143))
         h.server.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=cookie-b; Path=/").setBody("{}"))
         h.enqueueConnect()
         val started = System.currentTimeMillis()
@@ -510,7 +510,7 @@ class SignOutRaceTest {
             ws.close(4002, "session revoked")
             assertTrue("the rejection's clear is held", hold.entered.await(20, TimeUnit.SECONDS))
             h.await(client.signedOutReason) { it == SignedOutReason.SessionExpired }
-            h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_137))
+            h.server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_143))
             h.server.enqueue(MockResponse().setResponseCode(200).addHeader("Set-Cookie", "tether_session=cookie-b; Path=/").setBody("{}"))
             h.enqueueConnect()
             assertEquals(LoginResult.Success, runBlocking { client.login(base, "pw") })

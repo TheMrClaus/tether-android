@@ -102,6 +102,17 @@ data class WorktreeInfo(
     /** "none" | "pending" | "running" | "ok" | "failed". */
     val setupStatus: String? = null,
     /**
+     * v143 (ta-6t1): present only when this checkout's hooks were not run: "consent-missing" |
+     * "consent-mismatch" | "consent-not-owner" (open: an unknown value reads as skipped).
+     */
+    val setupSkipped: String? = null,
+    /**
+     * v143 r3: present only when a declared teardown did not run at archive: "consent-missing" | "declined" |
+     * "consent-mismatch" | "consent-not-owner" | "checkout-tampered" | "checkout-changed" | "processes-alive" |
+     * "sessions-changed" (open: an unknown value reads as skipped).
+     */
+    val teardownSkipped: String? = null,
+    /**
      * Bounded prose from the project-config parser, raw: a `string[]` on the wire, kept as the
      * element so a malformed list never drops the session row (read it with [configWarningList]).
      */

@@ -12,6 +12,8 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.tether.app.client.DraftComposerModel
 import com.tether.app.client.DraftComposerState
 import com.tether.app.client.DraftSessionOptionsModel
+import com.tether.app.client.DraftSetupConfirmation
+import com.tether.app.client.SetupApproval
 import com.tether.app.client.WorktreeDeclaredScript
 import com.tether.app.client.WorktreeField
 import com.tether.app.client.WorktreeSourceInfo
@@ -46,7 +48,9 @@ import org.robolectric.annotation.Config
  * - `pr`: Pull request #42 with a name, and a config warning from the repo's tether.json;
  * - `not-repo`: the folder is not a Git repository (the note alone).
  *
- * ta-coik.11: no setup confirmation goldens; the web shows the note (in `branch-off`) and sends.
+ * ta-m7ef (tether #241): `setup-checking` = Send pressed, the server is asked what the create would run;
+ * `setup-confirm` = the ref declares setup, a teardown and a port script, and waits for "Run setup and start"
+ * (the commands are numbered, one hidden character is drawn as a U+XXXX token, with its warning).
  *
  * Every state is seeded synchronously through the real engine on an unconfined scope (the source is
  * placed on the drawn state, never asked for), the clock is driven by hand, and the client throws on
@@ -57,6 +61,8 @@ enum class WorktreeShot(val id: String) {
     ExistingBranch("draft-worktree-existing-branch"),
     PullRequest("draft-worktree-pr"),
     NotRepo("draft-worktree-not-repo"),
+    SetupChecking("draft-worktree-setup-checking"),
+    SetupConfirm("draft-worktree-setup-confirm"),
 }
 
 private val exactCompare = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
@@ -131,9 +137,33 @@ private class WorktreeSeed(shot: WorktreeShot) {
                 check(model.selectIsolation("branch-off"))
                 WorktreeSourceInfo(cwd = DraftFixtures.ROOT, isRepo = false)
             }
+            WorktreeShot.SetupChecking, WorktreeShot.SetupConfirm -> {
+                check(model.selectIsolation("checkout-pr"))
+                check(model.setWorktreeField(WorktreeField.Pr, "42"))
+                repo(hasSetup = true, scripts = 2)
+            }
         }
         readiness = model.readiness()
-        state = model.state.value.copy(worktreeSource = source)
+        val approval = SetupApproval(
+            mode = "checkout-pr",
+            baseRef = "refs/tether/pull/42",
+            commit = "0123456789abcdef0123456789abcdef01234567",
+            commands = listOf("pnpm install --frozen-lockfile", "set -e\npnpm run build\npnpm run db:migrate"),
+            teardown = listOf("pnpm run db:drop"),
+            portScript = "/opt/tether/ports.sh",
+            portScriptSha256 = "9f2c" + "0".repeat(56) + "ab12",
+            hiddenCharacters = true,
+            consent = "sha256:" + "ab".repeat(32),
+        )
+        state = model.state.value.copy(
+            worktreeSource = source,
+            setupChecking = shot == WorktreeShot.SetupChecking,
+            setupConfirmation = if (shot == WorktreeShot.SetupConfirm) {
+                DraftSetupConfirmation(approval.copy(commands = approval.commands + "echo \u0430pi \u202Eok"), prNumber = 42, branch = null)
+            } else {
+                null
+            },
+        )
     }
 
     fun inputs() = DraftSheetInputs(

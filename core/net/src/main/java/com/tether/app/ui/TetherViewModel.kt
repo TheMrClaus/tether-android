@@ -175,6 +175,9 @@ class TetherViewModel(
 
     /** Every way the sheet goes (close, a selection, a resume, a `created`, another server, sign-out). */
     private fun hideDraft() {
+        // ta-m7ef (dashboard.tsx 1bf4a465 :334-340): however the sheet goes away, a pending setup check or
+        // confirmation goes with it: reopening must never show an approval the operator walked away from.
+        draftComposer.cancelSetup()
         _draftOpen.value = false
     }
 

@@ -97,8 +97,9 @@ class WireConformanceTest {
         val seen = manifest["serverTypesSeen"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet()
         val missing = manifest["serverTypesMissing"]!!.jsonArray.map { it.jsonObject.str("type")!! }.toSet()
         assertEquals(serverFrames().mapNotNull { it.second.str("type") }.toSet(), seen)
-        assertEquals(WireTypeLists.SERVER_TYPES, seen + missing)
-        assertEquals(missing, ServerFixtures.HAND_AUTHORED.keys)
+        // The corpus is the 887c222 capture: the types added after it (v141/v143) are hand-authored only.
+        assertEquals(WireTypeLists.SERVER_TYPES - WireTypeLists.SINCE_PARITY_BASE_SERVER, seen + missing)
+        assertEquals(missing, ServerFixtures.HAND_AUTHORED.keys - WireTypeLists.SINCE_PARITY_BASE_SERVER)
     }
 
     // (b) --------------------------------------------------------------------------
@@ -125,7 +126,8 @@ class WireConformanceTest {
         }
         println("WireConformance (b): ${lines.size - failures.size}/${lines.size} client examples round-tripped, ${types.size} types")
         assertEquals("Round-trip failures:\n" + failures.joinToString("\n"), 0, failures.size)
-        assertEquals(WireTypeLists.CLIENT_TYPES, types)
+        // The examples are the 887c222 capture; the client types added after it ride [extraClientFrames].
+        assertEquals(WireTypeLists.CLIENT_TYPES - WireTypeLists.SINCE_PARITY_BASE_CLIENT, types)
     }
 
     // (c) --------------------------------------------------------------------------
@@ -215,6 +217,40 @@ class WireConformanceTest {
         ClientMessage.RefreshProviders(),
         ClientMessage.Approval("s1", "r1", decision = "deny"),
         ClientMessage.Question("s1", "r1", mapOf("Q" to "A")),
+        // v143 (tether #241): the consent fields and the frames added with them.
+        ClientMessage.Create(
+            provider = "claude",
+            useWorktree = true,
+            worktree = WorktreeCreateRequest(mode = "checkout-branch", branch = "feature/x"),
+            setupConsent = "sha256:" + "ab".repeat(32),
+        ),
+        ClientMessage.Create(provider = "claude", useWorktree = true, worktree = WorktreeCreateRequest(mode = "branch-off"), setupConsent = "none"),
+        ClientMessage.WorktreeInspect("/w", "r1", WorktreeCreateRequest(mode = "checkout-pr", prNumber = 42)),
+        ClientMessage.WorktreeInspect("/w"),
+        ClientMessage.ArchiveInspect("s1", "r2"),
+        ClientMessage.ArchiveInspect("s1"),
+        ClientMessage.Archive("s1"),
+        ClientMessage.Archive("s1", "none"),
+        ClientMessage.Kill("s1", "sha256:" + "0f".repeat(32)),
+        ClientMessage.Kill("s1"),
+        ClientMessage.ArchiveStale("preview", 7),
+        ClientMessage.ArchiveStale("run", 30, "s2"),
+        ClientMessage.Resume("h1", "/w", sandboxPolicy = "workspace-write"),
+        ClientMessage.ScheduleCreate(
+            ScheduledActionInput(
+                name = "n", prompt = "p", cwd = "/w", provider = "claude", profileId = null, model = null,
+                reasoningEffort = null, permissionMode = null, sandboxPolicy = null, useWorktree = true,
+                cron = "0 9 * * *", timeZone = "UTC", maxRuns = null, setupConsent = OrNull("sha256:" + "cd".repeat(32)),
+            ),
+        ),
+        ClientMessage.ScheduleUpdate(
+            "sc1",
+            ScheduledActionInput(
+                name = "n", prompt = "p", cwd = "/w", provider = "claude", profileId = null, model = null,
+                reasoningEffort = null, permissionMode = null, sandboxPolicy = null, useWorktree = false,
+                cron = "0 9 * * *", timeZone = "UTC", maxRuns = null, setupConsent = OrNull(null),
+            ),
+        ),
     )
 
     private fun quote(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""

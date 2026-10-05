@@ -2,7 +2,7 @@ package com.tether.app.ui
 
 import com.tether.app.client.ConnectionHarness
 import com.tether.app.client.ConnectionState
-import com.tether.app.client.HEALTH_137
+import com.tether.app.client.HEALTH_143
 import com.tether.app.client.LoginResult
 import com.tether.app.ui.prefs.InMemoryDraftStore
 import kotlinx.coroutines.Dispatchers
@@ -54,7 +54,7 @@ class TetherViewModelLogBadgeClientTest {
     }
 
     private fun signInAgainWhileMainIsHeld(): WebSocket {
-        h.server.enqueue(MockResponse().setBody(HEALTH_137))
+        h.server.enqueue(MockResponse().setBody(HEALTH_143))
         h.server.enqueue(MockResponse().addHeader("Set-Cookie", "tether_session=fresh; Path=/").setBody("""{"ok":true}"""))
         h.enqueueConnect()
         val result = runBlocking { h.client.login(h.server.url("/").toString(), "pw") }

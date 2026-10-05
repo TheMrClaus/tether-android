@@ -184,7 +184,7 @@ class ScheduledRulesTest {
             cron = " 30 2 * * * ", timeZone = " Europe/Rome ", maxRuns = 3, extra = extra,
         )
         assertEquals(
-            ScheduledActionInput("Nightly", "Run the checks", "/workspace/project", "codex", "work", "gpt-5", "high", "plan", "read-only", true, "30 2 * * *", "Europe/Rome", 3, extra),
+            ScheduledActionInput("Nightly", "Run the checks", "/workspace/project", "codex", "work", "gpt-5", "high", "plan", "read-only", true, "30 2 * * *", "Europe/Rome", 3, extra = extra),
             ok(ScheduledRules.submit(form, CadenceMode.Custom, "", f.NOW, f.UTC)),
         )
     }

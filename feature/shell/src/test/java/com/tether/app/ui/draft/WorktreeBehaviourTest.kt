@@ -54,8 +54,9 @@ private const val BREAK = "\u2060\u200B"
  * every `worktree-inspect`. Every tap is a semantics action; every read after one waits on the model
  * or the drawn screen (v2 compose rule; never a single read).
  *
- * ta-coik.11: Send creates at once whatever the repo's setup, as the deployed web does (90fbb9f
- * draft-composer.tsx:789-795 shows a note, no confirmation).
+ * ta-m7ef (v143): an isolated Send first asks the server what the create would run (an intent
+ * `worktree-inspect`) and creates with the consent the answer carries: at once with "none" when the ref
+ * declares nothing, after "Run setup and start" when it declares hooks (draft-composer.tsx 1bf4a465).
  */
 abstract class WorktreeHarness(private val width: Int, private val height: Int) {
     // ta-9dpl: the folder is the outer rule, deleted only once the composition is gone: a preference
@@ -170,29 +171,47 @@ abstract class WorktreeHarness(private val width: Int, private val height: Int) 
 
     // --- run on the phone and the tablet -------------------------------------------------------------
 
-    /** The words of the retired ta-23f confirmation: none of them may ever be drawn. */
-    private val retired = listOf("This project's setup will run", "Setup may run on this host", "it can't be checked beforehand")
+    /** A repository whose ref declares nothing: the answer that lets the create go at once with "none". */
+    protected fun declaresNothing() = repo(hasSetup = false).copy(
+        setupPreview = com.tether.app.client.WorktreeSetupPreview(
+            "branch-off", "origin", "origin/main", "c".repeat(40), emptyList(), emptyList(), null, true, null, false, null, "none", "none", null,
+        ),
+    )
 
-    protected fun noConfirmationDrawn() {
-        for (words in retired) {
-            assertTrue("no confirmation: '$words'", rule.onAllNodesWithText(words, substring = true, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
-        }
-    }
+    protected val digest = "sha256:" + "ab".repeat(32)
 
-    /** One tap on Send: one create, at once, nothing in between. */
-    protected fun sendOnce(): com.tether.app.protocol.ClientMessage.Create {
+    /** A repository whose ref declares setup, a teardown and a port script, and the consent that approves them. */
+    protected fun declaresHooks(commands: List<String> = listOf("pnpm install", "pnpm run build"), hidden: Boolean = false) = repo(hasSetup = true).copy(
+        setupPreview = com.tether.app.client.WorktreeSetupPreview(
+            "branch-off", "origin", "origin/main", "c".repeat(40), commands, listOf("make clean"), "/opt/ports.sh", true, "f".repeat(64), hidden, digest, digest, null, null,
+        ),
+    )
+
+    /** One tap on Send: the setup check goes out, nothing is created, and the check says so. */
+    protected fun sendAndCheck() {
         until("Send enabled") { sendEnabled() }
         tap(DraftComposerTags.Send)
+        until("the setup check went out") { client.setupChecks.size == 1 }
+        awaitTag(DraftComposerTags.SetupChecking)
+        assertTrue("nothing is created while it checks", client.creates.isEmpty())
+        assertFalse("Send is off while it checks", sendEnabled())
+    }
+
+    /** One tap on Send, a "nothing declared" answer: one create, with consent none, no error. */
+    protected fun sendOnce(): com.tether.app.protocol.ClientMessage.Create {
+        sendAndCheck()
+        client.answerSetup(declaresNothing())
         until("the create went out") { client.creates.size == 1 }
         rule.waitForIdle()
-        noConfirmationDrawn()
         assertEquals(1, client.creates.size)
         assertEquals("no error", "", composer.state.value.error)
+        assertEquals("none", client.creates.single().setupConsent)
+        assertFalse("no approval was asked for", exists(DraftComposerTags.SetupConfirm))
         return client.creates.single()
     }
 
     @Test
-    fun withSetupSendCreatesAtOnceAndTheNoteSaysSo() {
+    fun withSetupTheNoteSaysSoAndSendChecksFirst() {
         openSheet()
         ready()
         isolate("branch-off")
@@ -204,9 +223,9 @@ abstract class WorktreeHarness(private val width: Int, private val height: Int) 
         assertNull("the frame is the web's", frame.worktree?.baseRef)
     }
 
-    /** The case ta-23f r2 confirmed (only an upstream remote): sent at once too, frame unchanged. */
+    /** The case ta-23f r2 confirmed (only an upstream remote): the same check, frame unchanged. */
     @Test
-    fun anUpstreamOnlyRepoSendsAtOnce() {
+    fun anUpstreamOnlyRepoSendsAfterItsCheck() {
         openSheet()
         ready()
         isolate("branch-off")
@@ -216,9 +235,9 @@ abstract class WorktreeHarness(private val width: Int, private val height: Int) 
         assertNull("the frame stays the web's", block.baseRef)
     }
 
-    /** No answer yet (ta-23f failed closed here): sent at once. */
+    /** No folder answer yet: the create's own check is what decides. */
     @Test
-    fun aPullRequestWithNoAnswerSendsAtOnce() {
+    fun aPullRequestWithNoFolderAnswerSendsAfterItsCheck() {
         openSheet()
         ready()
         isolate("checkout-pr")
@@ -346,20 +365,112 @@ class WorktreePhoneBehaviourTest : WorktreeHarness(412, 915) {
     }
 
     @Test
-    fun withoutSetupANewBranchSendsAtOnce() {
+    fun withoutSetupANewBranchSendsAfterItsCheckWithNoApproval() {
         openSheet()
         ready()
         isolate("branch-off")
         answer(repo(hasSetup = false, scripts = 1))
         until("the scripts note") { shown(WorktreeTags.SetupNote) == "This project declares 1 script you can run in the session." }
-        until("Send enabled") { sendEnabled() }
-        tap(DraftComposerTags.Send)
-        until("the create went out") { client.creates.size == 1 }
-        noConfirmationDrawn()
-        val frame = client.creates.single()
+        val frame = sendOnce()
         assertEquals(true, frame.useWorktree)
         assertEquals("branch-off", frame.worktree?.mode)
     }
+
+    // --- ta-m7ef: the approval ---------------------------------------------------------------------
+
+    @Test
+    fun declaredHooksAreShownForApprovalAndTheCreateCarriesExactlyTheirConsent() {
+        openSheet()
+        ready()
+        isolate("checkout-pr")
+        type(WorktreeField.Pr, "42")
+        sendAndCheck()
+        // The check asked for THIS create's block.
+        val asked = client.setupChecks.single()
+        assertEquals(DraftFixtures.ROOT, asked[0])
+        assertEquals(com.tether.app.protocol.WorktreeCreateRequest("checkout-pr", prNumber = 42), asked[1])
+        client.answerSetup(declaresHooks().copy(setupPreview = declaresHooks().setupPreview!!.copy(mode = "checkout-pr")))
+        awaitTag(DraftComposerTags.SetupConfirm)
+        awaitGone(DraftComposerTags.SetupChecking)
+        // The ref, the commit and every command, one numbered block each; teardown is shown for information.
+        until("the title") { shown(com.tether.app.ui.components.ConsentTags.Title) == SetupConfirmationCopy.TITLE }
+        until("the ref and commit") {
+            shown(com.tether.app.ui.components.ConsentTags.Body).let {
+                it.startsWith("Pull request #42 from origin/main at commit ${"c".repeat(40)} declares commands in its committed tether.json.")
+            }
+        }
+        assertEquals("pnpm install", shownCommand("draft-setup-command", 0))
+        assertEquals("pnpm run build", shownCommand("draft-setup-command", 1))
+        assertEquals("make clean", shownCommand("draft-teardown-command", 0))
+        assertEquals("/opt/ports.sh", shownCommand("draft-port-script", 0))
+        assertTrue("no hidden characters, no warning", !exists(com.tether.app.ui.components.ConsentTags.Hidden))
+        assertTrue("nothing is created before the approval", client.creates.isEmpty())
+        assertFalse("Send stays off while it waits", sendEnabled())
+        tap(DraftComposerTags.SetupRun)
+        until("the create went out") { client.creates.size == 1 }
+        assertEquals(digest, client.creates.single().setupConsent)
+        assertEquals(42L, client.creates.single().worktree?.prNumber)
+        awaitGone(DraftComposerTags.SetupConfirm)
+    }
+
+    @Test
+    fun cancelOnTheApprovalCreatesNothingAndKeepsTheDraft() {
+        openSheet()
+        ready()
+        isolate("branch-off")
+        sendAndCheck()
+        client.answerSetup(declaresHooks())
+        awaitTag(DraftComposerTags.SetupConfirm)
+        tap(DraftComposerTags.SetupCancel)
+        awaitGone(DraftComposerTags.SetupConfirm)
+        assertTrue(client.creates.isEmpty())
+        assertEquals("Review this", composer.state.value.text)
+        until("Send is back") { sendEnabled() }
+    }
+
+    @Test
+    fun hiddenCharactersAreWarnedAboutAndDrawnAsTokens() {
+        openSheet()
+        ready()
+        isolate("branch-off")
+        sendAndCheck()
+        client.answerSetup(declaresHooks(commands = listOf("echo \u0430pi \u202Eok"), hidden = true))
+        awaitTag(DraftComposerTags.SetupConfirm)
+        awaitTag(com.tether.app.ui.components.ConsentTags.Hidden)
+        assertEquals(com.tether.app.ui.components.HIDDEN_CHARACTERS_WARNING, shown(com.tether.app.ui.components.ConsentTags.Hidden))
+        assertEquals("echo U+0430pi U+202Eok", shownCommand("draft-setup-command", 0))
+    }
+
+    @Test
+    fun anIntentThatDidNotResolveShowsTheServersWordsAndCreatesNothing() {
+        openSheet()
+        ready()
+        isolate("checkout-branch")
+        type(WorktreeField.Branch, "feat/x")
+        sendAndCheck()
+        client.answerSetup(repo(hasSetup = false).copy(setupPreview = declaresNothing().setupPreview!!.copy(consent = null, error = "No such branch: feat/x")))
+        until("the words") { shown(DraftComposerTags.Error).contains("No such branch: feat/x") }
+        awaitGone(DraftComposerTags.SetupChecking)
+        assertTrue(client.creates.isEmpty())
+        until("Send is back") { sendEnabled() }
+    }
+
+    @Test
+    fun anEditWhileCheckingCancelsItWithTheWebsWords() {
+        openSheet()
+        ready()
+        isolate("branch-off")
+        sendAndCheck()
+        rule.runOnUiThread { composer.setText("Review that") }
+        awaitGone(DraftComposerTags.SetupChecking)
+        until("the words") { shown(DraftComposerTags.Error).contains("The setup check was cancelled because the draft changed. Press Send again.") }
+        // The late answer to the cancelled check starts nothing.
+        client.answerSetup(declaresNothing())
+        rule.waitForIdle()
+        assertTrue(client.creates.isEmpty())
+    }
+
+    private fun shownCommand(prefix: String, index: Int): String = shown("$prefix:$index")
 
     @Test
     fun aSuggestionFillsTheFieldAndIsDrawnByTheExactRule() {

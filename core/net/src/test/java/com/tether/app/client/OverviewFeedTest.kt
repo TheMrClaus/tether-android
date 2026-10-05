@@ -285,7 +285,7 @@ class OverviewFeedTest {
         init {
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
-                    "/healthz" -> MockResponse().setResponseCode(200).setBody(HEALTH_137)
+                    "/healthz" -> MockResponse().setResponseCode(200).setBody(HEALTH_143)
                     "/api/auth/login" -> MockResponse().setResponseCode(200).setBody("{}")
                         .addHeader("Set-Cookie", "tether_session=parity-fake-cookie-b; Path=/; HttpOnly")
                     "/api/auth/session" -> MockResponse().setResponseCode(200).setBody("""{"authenticated":true}""")

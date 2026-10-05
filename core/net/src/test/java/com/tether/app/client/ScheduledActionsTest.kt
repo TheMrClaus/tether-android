@@ -112,22 +112,33 @@ class ScheduledActionsTest {
         assertEquals(emptyList<ScheduledContinuation>(), state.continuations)
     }
 
-    /** tether #241 adds `setupConsent`: an unknown field is kept, and an edit sends it back unchanged. */
+    /** tether #241 adds `setupConsent` (v143, now modelled): an edit starting from the stored schedule sends it back unchanged. */
     @Test fun anUnknownFieldRoundTripsThroughAnEdit() {
         val frame = TetherJson.parseToJsonElement(
             captured("s2c")[1].toString().replace("\"runs\":[]", "\"runs\":[],\"setupConsent\":\"sha256:${"a".repeat(64)}\""),
         ).jsonObject
         val schedule = parse(frame).schedules.single()
-        assertEquals(JsonPrimitive("sha256:${"a".repeat(64)}"), schedule.unknown["setupConsent"])
+        assertEquals(com.tether.app.protocol.OrNull("sha256:${"a".repeat(64)}"), schedule.setupConsent)
+        assertNull("it is modelled now, so it is no unknown field", schedule.unknown["setupConsent"])
         val encoded = ClientMessage.ScheduleUpdate(schedule.id, schedule.toInput()).toJsonObject()
         val input = encoded["schedule"]!!.jsonObject
-        assertEquals(ScheduledActionInput.KEYS.toList() + "setupConsent", input.keys.toList())
+        assertEquals(ScheduledActionInput.KEYS.toList(), input.keys.toList())
         assertEquals(JsonPrimitive("sha256:${"a".repeat(64)}"), input["setupConsent"])
+    }
+
+    @Test fun aStoredNullApprovalStaysAnExplicitNullAndAnAbsentOneStaysAbsent() {
+        val base = captured("s2c")[1].toString()
+        val nulled = parse(TetherJson.parseToJsonElement(base.replace("\"runs\":[]", "\"runs\":[],\"setupConsent\":null")).jsonObject).schedules.single()
+        assertEquals(com.tether.app.protocol.OrNull<String>(null), nulled.setupConsent)
+        assertEquals("null", ClientMessage.ScheduleUpdate(nulled.id, nulled.toInput()).toJsonObject()["schedule"]!!.jsonObject["setupConsent"].toString())
+        val absent = parse(TetherJson.parseToJsonElement(base).jsonObject).schedules.single()
+        assertNull(absent.setupConsent)
+        assertFalse(ClientMessage.ScheduleUpdate(absent.id, absent.toInput()).toJsonObject()["schedule"]!!.jsonObject.containsKey("setupConsent"))
     }
 
     @Test fun anExtraFieldCanNeverReplaceAModelledOne() {
         val extra = TetherJson.parseToJsonElement("""{"provider":"gemini","maxRuns":99,"later":true}""").jsonObject
-        val input = ScheduledActionInput("n", "p", "/w", "claude", null, null, null, null, null, false, "* * * * *", "UTC", null, extra)
+        val input = ScheduledActionInput("n", "p", "/w", "claude", null, null, null, null, null, false, "* * * * *", "UTC", null, extra = extra)
         val encoded = input.toJsonObject()
         assertEquals("claude", encoded["provider"]!!.jsonPrimitive.content)
         assertEquals("null", encoded["maxRuns"].toString())

@@ -1,11 +1,13 @@
 package com.tether.app.protocol
 
 /**
- * The v137 TS unions' discriminator sets, checked in so CI (no tether checkout)
+ * The v143 TS unions' discriminator sets, checked in so CI (no tether checkout)
  * can verify type coverage. They are derived from docs/parity/matrix.json (kind
  * `server-msg` / `client-msg`, 43 + 69 rows), which tools/parity/build-matrix.py
  * generates from tether lib/protocol.ts at PARITY_BASE (T15.8: 887c222, v137; the
- * v131 Overview frames joined the matrix then). v132-v137 added no message types.
+ * v131 Overview frames joined the matrix then). v132-v140 added no message types; v141 (#244) added
+ * `archive-stale` / `archive-stale-result` and v143 (#241) `archive-inspect` / `archive-preview`
+ * ([SINCE_PARITY_BASE_SERVER], [SINCE_PARITY_BASE_CLIENT]).
  * WireConformanceTest re-checks these against matrix.json, and against
  * lib/protocol.ts itself when TETHER_PROTOCOL_TS points at one.
  */
@@ -19,12 +21,14 @@ object WireTypeLists {
         "ready", "scheduled-actions", "search-results", "seen", "server-settings", "session",
         "session-controls", "session-order", "snapshot", "turns-detail", "version_mismatch",
         "worktree-diff", "worktree-logs", "worktree-scripts", "worktree-source",
+        // v141 / v143 (after PARITY_BASE)
+        "archive-preview", "archive-stale-result",
         // v131 (opt-in Overview feed)
         "overview-delta", "overview-snapshot",
     )
 
     val CLIENT_TYPES: Set<String> = setOf(
-        "acp-agents", "advanced-settings", "approval", "archive", "attach", "background-command",
+        "acp-agents", "advanced-settings", "approval", "archive", "archive-inspect", "archive-stale", "attach", "background-command",
         "browse", "change-request", "codex-control-action", "codex-controls", "create",
         "create-folder", "detect-engines", "discover", "dismiss-notice", "fetch-turns",
         "git-diff-file", "global-search", "handoff", "handoff-brief", "hello", "interrupt", "kill",
@@ -42,6 +46,6 @@ object WireTypeLists {
     )
 
     /** Types added after PARITY_BASE (887c222): not in matrix.json until the matrix is rebuilt at a newer base. */
-    val SINCE_PARITY_BASE_SERVER: Set<String> = emptySet()
-    val SINCE_PARITY_BASE_CLIENT: Set<String> = emptySet()
+    val SINCE_PARITY_BASE_SERVER: Set<String> = setOf("archive-preview", "archive-stale-result")
+    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("archive-inspect", "archive-stale")
 }

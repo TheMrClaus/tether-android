@@ -179,7 +179,7 @@ class NodeRegistryTest {
         fun url(): String = server.url("/").toString().trimEnd('/')
 
         fun enqueueLoginAndConnect(cookie: String, probeDelayMs: Long = 0) {
-            server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_137))
+            server.enqueue(MockResponse().setResponseCode(200).setBody(HEALTH_143))
             server.enqueue(
                 MockResponse().setResponseCode(200).setBody("{}")
                     .addHeader("Set-Cookie", "tether_session=$cookie; Path=/; HttpOnly"),
@@ -398,7 +398,7 @@ class NodeRegistryTest {
                 "/api/auth/session" -> MockResponse().setResponseCode(200).setBody("""{"authenticated":true}""")
                     .setHeadersDelay(if (probes.getAndIncrement() == 0) 1_500L else 0L, TimeUnit.MILLISECONDS)
                 "/ws" -> MockResponse().withWebSocketUpgrade(listener)
-                "/healthz" -> MockResponse().setResponseCode(200).setBody(HEALTH_137)
+                "/healthz" -> MockResponse().setResponseCode(200).setBody(HEALTH_143)
                 "/api/auth/login" -> MockResponse().setResponseCode(200)
                     .addHeader("Set-Cookie", "tether_session=parity-fake-cookie-2; Path=/").setBody("{}")
                 else -> MockResponse().setResponseCode(404)
@@ -875,8 +875,8 @@ class NodeRegistryTest {
         h.client.start()
         val ws = h.nextSocket()
         assertNull(h.client.serverProtocolVersion.value)
-        h.handshake(ws, readyFrame(protocolVersion = 140))
-        h.await(h.client.serverProtocolVersion) { it == 140 }
+        h.handshake(ws, readyFrame(protocolVersion = 144))
+        h.await(h.client.serverProtocolVersion) { it == 144 }
         h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}")) // POST /api/auth/logout
         runBlocking { h.client.logout() }
         h.await(h.client.serverProtocolVersion) { it == null }

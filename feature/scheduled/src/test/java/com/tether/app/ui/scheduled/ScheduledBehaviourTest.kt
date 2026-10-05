@@ -239,7 +239,7 @@ abstract class ScheduledBehaviourBase(private val viewport: Int) {
             listOf(
                 ScheduledActionInput(
                     "Morning triage", "Review the new issues.", "/home/op/projects/tether", "claude", null, "claude-opus", null, null, null,
-                    false, "0 9 * * 1-5", "UTC", null,
+                    false, "0 9 * * 1-5", "UTC", null, setupConsent = com.tether.app.protocol.OrNull(null),
                 ),
             ),
             rec.creates,
@@ -272,7 +272,7 @@ abstract class ScheduledBehaviourBase(private val viewport: Int) {
         assertEquals(
             ScheduledActionInput(
                 "Nightly", "Run the checks", "/home/op/projects/site", "claude", null, "claude-opus", "high", "bypassPermissions", "off",
-                true, "30 2 * * *", "Europe/Rome", 3,
+                true, "30 2 * * *", "Europe/Rome", 3, setupConsent = com.tether.app.protocol.OrNull(null),
             ),
             rec.creates.single(),
         )
@@ -335,7 +335,8 @@ abstract class ScheduledBehaviourBase(private val viewport: Int) {
         rule.onNodeWithTag(ScheduleEditorTags.Submit).performClick()
         val (id, input) = rec.updates.single()
         assertEquals("triage", id)
-        assertEquals(ScheduledStates.populated.schedules.first().toInput().copy(name = "Morning triage"), input)
+        // v143: an edit always states its consent (the web's `setupConsent: null` when there is no check to make).
+        assertEquals(ScheduledStates.populated.schedules.first().toInput().copy(name = "Morning triage", setupConsent = com.tether.app.protocol.OrNull(null)), input)
         assertEquals(ScheduledStates.consent, input.extra)
     }
 

@@ -67,6 +67,16 @@ class TetherViewModelResumeTest {
             return com.tether.app.client.NewSessionResult.Sent
         }
 
+        /** ta-m7ef: the setup checks that went out (an isolated Send asks before it creates). */
+        val setupChecks = mutableListOf<String>()
+        val sources = kotlinx.coroutines.flow.MutableSharedFlow<com.tether.app.client.WorktreeSourceReply>(extraBufferCapacity = 16)
+        override val worktreeSources: kotlinx.coroutines.flow.Flow<com.tether.app.client.WorktreeSourceReply> = sources
+
+        override fun inspectSetup(cwd: String, worktree: com.tether.app.protocol.WorktreeCreateRequest, requestId: String, expectedEpoch: Long): Boolean {
+            setupChecks += requestId
+            return true
+        }
+
         override fun resume(history: HistorySession): Boolean {
             if (!sends) return false
             resumed += history.historyId
@@ -332,10 +342,10 @@ class TetherViewModelResumeTest {
     }
 
     /**
-     * ta-coik.11: Send on an isolated draft creates at once, as the web does (no setup confirmation),
-     * even with no inspect answer yet; the sheet's closing paths have nothing to cancel.
+     * ta-m7ef: Send on an isolated draft asks what the create would run and creates only with the answer's
+     * consent (here: nothing declared, so "none"); closing the sheet while the check waits cancels it.
      */
-    @Test fun anIsolatedSendCreatesAtOnce() = runTest(dispatcher) {
+    @Test fun anIsolatedSendChecksThenCreatesWithTheConsent() = runTest(dispatcher) {
         val client = ResumeClient()
         val vm = vm(client)
         runCurrent()
@@ -344,10 +354,40 @@ class TetherViewModelResumeTest {
         vm.draftComposer.setText("first words")
         assertTrue(vm.draftComposer.selectIsolation("branch-off"))
         vm.openDraft()
-        assertEquals(com.tether.app.client.DraftSubmitResult.Sent, vm.draftComposer.submit("https://a.example:443"))
+        assertEquals(com.tether.app.client.DraftSubmitResult.Checking, vm.draftComposer.submit("https://a.example:443"))
+        assertTrue("nothing is created before the answer", client.requests.isEmpty())
+        assertTrue(vm.draftComposer.state.value.setupChecking)
+        val none = com.tether.app.client.WorktreeSetupPreview("branch-off", "origin", "origin/main", "c".repeat(40), emptyList(), emptyList(), null, true, null, false, null, "none", "none", null)
+        client.sources.tryEmit(
+            com.tether.app.client.WorktreeSourceReply(com.tether.app.client.WorktreeSourceInfo(isRepo = true, setupPreview = none), client.setupChecks.single(), client.linkEpoch.value),
+        )
+        runCurrent()
         assertEquals(1, client.requests.size)
+        assertEquals("none", client.requests.single().setupConsent)
         assertEquals(com.tether.app.protocol.tree.JsBool.TRUE, client.requests.single().form["useWorktree"])
         assertEquals("", vm.draftComposer.state.value.error)
+    }
+
+    @Test fun closingTheSheetCancelsAPendingSetupCheck() = runTest(dispatcher) {
+        val client = ResumeClient()
+        val vm = vm(client)
+        runCurrent()
+        vm.draftComposer.refresh()
+        vm.draftComposer.selectProvider("claude")
+        vm.draftComposer.setText("first words")
+        assertTrue(vm.draftComposer.selectIsolation("branch-off"))
+        vm.openDraft()
+        assertEquals(com.tether.app.client.DraftSubmitResult.Checking, vm.draftComposer.submit("https://a.example:443"))
+        vm.closeDraft()
+        assertFalse(vm.draftComposer.state.value.setupChecking)
+        assertNull(vm.draftComposer.state.value.setupConfirmation)
+        client.sources.tryEmit(
+            com.tether.app.client.WorktreeSourceReply(
+                com.tether.app.client.WorktreeSourceInfo(isRepo = true), client.setupChecks.single(), client.linkEpoch.value,
+            ),
+        )
+        runCurrent()
+        assertTrue("a late answer starts nothing", client.requests.isEmpty())
     }
 
     /** ta-abm r2 (F2, T7.4 r2 L4b): a sign-out drops the draft's attachments and any pick still being read. */

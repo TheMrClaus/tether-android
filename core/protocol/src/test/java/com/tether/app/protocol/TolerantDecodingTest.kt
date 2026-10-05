@@ -156,24 +156,24 @@ class TolerantDecodingTest {
         assertEquals(setOf("type", "protocolVersion", "client"), hello.keys)
         assertEquals("android", hello["client"]!!.jsonPrimitive.content)
         assertEquals(setOf("type", "protocolVersion"), ClientMessage.Hello().toJsonObject().keys)
-        // ta-koy: the native floor the app documents stays 129. ta-3uk: the wire types model v137
+        // ta-koy: the native floor the app documents stays 129. ta-3uk: the wire types model v143
         // and the ADVERTISED hello is the same version — see the pin below.
-        assertEquals(137, TARGET_PROTOCOL_VERSION)
+        assertEquals(143, TARGET_PROTOCOL_VERSION)
         assertEquals(129, NATIVE_PROTOCOL_FLOOR)
     }
 
     /**
-     * ta-3uk: the version the app ADVERTISES in `hello` is TARGET_PROTOCOL_VERSION (137). A server
+     * ta-3uk: the version the app ADVERTISES in `hello` is TARGET_PROTOCOL_VERSION (143). A server
      * refuses a native hello newer than its own PROTOCOL_VERSION (lib/hello-compat.mjs,
-     * server_too_old), so this needs a server at >= 137 (the owner's deployed server is at 137).
+     * server_too_old), so this needs a server at >= 143 (tether PR #241; the owner deploys it).
      */
     @Test
-    fun advertisedHelloVersionIsTheModelledVersion137() {
-        assertEquals(137, PROTOCOL_VERSION)
+    fun advertisedHelloVersionIsTheModelledVersion143() {
+        assertEquals(143, PROTOCOL_VERSION)
         assertEquals(TARGET_PROTOCOL_VERSION, PROTOCOL_VERSION)
-        assertEquals(137, ClientMessage.Hello(client = HELLO_CLIENT_ANDROID).protocolVersion)
+        assertEquals(143, ClientMessage.Hello(client = HELLO_CLIENT_ANDROID).protocolVersion)
         val sent = ClientMessage.Hello(PROTOCOL_VERSION, HELLO_CLIENT_ANDROID).toJsonObject()
-        assertEquals(137, sent["protocolVersion"]!!.jsonPrimitive.content.toInt())
+        assertEquals(143, sent["protocolVersion"]!!.jsonPrimitive.content.toInt())
         assertEquals("android", sent["client"]!!.jsonPrimitive.content)
     }
 

@@ -26,8 +26,8 @@ data class ScheduledActionRun(
 
 /**
  * lib/protocol.ts `ScheduledAction` (v87): a fresh-agent cron schedule. [unknown] keeps every field
- * this client does not model (a newer server's, e.g. tether #241's `setupConsent`), so an edit can
- * send it back unchanged ([toInput]).
+ * this client does not model (a newer server's), so an edit can send it back unchanged ([toInput]);
+ * v143's `setupConsent` is modelled ([setupConsent]).
  */
 data class ScheduledAction(
     val id: String,
@@ -53,6 +53,11 @@ data class ScheduledAction(
     /** Oldest first, as the server appends them (lib/scheduled-actions.mjs `runs`). */
     val runs: List<ScheduledActionRun>,
     val unknown: JsonObject = JsonObject(emptyMap()),
+    /**
+     * v143 r3 (ta-6t1): the setup approval saved with an isolated schedule, as the server stored it (a string, or
+     * an explicit null). Null: not sent (an older server). An edit's starting input carries it unchanged.
+     */
+    val setupConsent: com.tether.app.protocol.OrNull<String>? = null,
 ) {
     /**
      * The schedule as an edit's starting input: its own fields plus [unknown] (written back
@@ -61,7 +66,10 @@ data class ScheduledAction(
     fun toInput(): ScheduledActionInput = ScheduledActionInput(
         name = name, prompt = prompt, cwd = cwd, provider = provider, profileId = profileId, model = model,
         reasoningEffort = reasoningEffort, permissionMode = permissionMode, sandboxPolicy = sandboxPolicy,
-        useWorktree = useWorktree, cron = cron, timeZone = timeZone, maxRuns = maxRuns, extra = unknown,
+        useWorktree = useWorktree, cron = cron, timeZone = timeZone, maxRuns = maxRuns,
+        // v143: the stored approval is modelled ([ScheduledActionInput.setupConsent]); a stored null stays an explicit null.
+        setupConsent = setupConsent,
+        extra = unknown,
     )
 
     companion object {
@@ -132,6 +140,12 @@ object ScheduledActionsParse {
         lastRunAt = o.long("lastRunAt"),
         runs = (o["runs"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.let(::run) },
         unknown = JsonObject(o.filterKeys { it !in ScheduledAction.KEYS }),
+        setupConsent = when (val consent = o["setupConsent"]) {
+            null -> null
+            is kotlinx.serialization.json.JsonNull -> com.tether.app.protocol.OrNull(null)
+            is JsonPrimitive -> if (consent.isString) com.tether.app.protocol.OrNull(consent.content) else null
+            else -> null
+        },
     )
 
     fun continuation(o: JsonObject): ScheduledContinuation? = ScheduledContinuation(

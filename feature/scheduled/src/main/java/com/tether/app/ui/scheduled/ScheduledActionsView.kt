@@ -57,10 +57,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.tether.app.client.CreateErrorReply
 import com.tether.app.client.ProviderCatalogEntry
 import com.tether.app.client.ScheduledAction
 import com.tether.app.client.ScheduledActionsState
 import com.tether.app.client.ScheduledContinuation
+import com.tether.app.client.WorktreeSourceReply
 import com.tether.app.protocol.ScheduledActionInput
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
@@ -108,6 +110,12 @@ data class ScheduledActionsHandlers(
     val onControl: (scheduleId: String, action: String) -> Unit = { _, _ -> },
     val onCancelContinuation: (sessionId: String, resetsAt: Long) -> Unit = { _, _ -> },
     val onOpenSession: (sessionId: String) -> Unit = {},
+    /**
+     * ta-m7ef (v143 r3, scheduled-actions-view.tsx `onCheckSetup`): send the setup check (an intent
+     * `worktree-inspect` for [cwd]); its correlated answer arrives as the view's `setupReply`, a refusal as its
+     * `createError`. False when not sent. Null: no check (an isolated save is then sent without a consent).
+     */
+    val onCheckSetup: ((cwd: String, requestId: String) -> Boolean)? = null,
 )
 
 /**
@@ -120,6 +128,9 @@ class ScheduledUiState(tab: ScheduledTab = ScheduledTab.Schedules, editor: Sched
     var tab by mutableStateOf(tab)
     var editor by mutableStateOf(editor)
     var armedDeleteId by mutableStateOf<String?>(null)
+
+    /** ta-m7ef: the isolated save's setup check in flight or waiting for approval (not kept across a restart). */
+    var setup by mutableStateOf<ScheduleSetupCheck?>(null)
 
     companion object {
         val Saver: Saver<ScheduledUiState, Any> = androidx.compose.runtime.saveable.listSaver(
@@ -191,6 +202,12 @@ fun ScheduledActionsView(
     clock: () -> Long = System::currentTimeMillis,
     /** False only for goldens that shoot the editor inline ([ScheduleEditorFrame]). */
     editorInWindow: Boolean = true,
+    /** ta-m7ef: the latest `worktree-source` of the live socket (the answer to a save's setup check). */
+    setupReply: WorktreeSourceReply? = null,
+    /** ta-m7ef: the latest `error` frame (a refusal of the setup check carries no `worktree-source`). */
+    createError: CreateErrorReply? = null,
+    /** ta-m7ef: a fresh correlation token per setup check. */
+    newRequestId: () -> String = { java.util.UUID.randomUUID().toString() },
 ) {
     val t = LocalTetherTokens.current
     val layout = ScheduledLayout(viewportWidth)
@@ -287,21 +304,74 @@ fun ScheduledActionsView(
         }
     }
 
+    // v143 r3 (ta-6t1): the save, sent with the consent the check settled on.
+    val save = { id: String?, input: ScheduledActionInput ->
+        if (id != null) handlers.onUpdate(id, input) else handlers.onCreate(input)
+        ui.setup = null
+        ui.editor = null
+    }
+    // The answer to THIS save's setup check (matched by its own requestId).
+    LaunchedEffect(setupReply) {
+        val check = ui.setup
+        when (val outcome = ScheduleSetup.onReply(check, setupReply)) {
+            ScheduleSetupOutcome.Ignore -> Unit
+            is ScheduleSetupOutcome.Save -> save(check?.editingId, outcome.input)
+            is ScheduleSetupOutcome.Confirm -> ui.setup = outcome.check
+            is ScheduleSetupOutcome.Refuse -> {
+                ui.setup = null
+                ui.editor = ui.editor?.copy(error = outcome.message)
+            }
+        }
+    }
+    // A refusal of the check (no worktree-source will come) ends it.
+    LaunchedEffect(createError) {
+        ScheduleSetup.errorMessage(ui.setup, createError)?.let { message ->
+            ui.setup = null
+            ui.editor = ui.editor?.copy(error = message)
+        }
+    }
+    // Any edit of the form while checking or confirming cancels the check.
+    LaunchedEffect(ui.editor?.form) {
+        if (ScheduleSetup.editCancels(ui.setup, ui.editor?.form ?: return@LaunchedEffect)) ui.setup = null
+    }
+
     ui.editor?.let { editor ->
-        val close = { ui.editor = null }
+        val close = { ui.setup = null; ui.editor = null }
         val submit = {
             when (val result = ScheduledRules.submit(editor.form, editor.mode, editor.onceValue, clock(), zone)) {
                 is SubmitResult.Error -> ui.editor = editor.copy(error = result.message)
                 is SubmitResult.Ok -> {
                     val id = editor.editingId
-                    if (id != null) handlers.onUpdate(id, result.input) else handlers.onCreate(result.input)
-                    ui.editor = null
+                    val check = handlers.onCheckSetup
+                    if (result.input.useWorktree && check != null) {
+                        // v143 r3: an isolated schedule's save approves (or not) its setup first.
+                        if (ui.setup == null) {
+                            val requestId = newRequestId()
+                            if (!check(result.input.cwd, requestId)) {
+                                ui.editor = editor.copy(error = ScheduleSetup.LINK_DOWN_COPY)
+                            } else {
+                                ui.editor = editor.copy(error = "")
+                                ui.setup = ScheduleSetupCheck(false, requestId, createError?.seq ?: 0L, result.input, id, editor.form, null)
+                            }
+                        }
+                    } else {
+                        save(id, ScheduleSetup.withConsent(result.input, null))
+                    }
                 }
             }
         }
         val workspaces = ScheduledRules.workspaceSuggestions(currentWorkspace, pinnedProjects)
         if (editorInWindow) {
-            ScheduleEditorDialog(editor, entries, workspaces, viewportWidth, zone, clock, onChange = { ui.editor = it }, onClose = close, onSubmit = submit)
+            ScheduleEditorDialog(
+                editor, entries, workspaces, viewportWidth, zone, clock,
+                onChange = { ui.editor = it }, onClose = close, onSubmit = submit,
+                setup = ui.setup,
+                setupActions = ScheduleSetupActions(
+                    onBack = { ui.setup = null },
+                    onSaveWithoutSetup = { ui.setup?.let { save(it.editingId, ScheduleSetup.withConsent(it.input, null)) } },
+                    onApprove = { ui.setup?.let { check -> check.approval?.scheduleConsent?.let { save(check.editingId, ScheduleSetup.withConsent(check.input, it)) } } },
+                ),
+            )
         }
     }
 }

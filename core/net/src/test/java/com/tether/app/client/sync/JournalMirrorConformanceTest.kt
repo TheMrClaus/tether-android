@@ -87,7 +87,7 @@ class JournalMirrorConformanceTest {
     }
 
     private fun readyWith(sessionId: String) =
-        """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
+        """{"type":"ready","protocolVersion":143,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
             "sessions":[{"id":"$sessionId","provider":"claude","name":"conformance","cwd":"/work/parity","status":"ready",
             "startedAt":1,"updatedAt":1,"pinned":false,"runtimeArchived":false,"mode":"headless"}]}"""
 

@@ -98,7 +98,7 @@ class SessionCookieNameTest {
     /** A real sign-in whose login response carries [setCookie]; returns its result. */
     private fun login(vararg setCookie: String, https: Boolean = false): LoginResult {
         signedOutClient(https)
-        h.server.enqueue(MockResponse().setBody(HEALTH_137))
+        h.server.enqueue(MockResponse().setBody(HEALTH_143))
         val response = MockResponse().setBody("""{"ok":true}""")
         setCookie.forEach { response.addHeader("Set-Cookie", it) }
         h.server.enqueue(response)
@@ -326,7 +326,7 @@ class SessionCookieNameTest {
             sweepIntervalMs = 3_600_000,
             scheduler = h.scheduler,
         )
-        h.server.enqueue(MockResponse().setBody(HEALTH_137))
+        h.server.enqueue(MockResponse().setBody(HEALTH_143))
         h.server.enqueue(
             MockResponse().setBody("""{"ok":true}""")
                 .addHeader("Set-Cookie", "tether_session=p; Domain=example.com")

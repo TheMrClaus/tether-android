@@ -34,7 +34,7 @@ class OfflineReadTest {
             "pinned":false,"runtimeArchived":false,"mode":"headless"}"""
 
     private fun ready(vararg sessions: String) =
-        """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
+        """{"type":"ready","protocolVersion":143,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
             "sessions":[${sessions.joinToString(",")}]}"""
 
     private val state = """{"tetherSessionId":"s1","provider":"claude","cwd":"/w","turnOrder":[],"turnsById":{},"activeTurnId":null,"queuedMessages":[]}"""

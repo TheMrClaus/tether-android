@@ -294,7 +294,7 @@ class PasskeyHostRelyingPartyWireTest {
     @Before fun setUp() {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
-                "/healthz" -> MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}""")
+                "/healthz" -> MockResponse().setBody("""{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129}""")
                 "/api/auth/passkey/login/options" -> MockResponse().setHeader("Content-Type", "application/json").setBody(PasskeyFixtures.loginOptionsJson(rpId))
                 "/api/auth/passkey/login/verify" -> MockResponse().setHeader("Content-Type", "application/json").setBody("""{"ok":true}""")
                     .addHeader("Set-Cookie", "tether_session=0123456789abcdef0123456789abcdef.YXBwLXBhc3NrZXk; Path=/; HttpOnly; SameSite=Strict")

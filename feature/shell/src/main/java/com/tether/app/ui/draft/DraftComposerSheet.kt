@@ -173,6 +173,12 @@ object DraftComposerTags {
     const val Error = "draft-error"
     const val Notice = "draft-notice"
     const val Readiness = "draft-readiness"
+    /** ta-m7ef: the setup check's "Checking what this project's setup would run…" line. */
+    const val SetupChecking = "draft-setup-checking"
+    /** ta-m7ef: the setup confirmation panel and its keys. */
+    const val SetupConfirm = "draft-setup-confirm"
+    const val SetupRun = "draft-setup-run"
+    const val SetupCancel = "draft-setup-cancel"
     const val Attachments = "draft-attachments"
     const val Input = "draft-input"
     const val Attach = "draft-attach"
@@ -264,15 +270,22 @@ class DraftSheetActions(
     val onWorktreeField: (com.tether.app.client.WorktreeField, String) -> Unit = { _, _ -> },
     /** T8.4: the "GitHub issues" / "Pull requests" buttons (open the dialog on that tab). */
     val onGitHub: (GitHubWorkTab) -> Unit = {},
+    /** ta-m7ef: "Run setup and start" — create with the consent the confirmation showed. */
+    val onConfirmSetup: () -> Unit = {},
+    /** ta-m7ef: "Cancel" on the setup confirmation — back to the draft; nothing is created. */
+    val onCancelSetup: () -> Unit = {},
 )
 
 private fun DraftComposerState.cwd(): String = (form["cwd"] as? JsStr)?.value.orEmpty()
 
 private fun DraftComposerState.key(): String = (form["key"] as? JsStr)?.value.orEmpty()
 
-/** draft-composer.tsx sendDisabled: nothing to send, a create in flight, or a readiness reason. */
+/**
+ * draft-composer.tsx sendDisabled: nothing to send, a create in flight, a setup check or confirmation
+ * pending (v143, `setupPending`), or a readiness reason.
+ */
 internal fun sendDisabled(draft: DraftComposerState, readiness: String): Boolean =
-    (draft.text.isBlank() && draft.staged.isEmpty()) || draft.creating || readiness.isNotEmpty()
+    (draft.text.isBlank() && draft.staged.isEmpty()) || draft.creating || draft.setupChecking || draft.setupConfirmation != null || readiness.isNotEmpty()
 
 /**
  * The sheet wired to the view model: up while the operator is composing ([TetherViewModel.draftOpen])
@@ -385,6 +398,10 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHu
             // use-draft-composer.ts submit, drawn for the server this sheet was drawn for.
             if (composer.submit(origin) == DraftSubmitResult.NotOffered) client.requestProviderCatalog()
         },
+        onConfirmSetup = {
+            if (composer.confirmSetup() == DraftSubmitResult.NotOffered) client.requestProviderCatalog()
+        },
+        onCancelSetup = composer::cancelSetup,
     )
     Dialog(onDismissRequest = vm::closeDraft, properties = DraftDialogProperties) {
         val view = LocalView.current
@@ -658,6 +675,12 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
     if (wideRow) DraftLiveRow(inputs, actions) else DraftSettingsTriggerRow(inputs, actions)
     Box(Modifier.height(t.css.spaceMd))
 
+    // ta-m7ef (draft-composer.tsx 1bf4a465): the project's setup, waiting for the operator's approval, and the
+    // check between Send and create.
+    draft.setupConfirmation?.let { SetupConfirmation(it, actions.onConfirmSetup, actions.onCancelSetup) }
+    if (draft.setupChecking) {
+        StatusLine(TetherIcons.Loader, "Checking what this project's setup would run…", DraftComposerTags.SetupChecking)
+    }
     // draft-composer.tsx: the hook's error, else the attachment flash.
     if (draft.error.isNotEmpty()) {
         StatusLine(TetherIcons.TriangleAlert, draft.error, DraftComposerTags.Error)
@@ -817,12 +840,12 @@ private fun MessageWell(draft: DraftComposerState, readiness: String, narrow: Bo
             TetherKey(
                 onClick = submit,
                 classes = KeyClasses.ChatSend,
-                label = if (draft.creating) "Creating…" else "Send",
+                label = if (draft.creating) "Creating…" else if (draft.setupChecking) "Checking…" else "Send",
                 icon = TetherIcons.Send,
                 iconSize = 18.dp,
                 enabled = !disabled,
                 minHeight = 44.dp,
-                contentDescription = if (draft.creating) "Creating session…" else "Start session and send",
+                contentDescription = if (draft.creating) "Creating session…" else if (draft.setupChecking) "Checking the project's setup…" else "Start session and send",
                 modifier = Modifier.widthIn(min = 44.dp).testTag(DraftComposerTags.Send),
             )
         }

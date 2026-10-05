@@ -178,7 +178,7 @@ class ReconnectLatencyTest {
             """"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"}"""
 
     private fun readyListing(vararg ids: String) =
-        """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"sessions":[${ids.joinToString(",") { sessionJson(it) }}],""" +
+        """{"type":"ready","protocolVersion":143,"nativeProtocolFloor":129,"sessions":[${ids.joinToString(",") { sessionJson(it) }}],""" +
             """"providers":[],"workspaceRoot":null}"""
 
     private fun attaches(frames: List<kotlinx.serialization.json.JsonObject>): List<Pair<String, Long?>> =

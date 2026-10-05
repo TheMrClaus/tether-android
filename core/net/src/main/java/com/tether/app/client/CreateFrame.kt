@@ -84,7 +84,7 @@ object CreateFrame {
     }
 
     /** The v98 `worktree` block, from [DraftForm.buildWorktreeCreateRequest]'s object. */
-    private fun worktreeRequest(o: JsObj): WorktreeCreateRequest = WorktreeCreateRequest(
+    internal fun worktreeRequest(o: JsObj): WorktreeCreateRequest = WorktreeCreateRequest(
         mode = (o["mode"] as? JsStr)?.value ?: "branch-off",
         baseRef = (o["baseRef"] as? JsStr)?.value,
         branch = (o["branch"] as? JsStr)?.value,

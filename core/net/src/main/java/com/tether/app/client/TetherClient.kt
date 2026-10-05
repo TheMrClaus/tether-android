@@ -466,6 +466,14 @@ interface TetherClient {
     val worktreeSources: Flow<WorktreeSourceReply> get() = kotlinx.coroutines.flow.emptyFlow()
 
     /**
+     * ta-m7ef (v143, tether #241): `worktree-inspect` for the INTENDED create ([worktree] is the `create.worktree`
+     * block), so the reply's `setupPreview` is for the ref that create resolves. The same rules as
+     * [inspectWorktree] (a live handshaken socket still the one the composer asked on, a bounded [requestId]);
+     * a read, never queued or resent. False when not sent.
+     */
+    fun inspectSetup(cwd: String, worktree: com.tether.app.protocol.WorktreeCreateRequest, requestId: String, expectedEpoch: Long): Boolean = false
+
+    /**
      * ta-8cv: every `error` frame of the live socket, as the web's `createError` holds it
      * (use-tether.ts: `{message, seq, requestId?}`, seq monotonic): the draft composer acts only on
      * the one whose `requestId` echoes its in-flight create. The message is cleaned by the error

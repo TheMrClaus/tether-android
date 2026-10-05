@@ -7,7 +7,8 @@ package com.tether.app.protocol
  *  - `approval` / `approval_resolved`: declared in ServerMessage but never sent by
  *    server.mjs at 7d65611 (approvals arrive as `event` frames);
  *  - `acp-agents`: retired server-side (the request is answered with `error`);
- *  - `overview-snapshot` / `overview-delta` (v131/v132): sent only to a subscribed socket.
+ *  - `overview-snapshot` / `overview-delta` (v131/v132): sent only to a subscribed socket;
+ *  - `archive-preview` / `archive-stale-result` (v143 / v141): added after the 887c222 capture.
  */
 object ServerFixtures {
     const val APPROVAL = """
@@ -74,7 +75,28 @@ object ServerFixtures {
                       "kind":"tool_result","text":"Bash finished"}]}
     """
 
+    /** v143 r3 (ta-6t1) `archive-preview`, as lib/protocol.ts TeardownPreview (with r7 `stopsSessions`). */
+    const val ARCHIVE_PREVIEW = """
+        {"type":"archive-preview","sessionId":"sess-1","requestId":"r1","preview":{"sessionId":"sess-1",
+         "commands":["pnpm run teardown"],"commit":"0123456789abcdef0123456789abcdef01234567","worktreePath":"/w/.tether/wt/a",
+         "checkoutIntact":true,"checkoutChanged":false,"hiddenCharacters":false,
+         "fingerprint":"sha256:0000000000000000000000000000000000000000000000000000000000000001",
+         "nonce":"00112233445566778899aabbccddeeff",
+         "digest":"sha256:0000000000000000000000000000000000000000000000000000000000000002",
+         "consent":"sha256:0000000000000000000000000000000000000000000000000000000000000002","error":null,
+         "stopsSessions":[{"sessionId":"sess-2","name":"Home folder"}]}}
+    """
+
+    /** v141 (#244) `archive-stale-result`, as lib/protocol.ts. */
+    const val ARCHIVE_STALE_RESULT = """
+        {"type":"archive-stale-result","mode":"preview","days":15,"eligible":12,"archived":0,"failed":0,"remaining":12,
+         "skipped":{"pinned":1,"inFlight":0,"pendingRequest":2,"background":0,"viewing":1},
+         "retention":{"cap":500,"retiredNow":0,"willBePruned":3}}
+    """
+
     val HAND_AUTHORED: Map<String, String> = mapOf(
+        "archive-preview" to ARCHIVE_PREVIEW,
+        "archive-stale-result" to ARCHIVE_STALE_RESULT,
         "approval" to APPROVAL,
         "approval_resolved" to APPROVAL_RESOLVED,
         "acp-agents" to ACP_AGENTS,

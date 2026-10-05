@@ -167,6 +167,21 @@ class DraftTestClient(
         check(sources.tryEmit(com.tether.app.client.WorktreeSourceReply(info, requestId, epoch)))
     }
 
+    /** ta-m7ef: every setup check (an intent `worktree-inspect`) that went out: (cwd, block, requestId, socket). */
+    val setupChecks = CopyOnWriteArrayList<List<Any>>()
+
+    override fun inspectSetup(cwd: String, worktree: com.tether.app.protocol.WorktreeCreateRequest, requestId: String, expectedEpoch: Long): Boolean {
+        refuseInGolden("worktree-inspect (setup check)")
+        if (expectedEpoch != linkEpoch.value) return false
+        setupChecks += listOf(cwd, worktree, requestId, expectedEpoch)
+        return true
+    }
+
+    /** ta-m7ef: the server's `worktree-source` for the last setup check, on the current socket. */
+    fun answerSetup(info: com.tether.app.client.WorktreeSourceInfo, requestId: String = setupChecks.last()[2] as String, epoch: Long = linkEpoch.value) {
+        check(sources.tryEmit(com.tether.app.client.WorktreeSourceReply(info, requestId, epoch)))
+    }
+
     override fun browse(cwd: String?) {
         refuseInGolden("browse")
         browsed += cwd

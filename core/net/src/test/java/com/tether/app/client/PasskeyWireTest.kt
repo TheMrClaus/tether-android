@@ -41,7 +41,7 @@ class PasskeyWireTest {
     private fun take(server: MockWebServer = h.server): RecordedRequest = server.takeRequest(10, TimeUnit.SECONDS) ?: error("no request reached the server")
     private fun ok(body: String, code: Int = 200) = MockResponse().setResponseCode(code).setHeader("Content-Type", json).setBody(body)
     private fun obj(text: String) = TetherJson.parseToJsonElement(text) as JsonObject
-    private fun health() = MockResponse().setBody(HEALTH_137)
+    private fun health() = MockResponse().setBody(HEALTH_143)
 
     // =========================== registration (Settings → Devices) ===========================
 
@@ -276,7 +276,7 @@ class PasskeyWireTest {
 
     @Test fun aServerOutsideTheNativeWindowOrAPhoneWithoutPasskeysSendsNothingMore() {
         val client = signedOutClient()
-        h.server.enqueue(MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":999}"""))
+        h.server.enqueue(MockResponse().setBody("""{"ok":true,"protocolVersion":143,"nativeProtocolFloor":999}"""))
         assertTrue(runBlocking { client.passkeyLogin(base, RecordingPasskeys()) } is LoginResult.VersionMismatch)
         take()
         assertEquals(1, h.server.requestCount)

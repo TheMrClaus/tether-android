@@ -47,44 +47,45 @@ class ConnectionPolicyTest {
 
     @Test
     fun windowAcceptsFloorToServerVersionInclusive() {
-        assertNull(Compatibility.evaluate(137, 137))
-        assertNull(Compatibility.evaluate(140, 100))
+        assertNull(Compatibility.evaluate(143, 143))
+        assertNull(Compatibility.evaluate(145, 100))
         assertNull(Compatibility.evaluate(serverProtocolVersion = null, nativeProtocolFloor = 129))
         // The window is inclusive at both ends, for any client version.
         assertNull(Compatibility.evaluate(129, 129, clientVersion = 129))
     }
 
     /**
-     * ta-3uk: the hello-compat window (lib/hello-compat.mjs) for this app at v137: served when
-     * `floor <= 137 <= server`. The owner's deployed server (PROTOCOL_VERSION 137,
-     * NATIVE_PROTOCOL_FLOOR 129) is inside it, and so is any newer server with the same floor;
-     * a server at 129..136 now refuses it (server_too_old), which /healthz and `ready` flag
-     * before the hello, and a floor raised past 137 needs an app update (client_too_old).
+     * ta-3uk: the hello-compat window (lib/hello-compat.mjs) for this app at v143: served when
+     * `floor <= 143 <= server`. A server at PROTOCOL_VERSION 143 (tether PR #241, NATIVE_PROTOCOL_FLOOR
+     * 129) is inside it, and so is any newer server with the same floor; a server at 129..142 refuses
+     * it (server_too_old: the owner deploys #241 before this app is merged), which /healthz and `ready`
+     * flag before the hello, and a floor raised past 143 needs an app update (client_too_old).
      */
     @Test
-    fun helloCompatWindowFor137() {
-        assertEquals(137, PROTOCOL_VERSION)
+    fun helloCompatWindowFor143() {
+        assertEquals(143, PROTOCOL_VERSION)
         assertEquals(TARGET_PROTOCOL_VERSION, PROTOCOL_VERSION)
-        assertNull(Compatibility.evaluate(serverProtocolVersion = 137, nativeProtocolFloor = 129))
-        assertNull(Compatibility.evaluate(serverProtocolVersion = 140, nativeProtocolFloor = 129))
-        for (floor in 129..137) assertNull("floor $floor", Compatibility.evaluate(137, floor))
-        for (server in 137..140) assertNull("server $server", Compatibility.evaluate(server, 129))
-        for (server in 129..136) {
+        assertNull(Compatibility.evaluate(serverProtocolVersion = 143, nativeProtocolFloor = 129))
+        assertNull(Compatibility.evaluate(serverProtocolVersion = 145, nativeProtocolFloor = 129))
+        for (floor in 129..143) assertNull("floor $floor", Compatibility.evaluate(143, floor))
+        for (server in 143..146) assertNull("server $server", Compatibility.evaluate(server, 129))
+        for (server in 129..142) {
             val bad = Compatibility.evaluate(server, 129)!!
             assertEquals("server $server", IncompatibleReason.ServerTooOld, bad.reason)
             assertEquals(server, bad.serverProtocolVersion)
             assertEquals(129, bad.nativeProtocolFloor)
         }
-        assertEquals(IncompatibleReason.ServerTooOld, Compatibility.evaluate(136, 129)!!.reason)
+        // The deployed server before #241 (PROTOCOL 140) now refuses the app: it must be updated first.
+        assertEquals(IncompatibleReason.ServerTooOld, Compatibility.evaluate(140, 129)!!.reason)
         assertEquals(IncompatibleReason.ServerTooOld, Compatibility.evaluate(129, 129)!!.reason)
-        assertEquals(IncompatibleReason.ClientTooOld, Compatibility.evaluate(140, 138)!!.reason)
+        assertEquals(IncompatibleReason.ClientTooOld, Compatibility.evaluate(145, 144)!!.reason)
         // The previous app (v132) against the same server is still served: only the app moved.
-        assertNull(Compatibility.evaluate(137, 129, clientVersion = 132))
+        assertNull(Compatibility.evaluate(143, 129, clientVersion = 132))
     }
 
     @Test
     fun windowNamesTheSideThatIsBehind() {
-        assertEquals(IncompatibleReason.ClientTooOld, Compatibility.evaluate(140, 138)!!.reason)
+        assertEquals(IncompatibleReason.ClientTooOld, Compatibility.evaluate(150, 144)!!.reason)
         assertEquals(IncompatibleReason.ServerTooOld, Compatibility.evaluate(128, 120, clientVersion = 129)!!.reason)
         // v128 and older servers have no native window at all.
         assertEquals(
@@ -105,7 +106,7 @@ class ConnectionPolicyTest {
         )
         // Web-style frames (no reason): the required version decides.
         assertEquals(IncompatibleReason.ServerTooOld, Compatibility.fromMismatch(ServerMessage.VersionMismatch(128, null)).reason)
-        assertEquals(IncompatibleReason.ClientTooOld, Compatibility.fromMismatch(ServerMessage.VersionMismatch(140, null)).reason)
+        assertEquals(IncompatibleReason.ClientTooOld, Compatibility.fromMismatch(ServerMessage.VersionMismatch(150, null)).reason)
         // A bare frame (requiredVersion -1) still halts; updating the app is the advice.
         val bare = Compatibility.fromMismatch(ServerMessage.VersionMismatch(-1, null))
         assertEquals(IncompatibleReason.ClientTooOld, bare.reason)

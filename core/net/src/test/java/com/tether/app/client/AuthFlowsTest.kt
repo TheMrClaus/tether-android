@@ -95,7 +95,7 @@ class AuthFlowsTest {
     }
 
     private fun health(pairing: Boolean = false, floor: Int = 129) = MockResponse().setBody(
-        """{"ok":true,"protocolVersion":137,"nativeProtocolFloor":$floor${if (pairing) ""","pairing":true""" else ""}}""",
+        """{"ok":true,"protocolVersion":143,"nativeProtocolFloor":$floor${if (pairing) ""","pairing":true""" else ""}}""",
     )
 
     private fun <T> awaitValue(block: suspend () -> T, predicate: (T) -> Boolean): T = runBlocking {
@@ -125,7 +125,7 @@ class AuthFlowsTest {
     fun loginSendsTheSameBytesAsTheWebFormWithNothingAltered() {
         newClient()
         // The deployed server's /healthz (protocol 137, native floor 129): the pre-flight passes.
-        h.server.enqueue(MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129,"pairing":true}"""))
+        h.server.enqueue(MockResponse().setBody("""{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129,"pairing":true}"""))
         h.server.enqueue(MockResponse().setBody("""{"ok":true}""").addHeader("set-cookie", "tether_session=s; Path=/; HttpOnly"))
         val password = "  Pä\"ss\\wörd é "
         assertEquals(LoginResult.Success, runBlocking { h.client.login(base, password, "Operator") })

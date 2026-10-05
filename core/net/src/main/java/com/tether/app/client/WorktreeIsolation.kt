@@ -17,10 +17,11 @@ import kotlinx.serialization.json.intOrNull
  * (~156-178), the readiness reasons (hooks/use-draft-composer.ts ~274-278) and the v98 wire shapes
  * (lib/protocol.ts WorktreeSourceInfo, `worktree-inspect` / `worktree-source`).
  *
- * ta-coik.11: no setup confirmation. The deployed web (90fbb9f draft-composer.tsx:789-795) only
- * shows a note when the inspected config declares setup or scripts ([WorktreeCopy.setupNote]), and
- * sends the create at once; the app does the same. Server-enforced setup consent (tether #241) is
- * for both clients together.
+ * ta-coik.11 (superseded by ta-m7ef): the deployed web 90fbb9f only showed a note when the inspected
+ * config declared setup or scripts ([WorktreeCopy.setupNote]) and sent the create at once. Since tether
+ * #241 (PROTOCOL 143) the server runs a checkout's hooks only on a matching consent: the composer asks
+ * what THIS create would run (`worktree-inspect` with its `worktree` block, [WorktreeSourceInfo.setupPreview]),
+ * shows it ([SetupConsentSteps]) and sends `create.setupConsent` ([DraftComposerModel]).
  */
 
 /** draft-composer.tsx WorktreeSelect's values and words, verbatim. */
@@ -78,6 +79,11 @@ data class WorktreeSourceInfo(
     val hasSetup: Boolean = false,
     val hasTeardown: Boolean = false,
     val declaredScripts: List<WorktreeDeclaredScript> = emptyList(),
+    /**
+     * v143 (ta-6t1): what a create would run from the ref the inspect's `worktree` block resolves, and the
+     * consent that approves it. Null: absent (an older server), or not owner-grade, or not a repository.
+     */
+    val setupPreview: WorktreeSetupPreview? = null,
 ) {
     /** Redacted: paths and branch names stay out of logs. */
     override fun toString(): String =
@@ -137,6 +143,7 @@ data class WorktreeSourceInfo(
                 }
                 .take(MAX_SCRIPTS)
                 .toList(),
+            setupPreview = WorktreeSetupPreview.parse(info),
         )
     }
 }

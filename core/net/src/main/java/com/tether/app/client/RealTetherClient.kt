@@ -4870,6 +4870,22 @@ class RealTetherClient(
         }
     }
 
+    /**
+     * ta-m7ef (v143): `worktree-inspect` carrying the intended create's `worktree` block (use-draft-composer.ts
+     * submit, 1bf4a465): the same checks as [inspectWorktree]; the reply's `setupPreview` is for the ref that
+     * create resolves.
+     */
+    override fun inspectSetup(cwd: String, worktree: com.tether.app.protocol.WorktreeCreateRequest, requestId: String, expectedEpoch: Long): Boolean {
+        if (cwd.isEmpty() || cwd.length > WorktreeSourceInfo.MAX_PATH) return false
+        if (requestId.isEmpty() || requestId.length > INSPECT_REQUEST_ID_MAX) return false
+        return synchronized(lock) {
+            val ws = socket
+            if (ws == null || socketOrigin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
+            if (expectedEpoch != epoch) return@synchronized false
+            ws.send(ClientMessage.WorktreeInspect(cwd, requestId, worktree).encode())
+        }
+    }
+
     /** ta-895: [providerCatalogState] when the CURRENT socket delivered it, else null. Caller holds [lock]. */
     private fun liveCatalogLocked(): List<ProviderCatalogEntry>? {
         val origin = socketOrigin ?: return null

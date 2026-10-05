@@ -5,7 +5,6 @@ import com.tether.app.mirror.JournalMirror
 import com.tether.app.mirror.SessionRowInput
 import com.tether.app.protocol.AgentEvent
 import com.tether.app.protocol.ServerMessage
-import com.tether.app.protocol.TARGET_PROTOCOL_VERSION
 import com.tether.app.protocol.TetherJson
 import com.tether.app.protocol.fold.reduce
 import com.tether.app.protocol.model.AgentSession
@@ -22,12 +21,20 @@ import kotlinx.coroutines.CompletableDeferred
  * MirrorVersionTest pins the SHA to `parity-corpus/corpus-manifest.json`, so a corpus re-sync
  * must bump it.
  *
- * ta-ylh: keyed on TARGET, the protocol the port models (since ta-3uk the advertised
+ * ta-ylh (superseded by ta-m7ef: see [REDUCER_PROTOCOL_VERSION]): keyed on TARGET, the protocol the port models (since ta-3uk the advertised
  * PROTOCOL_VERSION is defined as TARGET, so the two cannot split again): the v133 fold keeps queued-message `origin` / `noticeKind`, so a checkpoint folded by the v132
  * port must not be reused, although the corpus did not move. T15.8: the corpus moved to 887c222.
  */
 const val REDUCER_CORPUS_SHA = "887c22214126fa662192e2a3adf6f2dd44e69cd6"
-val REDUCER_VERSION: String = "$REDUCER_CORPUS_SHA/v$TARGET_PROTOCOL_VERSION"
+
+/**
+ * ta-m7ef: the protocol the vendored REDUCER corpus (and so the fold) models: 887c222, v137. The app's
+ * TARGET_PROTOCOL_VERSION moved to 143 (tether #241): v138-v143 added no event and changed nothing the
+ * fold reads (a metrics field, settings, new request/reply frames, worktree skip flags), so the local
+ * checkpoints stay valid and are not cleared on the update. A change to the fold bumps this, with the corpus.
+ */
+const val REDUCER_PROTOCOL_VERSION = 137
+val REDUCER_VERSION: String = "$REDUCER_CORPUS_SHA/v$REDUCER_PROTOCOL_VERSION"
 
 /**
  * T13.1: what the client's frame handlers hand the mirror (SYNC_DESIGN §2.3), as mirror

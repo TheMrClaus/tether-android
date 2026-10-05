@@ -26,7 +26,7 @@ class SubagentDefaultsClientTest {
         val ws = h.nextSocket()
         h.handshake(
             ws,
-            """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
+            """{"type":"ready","protocolVersion":143,"nativeProtocolFloor":129,"providers":[],"workspaceRoot":null,
                "sessions":[${row("""{"totalTokens":1,"subagentDefaults":{"maker":{"model":"claude-opus-5-5","effort":"high"}}}""")}]}""",
         )
         val first = h.await(h.client.sessions) { it.isNotEmpty() }.single()

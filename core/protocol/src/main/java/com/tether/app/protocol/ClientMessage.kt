@@ -122,6 +122,12 @@ sealed interface ClientMessage {
         val sandboxPolicy: String? = null,
         val useWorktree: Boolean? = null,
         val worktree: WorktreeCreateRequest? = null,
+        /**
+         * v143 (ta-6t1): approves the worktree hooks this create resolves: "none" or the digest the
+         * latest `worktree-source.info.setupPreview.consent` reported. Without a matching one the
+         * checkout is made without its hooks.
+         */
+        val setupConsent: String? = null,
         val acpAgentId: String? = null,
         val profileId: String? = null,
         val model: String? = null,
@@ -140,6 +146,7 @@ sealed interface ClientMessage {
             opt("sandboxPolicy", sandboxPolicy)
             opt("useWorktree", useWorktree)
             if (worktree != null) put("worktree", worktree.toJsonObject())
+            opt("setupConsent", setupConsent)
             opt("acpAgentId", acpAgentId)
             opt("profileId", profileId)
             opt("model", model)
@@ -158,11 +165,13 @@ sealed interface ClientMessage {
                 "profile=${if (profileId == null) "none" else "***"}, useWorktree=$useWorktree, requestId=$requestId)"
     }
 
-    data class Resume(val historyId: String, val cwd: String, val profileId: String? = null) : ClientMessage {
+    /** [sandboxPolicy]: v140 (ta-cbk), the Bash sandbox tier of a resumed Claude conversation (optional). */
+    data class Resume(val historyId: String, val cwd: String, val profileId: String? = null, val sandboxPolicy: String? = null) : ClientMessage {
         override fun toJsonObject() = frame("resume") {
             put("historyId", historyId)
             put("cwd", cwd)
             opt("profileId", profileId)
+            opt("sandboxPolicy", sandboxPolicy)
         }
     }
 
@@ -237,10 +246,15 @@ sealed interface ClientMessage {
 
     // ---- worktrees / git (v98, #159) ----------------------------------------
 
-    data class WorktreeInspect(val cwd: String, val requestId: String? = null) : ClientMessage {
+    /**
+     * v143 (ta-6t1): [worktree] is the intended create's block, so the reply's `setupPreview` is for
+     * the ref that create resolves (absent: the default create, branch-off from origin's default).
+     */
+    data class WorktreeInspect(val cwd: String, val requestId: String? = null, val worktree: WorktreeCreateRequest? = null) : ClientMessage {
         override fun toJsonObject() = frame("worktree-inspect") {
             put("cwd", cwd)
             opt("requestId", requestId)
+            if (worktree != null) put("worktree", worktree.toJsonObject())
         }
     }
 
@@ -314,12 +328,40 @@ sealed interface ClientMessage {
         }
     }
 
-    data class Archive(val sessionId: String) : ClientMessage {
-        override fun toJsonObject() = frame("archive") { put("sessionId", sessionId) }
+    /** v143 r3: [teardownConsent] approves the worktree teardown ("none" or the `archive-preview` consent). */
+    data class Archive(val sessionId: String, val teardownConsent: String? = null) : ClientMessage {
+        override fun toJsonObject() = frame("archive") {
+            put("sessionId", sessionId)
+            opt("teardownConsent", teardownConsent)
+        }
     }
 
-    data class Kill(val sessionId: String) : ClientMessage {
-        override fun toJsonObject() = frame("kill") { put("sessionId", sessionId) }
+    /** v143 r3 (ta-6t1): owner-only; answered by `archive-preview`. */
+    data class ArchiveInspect(val sessionId: String, val requestId: String? = null) : ClientMessage {
+        override fun toJsonObject() = frame("archive-inspect") {
+            put("sessionId", sessionId)
+            opt("requestId", requestId)
+        }
+    }
+
+    /** v143 r3: a kill archives too, so it carries the same [teardownConsent] as [Archive]. */
+    data class Kill(val sessionId: String, val teardownConsent: String? = null) : ClientMessage {
+        override fun toJsonObject() = frame("kill") {
+            put("sessionId", sessionId)
+            opt("teardownConsent", teardownConsent)
+        }
+    }
+
+    /**
+     * v141 (issue #244): owner-grade bulk archive of long-idle sessions. [mode]: "preview" | "run";
+     * [days]: 7 | 15 | 30. Typed and decoded only; its dialog is a later piece.
+     */
+    data class ArchiveStale(val mode: String, val days: Int, val exceptSessionId: String? = null) : ClientMessage {
+        override fun toJsonObject() = frame("archive-stale") {
+            put("mode", mode)
+            put("days", days)
+            opt("exceptSessionId", exceptSessionId)
+        }
     }
 
     // ---- turns -----------------------------------------------------------------
@@ -858,6 +900,12 @@ data class ScheduledActionInput(
     val cron: String,
     val timeZone: String,
     val maxRuns: Int?,
+    /**
+     * v143 r3 (ta-6t1): the setup approval saved with an isolated schedule (the `setupPreview.scheduleConsent`
+     * its owner approved: "none" or "sha256:<64 hex>"). `OrNull(null)` is an explicit JSON null (the web's
+     * non-isolated save and "Save without setup"); null is omitted. Honoured server-side only for an owner's save.
+     */
+    val setupConsent: OrNull<String>? = null,
     val extra: JsonObject = EMPTY_EXTRA,
 ) {
     fun toJsonObject(): JsonObject = buildJsonObject {
@@ -874,6 +922,7 @@ data class ScheduledActionInput(
         put("cron", cron)
         put("timeZone", timeZone)
         put("maxRuns", maxRuns)
+        if (setupConsent != null) put("setupConsent", setupConsent.value)
         for ((key, value) in extra) if (key !in KEYS) put(key, value)
     }
 
@@ -881,7 +930,7 @@ data class ScheduledActionInput(
         /** The fields this client models, in the web's order (scheduled-actions-view.tsx submit). */
         val KEYS: Set<String> = linkedSetOf(
             "name", "prompt", "cwd", "provider", "profileId", "model", "reasoningEffort",
-            "permissionMode", "sandboxPolicy", "useWorktree", "cron", "timeZone", "maxRuns",
+            "permissionMode", "sandboxPolicy", "useWorktree", "cron", "timeZone", "maxRuns", "setupConsent",
         )
 
         private val EMPTY_EXTRA = JsonObject(emptyMap())
@@ -900,6 +949,11 @@ data class ScheduledActionInput(
             cron = r.str("cron"),
             timeZone = r.str("timeZone"),
             maxRuns = r.o.long("maxRuns")?.toInt(),
+            setupConsent = when {
+                !r.o.containsKey("setupConsent") -> null
+                r.o["setupConsent"] is JsonNull -> OrNull(null)
+                else -> OrNull(r.str("setupConsent"))
+            },
             extra = JsonObject(r.o.filterKeys { it !in KEYS }),
         )
     }
@@ -981,6 +1035,7 @@ private object ClientDecoders {
                 sandboxPolicy = r.o.str("sandboxPolicy"),
                 useWorktree = r.o.boolOrNull("useWorktree"),
                 worktree = r.nested("worktree")?.let(WorktreeCreateRequest::from),
+                setupConsent = r.o.str("setupConsent"),
                 acpAgentId = r.o.str("acpAgentId"),
                 profileId = r.o.str("profileId"),
                 model = r.o.str("model"),
@@ -990,8 +1045,10 @@ private object ClientDecoders {
                 requestId = r.o.str("requestId"),
             )
         },
-        "resume" to { r -> ClientMessage.Resume(r.str("historyId"), r.str("cwd"), r.o.str("profileId")) },
-        "worktree-inspect" to { r -> ClientMessage.WorktreeInspect(r.str("cwd"), r.o.str("requestId")) },
+        "resume" to { r -> ClientMessage.Resume(r.str("historyId"), r.str("cwd"), r.o.str("profileId"), r.o.str("sandboxPolicy")) },
+        "worktree-inspect" to { r ->
+            ClientMessage.WorktreeInspect(r.str("cwd"), r.o.str("requestId"), r.nested("worktree")?.let(WorktreeCreateRequest::from))
+        },
         "worktree-scripts" to { r -> ClientMessage.WorktreeScriptsRequest(r.str("sessionId")) },
         "worktree-script" to { r -> ClientMessage.WorktreeScript(r.str("sessionId"), r.str("name"), r.str("action")) },
         "worktree-logs" to { r -> ClientMessage.WorktreeLogsRequest(r.str("sessionId"), r.str("name")) },
@@ -1020,8 +1077,12 @@ private object ClientDecoders {
         "fetch-turns" to { r -> ClientMessage.FetchTurns(r.str("sessionId"), r.int("fromIndex"), r.int("toIndex")) },
         "pin" to { r -> ClientMessage.Pin(r.str("sessionId"), r.bool("pinned")) },
         "rename" to { r -> ClientMessage.Rename(r.str("sessionId"), r.str("name")) },
-        "archive" to { r -> ClientMessage.Archive(r.str("sessionId")) },
-        "kill" to { r -> ClientMessage.Kill(r.str("sessionId")) },
+        "archive" to { r -> ClientMessage.Archive(r.str("sessionId"), r.o.str("teardownConsent")) },
+        "archive-inspect" to { r -> ClientMessage.ArchiveInspect(r.str("sessionId"), r.o.str("requestId")) },
+        "kill" to { r -> ClientMessage.Kill(r.str("sessionId"), r.o.str("teardownConsent")) },
+        "archive-stale" to { r ->
+            ClientMessage.ArchiveStale(r.str("mode"), r.int("days"), r.o.str("exceptSessionId"))
+        },
         "send" to { r ->
             ClientMessage.Send(
                 sessionId = r.str("sessionId"),

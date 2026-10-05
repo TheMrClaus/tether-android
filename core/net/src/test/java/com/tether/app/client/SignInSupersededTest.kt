@@ -80,7 +80,7 @@ class SignInSupersededTest {
         override fun dispatch(request: RecordedRequest): MockResponse {
             val path = request.path.orEmpty()
             return when {
-                path == "/healthz" -> ok("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129,"pairing":true}""")
+                path == "/healthz" -> ok("""{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129,"pairing":true}""")
                 path == "/api/auth/login" -> {
                     loginArrived.countDown()
                     loginGate?.await(15, TimeUnit.SECONDS)

@@ -51,7 +51,7 @@ class CredentialEpochTest {
         val origin = serverOrigin(h.client.serverUrl.value)
 
         // The same server, a password sign-in: another credential.
-        h.server.enqueue(MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129,"pairing":true}"""))
+        h.server.enqueue(MockResponse().setBody("""{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129,"pairing":true}"""))
         h.server.enqueue(MockResponse().setBody("""{"ok":true}""").addHeader("set-cookie", "tether_session=s; Path=/; HttpOnly"))
         assertEquals(LoginResult.Success, runBlocking { h.client.login(base, "pw", "Operator") })
         assertEquals(origin, serverOrigin(h.client.serverUrl.value))
@@ -106,7 +106,7 @@ class CredentialEpochTest {
         h.server.takeRequest(20, TimeUnit.SECONDS)
         val loaded = h.client.credentialEpoch.value
         assertTrue("loaded: $loaded", loaded > 0)
-        h.server.enqueue(MockResponse().setBody("""{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129,"pairing":true}"""))
+        h.server.enqueue(MockResponse().setBody("""{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129,"pairing":true}"""))
         h.server.enqueue(MockResponse().setBody("""{"ok":true}""").addHeader("set-cookie", "tether_session=s; Path=/; HttpOnly"))
         assertEquals(LoginResult.Success, runBlocking { h.client.login(base, "pw", "Operator") })
         assertEquals(loaded, h.client.credentialEpoch.value)

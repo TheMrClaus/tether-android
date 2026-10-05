@@ -170,7 +170,7 @@ object NewSessionGuard {
      */
     fun resolve(request: NewSessionRequest, liveCatalog: List<ProviderCatalogEntry>?, providers: List<ProviderInfo>): ClientMessage.Create? {
         val entry = resolveEntry(request.choice, liveCatalog, providers) ?: return null
-        val frame = CreateFrame.build(request.form, entry, request.modified, request.requestId)
+        val frame = CreateFrame.build(request.form, entry, request.modified, request.requestId).copy(setupConsent = request.setupConsent)
         // ta-23f: an isolated create without its `worktree` block is never sent: the server would make a
         // default new branch (and run that base's setup) instead of the checkout the operator asked for.
         // The composer's readiness already refuses it; this is the last line.
@@ -203,6 +203,12 @@ data class NewSessionRequest(
     val modified: JsObj,
     val requestId: String,
     val linkEpoch: Long,
+    /**
+     * ta-m7ef (v143): the consent to the worktree hooks this create resolves, the one the setup check
+     * reported and the operator approved ("none" when it declared nothing); null for a local session.
+     * Sent as `create.setupConsent` exactly as given.
+     */
+    val setupConsent: String? = null,
 ) {
     /** ta-8cv r2 (security F3): redacted (no profile id, folder or picks); the wire form is the client's. */
     override fun toString(): String = "NewSessionRequest(choice=$choice, requestId=$requestId, linkEpoch=$linkEpoch)"

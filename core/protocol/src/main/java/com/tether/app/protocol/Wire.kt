@@ -12,9 +12,9 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * The protocol the wire TYPES in this module model: tether lib/protocol.ts
- * PROTOCOL_VERSION v137 (T15.8; ta-ylh 135, ta-koy 129 -> 132). Every
+ * PROTOCOL_VERSION v143 (ta-m7ef; T15.8 v137, ta-ylh 135, ta-koy 129 -> 132). Every
  * ClientMessage/ServerMessage of that union has a Kotlin type; see
- * WireConformanceTest. v130-v137 are all additive and not native-breaking:
+ * WireConformanceTest. v130-v143 are all additive and not native-breaking:
  * AgentSession.lastSeq and SessionProjection.removedQueueIds (v130), the opt-in
  * Overview feed frames and pending-request `createdAt` (v131),
  * OverviewActivity.workspace (v132), queued-message `origin` / `noticeKind`
@@ -22,10 +22,17 @@ import kotlinx.serialization.json.longOrNull
  * AgentSession.createdVia and ready.hiddenAgentSessionCount (v135),
  * QueuedMessage.queuedAt (v136). v137 only adds `plan` to the HTTP
  * `/api/claude-accounts` rows, which this app does not read yet.
+ * v138 SessionMetrics.subagentDefaults; v139 `server-settings.secretsSet`; v140 `resume.sandboxPolicy`;
+ * v141 `archive-stale` / `archive-stale-result` (tether #244); v142 ServerSettings.autoArchiveIdleDays;
+ * v143 (tether #241, worktree setup/teardown consent): `create.setupConsent`, `worktree-inspect.worktree`,
+ * `worktree-source.info.setupPreview`, `archive-inspect` / `archive-preview`, `archive` / `kill`
+ * `teardownConsent`, `ScheduledActionInput.setupConsent`, `SessionWorktree` / `WorktreeScriptsSnapshot`
+ * `setupSkipped` / `teardownSkipped`. An older native client that sends no consent still gets its worktree,
+ * without its hooks (fail closed, by the server's decision); the native floor stays 129.
  *
  * Also what the app advertises: [PROTOCOL_VERSION] is defined as this value.
  */
-const val TARGET_PROTOCOL_VERSION: Int = 137
+const val TARGET_PROTOCOL_VERSION: Int = 143
 
 /**
  * The protocol version the RUNTIME speaks: the `hello` this app sends. The
@@ -45,7 +52,7 @@ const val PROTOCOL_VERSION: Int = TARGET_PROTOCOL_VERSION
 
 /**
  * v129 (S1.1 / D5): the oldest protocol a NATIVE client may speak and still be
- * served (twin of lib/protocol.ts NATIVE_PROTOCOL_FLOOR, still 129 at v137). The
+ * served (twin of lib/protocol.ts NATIVE_PROTOCOL_FLOOR, still 129 at v143). The
  * server advertises its own value in `ready.nativeProtocolFloor` and `/healthz`;
  * this constant is documentation only — the runtime always trusts the server's.
  */

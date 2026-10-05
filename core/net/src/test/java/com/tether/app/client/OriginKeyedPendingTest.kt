@@ -83,7 +83,7 @@ class OriginKeyedPendingTest {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     paths += request.path.orEmpty()
                     return when (request.path) {
-                        "/healthz" -> MockResponse().setResponseCode(200).setBody(HEALTH_137)
+                        "/healthz" -> MockResponse().setResponseCode(200).setBody(HEALTH_143)
                         "/api/auth/login" -> MockResponse().setResponseCode(200).setBody("{}")
                             .addHeader("Set-Cookie", "tether_session=parity-fake-cookie-${server.port}; Path=/; HttpOnly")
                         "/api/auth/session" -> {
@@ -1054,7 +1054,7 @@ class OriginKeyedPendingTest {
         client.start()
         val aws = a.nextSocket()
         aws.send(
-            """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"sessions":[${
+            """{"type":"ready","protocolVersion":143,"nativeProtocolFloor":129,"sessions":[${
                 createdFrame("a-only-session").substringAfter("\"session\":").removeSuffix("}")
             }],"providers":[{"id":"a-provider","label":"A"}],"workspaceRoot":"/a-root"}""",
         )
@@ -1090,7 +1090,7 @@ class OriginKeyedPendingTest {
     // ------------------------------------------------------------------
 
     private fun readyWith(sessionId: String) =
-        """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"sessions":[{"id":"$sessionId","provider":"claude","name":"n","cwd":"/w",""" +
+        """{"type":"ready","protocolVersion":143,"nativeProtocolFloor":129,"sessions":[{"id":"$sessionId","provider":"claude","name":"n","cwd":"/w",""" +
             """"status":"ready","startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"}],""" +
             """"providers":[],"workspaceRoot":null}"""
 
@@ -1164,7 +1164,7 @@ class OriginKeyedPendingTest {
     // ------------------------------------------------------------------
 
     private val readyWithClaude =
-        """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"sessions":[],""" +
+        """{"type":"ready","protocolVersion":143,"nativeProtocolFloor":129,"sessions":[],""" +
             """"providers":[{"id":"claude","label":"Claude","glyph":"C","available":true}],"workspaceRoot":null}"""
 
     private val accountsCatalog =

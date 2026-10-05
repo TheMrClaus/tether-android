@@ -2,6 +2,7 @@ package com.tether.app.client
 
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ClientMessage
+import com.tether.app.protocol.WorktreeCreateRequest
 import com.tether.app.protocol.model.ProviderInfo
 import com.tether.app.ui.StubClient
 import com.tether.app.ui.prefs.InMemoryDraftStore
@@ -24,9 +25,9 @@ import org.junit.Test
  *   per folder per socket, while isolation is on; only the `worktree-source` echoing it, for that
  *   folder, on that socket, is taken (a stale folder's, request's or socket's answer is ignored).
  * - Readiness: an incomplete isolation request blocks Send with the web's words, in the web's order.
- * - ta-coik.11: Send creates at once whatever the inspected config says, as the deployed web does
- *   (90fbb9f draft-composer.tsx:789-795 shows a note only); the frame is the one the same form makes
- *   with no answer at all.
+ * - ta-m7ef (v143): an isolated Send first checks what the create would run ([DraftSetupConsentTest] has
+ *   the consent rules) and creates with the consent the answer carries; a local Send goes at once. The
+ *   frame is otherwise the one the same form always made.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class DraftWorktreeModelTest {
@@ -74,6 +75,15 @@ class DraftWorktreeModelTest {
         override fun inspectWorktree(cwd: String, requestId: String, expectedEpoch: Long): Boolean {
             if (connection.value != ConnectionState.Connected || expectedEpoch != linkEpoch.value) return false
             inspects += Triple(cwd, requestId, expectedEpoch)
+            return true
+        }
+
+        /** Every setup check that went out (ta-m7ef): (cwd, block, requestId, socket). */
+        val setupInspects = mutableListOf<List<Any>>()
+
+        override fun inspectSetup(cwd: String, worktree: WorktreeCreateRequest, requestId: String, expectedEpoch: Long): Boolean {
+            if (connection.value != ConnectionState.Connected || expectedEpoch != linkEpoch.value) return false
+            setupInspects += listOf(cwd, worktree, requestId, expectedEpoch)
             return true
         }
 
@@ -268,7 +278,7 @@ class DraftWorktreeModelTest {
         assertFalse(h.model.selectIsolation("bogus"))
     }
 
-    // --- ta-coik.11: Send sends at once (the web shows a note, no confirmation) -------------------
+    // --- ta-m7ef: an isolated Send checks the setup first; a local Send goes at once ----------------
 
     /** Every isolation mode with its required input, as the user would fill it. */
     private fun Harness.fill(mode: String) {
@@ -279,45 +289,47 @@ class DraftWorktreeModelTest {
         }
     }
 
-    /** The answers ta-23f confirmed on (setup will run, may run, cannot be vouched for) and their controls. */
-    private val answers: List<WorktreeSourceInfo?> = listOf(
-        null,
-        repo(hasSetup = true),
-        repo(hasSetup = true, scripts = 3),
-        repo(hasSetup = false),
-        repo(hasSetup = false, scripts = 2),
-        repo(hasSetup = false, defaultBaseRef = "upstream/main", remote = "upstream"),
-        repo(hasSetup = true, defaultBaseRef = "HEAD", remote = null),
-        notARepo,
+    /** The server's answer to the setup check: [info] stamped as the reply to the last setup inspect. */
+    private fun Harness.answerSetup(info: WorktreeSourceInfo) =
+        model.onWorktreeSource(WorktreeSourceReply(info, client.setupInspects.last()[2] as String, client.linkEpoch.value))
+
+    /** A repository whose ref declares nothing: the answer that lets the create go at once with "none". */
+    private val declaresNothing = repo(hasSetup = false).copy(
+        setupPreview = WorktreeSetupPreview("branch-off", "origin", "origin/main", "c".repeat(40), emptyList(), emptyList(), null, true, null, false, null, "none", "none", null),
     )
 
-    /** The frame [mode] makes with no inspect at all (requestId blanked: the inspect draws tokens too). */
+    /** The frame [mode] makes after a "nothing declared" answer (requestId blanked: tokens differ per attempt). */
     private fun TestScope.baseline(mode: String, base: String? = null): ClientMessage.Create {
         val h = harness()
         h.fill(mode)
         base?.let { h.model.setWorktreeField(WorktreeField.BaseRef, it) }
-        assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
-        return h.client.frames.single().copy(requestId = "")
+        assertEquals(DraftSubmitResult.Checking, h.model.submit(A))
+        assertTrue(h.answerSetup(declaresNothing))
+        return h.client.frames.single().copy(requestId = "", setupConsent = null)
     }
 
     @Test
-    fun sendCreatesAtOnceEvenWithSetupPresent() = runTest {
+    fun anIsolatedSendChecksTheSetupBeforeItCreatesAnything() = runTest {
         for (mode in listOf("branch-off", "checkout-branch", "checkout-pr")) {
             for (base in if (mode == "branch-off") listOf(null, "origin/main", "origin/dev") else listOf(null)) {
                 val expected = baseline(mode, base)
-                for (info in answers) {
-                    val h = harness()
-                    h.fill(mode)
-                    base?.let { h.model.setWorktreeField(WorktreeField.BaseRef, it) }
-                    assertTrue(h.model.inspectWorktree())
-                    if (info != null) assertTrue(h.model.onWorktreeSource(h.client.source(info)))
-                    val label = "$mode base=$base $info"
-                    assertEquals(label, DraftSubmitResult.Sent, h.model.submit(A))
-                    assertEquals("$label: one frame, at once", 1, h.client.frames.size)
-                    assertTrue(label, h.model.state.value.creating)
-                    assertEquals("$label: no error", "", h.model.state.value.error)
-                    assertEquals("$label: the frame is the one the form makes with no answer", expected, h.client.frames.single().copy(requestId = ""))
-                }
+                val h = harness()
+                h.fill(mode)
+                base?.let { h.model.setWorktreeField(WorktreeField.BaseRef, it) }
+                val label = "$mode base=$base"
+                assertEquals(label, DraftSubmitResult.Checking, h.model.submit(A))
+                assertTrue("$label: nothing is created while checking", h.client.frames.isEmpty())
+                assertTrue("$label: the draft says it is checking", h.model.state.value.setupChecking)
+                assertEquals("$label: asks for the intent's own block", 1, h.client.setupInspects.size)
+                assertEquals(label, "/w", h.client.setupInspects.single()[0])
+                assertEquals(label, expected.worktree, h.client.setupInspects.single()[1])
+                // The answer arrives: nothing declared, so the create goes at once with consent "none".
+                assertTrue(h.answerSetup(declaresNothing))
+                assertEquals("$label: one frame", 1, h.client.frames.size)
+                assertEquals("$label: consent none", "none", h.client.frames.single().setupConsent)
+                assertEquals("$label: the rest is the form's frame", expected, h.client.frames.single().copy(requestId = "", setupConsent = null))
+                assertTrue(label, h.model.state.value.creating)
+                assertFalse(label, h.model.state.value.setupChecking)
             }
         }
     }
@@ -338,31 +350,36 @@ class DraftWorktreeModelTest {
     }
 
     @Test
-    fun localSendsAtOnceWithNoBlock() = runTest {
+    fun localSendsAtOnceWithNoBlockAndNoConsent() = runTest {
         val h = harness()
         assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
         assertEquals(false, h.client.frames.single().useWorktree)
         assertNull(h.client.frames.single().worktree)
+        assertNull("a local create carries no consent", h.client.frames.single().setupConsent)
+        assertTrue(h.client.setupInspects.isEmpty())
     }
 
     @Test
-    fun theInterimPickerSendsAnIsolatedCreateAtOnce() = runTest {
+    fun theInterimPickerChecksAnIsolatedCreateToo() = runTest {
         val h = harness()
         h.isolate("checkout-pr", repo(hasSetup = true))
         h.model.setWorktreeField(WorktreeField.Pr, "42")
-        assertEquals(DraftSubmitResult.Sent, h.model.submitChoice(NewSessionChoice("claude", "claude", null), A))
+        assertEquals(DraftSubmitResult.Checking, h.model.submitChoice(NewSessionChoice("claude", "claude", null), A))
+        assertTrue(h.answerSetup(declaresNothing))
         assertEquals(42L, h.client.frames.single().worktree?.prNumber)
+        assertEquals("none", h.client.frames.single().setupConsent)
     }
 
     @Test
-    fun aNewAnswerAfterSendChangesNothing() = runTest {
+    fun theFolderQuestionsAnswerNeverStartsTheCreate() = runTest {
+        // The notes' inspect (no `worktree` block) and the create's setup check are different questions.
         val h = harness()
         h.isolate("branch-off", repo(hasSetup = true))
-        assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
+        assertEquals(DraftSubmitResult.Checking, h.model.submit(A))
+        // The folder question's own answer is still taken for the notes, and starts nothing.
         assertTrue(h.model.onWorktreeSource(h.client.source(repo(hasSetup = false))))
-        assertEquals("", h.model.state.value.error)
-        assertTrue(h.model.state.value.creating)
-        assertEquals(1, h.client.frames.size)
+        assertTrue(h.client.frames.isEmpty())
+        assertTrue(h.model.state.value.setupChecking)
     }
 
     @Test

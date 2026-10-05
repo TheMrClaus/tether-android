@@ -166,6 +166,17 @@ class ServerSettingsView private constructor(
     fun paths(setting: ServerSetting): List<String> =
         (raw[setting.key] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }.orEmpty()
 
+    /**
+     * v142 (tether #244 part D): `autoArchiveIdleDays` — sessions idle longer than this many days are archived,
+     * unattended; 0 = off (the default). Typed and tolerated only (its row is a later piece): a missing or
+     * wrongly typed value, a fraction, or one outside 0..3650 reads as off.
+     */
+    val autoArchiveIdleDays: Int
+        get() {
+            val days = (raw["autoArchiveIdleDays"] as? JsonPrimitive)?.takeIf { it !is JsonNull && !it.isString }?.doubleOrNull ?: return 0
+            return if (days >= 1.0 && days <= 3650.0 && days == Math.floor(days)) days.toInt() else 0
+        }
+
     override fun toString(): String =
         "ServerSettingsView(keys=${raw.keys.sorted()}, envForced=${envForced.sorted()}, restartRequired=$restartRequired)"
 

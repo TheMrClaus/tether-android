@@ -34,7 +34,7 @@ class DeferredAttachMirrorTest {
             """"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"}"""
 
     private val listing =
-        """{"type":"ready","protocolVersion":137,"nativeProtocolFloor":129,"sessions":[${session("s1")},${session("s2")}],""" +
+        """{"type":"ready","protocolVersion":143,"nativeProtocolFloor":129,"sessions":[${session("s1")},${session("s2")}],""" +
             """"providers":[],"workspaceRoot":null}"""
 
     private fun attaches() = h.framesUntilBarrier().filter { it.type() == "attach" }.map { it["sessionId"]!!.jsonPrimitive.content }

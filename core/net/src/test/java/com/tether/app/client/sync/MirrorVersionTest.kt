@@ -12,8 +12,11 @@ class MirrorVersionTest {
         val manifest = File(System.getProperty("parity.corpus"), "corpus-manifest.json").readText()
         val sha = Regex("\"tetherSha\"\\s*:\\s*\"([0-9a-f]+)\"").find(manifest)!!.groupValues[1]
         assertEquals("re-synced corpus: bump REDUCER_CORPUS_SHA (it invalidates local checkpoints)", sha, REDUCER_CORPUS_SHA)
-        assertEquals("$sha/v$TARGET_PROTOCOL_VERSION", REDUCER_VERSION)
+        assertEquals("$sha/v$REDUCER_PROTOCOL_VERSION", REDUCER_VERSION)
         // T15.8: the corpus re-synced at 887c222 (v137: deferred-row queuedAt, #222 grants folded).
         assertEquals("887c22214126fa662192e2a3adf6f2dd44e69cd6/v137", REDUCER_VERSION)
+        // ta-m7ef: the app models v143 on the wire, but the fold (the corpus) is still v137's: no checkpoint is cleared.
+        assertEquals(137, REDUCER_PROTOCOL_VERSION)
+        assertEquals(143, TARGET_PROTOCOL_VERSION)
     }
 }

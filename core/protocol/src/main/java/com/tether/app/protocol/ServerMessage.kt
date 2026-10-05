@@ -251,10 +251,15 @@ sealed interface ServerMessage {
         val restartRequired: Boolean,
         val discovered: List<ClaudeCliVersion>,
         val detected: JsonObject,
+        /**
+         * v139 (#234/#235): whether the server holds a `password` / `proxyToken` (a paired-device socket
+         * receives both as "" in [settings]); absent on a server before v139. Booleans only.
+         */
+        val secretsSet: Map<String, Boolean> = emptyMap(),
     ) : ServerMessage {
         override fun toString(): String =
             "ServerSettings(settings=${settings.keys.sorted()}, envForced=$envForced, restartRequired=$restartRequired, " +
-                "discovered=$discovered, detected=${detected.keys.sorted()})"
+                "discovered=$discovered, detected=${detected.keys.sorted()}, secretsSet=$secretsSet)"
     }
 
     /**
@@ -290,6 +295,33 @@ sealed interface ServerMessage {
 
     /** [info]: WorktreeSourceInfo, raw. */
     data class WorktreeSource(val info: JsonObject, val requestId: String? = null) : ServerMessage
+
+    /**
+     * v143 r3 (ta-6t1): the answer to `archive-inspect`. [preview]: TeardownPreview, raw, or null when the
+     * session has no worktree (a present JSON null). [malformed] is true when `preview` is absent or not an
+     * object or null: the console then offers only to end without the teardown (draft-form.ts teardownConsentStep).
+     */
+    data class ArchivePreview(
+        val sessionId: String,
+        val preview: JsonObject?,
+        val requestId: String? = null,
+        val malformed: Boolean = false,
+    ) : ServerMessage
+
+    /**
+     * v141 (issue #244): the reply to `archive-stale`. `archived`/`failed` are 0 for a preview; [remaining] is
+     * what a further `run` would still archive. Typed and decoded only; its dialog is a later piece.
+     */
+    data class ArchiveStaleResult(
+        val mode: String,
+        val days: Int,
+        val eligible: Int,
+        val archived: Int,
+        val failed: Int,
+        val remaining: Int,
+        val skipped: ArchiveStaleSkipped = ArchiveStaleSkipped(),
+        val retention: ArchiveStaleRetention = ArchiveStaleRetention(),
+    ) : ServerMessage
 
     /** [snapshot]: WorktreeScriptsSnapshot, raw. */
     data class WorktreeScripts(val snapshot: JsonObject) : ServerMessage
@@ -842,6 +874,7 @@ private object ServerDecoders {
                 restartRequired = r.o.boolOrNull("restartRequired") == true,
                 discovered = r.optList("discovered", ClaudeCliVersion.serializer()).orEmpty(),
                 detected = r.o.obj("detected") ?: JsonObject(emptyMap()),
+                secretsSet = if (r.o.obj("secretsSet") != null) r.boolMap("secretsSet") else emptyMap(),
             )
         },
         // ta-q6p: both carry plaintext env values, so neither ever becomes an Unknown holding its raw frame.
@@ -855,6 +888,39 @@ private object ServerDecoders {
         "metadata-draft-result" to { r -> ServerMessage.MetadataDraftResult(r.str("requestId"), r.draft("result")) },
         "metadata-draft-error" to { r -> ServerMessage.MetadataDraftError(r.str("requestId"), r.str("error")) },
         "worktree-source" to { r -> ServerMessage.WorktreeSource(r.obj("info"), r.o.str("requestId")) },
+        "archive-preview" to { r ->
+            val raw = r.o["preview"]
+            ServerMessage.ArchivePreview(
+                sessionId = r.str("sessionId"),
+                preview = raw as? JsonObject,
+                requestId = r.o.str("requestId"),
+                malformed = raw == null || (raw !is JsonObject && raw !is JsonNull),
+            )
+        },
+        "archive-stale-result" to { r ->
+            val skipped = r.o.obj("skipped")
+            val retention = r.o.obj("retention")
+            ServerMessage.ArchiveStaleResult(
+                mode = r.str("mode"),
+                days = r.int("days"),
+                eligible = r.int("eligible"),
+                archived = r.int("archived"),
+                failed = r.int("failed"),
+                remaining = r.int("remaining"),
+                skipped = ArchiveStaleSkipped(
+                    pinned = skipped?.long("pinned")?.toInt() ?: 0,
+                    inFlight = skipped?.long("inFlight")?.toInt() ?: 0,
+                    pendingRequest = skipped?.long("pendingRequest")?.toInt() ?: 0,
+                    background = skipped?.long("background")?.toInt() ?: 0,
+                    viewing = skipped?.long("viewing")?.toInt() ?: 0,
+                ),
+                retention = ArchiveStaleRetention(
+                    cap = retention?.long("cap")?.toInt() ?: 0,
+                    retiredNow = retention?.long("retiredNow")?.toInt() ?: 0,
+                    willBePruned = retention?.long("willBePruned")?.toInt() ?: 0,
+                ),
+            )
+        },
         "worktree-scripts" to { r -> ServerMessage.WorktreeScripts(r.obj("snapshot")) },
         "worktree-logs" to { r ->
             ServerMessage.WorktreeLogs(r.str("sessionId"), r.str("name"), r.strList("lines"), r.int("dropped", 0))
@@ -918,3 +984,15 @@ private object ServerDecoders {
     /** Optional single modeled object: absent or malformed -> null (the caller defaults it). */
     private fun <T> Req.optModel(key: String, serializer: KSerializer<T>): T? = o.obj(key)?.let { decodeOrNull(serializer, it) }
 }
+
+/** v141 `archive-stale-result.skipped`: how many sessions each protection kept out of the archive. */
+data class ArchiveStaleSkipped(
+    val pinned: Int = 0,
+    val inFlight: Int = 0,
+    val pendingRequest: Int = 0,
+    val background: Int = 0,
+    val viewing: Int = 0,
+)
+
+/** v141 `archive-stale-result.retention`. */
+data class ArchiveStaleRetention(val cap: Int = 0, val retiredNow: Int = 0, val willBePruned: Int = 0)

@@ -69,10 +69,10 @@ fun testBackoff() = Backoff(baseMs = 1_100, capMs = 30_000, random = { 0.0 })
 fun isReconnectDelay(ms: Long) = ms != ConnectionTimings.PING_TIMEOUT_MS && ms != ConnectionTimings.BACKGROUND_GRACE_MS &&
     ms != NodeRegistryRules.REQUEST_TIMEOUT_MS && ms != ConnectionTimings.DEFERRED_ATTACH_MAX_WAIT_MS
 
-const val HEALTH_137 = """{"ok":true,"protocolVersion":137,"nativeProtocolFloor":129}"""
+const val HEALTH_143 = """{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129}"""
 
 fun readyFrame(
-    protocolVersion: Int = 137,
+    protocolVersion: Int = 143,
     floor: Int? = 129,
     workspaceRoot: String? = null,
 ): String = buildString {
