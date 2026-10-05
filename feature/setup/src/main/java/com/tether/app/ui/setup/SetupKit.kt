@@ -43,7 +43,11 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.InputWellStyle
+import com.tether.app.ui.components.KeyClasses
+import com.tether.app.ui.components.KeyState
 import com.tether.app.ui.components.cssSurface
+import com.tether.app.ui.components.currentLayoutClass
+import com.tether.app.ui.components.resolveKey
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.theme.JetBrainsMono
@@ -262,3 +266,12 @@ internal fun PickRow(icon: ImageVector, text: String, pressed: Boolean, onClick:
     }
 }
 
+
+/**
+ * The ink of a primary key (`.button-primary`) in its current state: what its label is drawn in, so an icon
+ * beside the label (page.tsx 322, 407, 411: lucide icons take `currentColor`) is always the label's colour,
+ * disabled or not. [TetherKey] draws its own legend and leading icon in it; a trailing icon is the caller's.
+ */
+@Composable
+internal fun primaryKeyInk(enabled: Boolean): Color =
+    resolveKey(LocalTetherTokens.current, KeyClasses.ButtonPrimary, if (enabled) KeyState.Rest else KeyState.Disabled, layout = currentLayoutClass()).ink

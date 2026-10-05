@@ -415,7 +415,7 @@ private fun Footer(model: SetupWizardModel, phone: Boolean) {
                     label = SetupWords.CONTINUE,
                     enabled = model.canAdvance && !model.busy,
                     minHeight = 46.dp,
-                    trailing = { Icon(TetherIcons.ArrowRight, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(16.dp)) },
+                    trailing = { Icon(TetherIcons.ArrowRight, contentDescription = null, tint = primaryKeyInk(enabled = model.canAdvance && !model.busy), modifier = Modifier.size(16.dp)) },
                     modifier = Modifier.testTag(SetupTags.Continue),
                 )
             } else {
@@ -427,7 +427,7 @@ private fun Footer(model: SetupWizardModel, phone: Boolean) {
                     iconSize = 16.dp,
                     enabled = !model.busy,
                     minHeight = 46.dp,
-                    trailing = if (model.busy) null else { { Icon(TetherIcons.Check, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(16.dp)) } },
+                    trailing = if (model.busy) null else { { Icon(TetherIcons.Check, contentDescription = null, tint = primaryKeyInk(enabled = true), modifier = Modifier.size(16.dp)) } },
                     modifier = Modifier.testTag(SetupTags.Apply),
                 )
             }
