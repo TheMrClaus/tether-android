@@ -120,7 +120,7 @@ class SetupWizardBehaviourTest {
         tag(SetupTags.Continue).assertIsEnabled()
         tap(SetupTags.Continue)
 
-        waitFor { shows("Choose your harnesses.") }
+        waitFor { shows("Choose your harnesses.") && model.detected.isNotEmpty() }
         // Detection ticked what it found (claude, codex); opencode is not found and not ticked.
         assertTrue(model.engines.containsAll(listOf("claude", "codex")))
         assertTrue("opencode" !in model.engines)
