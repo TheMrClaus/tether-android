@@ -229,8 +229,9 @@ interface TetherClient {
      * an optional v103 [mention]). Call it ONLY from an explicit Send (a tap or the submit key), never
      * in answer to anything received. Under the lock, in order: a live, handshaken socket of a running
      * client; the composer drawn for THIS server ([expectedOrigin] = the socket's origin and the
-     * outbox's); the session confirmed live on it; listed, and neither read-only, handed off nor
-     * archived; idle (no active turn); the mention, if any, offered by the current catalog; the
+     * outbox's) (ta-coik.25: nothing about the session's liveness, listing, read-only, handed-off or
+     * archived state, as the web's filePending sends on any open link and the server decides); idle
+     * (no active turn, as the web's composer's `busy`); the mention, if any, offered by the current catalog; the
      * encoded frame within [AttachmentFrame.MAX_SEND_FRAME_BYTES] and within what the socket's queue
      * can take now. Then (ta-coik.3, use-tether.ts filePending) it is filed in the pending store under
      * a fresh idempotency key and one drain puts every sendable record on that socket oldest-first,

@@ -85,7 +85,6 @@ internal class AttachmentLink(
     val pendingLoaded: Boolean,
     val halted: Boolean,
     val pendingOrigin: String?,
-    val sessionLive: Boolean,
 )
 
 /** Why [link] may not carry a message with attachments drawn for [expectedOrigin] (null: it may). */
@@ -93,7 +92,6 @@ internal fun attachmentLinkRefusal(link: AttachmentLink, expectedOrigin: String?
     !link.socketBound || link.socketOrigin == null || !link.socketOpen || !link.handshakeDone || !link.pendingLoaded || link.halted ->
         AttachmentSendResult.NotConnected
     expectedOrigin == null || expectedOrigin != link.socketOrigin || link.pendingOrigin != link.socketOrigin -> AttachmentSendResult.NotLive
-    !link.sessionLive -> AttachmentSendResult.NotLive
     else -> null
 }
 
@@ -109,10 +107,10 @@ enum class AttachmentSendResult {
     /** No live, handshaken socket (offline, reconnecting), or the frame could not be handed to it. */
     NotConnected,
 
-    /** Connected, but the session is not confirmed live on this connection, or the composer was drawn for another server. */
+    /** The composer was drawn for another server than the one the socket is on (ta-coik.25: never the session's liveness). */
     NotLive,
 
-    /** The session is read-only, handed off, archived, or not listed (fail closed). */
+    /** No session id to send to (ta-coik.25: never read-only, handed off, archived or unlisted: the server decides). */
     Locked,
 
     /** A turn is running: attachments ride an idle send only (the server never queues them). */

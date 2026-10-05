@@ -23,8 +23,7 @@ class AttachmentLinkGateTest {
         pendingLoaded: Boolean = true,
         halted: Boolean = false,
         pendingOrigin: String? = a,
-        sessionLive: Boolean = true,
-    ) = AttachmentLink(socketBound, socketOrigin, socketOpen, handshakeDone, pendingLoaded, halted, pendingOrigin, sessionLive)
+    ) = AttachmentLink(socketBound, socketOrigin, socketOpen, handshakeDone, pendingLoaded, halted, pendingOrigin)
 
     @Test
     fun aLiveHandshakenSocketOfTheOutboxsServerDrawnForItMaySend() {
@@ -60,9 +59,6 @@ class AttachmentLinkGateTest {
         assertEquals(AttachmentSendResult.NotLive, attachmentLinkRefusal(link(pendingOrigin = b), a))
         assertEquals(AttachmentSendResult.NotLive, attachmentLinkRefusal(link(pendingOrigin = null), a))
     }
-
-    @Test
-    fun aSessionNotConfirmedOnThisSocketIsNotLive() = assertEquals(AttachmentSendResult.NotLive, attachmentLinkRefusal(link(sessionLive = false), a))
 
     @Test
     fun theQueueTakesAFrameUpToTheSocketsBoundAndNotOneByteMore() {

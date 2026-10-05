@@ -147,35 +147,50 @@ class AttachmentTransmissionTest {
         assertTrue(frames("send").isEmpty())
     }
 
+    /**
+     * ta-coik.25: the web's filePending (use-tether.ts 90fbb9f :643-695) puts the send on any open
+     * socket and asks nothing of the session's snapshot: the app does the same on a link whose session
+     * has not been attached or snapshotted yet (catching up), with no projection at all.
+     */
     @Test
-    fun aSessionNotConfirmedLiveOnThisConnectionSendsNothing() {
+    fun aSessionNotConfirmedLiveOnThisConnectionIsSentAsOnTheWeb() {
         val client = h.newClient()
         h.enqueueConnect()
         client.start()
         val ws = h.nextSocket()
         h.handshake(ws, ready())
         // Listed, but never attached and snapshotted on this socket.
-        assertEquals(AttachmentSendResult.NotLive, client.sendAttachments("s1", "x", listOf(picture), null, client.consentOrigin.value))
-        assertTrue(frames("send").isEmpty())
+        assertEquals(false, "s1" in client.liveSessions.value)
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "x", listOf(picture), null, client.consentOrigin.value))
+        val sent = frames("send").single()
+        assertEquals("x", sent.str("text"))
+        assertTrue(sent.containsKey("attachments"))
     }
 
+    /**
+     * ta-coik.25: nothing the client held about the session refuses the send (the web asks the server,
+     * which answers a refusal with an `error`): read-only, handed off, archived or never listed.
+     */
     @Test
-    fun aReadOnlyHandedOffArchivedOrUnlistedSessionSendsNothing() {
+    fun aReadOnlyHandedOffArchivedOrUnlistedSessionIsSentAsOnTheWeb() {
         val (client, ws) = connected()
         val origin = client.consentOrigin.value
-        assertEquals(AttachmentSendResult.NotLive, client.sendAttachments("s-unknown", "x", listOf(picture), null, origin))
         fun row(extra: String, updated: Int) =
             """{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":$updated,"endedAt":null,"exitCode":null,"pinned":false,"mode":"headless"$extra}}"""
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s-unknown", "unlisted", listOf(picture), null, origin))
+        assertEquals("unlisted", frames("send").single().str("text"))
         ws.send(row(""","runtimeArchived":false,"readOnly":true""", 2))
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.readOnly } }
-        assertEquals(AttachmentSendResult.Locked, client.sendAttachments("s1", "x", listOf(picture), null, origin))
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "read-only", listOf(picture), null, origin))
+        assertEquals("read-only", frames("send").single().str("text"))
         ws.send(row(""","runtimeArchived":false,"handedOffTo":"s2"""", 3))
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.handedOffTo == "s2" } }
-        assertEquals(AttachmentSendResult.Locked, client.sendAttachments("s1", "x", listOf(picture), null, origin))
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "handed off", listOf(picture), null, origin))
+        assertEquals("handed off", frames("send").single().str("text"))
         ws.send(row(""","runtimeArchived":true""", 4))
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.runtimeArchived } }
-        assertEquals(AttachmentSendResult.Locked, client.sendAttachments("s1", "x", listOf(picture), null, origin))
-        assertTrue(frames("send").isEmpty())
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "archived", listOf(picture), null, origin))
+        assertEquals("archived", frames("send").single().str("text"))
     }
 
     @Test

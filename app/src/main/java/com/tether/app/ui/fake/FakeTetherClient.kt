@@ -504,7 +504,7 @@ class FakeTetherClient : TetherClient {
     }
 
     // T6.3: the demo keeps the real client's contract, with the real ConsentGuard: always
-    // "connected", every listed session live, read-only / handed-off sessions locked, a decision
+    // "connected", every listed session live, a decision
     // only for the exact pending request (fingerprint) with an offered choice, and each at most once.
     private val decided = MutableStateFlow<Set<String>>(emptySet())
     override val decidedRequests: StateFlow<Set<String>> = decided.asStateFlow()
@@ -521,8 +521,7 @@ class FakeTetherClient : TetherClient {
         .stateIn(scope, SharingStarted.Eagerly, _sessions.value.associate { it.id to com.tether.app.client.SessionSync(com.tether.app.client.Freshness.Live, null) })
 
     private fun decide(sessionId: String, requestId: String, expectedFingerprint: String, question: Boolean, check: (JsObj) -> ConsentResult?): ConsentResult {
-        val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return ConsentResult.Locked
-        if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return ConsentResult.Locked
+        // ta-coik.26: as the web, no read-only / handed-off refusal: the request must be the pending one.
         val tree = _projectionTrees.value[sessionId]
         val turnId = ConsentGuard.activeTurnId(tree) ?: return ConsentResult.NotPending
         val request = (if (question) ConsentGuard.pendingQuestion(tree, requestId) else ConsentGuard.pendingApproval(tree, requestId))

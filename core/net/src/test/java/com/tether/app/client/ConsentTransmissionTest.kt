@@ -319,23 +319,47 @@ class ConsentTransmissionTest {
         assertTrue(client.decidedRequests.value.isEmpty())
     }
 
+    /**
+     * ta-coik.26: the web's cards draw on a read-only or handed-off session with no such check
+     * (chat-view.tsx 90fbb9f :3672-3678) and `respondApproval` / `respondQuestion` send on any open
+     * socket (use-tether.ts :337-344, :1667-1691): the decision goes out and the server answers.
+     */
     @Test
-    fun aReadOnlyHandedOffOrUnlistedSessionIsLocked() {
-        val (client, ws) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
-        assertEquals(ConsentResult.Locked, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+    fun aReadOnlySessionsDecisionIsSentAsOnTheWeb() {
+        val (client, _) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
+        assertTrue(client.sessions.value.single { it.id == "s1" }.readOnly)
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
+        assertEquals(listOf("approval", "question"), consentFrames().map { it.type() })
+    }
+
+    @Test
+    fun aHandedOffSessionsDecisionIsSentAsOnTheWeb() {
+        val (client, ws) = connected()
         ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless","handedOffTo":"s2"}}""")
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.handedOffTo == "s2" } }
-        assertEquals(ConsentResult.Locked, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
+        assertEquals(listOf("approval", "question"), consentFrames().map { it.type() })
+    }
+
+    /** ta-coik.26: the card must still match a pending request in the projection the client holds. */
+    @Test
+    fun aReadOnlySessionsDecisionStillMustMatchThePendingRequest() {
+        val (client, _) = connected(readyWithSessions("s1", extra = ""","readOnly":true"""))
+        assertEquals(ConsentResult.NotPending, client.approval("s1", "r-unknown", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertEquals(ConsentResult.NotPending, client.approval("s1", "r-choice", "0".repeat(64), choiceId = "accept"))
         assertTrue(consentFrames().isEmpty())
         assertTrue(client.decidedRequests.value.isEmpty())
     }
 
+    /** ta-coik.26: the web has no session-listing check either; the request must still be pending. */
     @Test
-    fun anUnlistedSessionFailsClosed() {
-        // L2: a live, pending request whose session the server never listed is refused.
+    fun aSessionTheServerNeverListedIsSentAsOnTheWebWhenItsRequestIsPending() {
         val (client, _) = connected(readyFrame())
-        assertEquals(ConsentResult.Locked, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
-        assertTrue(consentFrames().isEmpty())
+        assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
+        assertEquals(ConsentResult.NotPending, client.approval("s9", "r-choice", "x", choiceId = "accept"))
+        assertEquals(1, consentFrames().size)
     }
 
     @Test

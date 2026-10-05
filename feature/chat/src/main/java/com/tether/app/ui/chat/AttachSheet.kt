@@ -354,7 +354,9 @@ class AttachmentStager(
 internal fun attachmentRefusalCopy(result: AttachmentSendResult): String? = when (result) {
     AttachmentSendResult.Sent, AttachmentSendResult.Empty -> null
     AttachmentSendResult.NotConnected -> "Not connected — the message and its attachments were not sent."
-    AttachmentSendResult.NotLive -> "Catching up — the message and its attachments were not sent. Try again in a moment."
+    // ta-coik.25: NotLive means only "drawn for another server" (RealTetherClient sendAttachments); the
+    // web sends on any open link, a session still catching up included.
+    AttachmentSendResult.NotLive -> OTHER_SERVER_NOT_SENT
     AttachmentSendResult.Locked -> "This session can’t take messages from here — the attachments were not sent."
     AttachmentSendResult.Busy -> "Wait for the current turn to finish before sending attachments."
     AttachmentSendResult.TooLarge -> "This message is too large to send in one piece (at most ${AttachmentCopy.size(com.tether.app.client.AttachmentFrame.MAX_SEND_FRAME_BYTES)} encoded). Remove an attachment and try again."

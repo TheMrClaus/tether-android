@@ -207,6 +207,17 @@ class AttachmentComposerBehaviourTest {
         }
     }
 
+    /**
+     * ta-coik.25: the web sends attachments on any open link, a session still catching up included
+     * (use-tether.ts 90fbb9f filePending :643-695), so no refusal says "Catching up"; the one NotLive
+     * left is a composer drawn for another server.
+     */
+    @Test
+    fun noRefusalSaysCatchingUpAndNotLiveMeansAnotherServer() {
+        for (result in AttachmentSendResult.entries) assertTrue("$result", attachmentRefusalCopy(result)?.contains("Catching up") != true)
+        assertEquals(OTHER_SERVER_NOT_SENT, attachmentRefusalCopy(AttachmentSendResult.NotLive))
+    }
+
     @Test
     fun whileATurnRunsAttachmentsWaitWithTheWebsCopy() {
         staged = listOf(pic)

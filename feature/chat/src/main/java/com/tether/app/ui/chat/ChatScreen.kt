@@ -130,8 +130,8 @@ fun ChatScreen(
             runFocus = RunFocus(runId, toolId, (runFocus?.nonce ?: 0) + 1)
         }
     }
-    val consent = remember(session, connection, liveSessions, decided, unconfirmed, consentOrigin, vm, onFocusCall, sync, reportsFreshness) {
-        consentActionsFor(vm, session, connection, consentOrigin, liveSessions, decided, unconfirmed, onFocusCall, sync, reportsFreshness)
+    val consent = remember(session, decided, unconfirmed, consentOrigin, vm, onFocusCall) {
+        consentActionsFor(vm, session, consentOrigin, decided, unconfirmed, onFocusCall)
     }
     // T6.4: background commands — open one's output; STOP one (a tap on its Stop key, and only then).
     var openCommandId by remember(session?.id) { mutableStateOf<String?>(null) }
@@ -566,26 +566,24 @@ private fun RunTab(
 internal fun consentActionsFor(
     vm: TetherViewModel,
     session: AgentSession?,
-    connection: com.tether.app.client.ConnectionState,
     origin: String?,
-    liveSessions: Set<String>,
     decided: Set<String>,
     unconfirmed: Set<String> = emptySet(),
     onFocusCall: ((runId: String, toolId: String) -> Unit)? = null,
-    /** T13.2: the session's freshness; a copy that is not Live is never actionable. */
-    sync: com.tether.app.client.SessionSync? = null,
-    /** r2: the client reports freshness at all (a missing entry is then not live). */
-    reportsFreshness: Boolean = true,
 ): ConsentActions {
     val s = session ?: return ConsentActions.Unavailable
     return ConsentActions(
         sessionId = s.id,
         origin = origin,
-        // ta-coik.24: no Offline / Catching-up lock, as on the web: its cards disable only once
-        // `submitted` (chat-view.tsx 90fbb9f :1016-1021, :1191-1210), and a send refused by a closed
-        // socket (use-tether.ts :337-344) leaves them answerable and shows "The secure link is
-        // reconnecting. Your input was not sent." The client does the same (transmitConsent).
-        lock = commandKeyLock(consentLock(connection == com.tether.app.client.ConnectionState.Connected && origin != null, ChatFreshness.isLive(s.id, liveSessions, sync, reportsFreshness), s)),
+        // ta-coik.24 / ta-coik.26: no lock at all, as on the web: its cards disable only once
+        // `submitted` (chat-view.tsx 90fbb9f :1016-1021, :1191-1210), draw on a read-only or
+        // handed-off session as on any other (:3672-3678, no such check) and send on any open
+        // socket (use-tether.ts :337-344, :1667-1691): a send refused by a closed socket leaves them
+        // answerable and shows "The secure link is reconnecting. Your input was not sent.", and the
+        // server answers a read-only or handed-off session's decision with an `error`, shown. The
+        // client does the same (transmitConsent) and keeps what the web keeps: the request must be
+        // the one the card drew.
+        lock = null,
         decided = decided,
         unconfirmed = unconfirmed,
         questionUnavailable = if (s.provider == "opencode" && s.engineGeneration != "opencode-serve-v2") ConsentActions.LEGACY_OPENCODE_QUESTION else null,

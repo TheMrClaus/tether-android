@@ -1523,22 +1523,41 @@ class ApprovalScreenBehaviourTest {
         assertEquals(listOf("approval:s1:req-w:allow"), client.consentCalls)
     }
 
-    @Test fun aReadOnlySessionShowsItsLock() {
+    /**
+     * ta-coik.26: the web draws the approval and question cards live on a read-only or handed-off
+     * session (chat-view.tsx 90fbb9f :3672-3678, no such check) and sends the answer; the server
+     * decides. No lock words, a key that is enabled, and a tap that reaches the client once.
+     */
+    private fun answerOnLocked(locked: com.tether.app.protocol.model.AgentSession, fixture: ChatFixtures.Folded, key: String): ChatTestClient {
         val client = ChatTestClient()
-        client.show(session.copy(readOnly = true), ApprovalFixtures.question)
+        client.show(locked, fixture)
         val vm = TetherViewModel(client)
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
             TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
-                ChatScreen(vm = vm, session = session.copy(readOnly = true), projection = projections["s1"], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
+                ChatScreen(vm = vm, session = locked, projection = projections["s1"], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
             }
         }
         rule.waitForIdle()
-        scrollTo("question-submit")
-        rule.onNodeWithText(ConsentLock.ReadOnly.copy).assertIsDisplayed()
-        rule.onNodeWithTag("question-submit").assertIsNotEnabled()
-        assertTrue(client.consentCalls.isEmpty())
+        arm()
+        scrollTo(key)
+        rule.onNodeWithText(ConsentLock.ReadOnly.copy).assertDoesNotExist()
+        rule.onNodeWithText(ConsentLock.HandedOff.copy).assertDoesNotExist()
+        rule.onNodeWithTag("consent-lock").assertDoesNotExist()
+        rule.onNodeWithTag(key).assertIsEnabled().performClick()
+        rule.waitForIdle()
+        return client
+    }
+
+    @Test fun aReadOnlySessionsApprovalCardIsAnswerableAsOnTheWeb() {
+        val client = answerOnLocked(session.copy(readOnly = true), ApprovalFixtures.write, "approval-allow")
+        assertEquals(listOf("approval:s1:req-w:allow"), client.consentCalls)
+    }
+
+    @Test fun aHandedOffSessionsApprovalCardIsAnswerableAsOnTheWeb() {
+        val client = answerOnLocked(session.copy(handedOffTo = "s2"), ApprovalFixtures.write, "approval-allow")
+        assertEquals(listOf("approval:s1:req-w:allow"), client.consentCalls)
     }
 
     // ---- round 3: the card state survives a link blip and a tab switch (B1) -------------------

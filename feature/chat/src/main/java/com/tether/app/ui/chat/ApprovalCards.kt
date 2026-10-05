@@ -85,7 +85,8 @@ import com.tether.app.ui.text.tokenStyle
  *
  * Consent (SYNC_DESIGN §5.1 I2/I3): a card only ever calls [ConsentActions] from a tap, sends at most
  * once (its own guard plus the client's ledger), and renders disabled with the reason in words
- * whenever [ConsentActions.lock] says it cannot be answered here.
+ * whenever [ConsentActions.lock] says it cannot be answered here. ta-coik.26: the chat screen sets
+ * no lock (the web draws the cards live on a read-only or handed-off session too).
  */
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
@@ -109,15 +110,16 @@ enum class ConsentLock(val copy: String) {
     /** Connected, but the session's snapshot has not landed on this connection yet (see [Offline]). */
     CatchingUp("Catching up… You can answer once the latest state is in."),
 
-    /** `session.readOnly`: an imported replay Tether does not drive. */
+    /** `session.readOnly`: an imported replay Tether does not drive (the session controls and Stop keys; ta-coik.26: never the cards). */
     ReadOnly("Read-only: Tether isn’t driving this conversation, so it can’t answer here."),
 
-    /** `session.handedOffTo`: the work continues in another session. */
+    /** `session.handedOffTo`: the work continues in another session (ta-coik.26: never the cards). */
     HandedOff("This session was handed off. Answer in the session it continued in."),
 }
 
 /**
- * The lock for [session] (pure; tested): read-only and handed-off first (they hold whatever the
+ * The lock for [session] (pure; tested; the session controls and Stop keys use it, ta-coik.26: the
+ * approval and question cards no longer do): read-only and handed-off first (they hold whatever the
  * link does), then no connection, then a projection not yet confirmed live on this connection.
  */
 fun consentLock(connected: Boolean, live: Boolean, session: AgentSession?): ConsentLock? = when {

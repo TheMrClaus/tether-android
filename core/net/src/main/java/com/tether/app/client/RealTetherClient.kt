@@ -3758,17 +3758,21 @@ class RealTetherClient(
                 pendingLoaded = pendingLoaded,
                 halted = haltedLocked(),
                 pendingOrigin = pendingOrigin,
-                sessionLive = sessionId in liveThisEpoch,
             )
             attachmentLinkRefusal(link, expectedOrigin)?.let { return@synchronized it }
             // ta-2ew (R3): a first message bound to its create's socket goes on that socket only.
             if (expectedEpoch != null && expectedEpoch != epoch) return@synchronized AttachmentSendResult.NotConnected
             val ws = socket ?: return@synchronized AttachmentSendResult.NotConnected
-            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized AttachmentSendResult.Locked
-            if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized AttachmentSendResult.Locked
-            val tree = sessionStore.tree(sessionId) ?: return@synchronized AttachmentSendResult.NotLive
-            if (tree["activeTurnId"] is JsStr) return@synchronized AttachmentSendResult.Busy
-            if (mention != null && !CommandGuard.mentionOffered(session, mention, providerCatalogState.value)) return@synchronized AttachmentSendResult.NotOffered
+            // ta-coik.25: nothing about the session's liveness, listing, read-only, handed-off or
+            // archived state: the web's filePending puts the send on any open socket (use-tether.ts
+            // 90fbb9f :643-695), a session whose snapshot has not landed included, and the server
+            // answers a refusal with an `error`. Only what the web's composer decides stays: `busy`
+            // is the projection's activeTurnId (chat-view.tsx :1968, :3238-3241), and a delegate
+            // mention must still be offered (T7.3).
+            val session = sessionsState.value.firstOrNull { it.id == sessionId }
+            val tree = sessionStore.tree(sessionId)
+            if (tree?.get("activeTurnId") is JsStr) return@synchronized AttachmentSendResult.Busy
+            if (mention != null && session != null && !CommandGuard.mentionOffered(session, mention, providerCatalogState.value)) return@synchronized AttachmentSendResult.NotOffered
             // ta-coik.3 (use-tether.ts filePending :643-695): filed in the pending store under the key
             // the frame carries, then ONE drain puts every sendable record on the wire oldest-first, so
             // an earlier message to this session that may go now goes ahead of it (no app-only
@@ -4672,9 +4676,9 @@ class RealTetherClient(
 
     /**
      * T6.3 (SYNC_DESIGN §5.1 I2/I3, §5.4): the one path an operator decision takes to the wire.
-     * Under the lock, in order: a live, handshaken socket; the session listed on it (ta-coik.24: not
-     * its liveness, see below); not read-only or handed off (an unlisted session is refused
-     * too: fail closed); the request pending in the active turn with the SAME fingerprint the card
+     * Under the lock, in order: a live, handshaken socket (ta-coik.24 / ta-coik.26: nothing about the
+     * session's liveness, listing, read-only or handed-off state, see below); the request pending in
+     * the active turn with the SAME fingerprint the card
      * rendered (a re-raised or replaced request never matches); not already decided here; an offered
      * choice ([check]); then claimed in the ledger and enqueued on that socket. A frame the socket
      * refuses releases its claim (nothing left the device). Nothing is retried, held or persisted,
@@ -4692,11 +4696,12 @@ class RealTetherClient(
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone) return@synchronized ConsentResult.NotConnected
-            // ta-coik.24: not the session's liveness: the web's `send` puts `approval` / `question` on
-            // any OPEN socket (use-tether.ts 90fbb9f :337-344, :1667-1691), catching up included; the
-            // request must still be the one the card drew, against the copy this client holds.
-            val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized ConsentResult.Locked
-            if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized ConsentResult.Locked
+            // ta-coik.24 / ta-coik.26: not the session's liveness, listing, read-only or handed-off
+            // state: the web's `send` puts `approval` / `question` on any OPEN socket (use-tether.ts
+            // 90fbb9f :337-344, :1667-1691) and its cards draw with no such check (chat-view.tsx
+            // :3672-3678); the server answers a read-only or handed-off session's decision with an
+            // `error`, shown. The request must still be the one the card drew, in the copy this
+            // client holds (an absent projection has no pending request).
             val tree = sessionStore.tree(sessionId)
             val turnId = ConsentGuard.activeTurnId(tree) ?: return@synchronized ConsentResult.NotPending
             val request = pending(tree, requestId) ?: return@synchronized ConsentResult.NotPending
