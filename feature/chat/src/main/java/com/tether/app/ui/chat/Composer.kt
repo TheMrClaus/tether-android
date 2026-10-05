@@ -232,6 +232,8 @@ fun Composer(
     github: ComposerGitHub? = null,
     /** T11.2: text shared from another app for this session, added to the end of the draft once it is hydrated. */
     inserts: kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.emptyFlow(),
+    /** T8.5: the `@` picker's Sessions and the takeover draft (null: neither is offered). */
+    takeover: ComposerTakeover? = null,
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
@@ -356,22 +358,84 @@ fun Composer(
     // mention belongs to the session and the server it was picked on (a switch drops it).
     var atDismissed by remember(session?.id) { mutableStateOf(false) }
     var delegateMention by remember(session?.id, runActions.origin) { mutableStateOf<DelegateMention?>(null) }
+    // T8.5 (chat-view.tsx 90fbb9f :1809-1828): the takeover being composed (its source), its editable
+    // text and the summary's fold; per session, like the web's per-session ChatView.
+    var handoffSourceId by remember(session?.id) { mutableStateOf<String?>(null) }
+    var handoffText by remember(session?.id) { mutableStateOf("") }
+    var handoffSummaryCollapsed by remember(session?.id) { mutableStateOf(true) }
+    var handoffSeededFor by remember(session?.id) { mutableStateOf<String?>(null) }
     fun atQueryNow(text: String): String? =
-        if (session != null && !readOnly && !handedOffNow && !(runActions.commandMode && text.startsWith("!"))) atQueryOf(text) else null
+        if (session != null && !readOnly && !handedOffNow && !(runActions.commandMode && text.startsWith("!")) && handoffSourceId == null) atQueryOf(text) else null
     val atQuery = atQueryNow(draft)
     val agentRows = remember(atQuery, runActions.agents) { atQuery?.let { matchAgents(runActions.agents, it) } ?: emptyList() }
-    val atMenuOpen = atQuery != null && !atDismissed && agentRows.isNotEmpty()
+    // T8.5 (chat-view.tsx :2791-2802): the Sessions section, below the Agents.
+    fun sessionRowsFor(query: String?): List<AgentSession> =
+        if (query != null && session != null && takeover != null) handoffCandidates(takeover.sessions, session, query) else emptyList()
+    val sessionRows = remember(atQuery, takeover?.sessions, session?.id, session?.cwd) { sessionRowsFor(atQuery) }
+    val atMenuOpen = atQuery != null && !atDismissed && (agentRows.isNotEmpty() || sessionRows.isNotEmpty())
     val atActive = atQuery != null
     LaunchedEffect(atActive) { if (atActive && runActions.agents.isEmpty()) runActions.onRequestAgents() }
-    fun liveAtMenu(): List<com.tether.app.client.ProviderCatalogEntry>? {
+    /** The open `@` menu's rows NOW (agents first, then sessions), or null when it is closed. */
+    fun liveAtMenu(): List<Any>? {
         val q = atQueryNow(field.text) ?: return null
-        val rows = matchAgents(runActions.agents, q)
+        val rows = matchAgents(runActions.agents, q) + sessionRowsFor(q)
         return if (!atDismissed && rows.isNotEmpty()) rows else null
     }
     fun beginDelegate(entry: com.tether.app.client.ProviderCatalogEntry) {
         delegateMention = mentionFor(entry)
         atDismissed = true
         setDraft(stripAtToken(field.text))
+    }
+    /** chat-view.tsx :2834-2851 beginHandoff: ask for the brief and open the takeover draft. */
+    fun beginHandoff(source: AgentSession) {
+        handoffRefusal(source)?.let {
+            flash(it)
+            return
+        }
+        takeover?.onRequestBrief?.invoke(source.id)
+        handoffSourceId = source.id
+        atDismissed = true
+        setDraft(stripAtToken(field.text))
+    }
+    fun pickAtRow(row: Any?) {
+        when (row) {
+            is com.tether.app.client.ProviderCatalogEntry -> beginDelegate(row)
+            is AgentSession -> beginHandoff(row)
+        }
+    }
+    val handoffEntry = handoffSourceId?.let { id -> takeover?.briefs?.get(id) }
+    // chat-view.tsx :2911-2924: the brief seeds the editable text once per source, never over edits.
+    LaunchedEffect(handoffSourceId, handoffEntry) {
+        val id = handoffSourceId
+        if (id == null) {
+            handoffSeededFor = null
+        } else if (handoffEntry != null && handoffSeededFor != id) {
+            handoffText = handoffEntry.instruction
+            handoffSummaryCollapsed = true
+            handoffSeededFor = id
+        }
+    }
+    /** chat-view.tsx :2925-2929. */
+    fun cancelHandoff() {
+        handoffSourceId?.let { takeover?.onClearBrief?.invoke(it) }
+        handoffSourceId = null
+        handoffText = ""
+    }
+    /** chat-view.tsx :2935-2950 commitHandoff: claim the source and start THIS session's turn. */
+    fun commitHandoff() {
+        val source = handoffSourceId ?: return
+        val text = handoffText.trim()
+        if (text.isEmpty()) {
+            flash(HANDOFF_EMPTY_COPY)
+            return
+        }
+        if (takeover?.onHandoff?.invoke(source, text) == true) {
+            takeover.onClearBrief(source)
+            handoffSourceId = null
+            handoffText = ""
+        } else {
+            flash(HANDOFF_NOT_CONNECTED_COPY)
+        }
     }
     val delegateEntry = delegateMention?.let { m -> runActions.agents.firstOrNull { it.provider == m.provider } }
 
@@ -738,7 +802,7 @@ fun Composer(
                     return true
                 }
                 event.key == Key.Tab || enter -> {
-                    at.firstOrNull()?.let(::beginDelegate)
+                    pickAtRow(at.firstOrNull())
                     return true
                 }
             }
@@ -879,7 +943,21 @@ fun Composer(
                 if (menuOpen) {
                     SlashCommandMenu(matches = menuMatches, onAccept = { acceptCommand(it) })
                 }
-                if (atMenuOpen) MentionMenu(agentRows, onPick = ::beginDelegate)
+                if (atMenuOpen) {
+                    MentionMenu(agentRows, onPick = ::beginDelegate, sessions = sessionRows, now = takeover?.now?.invoke() ?: 0L, onPickSession = ::beginHandoff)
+                }
+                handoffSourceId?.let { sourceId ->
+                    HandoffDraftPanel(
+                        source = takeover?.sessions?.firstOrNull { it.id == sourceId },
+                        brief = handoffEntry,
+                        text = handoffText,
+                        onTextChange = { handoffText = it },
+                        summaryCollapsed = handoffSummaryCollapsed,
+                        onToggleSummary = { handoffSummaryCollapsed = !handoffSummaryCollapsed },
+                        onCancel = ::cancelHandoff,
+                        onCommit = ::commitHandoff,
+                    )
+                }
 
                 // v133 (T15.6): only the operator's own drafts, as chat-view.tsx:1914
                 // operatorQueuedMessages — a Tether notice ("system") is not his to edit or remove.
@@ -937,7 +1015,7 @@ fun Composer(
                             val at = liveAtMenu()
                             when {
                                 menu != null -> menu.firstOrNull()?.let(::acceptCommand)
-                                at != null -> at.firstOrNull()?.let(::beginDelegate)
+                                at != null -> pickAtRow(at.firstOrNull())
                                 else -> submit()
                             }
                         },

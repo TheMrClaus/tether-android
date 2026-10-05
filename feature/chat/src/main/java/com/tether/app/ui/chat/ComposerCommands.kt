@@ -268,13 +268,20 @@ internal fun mentionFor(entry: ProviderCatalogEntry): DelegateMention {
 }
 
 /**
- * `.chat-mention-menu` with its **Agents** section (the Sessions section is the takeover flow, not
- * in this task): the section label, then per agent the provider mark, the name (650, `--white`), the
- * status line (never colour alone: "loading models…", "model list unavailable", the default model,
- * "N models" / "default model") and the violet "delegate" tag. The first row is the active one.
+ * `.chat-mention-menu` with its **Agents** section: the section label, then per agent the provider
+ * mark, the name (650, `--white`), the status line (never colour alone: "loading models…", "model
+ * list unavailable", the default model, "N models" / "default model") and the violet "delegate" tag.
+ * T8.5: then **Sessions on this project** ([MentionSessionRow], chat-view.tsx 90fbb9f :3972-4011).
+ * Each section is drawn only when it has rows; the first row of the two is the active one.
  */
 @Composable
-internal fun MentionMenu(agents: List<ProviderCatalogEntry>, onPick: (ProviderCatalogEntry) -> Unit) {
+internal fun MentionMenu(
+    agents: List<ProviderCatalogEntry>,
+    sessions: List<com.tether.app.protocol.model.AgentSession> = emptyList(),
+    now: Long = 0L,
+    onPickSession: (com.tether.app.protocol.model.AgentSession) -> Unit = {},
+    onPick: (ProviderCatalogEntry) -> Unit,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusMd)
@@ -288,12 +295,7 @@ internal fun MentionMenu(agents: List<ProviderCatalogEntry>, onPick: (ProviderCa
             .semantics { contentDescription = "Mention a session or an agent" }
             .testTag(MENTION_MENU_TAG),
     ) {
-        Text(
-            "AGENTS",
-            style = type.body.copy(fontSize = rem(0.66f), fontWeight = FontWeight(650), letterSpacing = 0.04.em),
-            color = t.faint,
-            modifier = Modifier.padding(start = t.css.spaceMd, end = t.css.spaceMd, top = t.css.spaceSm, bottom = t.css.spaceXs).clearAndSetSemantics { contentDescription = "Agents" },
-        )
+        if (agents.isNotEmpty()) MentionSectionLabel("Agents")
         agents.forEachIndexed { index, entry ->
             val name = agentName(entry)
             val status = agentStatus(entry)
@@ -322,6 +324,10 @@ internal fun MentionMenu(agents: List<ProviderCatalogEntry>, onPick: (ProviderCa
                 }
                 MenuTag("delegate", violet = true)
             }
+        }
+        if (sessions.isNotEmpty()) MentionSectionLabel("Sessions on this project")
+        sessions.forEachIndexed { index, candidate ->
+            MentionSessionRow(candidate, active = agents.isEmpty() && index == 0, now = now, onPick = onPickSession)
         }
     }
 }

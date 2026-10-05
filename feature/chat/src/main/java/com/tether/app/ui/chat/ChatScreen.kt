@@ -284,6 +284,20 @@ fun ChatScreen(
     // T6.6: a handed-off source names (and links to) the session it continued in.
     val allSessions by vm.client.sessions.collectAsStateWithLifecycle()
     val handoffTarget = session?.handedOffTo?.takeIf { it.isNotEmpty() }?.let { id -> allSessions.firstOrNull { it.id == id } }
+    // T8.5 (chat-view.tsx 90fbb9f :156-165, dashboard.tsx :1683-1686): the `@` picker's takeover —
+    // the live roster, the derived briefs, and the brief / handoff frames with THIS session as target.
+    val handoffBriefs by vm.client.handoffBriefs.collectAsStateWithLifecycle()
+    val takeover = remember(session?.id, allSessions, handoffBriefs, vm) {
+        session?.let { s ->
+            ComposerTakeover(
+                sessions = allSessions,
+                briefs = handoffBriefs,
+                onRequestBrief = { sourceId -> vm.client.requestHandoffBrief(sourceId, s.id) },
+                onHandoff = { sourceId, text -> vm.client.handoff(sourceId, s.id, text) },
+                onClearBrief = { sourceId -> vm.client.clearHandoffBrief(sourceId) },
+            )
+        }
+    }
 
     // ta-coik.19 (web issue #135, chat-view.tsx 90fbb9f :1983-1992): this session's unresolved and
     // given-up sends. Dismiss is the failed bubble's one action (use-tether.ts :473-478): local only.
@@ -462,6 +476,7 @@ fun ChatScreen(
             onWarmControls = { session?.let { vm.client.requestWarmSessionControls(it.id) } },
             sendRows = sends.pending,
             github = composerGitHub,
+            takeover = takeover,
         )
     }
     CommandOutputDialog(
