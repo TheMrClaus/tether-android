@@ -862,13 +862,27 @@ class TetherViewModel(
      * ([TetherClient.sendAttachments]). Sent: the staged set is cleared. Anything else keeps it (and
      * the draft) and returns why.
      */
-    fun sendAttachments(sessionId: String, text: String, mention: com.tether.app.protocol.DelegateMention?, expectedOrigin: String?): AttachmentSendResult {
-        val staged = stagedAttachments.current.value
-        if (staged == null || staged.sessionId != sessionId || staged.items.isEmpty()) return AttachmentSendResult.Empty
-        if (expectedOrigin == null || staged.origin != expectedOrigin) return AttachmentSendResult.NotLive
+    fun sendAttachments(
+        sessionId: String,
+        text: String,
+        mention: com.tether.app.protocol.DelegateMention?,
+        expectedOrigin: String?,
+        extra: List<Attachment> = emptyList(),
+    ): AttachmentSendResult {
+        val current = stagedAttachments.current.value
+        val staged = current?.takeIf { it.sessionId == sessionId && it.items.isNotEmpty() }
+        if (staged == null && extra.isEmpty()) return AttachmentSendResult.Empty
+        // [extra]: T8.6 part 2 — the element screenshots of the picks riding this send (chat-view.tsx
+        // 90fbb9f :3199-3203: `[...attachments, ...pickAttachments]`); they are not staged files.
+        if (staged != null) {
+            if (expectedOrigin == null || staged.origin != expectedOrigin) return AttachmentSendResult.NotLive
+        } else if (expectedOrigin == null || expectedOrigin != attachmentOrigin()) {
+            return AttachmentSendResult.NotLive
+        }
         if (client.connection.value != ConnectionState.Connected) return AttachmentSendResult.NotConnected
-        val result = client.sendAttachments(sessionId, text, staged.items.map { it.attachment }, mention, expectedOrigin)
-        if (result == AttachmentSendResult.Sent) stagedAttachments.clear()
+        val files = staged?.items?.map { it.attachment }.orEmpty()
+        val result = client.sendAttachments(sessionId, text, files + extra, mention, expectedOrigin)
+        if (result == AttachmentSendResult.Sent && staged != null) stagedAttachments.clear()
         return result
     }
 

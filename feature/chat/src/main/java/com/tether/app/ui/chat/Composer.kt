@@ -236,6 +236,8 @@ fun Composer(
     takeover: ComposerTakeover? = null,
     /** T8.6: the in-console browser toggle beside the paperclip (null: no key, as the web without `onToggleBrowser`). */
     browser: ComposerBrowser? = null,
+    /** T8.6 part 2: the elements picked in the browser pane, riding the next send (null: none can be). */
+    browserPicks: ComposerPicks? = null,
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
@@ -261,6 +263,7 @@ fun Composer(
         }
     }
     val picked = attachments.staged
+    val hasPicksDrawn = browserPicks?.items?.isNotEmpty() == true
 
     val activeTurn = projection?.activeTurnId?.let { projection.turnsById[it] }
     val busy = activeTurn != null
@@ -713,13 +716,42 @@ fun Composer(
         // The live field, not the composition-time [draft] (see [liveMenu]).
         val text = field.text.trim()
         val hasAttachments = picked.isNotEmpty()
-        if (text.isEmpty() && !hasAttachments) return
+        val pickItems = browserPicks?.items.orEmpty()
+        val hasPicks = pickItems.isNotEmpty()
+        if (text.isEmpty() && !hasAttachments && !hasPicks) return
         // v53/v54: `!` command mode gets first refusal (Enter runs it in the FOREGROUND).
         if (runActions.commandMode && field.text.startsWith("!")) {
             dispatchCommand(false)
             return
         }
         if (text.startsWith("/") && !hasAttachments && runSlashCommand(text)) return
+        // #162 (chat-view.tsx 90fbb9f :3190-3210): picked elements ride the next prompt as a delimited
+        // descriptor block, their screenshots as attachments. Idle only, never queued (a pick is
+        // reference content for THIS prompt, not a standing instruction).
+        if (hasPicks && browserPicks != null) {
+            if (busy) {
+                flash("Wait for the current turn to finish before sending selected elements.")
+                return
+            }
+            val block = com.tether.app.client.BrowserPicks.formatDescriptorBlock(pickItems.map { it.descriptor }, browserPicks.pageUrl)
+            val combined = listOf(block, text).filter { it.isNotEmpty() }.joinToString("\n\n")
+            val shots = pickItems.mapNotNull { it.screenshot }
+            if (!hasAttachments && shots.isEmpty()) {
+                if (onSend(combined, emptyList())) {
+                    setDraft("")
+                    browserPicks.onClear()
+                }
+            } else {
+                val result = browserPicks.send(combined, shots)
+                if (result == com.tether.app.client.AttachmentSendResult.Sent) {
+                    setDraft("")
+                    browserPicks.onClear()
+                } else {
+                    attachmentRefusalCopy(result)?.let(::flash)
+                }
+            }
+            return
+        }
         // P2.4 (chat-view.tsx:3145-3167): a delegation rides an idle send only, never the queue.
         delegateMention?.let { mention ->
             if (text.isEmpty()) {
@@ -977,6 +1009,20 @@ fun Composer(
                         serverNow = serverNow,
                         stale = liveness.stale != null,
                     )
+                }
+
+                if (hasPicksDrawn) {
+                    // chat-view.tsx :4097-4120 `.chat-attachments` ("Selected page elements to send"), above the files.
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(
+                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Selected page elements to send" },
+                        horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+                        verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+                    ) {
+                        browserPicks?.items?.forEach { pick ->
+                            BrowserPickChip(pick = pick, onRemove = { browserPicks.onRemove(pick) })
+                        }
+                    }
                 }
 
                 if (picked.isNotEmpty()) {

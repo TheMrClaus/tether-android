@@ -326,6 +326,11 @@ fun ChatScreen(
     var focusFind by remember { mutableStateOf(0) }
     // T8.6 (dashboard.tsx 90fbb9f :229-236): the in-console browser pane's open flag, over sessions.
     var browserOpen by remember { mutableStateOf(false) }
+    // dashboard.tsx :235, :799-812: the picked elements, each tagged with its session so a session
+    // switch simply shows another slice; a new pick prunes any other session's, and the page it was
+    // picked on travels with it (chat-view.tsx `browserPageUrl`).
+    var browserPicks by remember { mutableStateOf(emptyList<SessionPick>()) }
+    var browserPageUrl by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(focusFind) { if (focusFind > 0) runCatching { findFocus.requestFocus() } }
 
     Box(
@@ -480,6 +485,17 @@ fun ChatScreen(
             github = composerGitHub,
             takeover = takeover,
             browser = if (session != null) ComposerBrowser(browserOpen) { browserOpen = !browserOpen } else null,
+            browserPicks = if (session != null) {
+                ComposerPicks(
+                    items = browserPicks.filter { it.sessionId == session.id }.map { it.pick },
+                    pageUrl = browserPageUrl,
+                    onRemove = { pick -> browserPicks = browserPicks.filterNot { it.pick === pick } },
+                    onClear = { browserPicks = browserPicks.filter { it.sessionId != session.id } },
+                    send = { text, shots -> vm.sendAttachments(session.id, text, null, consentOrigin, shots) },
+                )
+            } else {
+                null
+            },
         )
     }
     CommandOutputDialog(
@@ -493,6 +509,10 @@ fun ChatScreen(
             opener = vm.client.browserSockets,
             sessionId = session.id,
             onClose = { browserOpen = false },
+            onPicked = { pick, pageUrl ->
+                browserPicks = browserPicks.filter { it.sessionId == session.id } + SessionPick(session.id, pick)
+                browserPageUrl = pageUrl
+            },
             modifier = Modifier.align(Alignment.TopEnd),
         )
     }
@@ -808,3 +828,6 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
         )
     }
 }
+
+/** A picked element and the session it was picked for (dashboard.tsx :235 `BrowserPick & { sessionId }`). */
+private class SessionPick(val sessionId: String, val pick: com.tether.app.client.BrowserPick)

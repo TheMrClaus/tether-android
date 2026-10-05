@@ -67,17 +67,29 @@ class BrowserChannel(private val opener: BrowserSocketOpener, val sessionId: Str
 
     private val pickFlow = MutableSharedFlow<JsonObject>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
-    /**
-     * T8.6 part 2's seam: the `hover`, `picked` and `pick-empty` messages verbatim, for Select
-     * elements (use-browser.ts :165-186). Part 1 draws no pick UI.
-     */
+    /** The `hover`, `picked` and `pick-empty` messages verbatim (use-browser.ts :161-186). */
     val pickEvents: SharedFlow<JsonObject> = pickFlow.asSharedFlow()
+
+    private val hoverState = MutableStateFlow<HoverBox?>(null)
+
+    /** use-browser.ts :99, :161-163: the last `hover` reply's box; cleared when pick mode goes off (:225). */
+    val hoverBox: StateFlow<HoverBox?> = hoverState.asStateFlow()
+
+    private val pickedFlow = MutableSharedFlow<BrowserPick>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /**
+     * Each `picked` as a [BrowserPick] (use-browser.ts :165-184: numbered `pick-N` per channel, with the
+     * element screenshot as an attachment when one came). `pick-empty` is not here: the web ignores it
+     * (no case in its switch :141-200; server.mjs :8619 sends it for a tap that resolved no element).
+     */
+    val picks: SharedFlow<BrowserPick> = pickedFlow.asSharedFlow()
 
     private val lock = Any()
     private var socket: BrowserSocket? = null
     private var open = false
     private var disposed = false
     private var frameSeq = 0L
+    private var pickSeq = 0L
 
     /** Open the channel (use-browser.ts :124-132); once, until [dispose]. */
     fun connect() {
@@ -128,9 +140,10 @@ class BrowserChannel(private val opener: BrowserSocketOpener, val sessionId: Str
 
     fun sendInput(event: BrowserInput) = send(buildJsonObject { put("t", "input"); put("event", event.toJson()) })
 
-    /** use-browser.ts :222-229: the local flag flips at once; off clears the hover box (part 2). */
+    /** use-browser.ts :222-229: the local flag flips at once; off clears the hover box. */
     fun setPickMode(on: Boolean) {
         uiState.update { it.copy(state = it.state.copy(pickMode = on)) }
+        if (!on) hoverState.value = null
         send(buildJsonObject { put("t", "pick-mode"); put("on", on) })
     }
 
@@ -187,7 +200,19 @@ class BrowserChannel(private val opener: BrowserSocketOpener, val sessionId: Str
                         ),
                     )
                 }
-                "hover", "picked", "pick-empty" -> pickFlow.tryEmit(message)
+                "hover" -> {
+                    BrowserPicks.parseHover(message)?.let { hoverState.value = it }
+                    pickFlow.tryEmit(message)
+                }
+                "picked" -> {
+                    val seq = synchronized(lock) { pickSeq + 1 }
+                    BrowserPicks.parsePicked(message, seq)?.let { pick ->
+                        synchronized(lock) { pickSeq = seq }
+                        pickedFlow.tryEmit(pick)
+                    }
+                    pickFlow.tryEmit(message)
+                }
+                "pick-empty" -> pickFlow.tryEmit(message)
                 "closed" -> uiState.update { it.copy(state = State()) }
                 "error" -> uiState.update { it.copy(error = message.string("message")?.ifEmpty { null } ?: "browser error") }
                 else -> Unit

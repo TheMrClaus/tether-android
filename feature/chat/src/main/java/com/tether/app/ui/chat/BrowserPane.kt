@@ -27,6 +27,11 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -37,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -97,6 +103,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.BrowserChannel
 import com.tether.app.client.BrowserInput
+import com.tether.app.client.BrowserPick
+import com.tether.app.client.HoverBox
 import com.tether.app.client.BrowserSocketOpener
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.icons.TetherIcons
@@ -123,6 +131,9 @@ object BrowserPaneTags {
     const val Fit = "browser-fit"
     const val Readout = "browser-readout"
     const val Status = "browser-status"
+    const val SelectElements = "browser-select-elements"
+    const val ShotOnPick = "browser-shot-on-pick"
+    const val Highlight = "browser-highlight"
     fun preset(name: String) = "browser-preset-$name"
 }
 
@@ -189,6 +200,11 @@ fun BrowserPaneHost(
     sessionId: String,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * browser-pane.tsx :36-48 `onPicked(pick, pageUrl)`: an element the operator picked, and the page
+     * it was on (read at the pick, as the web's `urlRef`).
+     */
+    onPicked: (BrowserPick, String) -> Unit = { _, _ -> },
 ) {
     key(sessionId) {
         val channel = remember(opener) { BrowserChannel(opener, sessionId) }
@@ -202,10 +218,10 @@ fun BrowserPaneHost(
                 onDismissRequest = onClose,
                 properties = DialogProperties(usePlatformDefaultWidth = false),
             ) {
-                BrowserPane(channel, onClose, Modifier.fillMaxSize())
+                BrowserPane(channel, onClose, Modifier.fillMaxSize(), onPicked = onPicked)
             }
         } else {
-            BrowserSidePanel(modifier) { BrowserPane(channel, onClose, Modifier.fillMaxSize()) }
+            BrowserSidePanel(modifier) { BrowserPane(channel, onClose, Modifier.fillMaxSize(), onPicked = onPicked) }
         }
     }
 }
@@ -226,9 +242,11 @@ internal fun BrowserSidePanel(modifier: Modifier = Modifier, content: @Composabl
  * size), the live page (the server's JPEG screencast frames, never a web view of the page) taking
  * taps, drags, wheel and hardware keys as CDP-style input, and the status line.
  *
- * T8.6 part 2's seam: "Select elements" / "Screenshot on pick" (browser-pane.tsx :231-248) and the
- * hover box go between the viewport row and the stage, on [BrowserChannel.setPickMode] / `hover` /
- * `pick` and [BrowserChannel.pickEvents]; in pick mode the stage already forwards no input.
+ * T8.6 part 2: "Select elements" and "Screenshot on pick" (browser-pane.tsx :231-248) between the
+ * viewport row and the page. In pick mode the page takes no input: a drag sends `hover` (~30fps,
+ * :103-107) and the reply's box is drawn over the page (:250-254); a tap sends `pick {x,y,screenshot}`
+ * (:108-112); the `picked` reply goes to [onPicked] (the composer's chips). `pick-empty` is, as on the
+ * web (use-browser.ts :141-200 has no case for it), no feedback at all.
  */
 @Composable
 fun BrowserPane(
@@ -236,8 +254,15 @@ fun BrowserPane(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     defaultUrl: String? = null,
+    onPicked: (BrowserPick, String) -> Unit = { _, _ -> },
 ) {
     val ui by channel.ui.collectAsStateWithLifecycle()
+    val hoverBox by channel.hoverBox.collectAsStateWithLifecycle()
+    // A ref, as the web's `urlRef` (:44-47): the handler outlives the URL it was made with.
+    val currentOnPicked by rememberUpdatedState(onPicked)
+    LaunchedEffect(channel) {
+        channel.picks.collect { pick -> currentOnPicked(pick, channel.ui.value.state.url) }
+    }
     val frame by produceState<ImageBitmap?>(null, channel) {
         channel.frames.filterNotNull().collectLatest { f ->
             withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(f.jpeg, 0, f.jpeg.size)?.asImageBitmap() }?.let { value = it }
@@ -247,12 +272,15 @@ fun BrowserPane(
         ui = ui,
         frame = frame,
         defaultUrl = defaultUrl,
+        hoverBox = hoverBox,
         actions = remember(channel, onClose) {
             BrowserPaneActions(
                 navigate = { channel.navigate(it) },
                 setViewport = { w, h, mobile -> channel.setViewport(w, h, mobile) },
                 input = { channel.sendInput(it) },
                 setPickMode = { channel.setPickMode(it) },
+                hover = { x, y -> channel.hover(x, y) },
+                pick = { x, y, screenshot -> channel.pick(x, y, screenshot) },
                 close = {
                     channel.close()
                     onClose()
@@ -269,6 +297,8 @@ internal class BrowserPaneActions(
     val input: (BrowserInput) -> Unit,
     val setPickMode: (Boolean) -> Unit,
     val close: () -> Unit,
+    val hover: (x: Int, y: Int) -> Unit = { _, _ -> },
+    val pick: (x: Int, y: Int, screenshot: Boolean) -> Unit = { _, _, _ -> },
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -279,9 +309,12 @@ internal fun BrowserPaneContent(
     actions: BrowserPaneActions,
     modifier: Modifier = Modifier,
     defaultUrl: String? = null,
+    hoverBox: HoverBox? = null,
 ) {
     val t = LocalTetherTokens.current
     val state = ui.state
+    // browser-pane.tsx :53: "Screenshot on pick" starts on.
+    var shotOnPick by remember { mutableStateOf(true) }
     val vw = state.viewport.width
     val vh = state.viewport.height
     var urlDraft by remember { mutableStateOf(defaultUrl ?: "") }
@@ -363,6 +396,13 @@ internal fun BrowserPaneContent(
                     modifier = Modifier.padding(start = 4.dp).testTag(BrowserPaneTags.Readout),
                 )
             }
+
+            // browser-pane.tsx :231-248: Select elements (an `iconButton`, violet while picking) and the
+            // Screenshot on pick checkbox (a `smallButton` label).
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SelectElementsKey(active = state.pickMode, onClick = { actions.setPickMode(!state.pickMode) })
+                ShotOnPickToggle(checked = shotOnPick, onCheckedChange = { shotOnPick = it })
+            }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
 
@@ -389,6 +429,10 @@ internal fun BrowserPaneContent(
                     viewportWidth = vw,
                     viewportHeight = vh,
                     actions = actions,
+                    hoverBox = hoverBox,
+                    stageWidth = stageW,
+                    stageHeight = stageH,
+                    onPick = { x, y -> actions.pick(x, y, shotOnPick) },
                     modifier = Modifier.size(stageW, stageH),
                 )
             }
@@ -428,7 +472,9 @@ private val numeric = KeyboardOptions(keyboardType = KeyboardType.Number)
  * The live page (browser-pane.tsx :204-224): the frame drawn to the stage's size; a press, a drag
  * (throttled ~30fps) and a release go as `mousePressed` / `mouseMoved` / `mouseReleased` at the
  * mapped page pixel, a wheel as `mouseWheel`, and a hardware key as `keyDown` / `keyUp` (:111-118).
- * In pick mode none of them is forwarded (part 2 handles hover / pick there).
+ * In pick mode none of them is forwarded: a drag sends `hover` at the same throttle and the box the
+ * server answers with is drawn (:250-254); a tap (a touch within the slop, or any mouse click) is the
+ * pick (:108-112 `onClick`).
  */
 @Composable
 private fun BrowserStage(
@@ -437,10 +483,16 @@ private fun BrowserStage(
     viewportWidth: Int,
     viewportHeight: Int,
     actions: BrowserPaneActions,
+    hoverBox: HoverBox?,
+    stageWidth: Dp,
+    stageHeight: Dp,
+    onPick: (x: Int, y: Int) -> Unit,
     modifier: Modifier,
 ) {
     val focus = remember { FocusRequester() }
     val pick by rememberUpdatedState(pickMode)
+    val currentOnPick by rememberUpdatedState(onPick)
+    val touchSlop = LocalViewConfiguration.current.touchSlop
     Box(
         modifier
             .background(Color.White)
@@ -466,7 +518,8 @@ private fun BrowserStage(
                 true
             }
             .pointerInput(viewportWidth, viewportHeight) {
-                var lastMove = 0L
+                var lastMove = -BROWSER_MOVE_THROTTLE_MS
+                var pressedAt: Offset? = null
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
@@ -478,13 +531,23 @@ private fun BrowserStage(
                             PointerEventType.Press -> {
                                 runCatching { focus.requestFocus() }
                                 if (!pick) {
+                                    pressedAt = null
                                     change.consume()
                                     actions.input(BrowserInput("mousePressed", x, y, button = "left", buttons = 1, clickCount = 1, modifiers = modifiers))
+                                } else {
+                                    pressedAt = change.position
                                 }
                             }
                             PointerEventType.Release -> if (!pick) {
                                 change.consume()
                                 actions.input(BrowserInput("mouseReleased", x, y, button = "left", buttons = 0, clickCount = 1, modifiers = modifiers))
+                            } else {
+                                // The web's `click`: a mouse press-release on the stage, a touch that stayed a tap.
+                                val down = pressedAt
+                                pressedAt = null
+                                if (down != null && (change.type == PointerType.Mouse || (change.position - down).getDistance() <= touchSlop)) {
+                                    currentOnPick(x, y)
+                                }
                             }
                             PointerEventType.Move -> {
                                 // `touch-action: none`: a drag on the page is the page's, never the wrap's scroll.
@@ -492,7 +555,9 @@ private fun BrowserStage(
                                 val now = SystemClock.uptimeMillis()
                                 if (now - lastMove >= BROWSER_MOVE_THROTTLE_MS) {
                                     lastMove = now
-                                    if (!pick) {
+                                    if (pick) {
+                                        actions.hover(x, y)
+                                    } else {
                                         actions.input(BrowserInput("mouseMoved", x, y, buttons = if (change.pressed) 1 else 0, modifiers = modifiers))
                                     }
                                 }
@@ -513,6 +578,96 @@ private fun BrowserStage(
         if (frame != null) {
             Image(frame, contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
         }
+        if (pickMode && hoverBox != null && viewportWidth > 0 && viewportHeight > 0) {
+            HoverHighlight(hoverBox, viewportWidth, viewportHeight, stageWidth, stageHeight)
+        }
+    }
+}
+
+/**
+ * `.highlight` / `.highlightLabel` (browser-pane.module.css :159-176, tsx :143-146, :217-221): the
+ * picked-to element's box scaled from page pixels to the stage, a 2dp violet border over an 18%
+ * violet wash, its short label (tag#id.class) on a violet tab sitting on the box's top edge.
+ */
+@Composable
+private fun HoverHighlight(hover: HoverBox, vw: Int, vh: Int, stageWidth: Dp, stageHeight: Dp) {
+    val t = LocalTetherTokens.current
+    val left = (hover.box.x / vw * stageWidth.value).dp
+    val top = (hover.box.y / vh * stageHeight.value).dp
+    val width = (hover.box.width / vw * stageWidth.value).dp
+    val height = (hover.box.height / vh * stageHeight.value).dp
+    Box(
+        Modifier
+            .offset(left, top)
+            .size(width, height)
+            .background(t.violet.copy(alpha = 0.18f))
+            .border(2.dp, t.violet)
+            .testTag(BrowserPaneTags.Highlight),
+    ) {
+        Text(
+            hover.label,
+            color = Color.White,
+            fontFamily = Manrope,
+            fontWeight = TetherWeights.body,
+            fontSize = 10.sp,
+            maxLines = 1,
+            modifier = Modifier
+                .layout { measurable, constraints ->
+                    val p = measurable.measure(constraints.copy(maxWidth = Int.MAX_VALUE))
+                    layout(p.width, p.height) { p.place(0, -p.height) }
+                }
+                .background(t.violet, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                .padding(horizontal = 4.dp, vertical = 1.dp),
+        )
+    }
+}
+
+/** The `iconButton` / `iconButtonActive` Select elements key (tsx :232-243): violet and pressed while picking. */
+@Composable
+private fun SelectElementsKey(active: Boolean, onClick: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val shape = RoundedCornerShape(t.radiusSm)
+    val tone = if (active) t.violet else t.ink
+    Row(
+        Modifier
+            .heightIn(min = 44.dp)
+            .border(1.dp, if (active) t.violet else t.line, shape)
+            .background(if (active) t.violetWash else t.graphite, shape)
+            .toggleable(value = active, role = Role.Button, onValueChange = { onClick() })
+            .padding(horizontal = 10.dp)
+            .testTag(BrowserPaneTags.SelectElements),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(TetherIcons.SquareDashedMousePointer, contentDescription = null, tint = tone, modifier = Modifier.size(16.dp))
+        Text("Select elements", color = tone, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 13.sp, maxLines = 1)
+    }
+}
+
+/** The "Screenshot on pick" label (tsx :244-247): a `smallButton` holding a checkbox. */
+@Composable
+private fun ShotOnPickToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    val t = LocalTetherTokens.current
+    val shape = RoundedCornerShape(t.radiusSm)
+    Row(
+        Modifier
+            .heightIn(min = 36.dp)
+            .border(1.dp, t.line, shape)
+            .background(t.graphite, shape)
+            .toggleable(value = checked, role = Role.Checkbox, onValueChange = onCheckedChange)
+            .padding(horizontal = 10.dp)
+            .testTag(BrowserPaneTags.ShotOnPick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        val boxShape = RoundedCornerShape(3.dp)
+        Box(
+            Modifier.size(16.dp).border(1.dp, if (checked) t.violet else t.lineStrong, boxShape).background(if (checked) t.violet else t.graphite, boxShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (checked) Icon(TetherIcons.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+        }
+        Text("Screenshot on pick", color = t.ink, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp, maxLines = 1)
     }
 }
 
