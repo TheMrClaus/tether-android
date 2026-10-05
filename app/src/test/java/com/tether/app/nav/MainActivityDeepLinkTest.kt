@@ -77,7 +77,7 @@ class MainActivityDeepLinkTest {
      * a link's pending target, and never [linked].
      */
     private fun assertNoLinkSelection(vm: TetherViewModel, linked: String = LISTED) {
-        assertFalse("a link's target was selected", vm.selectionPending.value)
+        assertNull("a link's target was made pending", vm.pendingSessionId.value)
         assertNotEquals(linked, vm.selectedSessionId.value)
     }
 
@@ -143,13 +143,22 @@ class MainActivityDeepLinkTest {
         assertEquals(PAIRED, client.serverUrl.value)
     }
 
+    /**
+     * ta-coik.42 (web differs from the old app): a link to a session the server does not list is the
+     * web's pending target (dashboard.tsx 90fbb9f :292, :1125-1139), never given up and never a
+     * notice: nothing listed is on screen meanwhile (the one-time pick waits for it, :756), and the
+     * chat shows if it is listed later. The old app dropped the link with "That session isn't on
+     * this server any more."
+     */
     @Test
-    fun aStaleIdLandsOnTheCurrentScreenWithAToast() {
+    fun aStaleIdWaitsAsThePendingTargetWithNoToast() {
         install(NavTestClient())
         val activity = launch(view("tether://session/gone-1"))
-        assertNoLinkSelection(activity.vm, linked = "gone-1")
-        assertEquals(DeepLinkNavigator.SESSION_GONE, activity.vm.activeToast.value)
-        // A malformed one too, without a crash.
+        assertEquals("gone-1", activity.vm.pendingSessionId.value)
+        assertNull("nothing picked behind it", activity.vm.activeId.value)
+        assertFalse("gone-1" in client.attached)
+        assertNull(activity.vm.activeToast.value)
+        // A malformed one, without a crash.
         activity.newIntent(view("tether://session/..%2F..%2Fetc"))
         idle()
         assertEquals(DeepLinkNavigator.CANNOT_OPEN, activity.vm.activeToast.value)

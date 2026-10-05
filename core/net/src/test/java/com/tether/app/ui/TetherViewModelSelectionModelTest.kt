@@ -121,7 +121,8 @@ class TetherViewModelSelectionModelTest {
         vm.onBootView(sessionsView = true, remembered = null)
         vm.pickIfNothingSelected(true, listOf(chat("x", cwd = "/other"), chat("y", cwd = "/w"), chat("z", cwd = "/w")), currentWorkspace = "/w")
         assertEquals("y", vm.selectedSessionId.value)
-        assertFalse("a pick is not a pending target", vm.selectionPending.value)
+        assertNull("a pick is not a pending target", vm.pendingSessionId.value)
+        assertEquals("a pick is the web's activeId", "y", vm.activeId.value)
         noAttach()
         // Once committed it is not re-derived (another chat moving to the top changes nothing).
         vm.pickIfNothingSelected(true, listOf(chat("z", cwd = "/w"), chat("y", cwd = "/w")), currentWorkspace = "/w")
@@ -182,7 +183,8 @@ class TetherViewModelSelectionModelTest {
     fun aSessionsBootSeedsTheRememberedChatAsPendingWithoutAttaching() {
         vm.onBootView(sessionsView = true, remembered = LastOpenedSession("/w", "a", "h-a"))
         assertEquals("a", vm.selectedSessionId.value)
-        assertTrue(vm.selectionPending.value)
+        assertEquals("a", vm.pendingSessionId.value)
+        assertNull(vm.activeId.value)
         noAttach()
         // Once per view model: a second report (a rotation) seeds nothing.
         vm.selectSession("b")
@@ -210,7 +212,7 @@ class TetherViewModelSelectionModelTest {
     fun aRememberedChatStillListedNeedsNoRestore() {
         client.sessions.value = listOf(chat("a"))
         vm.onBootView(true, LastOpenedSession("/w", "a", "h-a"))
-        assertNull(vm.bootRestoreStep(true, listOf(history("h-a"))))
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-a")), LastOpenedSession("/w", "a", "h-a")))
         assertTrue(client.resumed.isEmpty())
         assertEquals("a", vm.selectedSessionId.value)
     }
@@ -219,23 +221,23 @@ class TetherViewModelSelectionModelTest {
     fun anExitedRememberedChatIsReopenedByItsHistoryIdOnce() {
         vm.onBootView(true, remembered)
         // Nothing discovered and no grace yet: wait.
-        assertNull(vm.bootRestoreStep(true, emptyList()))
+        assertNull(vm.bootRestoreStep(true, emptyList(), remembered))
         assertEquals("gone", vm.selectedSessionId.value)
         // Not on Sessions: wait.
-        assertNull(vm.bootRestoreStep(false, listOf(history("h-gone"))))
-        val hit = vm.bootRestoreStep(true, listOf(history("h-x"), history("h-gone")))
+        assertNull(vm.bootRestoreStep(false, listOf(history("h-gone")), remembered))
+        val hit = vm.bootRestoreStep(true, listOf(history("h-x"), history("h-gone")), remembered)
         assertEquals("h-gone", hit?.historyId)
         // At most once.
-        assertNull(vm.bootRestoreStep(true, listOf(history("h-gone"))))
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-gone")), remembered))
     }
 
     @Test
     fun withNoConversationToReopenTheRememberedChatIsGivenUpAndThePickRuns() {
         goLive()
         vm.onBootView(true, remembered)
-        assertNull(vm.bootRestoreStep(true, listOf(history("h-other"))))
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-other")), remembered))
         assertNull(vm.selectedSessionId.value)
-        assertFalse(vm.selectionPending.value)
+        assertNull(vm.pendingSessionId.value)
         vm.pickIfNothingSelected(true, listOf(chat("x")), "/w")
         assertEquals("x", vm.selectedSessionId.value)
     }
@@ -247,12 +249,12 @@ class TetherViewModelSelectionModelTest {
         main.scheduler.advanceTimeBy(RESTORE_GRACE_MS - 1)
         main.scheduler.runCurrent()
         assertFalse(vm.restoreGraceElapsed.value)
-        assertNull(vm.bootRestoreStep(true, emptyList()))
+        assertNull(vm.bootRestoreStep(true, emptyList(), remembered))
         assertEquals("gone", vm.selectedSessionId.value)
         main.scheduler.advanceTimeBy(2)
         main.scheduler.runCurrent()
         assertTrue(vm.restoreGraceElapsed.value)
-        assertNull(vm.bootRestoreStep(true, emptyList()))
+        assertNull(vm.bootRestoreStep(true, emptyList(), remembered))
         assertNull(vm.selectedSessionId.value)
     }
 
@@ -273,7 +275,7 @@ class TetherViewModelSelectionModelTest {
     @Test
     fun aRememberedChatGivenUpIsNotSeededAgainByALaterBootReport() {
         vm.onBootView(true, remembered)
-        assertNull(vm.bootRestoreStep(true, listOf(history("h-other")))) // given up
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-other")), remembered)) // given up
         assertNull(vm.selectedSessionId.value)
         vm.onBootView(true, remembered) // a rotation reports the view again
         assertNull(vm.selectedSessionId.value)
@@ -286,10 +288,10 @@ class TetherViewModelSelectionModelTest {
         vm.onBootView(true, LastOpenedSession("/w", "a", "h-a"))
         main.scheduler.advanceTimeBy(RESTORE_GRACE_MS + 1)
         main.scheduler.runCurrent()
-        assertNull(vm.bootRestoreStep(true, listOf(history("h-a")))) // listed: nothing to restore, and done
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-a")), LastOpenedSession("/w", "a", "h-a"))) // listed: nothing to restore, and done
         client.sessions.value = emptyList() // the chat ends later
         main.scheduler.advanceUntilIdle()
-        assertNull("the boot restore ran once (bootRestoreRef)", vm.bootRestoreStep(true, listOf(history("h-a"))))
+        assertNull("the boot restore ran once (bootRestoreRef)", vm.bootRestoreStep(true, listOf(history("h-a")), LastOpenedSession("/w", "a", "h-a")))
         assertEquals("a", vm.selectedSessionId.value)
     }
 
@@ -297,7 +299,7 @@ class TetherViewModelSelectionModelTest {
     fun anExplicitSelectionBeforeTheRestoreEndsIt() {
         vm.onBootView(true, remembered)
         vm.selectSession("b")
-        assertNull(vm.bootRestoreStep(true, listOf(history("h-gone"))))
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-gone")), remembered))
         assertEquals("b", vm.selectedSessionId.value)
     }
 
@@ -386,7 +388,7 @@ class TetherViewModelSelectionModelTest {
         assertNull(vm.selectedSessionId.value)
         vm.onNavigateToSessions(listOf(chat("b"), chat("a")), back)
         assertEquals("a", vm.selectedSessionId.value)
-        assertTrue(vm.selectionPending.value)
+        assertEquals("a", vm.pendingSessionId.value)
         noAttach()
     }
 
@@ -399,10 +401,10 @@ class TetherViewModelSelectionModelTest {
         assertEquals("listed: kept", "b", vm.selectedSessionId.value)
         vm.openSession("link")
         vm.onNavigateToSessions(listOf(chat("a")), back)
-        assertEquals("pending: kept", "link", vm.selectedSessionId.value)
+        assertEquals("pending: kept", "link", vm.pendingSessionId.value)
         vm.selectSession("c")
         vm.onNavigateToSessions(listOf(chat("a")), back)
-        assertEquals("picked and gone: the remembered chat", "a", vm.selectedSessionId.value)
+        assertEquals("picked and gone: the remembered chat", "a", vm.pendingSessionId.value)
     }
 
     // --- pending vs picked -----------------------------------------------------------------------
@@ -410,15 +412,18 @@ class TetherViewModelSelectionModelTest {
     @Test
     fun linksAndCreatedRepliesArePendingAndAnExplicitSelectionOrAResumeIsNot() {
         vm.openSession("a")
-        assertTrue(vm.selectionPending.value)
+        assertEquals("a", vm.pendingSessionId.value)
+        assertNull(vm.activeId.value)
         vm.selectSession("b")
-        assertFalse(vm.selectionPending.value)
+        assertNull(vm.pendingSessionId.value)
+        assertEquals("b", vm.activeId.value)
         client.replies.tryEmit(CreatedReply(chat("c"), seq = 1, origin = null))
         main.scheduler.advanceUntilIdle()
-        assertEquals("c", vm.selectedSessionId.value)
-        assertTrue(vm.selectionPending.value)
+        assertEquals("c", vm.pendingSessionId.value)
+        assertEquals("the pick stays behind it", "b", vm.activeId.value)
         assertTrue(vm.resumeHistory(history("h1")))
-        assertFalse(vm.selectionPending.value)
+        assertNull(vm.pendingSessionId.value)
+        assertNull(vm.activeId.value)
     }
 
     // --- the current workspace -------------------------------------------------------------------

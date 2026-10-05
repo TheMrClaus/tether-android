@@ -165,7 +165,7 @@ class MainActivityInstanceTest {
         assertNull(shadowOf(main.get()).nextStartedActivity)
         assertFalse(main.get().isFinishing)
         // ta-coik.41: nothing is opened by the relaunch (the web's one-time pick may hold the first chat).
-        assertFalse(main.vm.selectionPending.value)
+        assertNull(main.vm.pendingSessionId.value)
     }
 
     /**

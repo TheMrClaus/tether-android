@@ -67,10 +67,12 @@ class ColdStartLinkViewTest {
         rule.setContent { UiRoot(client = client, launchIntent = link) }
         onSessionsOnly()
 
-        // The stored settings load: the link is offered, and waits for its session.
+        // The stored settings load: the link is offered, and waits for its session as the console's
+        // pending target (ta-coik.42, dashboard.tsx 90fbb9f :292; nothing is picked behind it).
         rule.runOnIdle { client.loadedFlow.value = true }
         onSessionsOnly()
-        assertEquals(null, vm.selectedSessionId.value)
+        assertEquals(LISTED, vm.pendingSessionId.value)
+        assertEquals(null, vm.activeId.value)
 
         // The session list arrives: the link opens its session, still in Sessions.
         rule.runOnIdle {

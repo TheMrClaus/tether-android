@@ -114,9 +114,10 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     }
     // T6.2: downloaded tool-media clips belong to one sign-in on one server (ToolMediaCache).
     LaunchedEffect(client) { com.tether.app.ui.chat.syncToolMediaCache(client, context.cacheDir) }
-    // dashboard.tsx selectActiveId: an explicit selection retires a waiting link.
+    // dashboard.tsx selectActiveId: an explicit selection retires a waiting link (ta-coik.42: a pick,
+    // not a pending target becoming listed).
     LaunchedEffect(vm, navigator) {
-        vm.selectedSessionId.drop(1).collect {
+        vm.activeId.drop(1).collect {
             if (it != null) {
                 navigator.onUserSelection()
                 vm.setBootLinkPending(false)

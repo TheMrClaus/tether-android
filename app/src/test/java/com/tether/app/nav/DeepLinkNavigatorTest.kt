@@ -31,23 +31,25 @@ class DeepLinkNavigatorTest {
         assertNull(nav.step(ctx()))
     }
 
+    /**
+     * ta-coik.42 (web differs from the old app): signed in to the link's server, the link is handed
+     * to the console at once, listed or not and connected or not; the console's pending target waits
+     * for the list (dashboard.tsx 90fbb9f :292). The old app held it here until listed and dropped an
+     * unlisted one with a notice.
+     */
     @Test
-    fun aSessionWaitsForTheSnapshotWhileConnecting() {
+    fun aSignedInLinkIsHandedOverBeforeTheSnapshot() {
         val nav = DeepLinkNavigator()
-        assertNull(nav.offer(tether("s9"), ctx(connected = false, ids = emptySet())))
-        assertEquals("s9", nav.pendingSessionId)
-        assertNull(nav.step(ctx(connected = false, ids = setOf("s1"))))
-        assertEquals(open("s9"), nav.step(ctx(connected = true, ids = setOf("s1", "s9"))))
+        assertEquals(open("s9"), nav.offer(tether("s9"), ctx(connected = false, ids = emptySet())))
+        assertNull(nav.pendingSessionId)
     }
 
     @Test
-    fun aStaleIdLandsOnANoticeNotACrash() {
+    fun aStaleIdIsHandedOverWithNoNotice() {
         val nav = DeepLinkNavigator()
-        assertEquals(NavEffect.Notice(DeepLinkNavigator.SESSION_GONE), nav.offer(tether("gone"), ctx()))
+        assertEquals(open("gone"), nav.offer(tether("gone"), ctx()))
         assertNull(nav.pendingSessionId)
-        // Waiting, then the snapshot arrives without it.
-        assertNull(nav.offer(tether("gone"), ctx(connected = false, ids = emptySet())))
-        assertEquals(NavEffect.Notice(DeepLinkNavigator.SESSION_GONE), nav.step(ctx(connected = true, ids = setOf("s1"))))
+        assertNull(nav.step(ctx(ids = setOf("s1"))))
     }
 
     @Test
@@ -64,8 +66,8 @@ class DeepLinkNavigatorTest {
     fun homeOpensTheAppAndLeavesAWaitingLinkAlone() {
         val nav = DeepLinkNavigator()
         assertNull(nav.offer(ParsedLink.Open(Destination.Home), ctx()))
-        assertNull(nav.offer(tether("s9"), ctx(connected = false, ids = emptySet())))
-        assertNull(nav.offer(ParsedLink.Open(Destination.Home), ctx(connected = false, ids = emptySet())))
+        assertNull(nav.offer(tether("s9"), ctx(signedIn = false)))
+        assertNull(nav.offer(ParsedLink.Open(Destination.Home), ctx(signedIn = false)))
         assertEquals("s9", nav.pendingSessionId)
     }
 
@@ -97,7 +99,7 @@ class DeepLinkNavigatorTest {
     @Test
     fun aServerSwitchWhileWaitingDropsTheLink() {
         val nav = DeepLinkNavigator()
-        assertNull(nav.offer(tether("s9"), ctx(connected = false, ids = emptySet())))
+        assertNull(nav.offer(tether("s9"), ctx(signedIn = false)))
         assertEquals(NavEffect.Notice(DeepLinkNavigator.OTHER_SERVER), nav.step(ctx(server = b, connected = false, ids = setOf("s9"))))
     }
 
@@ -112,7 +114,7 @@ class DeepLinkNavigatorTest {
     @Test
     fun anExplicitSelectionRetiresAWaitingLink() {
         val nav = DeepLinkNavigator()
-        assertNull(nav.offer(tether("s9"), ctx(connected = false, ids = emptySet())))
+        assertNull(nav.offer(tether("s9"), ctx(signedIn = false)))
         nav.onUserSelection()
         assertNull(nav.step(ctx(ids = setOf("s9"))))
     }
@@ -120,8 +122,8 @@ class DeepLinkNavigatorTest {
     @Test
     fun theNewestLinkWins() {
         val nav = DeepLinkNavigator()
-        assertNull(nav.offer(tether("s8"), ctx(connected = false, ids = emptySet())))
-        assertNull(nav.offer(tether("s9"), ctx(connected = false, ids = emptySet())))
+        assertNull(nav.offer(tether("s8"), ctx(signedIn = false)))
+        assertNull(nav.offer(tether("s9"), ctx(signedIn = false)))
         assertEquals(open("s9"), nav.step(ctx(ids = setOf("s8", "s9"))))
     }
 

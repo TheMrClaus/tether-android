@@ -227,8 +227,12 @@ class GlobalSearchBehaviourTest {
         rule.waitForIdle()
         watcher.cancel()
         assertEquals("s-live", h.vm.selectedSessionId.value)
+        // ta-coik.42 (dashboard.tsx 90fbb9f :1261-1270): the pending target with nothing picked; its chat
+        // view's mount attaches it (the shell's, not composed here), so nothing goes out from the open.
+        assertEquals("s-live", h.vm.pendingSessionId.value)
+        assertNull(h.vm.activeId.value)
         assertEquals(listOf("s-live"), opened)
-        assertEquals(listOf("attach"), h.client.types().filter { it == "attach" || it == "resume" || it == "mark-seen" })
+        assertEquals(emptyList<String>(), h.client.types().filter { it == "attach" || it == "resume" || it == "mark-seen" })
         assertNull(h.vm.openingHistoryId.value)
         assertEquals("h-1", h.vm.findRequest.value!!.historyId)
         // The shell closes the drawer on the openRequests event; the host adds no second close.

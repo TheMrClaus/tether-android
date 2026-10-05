@@ -22,7 +22,8 @@ import kotlinx.coroutines.CoroutineScope
  * - the boot restore reopens it by historyId, or gives it up ([TetherViewModel.bootRestoreStep],
  *   :856-886; `reopen` :465-479: the block becomes current, resume, seen, the drawer closes);
  * - the one-time pick ([TetherViewModel.pickIfNothingSelected], :752-763);
- * - the chat on screen is remembered as `lastOpenedSession` (:829-835), per server origin (r2).
+ * - the chat on screen is remembered as `lastOpenedSession` (:829-835), per server origin (r2);
+ * - ta-coik.42: while a pending target is listed, its block is the current workspace (:1153-1160).
  * Its own composable, so a preference change recomposes this and not the shell.
  */
 @Composable
@@ -40,8 +41,8 @@ internal fun WebSelectionEffects(
     val loaded = stored ?: return
     val client = vm.client
     val sessions by client.sessions.collectAsStateWithLifecycle()
-    val selectedId by vm.selectedSessionId.collectAsStateWithLifecycle()
-    val pending by vm.selectionPending.collectAsStateWithLifecycle()
+    val activeId by vm.activeId.collectAsStateWithLifecycle()
+    val pending by vm.pendingSessionId.collectAsStateWithLifecycle()
     val openingHistoryId by vm.openingHistoryId.collectAsStateWithLifecycle()
     val bootLinkPending by vm.bootLinkPending.collectAsStateWithLifecycle()
     val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
@@ -87,8 +88,8 @@ internal fun WebSelectionEffects(
         if (view != null) vm.onBootView(view == DashboardView.Sessions, remembered)
     }
     // :856-886: the boot restore.
-    LaunchedEffect(sessionsView, sessions, histories, grace, selectedId, pending) {
-        val hit = vm.bootRestoreStep(sessionsView, histories) ?: return@LaunchedEffect
+    LaunchedEffect(sessionsView, sessions, histories, grace, pending, remembered) {
+        val hit = vm.bootRestoreStep(sessionsView, histories, remembered) ?: return@LaunchedEffect
         controller.focusWorkspaceFor(hit.cwd, workspaces, current)
         if (vm.resumeHistory(hit)) {
             controller.markSeen(hit.historyId)
@@ -96,8 +97,15 @@ internal fun WebSelectionEffects(
         }
     }
     // :752-763: the one-time pick.
-    LaunchedEffect(view, sessionsView, selectedId, openingHistoryId, bootLinkPending, visible, current, listLive) {
+    LaunchedEffect(view, sessionsView, activeId, pending, openingHistoryId, bootLinkPending, visible, current, listLive) {
         vm.pickIfNothingSelected(sessionsView, visible, current)
+    }
+    // :1153-1160: a pending target (a link, a live search hit, the remembered chat, a `created`) may
+    // live in a project no block owns; once listed, its block (or its own folder) becomes the current
+    // workspace, re-checked on the same inputs as the web's effect while the target stays pending.
+    val pendingCwd = pending?.let { id -> sessions.firstOrNull { it.id == id } }?.cwd
+    LaunchedEffect(pending, pendingCwd, workspaces, current) {
+        if (pendingCwd != null) controller.focusWorkspaceFor(pendingCwd, workspaces, current)
     }
     // :829-835: remember the chat on screen.
     LaunchedEffect(session?.id, session?.cwd, origin) {

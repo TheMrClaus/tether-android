@@ -51,7 +51,32 @@ class TetherViewModel(
 ) : ViewModel() {
 
     private val _selectedSessionId = MutableStateFlow<String?>(null)
+
+    /**
+     * ta-coik.42: the chat the console shows when it is listed, resolved from the web's two slots
+     * ([pendingSessionId] outranks [activeId] while it names a listed chat; [selectionShown]). The
+     * shell shows it only while it is in `visibleSessions` (dashboard.tsx 90fbb9f :709-717).
+     */
     val selectedSessionId: StateFlow<String?> = _selectedSessionId.asStateFlow()
+
+    // ta-coik.42 (declared before init, like the opening row: the created collector may run during it).
+    private val _activeId = MutableStateFlow<String?>(null)
+
+    /** dashboard.tsx 90fbb9f :274 `activeId`: the operator's pick (a sidebar row, the one-time pick). */
+    val activeId: StateFlow<String?> = _activeId.asStateFlow()
+
+    private val _pendingSessionId = MutableStateFlow<String?>(null)
+
+    /**
+     * dashboard.tsx 90fbb9f :292 `pendingSessionId`: a target that outranks [activeId] once it is
+     * listed (a link, the remembered chat, a `created`, a live search hit). It waits with no limit
+     * (only the remembered chat's boot restore gives it up, :856-886), so the chat on screen stays
+     * until the target appears; an explicit selection, a resume and the restore giving up retire it.
+     */
+    val pendingSessionId: StateFlow<String?> = _pendingSessionId.asStateFlow()
+
+    /** The shell's "Show ended sessions" (null: not read yet, nothing filtered), for `visibleSessions`. */
+    private var showEnded: Boolean? = null
 
     // T5.2 (declared before init: the created collector may run during it).
     /**
@@ -61,22 +86,10 @@ class TetherViewModel(
     private val _openingHistoryId = MutableStateFlow<String?>(null)
     val openingHistoryId: StateFlow<String?> = _openingHistoryId.asStateFlow()
 
-    // ta-coik.41 (declared before init, like the opening row: the created collector may run during it).
-    private val _selectionPending = MutableStateFlow(false)
-
-    /**
-     * Whether the selection is the web's `pendingSessionId` (a link, the remembered chat, a `created`,
-     * a live search hit) rather than a pick: until the list arrives it reads as "Reopening your
-     * session" (dashboard.tsx:1702 `pendingSessionId && !visibleSessions.length`). An explicit
-     * selection, a resume and the restore giving up retire it.
-     */
-    val selectionPending: StateFlow<Boolean> = _selectionPending.asStateFlow()
-
     /** The first view of this view model is resolved (the remembered chat is seeded, or not, once). */
     private var bootViewSeen = false
 
-    /** The remembered chat seeded at boot, while its restore (:856-886) is still owed. */
-    private var restoreTarget: com.tether.app.ui.prefs.LastOpenedSession? = null
+    /** dashboard.tsx:855 `bootRestoreRef`: the boot restore has run (or has nothing left to do). */
     private var restoreSettled = false
 
     private val _restoreGraceElapsed = MutableStateFlow(false)
@@ -450,6 +463,8 @@ class TetherViewModel(
         // T7.4: attachments staged for a session that locked (read-only, handed off, archived) go;
         // r2: so do those of a session that left the list (verifier L3), and a lock of the SELECTED
         // session drops a first pick still being read for it (nothing staged yet: L4a).
+        // ta-coik.42: a pending target now listed (or gone again) changes the chat on screen.
+        resolveSelection()
         val staged = stagedAttachments.current.value
         val stagedGone = staged != null && list.firstOrNull { it.id == staged.sessionId }.let { it == null || attachmentsLocked(it) }
         val selectedNow = _selectedSessionId.value
@@ -458,7 +473,8 @@ class TetherViewModel(
 
         // ta-coik.41: a selection whose session left the list is KEPT (dashboard.tsx 90fbb9f: nothing
         // clears `activeId`; `selectedSession` :709-717 just resolves to nothing, so the empty workspace
-        // shows, and the chat is on screen again if it comes back).
+        // shows, and the chat is on screen again if it comes back). ta-coik.42: a pending target that
+        // leaves falls back to `activeId`, as there.
 
         // Drop run-tab selections for sessions that no longer exist (archive /
         // workspace switch) — stale entries are inert (consumers resolve by
@@ -479,7 +495,7 @@ class TetherViewModel(
 
     fun selectSession(id: String) {
         // dashboard.tsx:300-304 selectActiveId: an explicit selection retires a pending target.
-        _selectionPending.value = false
+        _pendingSessionId.value = null
         showSelected(id)
         if (mountedChat == id) {
             // Re-selected while its chat view stays on screen: the web remounts nothing (dashboard.tsx
@@ -521,12 +537,49 @@ class TetherViewModel(
         _openingHistoryId.value = null
         // ta-abm (dashboard.tsx selectSession): a selection closes the new-session sheet; the draft stays.
         hideDraft()
-        // T7.4: staged attachments belong to the conversation they were picked in (the web's ChatView);
-        // r2: another selection drops a first pick still being read for the previous one as well.
+        // T7.4: staged attachments belong to the conversation they were picked in (the web's ChatView).
         val staged = stagedAttachments.current.value
-        if ((staged != null && staged.sessionId != id) || _selectedSessionId.value != id) stagedAttachments.clear()
-        _selectedSessionId.value = id
+        if (staged != null && staged.sessionId != id) stagedAttachments.clear()
+        _activeId.value = id
         loadDraft(id)
+        resolveSelection()
+    }
+
+    /**
+     * ta-coik.42: re-resolve [selectedSessionId] from the two slots and the listed chats (`visibleSessions`:
+     * an ended one only with "Show ended sessions" on, dashboard.tsx :609-611). When the chat on screen
+     * changes, what was staged for the previous one goes (T7.4 r2: a first pick still being read too),
+     * as the web's ChatView remounts with nothing staged.
+     */
+    private fun resolveSelection() {
+        val list = client.sessions.value
+        val filter = showEnded
+        val next = selectionShown(_pendingSessionId.value, _activeId.value) { id ->
+            list.any { it.id == id && (filter != false || it.status != "exited") }
+        }
+        if (next == _selectedSessionId.value) return
+        stagedAttachments.clear()
+        _selectedSessionId.value = next
+        next?.let(::loadDraft)
+    }
+
+    /** ta-coik.42: the shell's "Show ended sessions" ([showEnded]; null until it is read). */
+    fun setShowEnded(value: Boolean?) {
+        if (showEnded == value) return
+        showEnded = value
+        resolveSelection()
+    }
+
+    /**
+     * dashboard.tsx 90fbb9f :1172-1174 `endSession`: the header's End session first commits the chat on
+     * screen as the pick (`selectActiveId(activeSession.id)`: the pending target and the opening row
+     * retire). Nothing is attached: the same chat stays mounted.
+     */
+    fun commitSelection(id: String) {
+        _openingHistoryId.value = null
+        _pendingSessionId.value = null
+        _activeId.value = id
+        resolveSelection()
     }
 
     private val _openRequests = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -553,19 +606,39 @@ class TetherViewModel(
         _bootLinkPending.value = pending
     }
 
-    /** Select [id] on behalf of a link: [selectSession] plus an [openRequests] event. Navigation only. */
+    /**
+     * ta-coik.42 (dashboard.tsx 90fbb9f :1125-1139, the notification click's `tether:open`): a link's
+     * target becomes [pendingSessionId] and nothing else changes. The chat on screen ([activeId]) stays
+     * until the target is listed, then the target is shown; the opening row and the new-session sheet
+     * stay too. Nothing is attached: the chat attaches when its view mounts ([chatViewShown]). Plus an
+     * [openRequests] event (Sessions, the drawer).
+     */
     fun openSession(id: String) {
-        selectSession(id)
-        // dashboard.tsx:1114, 1137, 1267: a link's (or a live search hit's) target is a pending one.
-        _selectionPending.value = true
+        _pendingSessionId.value = id
+        loadDraft(id)
+        resolveSelection()
+        _openRequests.tryEmit(id)
+    }
+
+    /**
+     * ta-coik.42 (dashboard.tsx 90fbb9f :1261-1270 `openGlobalHit`, a hit whose conversation is live):
+     * the pick and the opening row clear and the live session becomes [pendingSessionId]; the sheet
+     * closes. Nothing is attached (the mount does). Plus an [openRequests] event.
+     */
+    fun openSearchHit(id: String) {
+        _openingHistoryId.value = null
+        _activeId.value = null
+        _pendingSessionId.value = id
+        hideDraft()
+        loadDraft(id)
+        resolveSelection()
         _openRequests.tryEmit(id)
     }
 
     // ------------------------------------------------------------------
-    // ta-coik.41: the web's selection model (dashboard.tsx 90fbb9f). The web holds `activeId` (a pick)
-    // and `pendingSessionId` (a link, the remembered chat, a `created`, a live search hit) and shows
-    // whichever names a listed chat. Here one selection carries both, and [selectionPending] says
-    // whether it came the pending way.
+    // ta-coik.41 / ta-coik.42: the web's selection model (dashboard.tsx 90fbb9f): `activeId` (a pick)
+    // and `pendingSessionId` (a link, the remembered chat, a `created`, a live search hit), and the
+    // chat on screen is whichever names a listed chat, the pending one first ([selectionShown]).
     // ------------------------------------------------------------------
 
     /**
@@ -579,38 +652,41 @@ class TetherViewModel(
         if (bootViewSeen) return
         bootViewSeen = true
         if (!sessionsView || remembered == null) return
-        if (_selectedSessionId.value != null || _openingHistoryId.value != null || _bootLinkPending.value) return
-        restoreTarget = remembered
-        adopt(remembered.sessionId)
-        _selectionPending.value = true
+        if (_pendingSessionId.value != null || _activeId.value != null || _openingHistoryId.value != null || _bootLinkPending.value) return
+        _pendingSessionId.value = remembered.sessionId
+        loadDraft(remembered.sessionId)
+        resolveSelection()
     }
 
     /**
      * dashboard.tsx:856-886, the boot restore, re-evaluated on every change of its inputs and acted
-     * on at most once. While the remembered chat is still the pending selection and not in the
-     * session list, it waits for [histories] (the current workspace's discovered conversations) or
-     * the grace ([restoreGraceElapsed]); then it returns the conversation to reopen by its historyId,
-     * or, with none, gives the remembered chat up (the selection clears, so the one-time pick may
-     * run). Returns null when there is nothing to reopen now; the caller reopens what it returns
+     * on at most once. While the remembered chat ([remembered], the stored `lastOpenedSession`) is
+     * still [pendingSessionId] and not in the session list, it waits for [histories] (the current
+     * workspace's discovered conversations) or the grace ([restoreGraceElapsed]); then it returns the
+     * conversation to reopen by its historyId, or, with none, gives the remembered chat up (the pending
+     * target clears; [activeId] is untouched, so with nothing picked the one-time pick may run).
+     * Returns null when there is nothing to reopen now; the caller reopens what it returns
      * (dashboard.tsx `reopen`: the block becomes current, [resumeHistory], seen).
      */
-    fun bootRestoreStep(sessionsView: Boolean, histories: List<HistorySession>): HistorySession? {
+    fun bootRestoreStep(
+        sessionsView: Boolean,
+        histories: List<HistorySession>,
+        remembered: com.tether.app.ui.prefs.LastOpenedSession?,
+    ): HistorySession? {
         if (restoreSettled || !sessionsView) return null
         val grace = _restoreGraceElapsed.value
-        val target = restoreTarget
-        val stillPending = target != null && _selectionPending.value && _selectedSessionId.value == target.sessionId &&
-            client.sessions.value.none { it.id == target.sessionId }
+        val stillPending = remembered != null && _pendingSessionId.value == remembered.sessionId &&
+            client.sessions.value.none { it.id == remembered.sessionId }
         if (!stillPending) {
             if (grace) restoreSettled = true
             return null
         }
         if (histories.isEmpty() && !grace) return null
         restoreSettled = true
-        restoreTarget = null
-        val hit = target!!.historyId?.let { id -> histories.firstOrNull { it.historyId == id } }
+        val hit = remembered!!.historyId?.let { id -> histories.firstOrNull { it.historyId == id } }
         if (hit == null) {
-            _selectedSessionId.value = null
-            _selectionPending.value = false
+            _pendingSessionId.value = null
+            resolveSelection()
         }
         return hit
     }
@@ -626,24 +702,27 @@ class TetherViewModel(
      */
     fun pickIfNothingSelected(sessionsView: Boolean, visible: List<AgentSession>, currentWorkspace: String?) {
         if (!bootViewSeen || !_listLive.value || !sessionsView || visible.isEmpty()) return
-        if (_selectedSessionId.value != null || _openingHistoryId.value != null || _bootLinkPending.value) return
+        if (_activeId.value != null || _pendingSessionId.value != null || _openingHistoryId.value != null || _bootLinkPending.value) return
         val preferred = visible.firstOrNull { it.cwd == currentWorkspace } ?: visible.first()
-        adopt(preferred.id)
+        _activeId.value = preferred.id
+        loadDraft(preferred.id)
+        resolveSelection()
     }
 
     /**
      * dashboard.tsx:1352-1364 navigateTo("sessions") from the top bar: with nothing selected, the
-     * remembered chat ([remembered]) becomes the pending selection when it is listed ([visible]).
-     * "Nothing selected" is the web's `selectedSession?.id ?? pendingSessionId` being null: no
-     * selection, or a picked one whose chat left the list (a pending one is kept).
+     * remembered chat ([remembered]) becomes [pendingSessionId] when it is listed ([visible]).
+     * "Nothing selected" is the web's `selectedSession?.id ?? pendingSessionId` being null: no pending
+     * target, and no pick or a picked chat that left the list.
      */
     fun onNavigateToSessions(visible: List<AgentSession>, remembered: com.tether.app.ui.prefs.LastOpenedSession?) {
-        val selected = _selectedSessionId.value
-        if (selected != null && (_selectionPending.value || visible.any { it.id == selected })) return
+        val shown = selectionShown(_pendingSessionId.value, _activeId.value) { id -> visible.any { it.id == id } }
+        if (_pendingSessionId.value != null || (shown != null && visible.any { it.id == shown })) return
         val id = remembered?.sessionId ?: return
         if (visible.none { it.id == id }) return
-        adopt(id)
-        _selectionPending.value = true
+        _pendingSessionId.value = id
+        loadDraft(id)
+        resolveSelection()
     }
 
     /**
@@ -652,23 +731,15 @@ class TetherViewModel(
      * next connection, and the current workspace settled again on its `ready` (use-tether.ts :783).
      */
     private fun resetConsole() {
-        _selectedSessionId.value = null
-        _selectionPending.value = false
+        _activeId.value = null
+        _pendingSessionId.value = null
         _openingHistoryId.value = null
+        resolveSelection()
         bootViewSeen = false
-        restoreTarget = null
         restoreSettled = false
         _restoreGraceElapsed.value = false
         _listLive.value = false
         _currentWorkspace.value = null
-    }
-
-    /** The web's `setActiveId` / `setPendingSessionId` alone: no attach, the sheet stays, the opening row stays. */
-    private fun adopt(id: String) {
-        val staged = stagedAttachments.current.value
-        if ((staged != null && staged.sessionId != id) || _selectedSessionId.value != id) stagedAttachments.clear()
-        _selectedSessionId.value = id
-        loadDraft(id)
     }
 
     /**
@@ -813,8 +884,9 @@ class TetherViewModel(
     // ------------------------------------------------------------------
 
     /**
-     * dashboard.tsx:394-409: send `resume`; only if it went out, the row becomes the opening one
-     * and the current selection clears (the transcript waits for the server's `created`). A
+     * dashboard.tsx:394-409 (90fbb9f :465-479 `reopen`): send `resume`; only if it went out, the row
+     * becomes the opening one and both the pick and the pending target clear (the transcript waits
+     * for the server's `created`). A
      * refusal (history gone, recoverable work elsewhere) arrives as an `error` toast and leaves
      * the row opening, as on the web. Returns whether the frame was sent.
      */
@@ -822,8 +894,9 @@ class TetherViewModel(
         if (!client.resume(history)) return false
         hideDraft()
         _openingHistoryId.value = history.historyId
-        _selectedSessionId.value = null
-        _selectionPending.value = false
+        _pendingSessionId.value = null
+        _activeId.value = null
+        resolveSelection()
         return true
     }
 
@@ -859,20 +932,31 @@ class TetherViewModel(
      * replies) must still be the configured server. The client checks it and subscribes the session
      * in one step under its lock ([TetherClient.attachIfConfigured]), so a switch cannot slip between;
      * refused, nothing here changes (no selection, the sheet stays).
+     *
+     * ta-coik.42 (dashboard.tsx 90fbb9f :771-785): the reply's session becomes [pendingSessionId] (the
+     * opening row clears, [activeId] stays), so the chat on screen stays until the new one is listed.
+     * The attach still goes out with the reply, as the server's own watch moves with it (below).
      */
     private fun openCreated(sessionId: String, origin: String?) {
         if (origin != null && !client.attachIfConfigured(sessionId, origin)) return
         // ta-coik.39 r2: that attach is the one of the mount it causes (the server watches the
         // created session already: server.mjs 90fbb9f :9073, :9294, :9319).
         if (origin != null && mountedChat != sessionId) attachedForMount = sessionId
+        // A client that does not stamp its replies attaches as a sidebar open of a new chat does.
+        if (origin == null && _selectedSessionId.value != sessionId) {
+            if (mountedChat == sessionId) {
+                client.attach(sessionId)
+            } else {
+                attachedForMount = sessionId
+                client.attachMounted(sessionId)
+            }
+        }
         _openingHistoryId.value = null
         // dashboard.tsx:781: every `created` (this draft's own, or a resume's) closes the sheet.
         hideDraft()
-        if (_selectedSessionId.value != sessionId) {
-            if (origin != null) showSelected(sessionId) else selectSession(sessionId)
-        }
-        // ta-coik.41 (dashboard.tsx:778): the reply's session is a pending target.
-        _selectionPending.value = true
+        _pendingSessionId.value = sessionId
+        loadDraft(sessionId)
+        resolveSelection()
     }
 
     // ------------------------------------------------------------------
@@ -950,6 +1034,14 @@ class TetherViewModelFactory(
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = TetherViewModel(client, draftStore) as T
 }
+
+/**
+ * ta-coik.42 (dashboard.tsx 90fbb9f :710-717 `selectedSession`): the pending target when [listed], else
+ * the pick. With no pick the pending target is returned even when not listed, so a caller that shows
+ * only listed chats ([listed] again) shows nothing, as the web does.
+ */
+fun selectionShown(pending: String?, active: String?, listed: (String) -> Boolean): String? =
+    if (pending != null && listed(pending)) pending else active ?: pending
 
 /** ta-coik.41 (dashboard.tsx:851): how long the boot restore waits for discovery after a connection opens. */
 const val RESTORE_GRACE_MS = 2_000L

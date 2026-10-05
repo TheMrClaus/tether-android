@@ -9,7 +9,10 @@ data class NavContext(
     val signedIn: Boolean,
     /** The stored server URL, kept across logout to prefill sign-in. */
     val serverUrl: String?,
-    /** The `ready` snapshot is in: the client publishes its session list before it reports Connected. */
+    /**
+     * The `ready` snapshot is in: the client publishes its session list before it reports Connected.
+     * ta-coik.42: no longer decides where a link goes (the console's pending target waits for the list).
+     */
     val connected: Boolean,
     val sessionIds: Set<String>,
 ) {
@@ -28,10 +31,10 @@ sealed interface NavEffect {
  * The one navigation entry point (T4.4). Every source — the `tether://` filter, an http(s) link to
  * the paired server, a notification tap, a same-origin link tapped in a chat — ends up in [offer].
  *
- * A session link is held as the web holds `pendingSessionId` (components/dashboard.tsx): it waits
- * for the session list, is retired by any explicit selection ([onUserSelection]), and is fulfilled
- * once. Unlike the web, which waits indefinitely, a session the connected server does not list
- * lands on a notice and the current screen.
+ * ta-coik.42: a session link for the signed-in server is handed over at once ([NavEffect.Open]): the
+ * console holds it as the web holds `pendingSessionId` (components/dashboard.tsx 90fbb9f :292,
+ * :1125-1139), waiting with no limit for the session to be listed while the chat on screen stays,
+ * as the web does (no notice, no give-up). It is fulfilled once.
  *
  * Signed out, the link waits behind the login screen, bound to the server it was meant for: the
  * link's own origin (http(s)), else the stored server URL at the time it arrived. It is fulfilled
@@ -78,15 +81,8 @@ class DeepLinkNavigator {
             pending = null
             return NavEffect.Notice(OTHER_SERVER)
         }
-        if (waiting.sessionId in context.sessionIds) {
-            pending = null
-            return NavEffect.Open(waiting.sessionId)
-        }
-        if (context.connected) {
-            pending = null
-            return NavEffect.Notice(SESSION_GONE)
-        }
-        return null
+        pending = null
+        return NavEffect.Open(waiting.sessionId)
     }
 
     /** dashboard.tsx `selectActiveId`: an explicit selection retires the link's override. */
@@ -97,7 +93,6 @@ class DeepLinkNavigator {
     companion object {
         const val OTHER_SERVER = "That link is for a different Tether server."
         const val CANNOT_OPEN = "That link can't be opened in Tether."
-        const val SESSION_GONE = "That session isn't on this server any more."
         const val SIGNED_IN_OPEN_AGAIN = "Signed in. Open the link again to go to that session."
 
         fun noticeFor(reason: LinkRejection): String = when (reason) {

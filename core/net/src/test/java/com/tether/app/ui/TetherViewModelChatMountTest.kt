@@ -86,7 +86,9 @@ class TetherViewModelChatMountTest {
         val created = com.tether.app.protocol.model.AgentSession(id = "s9", provider = "claude", name = "s9", cwd = "/w", status = "ready", startedAt = 1, updatedAt = 1)
         client.replies.tryEmit(com.tether.app.client.CreatedReply(created, seq = 1, origin = "https://example.test"))
         main.scheduler.advanceUntilIdle()
-        assertEquals("s9", vm.selectedSessionId.value)
+        // ta-coik.42: the reply's session is the pending target (on screen once listed, the web's
+        // dashboard.tsx 90fbb9f :710-717; this client lists nothing, so the mount stands for it).
+        assertEquals("s9", vm.pendingSessionId.value)
         vm.chatViewShown("s9") // the mount that reply caused
         assertEquals(listOf("mount:s1", "attach-if:s9"), client.calls)
     }

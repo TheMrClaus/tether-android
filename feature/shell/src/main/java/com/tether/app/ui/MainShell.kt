@@ -157,7 +157,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val projections by vm.client.projections.collectAsStateWithLifecycle()
     val providers by vm.client.providers.collectAsStateWithLifecycle()
     val connection by vm.client.connection.collectAsStateWithLifecycle()
-    val selectedId by vm.selectedSessionId.collectAsStateWithLifecycle()
+    // ta-coik.42: the web's two slots (dashboard.tsx 90fbb9f :274 `activeId`, :292 `pendingSessionId`).
+    val activeId by vm.activeId.collectAsStateWithLifecycle()
+    val pendingSessionId by vm.pendingSessionId.collectAsStateWithLifecycle()
     val workspaceRoot by vm.client.workspaceRoot.collectAsStateWithLifecycle()
     val toast by vm.toast.collectAsStateWithLifecycle()
     val unseenWarnings by vm.unseenWarnings.collectAsStateWithLifecycle()
@@ -178,7 +180,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // A session already chosen by a link (a notification or deep link applied before this shell
     // composed) resolves the boot at once: the explicit session link wins, so nothing is read.
     var viewHistorySaved by rememberSaveable {
-        val linked = vm.selectedSessionId.value != null || vm.openingHistoryId.value != null || vm.bootLinkPending.value
+        val linked = vm.pendingSessionId.value != null || vm.activeId.value != null || vm.openingHistoryId.value != null || vm.bootLinkPending.value
         mutableStateOf(ViewHistory(if (linked) DashboardView.Sessions else null).encode())
     }
     // T15.4 r2: whether the operator has moved between views yet (the bar, the rail, a hand-off,
@@ -214,8 +216,11 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // flashes in; saved, so a rotation does not pass through that state (and remount the chat).
     var showEnded by rememberSaveable { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(prefs) { prefs.showEnded.distinctUntilChanged().collect { showEnded = it } }
-    val selectionPending by vm.selectionPending.collectAsStateWithLifecycle()
+    LaunchedEffect(showEnded) { vm.setShowEnded(showEnded) }
     val visibleSessions = if (showEnded == false) sessions.filter { it.status != "exited" } else sessions
+    // ta-coik.42 (dashboard.tsx 90fbb9f :710-717): the pending target while it is listed, else the pick;
+    // resolved here from the same list the shell shows, so the switch lands in the same frame.
+    val selectedId = selectionShown(pendingSessionId, activeId) { id -> visibleSessions.any { it.id == id } }
     val selectedSession = if (showEnded == null) null else visibleSessions.firstOrNull { it.id == selectedId }
     val session = selectedSession?.takeIf { sessionsView }
     // ta-coik.39 r2: the chat view on screen, as the web mounts its ChatView (dashboard.tsx 90fbb9f
@@ -319,8 +324,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         }
     }
     // T15.2/T15.4: any new selection (a create, a resume, a link) shows Sessions (`selectSession`,
-    // `reopen` and the `created` follow all `pushView("sessions")`).
-    LaunchedEffect(vm) { vm.selectedSessionId.drop(1).collect { if (it != null) navigateTo(DashboardView.Sessions) } }
+    // `reopen` and the `created` follow all `pushView("sessions")`). ta-coik.42: a new pick or pending
+    // target, not a pending target becoming listed (the web pushes nothing then).
+    LaunchedEffect(vm) { vm.activeId.drop(1).collect { if (it != null) navigateTo(DashboardView.Sessions) } }
+    LaunchedEffect(vm) { vm.pendingSessionId.drop(1).collect { if (it != null) navigateTo(DashboardView.Sessions) } }
     LaunchedEffect(vm) { vm.openingHistoryId.drop(1).collect { if (it != null) navigateTo(DashboardView.Sessions) } }
     // T15.4 (dashboard.tsx bootView): resolve the view once. A session chosen by a link wins
     // (above, or while the read is in flight: the selection collectors have resolved it); else the
@@ -331,7 +338,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         val boot = prefs.viewBoot()
         if (ViewHistory.decode(viewHistorySaved).current != null) return@LaunchedEffect
         val (resolved, _) = DashboardViews.resolve(
-            sessionLink = vm.selectedSessionId.value != null || vm.openingHistoryId.value != null || vm.bootLinkPending.value,
+            sessionLink = vm.pendingSessionId.value != null || vm.activeId.value != null || vm.openingHistoryId.value != null || vm.bootLinkPending.value,
             storedView = boot.storedView,
             hasExistingPreferences = boot.hasExistingPreferences,
         )
@@ -372,7 +379,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // issue #189: a remembered session whose snapshot has not arrived yet reads as "reopening",
     // never as the welcome stage.
     // ta-coik.41 (dashboard.tsx:1702): `pendingSessionId && !visibleSessions.length`.
-    val emptyStage = if (selectedId != null && selectionPending && visibleSessions.isEmpty()) {
+    val emptyStage = if (pendingSessionId != null && visibleSessions.isEmpty()) {
         EmptyStage.Reopening(connected)
     } else {
         EmptyStage.Welcome(connected, providers.map { ProviderAvailability(it.label, it.available, it.id) })
@@ -420,6 +427,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 // r3: the confirmation is bound to the session AND the server it was opened for.
                 onEndSession = {
                     session?.let {
+                        // dashboard.tsx 90fbb9f :1174: the chat on screen becomes the pick first.
+                        vm.commitSelection(it.id)
                         // ta-coik.22: live as on the web (workspace-header.tsx 90fbb9f :133); bound to
                         // the server ([endSessionServer]); offline the client says it was not ended.
                         val server = com.tether.app.ui.chat.endSessionServer(consentOrigin, vm.client.serverUrl.value)

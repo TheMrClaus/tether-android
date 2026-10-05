@@ -89,6 +89,10 @@ fun SessionDrawer(
 
     // T5.2: the resumed row stays highlighted until its `created` reply (TetherViewModel).
     val openingHistoryId by vm.openingHistoryId.collectAsStateWithLifecycle()
+    // ta-coik.42 (dashboard.tsx 90fbb9f :638-639): a history row is open when its live session is the
+    // pick or the pending target.
+    val activeId by vm.activeId.collectAsStateWithLifecycle()
+    val pendingSessionId by vm.pendingSessionId.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
     var harness by remember { mutableStateOf<String?>(null) }
     var folderPicker by remember { mutableStateOf(false) }
@@ -115,8 +119,9 @@ fun SessionDrawer(
         lastSeen = preferences.lastSeenSessions,
         sessionOrders = sessionOrders,
         sort = preferences.sidebarSort,
-        activeId = selectedId,
+        activeId = activeId,
         openingHistoryId = openingHistoryId,
+        pendingSessionId = pendingSessionId,
         collator = collator,
     )
     val state = SidebarState(
@@ -172,16 +177,8 @@ fun SessionDrawer(
     LaunchedEffect(active?.historyId, active?.status, active?.updatedAt) {
         active?.let { controller.onActiveSettled(it) }
     }
-    // T4.4, dashboard.tsx:1058-1066: a session opened by a link may live in a project no block
-    // owns; its block (or its own folder) becomes the current workspace, so it is listed.
-    val latestSessions by rememberUpdatedState(sessions)
-    val latestWorkspaces by rememberUpdatedState(workspaces)
-    val latestCurrent by rememberUpdatedState(current)
-    LaunchedEffect(controller) {
-        vm.openRequests.collect { id ->
-            latestSessions.firstOrNull { it.id == id }?.let { controller.focusWorkspaceFor(it.cwd, latestWorkspaces, latestCurrent) }
-        }
-    }
+    // T4.4: a session opened by a link may live in a project no block owns; ta-coik.42 moved making its
+    // block current to the shell's pending-target effect (WebSelectionEffects, dashboard.tsx :1153-1160).
 
     SessionSidebar(
         state = state,
