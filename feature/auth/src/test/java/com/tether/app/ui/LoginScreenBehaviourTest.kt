@@ -6,7 +6,11 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -432,6 +436,49 @@ class LoginScreenBehaviourTest(private val surface: LoginSurface) {
         submitPassword(console.password)
         waitFor { shows(successCopy) }
         assertEquals("operator" to "correct horse", lastLogin())
+    }
+
+    /** The username and password wells (the nodes carrying the field's own description). */
+    private fun wellsMarkedInvalid(): List<Boolean> = listOf("Operator username", "Dashboard password").map { name ->
+        rule.onAllNodes(hasContentDescription(name, substring = true), useUnmergedTree = true).fetchSemanticsNodes()
+            .single().config.getOrNull(SemanticsProperties.Error) != null
+    }
+
+    /** The well's left edge, half way down: its 1dp border. */
+    private fun passwordBorder(): Color {
+        val image = rule.onAllNodes(hasContentDescription("Dashboard password", substring = true), useUnmergedTree = true)
+            .onFirst().captureToImage().toPixelMap()
+        return image[1, image.height / 2]
+    }
+
+    /**
+     * ta-coik.53: studio-login.tsx:43 `passwordRefused = flow.phase === "error" && flow.lastAttempt ===
+     * "password"` puts `data-error` on the username and password `.field`s (:117, :132), so their inputs
+     * wear `border-color: var(--danger)` (studio-login.module.css:69) and `aria-invalid` (:124, :139),
+     * until the phase moves on (a new attempt, or here the mode switch). Studio only; Retro is its own CSS.
+     */
+    @Test fun aRefusedPasswordMarksTheUsernameAndPasswordInputsUntilThePhaseMovesOn() {
+        launch()
+        typeUrl()
+        waitFor { usernameShown }
+        assertEquals(listOf(false, false), wellsMarkedInvalid())
+        val calm = passwordBorder()
+        field("Operator username").performTextInput("operator")
+        submitPassword("wrong horse")
+        waitFor { shows(REFUSED) }
+        if (surface == LoginSurface.Retro) {
+            assertEquals(listOf(false, false), wellsMarkedInvalid())
+            return
+        }
+        assertEquals(listOf(true, true), wellsMarkedInvalid())
+        val refused = passwordBorder()
+        assertTrue("the danger border ($refused, was $calm)", refused != calm && refused.red > refused.green && refused.red > refused.blue)
+
+        // A new attempt moves the phase on: the marks clear with it.
+        field("Dashboard password").performTextClearance()
+        submitPassword(console.password)
+        waitFor { shows(successCopy) }
+        assertEquals(listOf(false, false), wellsMarkedInvalid())
     }
 
     @Test fun theSignInFieldsTellAutofillWhichIsTheUsernameAndWhichThePassword() {

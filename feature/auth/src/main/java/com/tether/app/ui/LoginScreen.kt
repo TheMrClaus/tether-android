@@ -54,6 +54,7 @@ import androidx.compose.ui.semantics.CredentialRequestData
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -86,6 +87,7 @@ import com.tether.app.client.PairResult
 import com.tether.app.client.SignInRequirements
 import com.tether.app.client.SignedOutReason
 import com.tether.app.client.TetherClient
+import com.tether.app.ui.components.InputWellStyle
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.KeyState
 import com.tether.app.ui.components.StatusDot
@@ -139,6 +141,9 @@ object LoginTags {
     const val FormFooter = "login-form-footer"
 }
 
+/** use-login-flow.ts `lastAttempt` ("passkey" | "password"), plus the app's pairing path. */
+enum class LoginAttempt { Password, Passkey, Pairing }
+
 /**
  * Everything a surface renders, plus the callbacks. One state machine
  * ([LoginScreen]) drives both surfaces, like use-login-flow.ts on the web.
@@ -179,7 +184,16 @@ class LoginUi(
      * its autofill suggestions. Null while none is armed.
      */
     val passkeyAutofill: CredentialRequestData? = null,
+    /** use-login-flow.ts `lastAttempt`: the kind of the latest sign-in that went out. */
+    val lastAttempt: LoginAttempt? = null,
 ) {
+    /**
+     * studio-login.tsx:43 `passwordRefused = flow.phase === "error" && flow.lastAttempt === "password"`:
+     * the username and password inputs wear the danger border until the next attempt (or anything
+     * else) moves the phase on.
+     */
+    val passwordRefused: Boolean get() = phase == LoginPhase.Error && lastAttempt == LoginAttempt.Password
+
     val busy: Boolean get() = phase == LoginPhase.Checking || phase == LoginPhase.Verifying || phase == LoginPhase.VerifyingPasskey || phase == LoginPhase.Success
 
     /** The username line is on screen: required, or the probe failed ([usernameOptional]). */
@@ -248,6 +262,8 @@ fun LoginScreen(
     var probeFailed by remember { mutableStateOf(false) }
     // The web's flow.notice after a dismissed passkey prompt; cleared by the next attempt.
     var passkeyNotice by remember { mutableStateOf<String?>(null) }
+    // use-login-flow.ts:86 `lastAttempt`: set when an attempt goes out (submitPassword, a passkey ceremony).
+    var lastAttempt by remember { mutableStateOf<LoginAttempt?>(null) }
 
     val deviceLabel = remember { Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android device" }
 
@@ -356,6 +372,7 @@ fun LoginScreen(
         if (!passkeyOffered) return
         val url = baseUrl.trim()
         phase = LoginPhase.VerifyingPasskey
+        lastAttempt = LoginAttempt.Passkey
         error = null
         passkeyNotice = null
         // The web's modal ceremony supersedes a pending conditional one (AbortError, quiet), not re-armed.
@@ -380,6 +397,7 @@ fun LoginScreen(
         if (answer !is PasskeyCeremony.Done) return
         if (!passkeyOffered || baseUrl.trim() != armed.url) return
         phase = LoginPhase.VerifyingPasskey
+        lastAttempt = LoginAttempt.Passkey
         error = null
         passkeyNotice = null
         val attempt = attempts.begin()
@@ -428,6 +446,7 @@ fun LoginScreen(
         phase = LoginPhase.Verifying
         error = null
         val attemptMode = mode
+        lastAttempt = if (attemptMode == AuthMode.Password) LoginAttempt.Password else LoginAttempt.Pairing
         val attempt = attempts.begin()
         val sentUsername = username.trim()
         val usernameHint = usernameHintFor(requirements, sentUsername)
@@ -552,6 +571,7 @@ fun LoginScreen(
         passkeyNeedsHttps = passkeyPossible && !passkeyOffered,
         onPasskey = ::passkey,
         passkeyAutofill = autofill?.takeIf { passkeyOffered && it.url == baseUrl.trim() }?.data,
+        lastAttempt = lastAttempt,
     )
     when (surface) {
         LoginSurface.Studio -> StudioLogin(ui)
@@ -607,17 +627,35 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 }
 
 /**
- * studio-login.module.css:67 `.field input`: `height: 50px`, `border-radius: 9px`, `padding: 0 14px`,
- * `background: var(--graphite)`, `font-size: 16px` (the well's body role already is 1rem). Held as a
- * floor, so a larger font scale still fits. Retro's prompts keep the plain well.
+ * studio-login.module.css `.field input` (tether 90fbb9f). Retro's prompts keep the plain well.
+ *  - :67 `height: 50px` (held as a floor, so a larger font scale still fits), `border: 1px solid
+ *    var(--line-strong)`, `border-radius: 9px`, `padding: 0 14px`, `background: var(--graphite)`,
+ *    `font-size: 16px` (the well's body role already is 1rem).
+ *  - :68 `:focus-visible`: `outline: 3px solid color-mix(in srgb, var(--accent) 16%, transparent)`,
+ *    `outline-offset: 1px`, `border-color: var(--accent)`, `box-shadow: none`.
+ *  - :69 `.field[data-error="true"] input { border-color: var(--danger) }` (see [LoginUi.passwordRefused]).
+ *  - :70 `:disabled { opacity: 0.6 }`.
  */
-private class FieldInput(val radius: Dp, val minHeight: Dp, val horizontalPadding: Dp, val face: Color)
+@Composable
+private fun studioFieldInput(): InputWellStyle {
+    val t = LocalTetherTokens.current
+    return InputWellStyle(
+        radius = 9.dp,
+        minHeight = 50.dp,
+        horizontalPadding = 14.dp,
+        face = t.graphite,
+        border = t.lineStrong,
+        focusBorder = t.accent,
+        focusOutline = t.accent.copy(alpha = t.accent.alpha * 0.16f),
+        focusOutlineWidth = 3.dp,
+        focusOutlineOffset = 1.dp,
+        invalidBorder = t.danger,
+        disabledAlpha = 0.6f,
+    )
+}
 
 @Composable
-private fun studioFieldInput(): FieldInput = FieldInput(9.dp, 50.dp, 14.dp, LocalTetherTokens.current.graphite)
-
-@Composable
-private fun ServerUrlField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope, input: FieldInput? = null) {
+private fun ServerUrlField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope, input: InputWellStyle? = null) {
     TetherInputWell(
         value = ui.baseUrl,
         onValueChange = ui.onBaseUrl,
@@ -627,20 +665,19 @@ private fun ServerUrlField(ui: LoginUi, modifier: Modifier = Modifier, fontFamil
         enabled = !ui.busy,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
         fontFamily = fontFamily,
-        radius = input?.radius,
-        minHeight = input?.minHeight,
-        horizontalPadding = input?.horizontalPadding,
-        face = input?.face,
+        style = input,
     )
 }
 
 @Composable
-private fun UsernameField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope, input: FieldInput? = null) {
+private fun UsernameField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily: FontFamily = Manrope, input: InputWellStyle? = null) {
     TetherInputWell(
         value = ui.username,
         onValueChange = ui.onUsername,
         modifier = modifier.semantics {
             contentDescription = if (ui.usernameOptional) "Operator username, optional" else "Operator username"
+            // studio-login.tsx:124 `aria-invalid={passwordRefused || undefined}`.
+            if (input != null && ui.passwordRefused) error(ui.error.orEmpty())
         },
         placeholder = if (ui.usernameOptional) "Username (optional)" else "Username",
         singleLine = true,
@@ -653,10 +690,8 @@ private fun UsernameField(ui: LoginUi, modifier: Modifier = Modifier, fontFamily
         ),
         fontFamily = fontFamily,
         contentType = ContentType.Username,
-        radius = input?.radius,
-        minHeight = input?.minHeight,
-        horizontalPadding = input?.horizontalPadding,
-        face = input?.face,
+        style = input,
+        invalid = input != null && ui.passwordRefused,
     )
 }
 
@@ -666,12 +701,16 @@ private fun PasswordField(
     modifier: Modifier = Modifier,
     fontFamily: FontFamily = Manrope,
     description: String = "Dashboard password",
-    input: FieldInput? = null,
+    input: InputWellStyle? = null,
 ) {
     TetherInputWell(
         value = ui.password,
         onValueChange = ui.onPassword,
-        modifier = modifier.semantics { contentDescription = description },
+        modifier = modifier.semantics {
+            contentDescription = description
+            // studio-login.tsx:139 `aria-invalid={passwordRefused || undefined}`.
+            if (input != null && ui.passwordRefused) error(ui.error.orEmpty())
+        },
         placeholder = "Password",
         singleLine = true,
         enabled = !ui.busy,
@@ -682,15 +721,13 @@ private fun PasswordField(
         contentType = ContentType.Password,
         // ta-coik.1: studio-login.tsx:137 / retro-login.tsx:208 `autocomplete="current-password webauthn"`.
         credentialRequest = ui.passkeyAutofill,
-        radius = input?.radius,
-        minHeight = input?.minHeight,
-        horizontalPadding = input?.horizontalPadding,
-        face = input?.face,
+        style = input,
+        invalid = input != null && ui.passwordRefused,
     )
 }
 
 @Composable
-private fun CodeField(ui: LoginUi, modifier: Modifier = Modifier, description: String = "Pairing code", input: FieldInput? = null) {
+private fun CodeField(ui: LoginUi, modifier: Modifier = Modifier, description: String = "Pairing code", input: InputWellStyle? = null) {
     TetherInputWell(
         value = ui.code,
         onValueChange = ui.onCode,
@@ -707,10 +744,7 @@ private fun CodeField(ui: LoginUi, modifier: Modifier = Modifier, description: S
         keyboardActions = KeyboardActions(onGo = { ui.onSubmit() }),
         fontFamily = JetBrainsMono,
         letterSpacing = 0.18.em,
-        radius = input?.radius,
-        minHeight = input?.minHeight,
-        horizontalPadding = input?.horizontalPadding,
-        face = input?.face,
+        style = input,
     )
 }
 
@@ -1034,7 +1068,11 @@ private fun StudioFormPanel(ui: LoginUi, narrowViewport: Boolean) {
 private fun primaryInk(enabled: Boolean): Color =
     resolveKey(LocalTetherTokens.current, KeyClasses.ButtonPrimary, if (enabled) KeyState.Rest else KeyState.Disabled, layout = currentLayoutClass()).ink
 
-/** `.submitButton`: at least 49px, `padding: 10px 16px`, the legend left and the 17px arrow right. */
+/**
+ * `.submitButton`: `padding: 10px 16px`, the legend left and the 17px arrow right. Its `min-height: 49px`
+ * (studio-login.module.css:71) loses to studio.css:269 `:root .button-primary { min-height: 2.75rem }`
+ * (0,2,0 over 0,1,0), so the key is the 44dp key floor; Compose's touch target still reaches 48dp.
+ */
 @Composable
 private fun StudioSubmit(label: String, ui: LoginUi, modifier: Modifier = Modifier) {
     val ink = primaryInk(!ui.busy)
@@ -1044,7 +1082,6 @@ private fun StudioSubmit(label: String, ui: LoginUi, modifier: Modifier = Modifi
         classes = KeyClasses.ButtonPrimary,
         label = label,
         enabled = !ui.busy,
-        minHeight = 49.dp,
         contentArrangement = Arrangement.SpaceBetween,
         contentPadding = 16.dp,
         trailing = { Icon(TetherIcons.ArrowRight, contentDescription = null, tint = ink, modifier = Modifier.size(17.dp)) },
@@ -1157,7 +1194,7 @@ private fun StudioForm(ui: LoginUi, modifier: Modifier, compact: Boolean = false
 }
 
 /**
- * studio-login.tsx's passkey key (`.promptButton`: at least 49px, the 19px fingerprint 10px before the
+ * studio-login.tsx's passkey key (`.promptButton`: at least 44px by studio.css:269, the 19px fingerprint 10px before the
  * legend), above the password form, with its "or" separator (T10.5).
  */
 @Composable
@@ -1176,7 +1213,6 @@ private fun StudioPasskey(ui: LoginUi) {
         icon = TetherIcons.Fingerprint,
         iconSize = 19.dp,
         enabled = !ui.busy,
-        minHeight = 49.dp,
         contentArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
         contentPadding = 16.dp,
     )

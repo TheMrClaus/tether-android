@@ -6,6 +6,10 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -216,6 +220,40 @@ class LoginStudioCompactTest : LoginConnectionBase() {
         val panel = rule.onNodeWithTag(LoginTags.FormPanel, useUnmergedTree = true).getUnclippedBoundsInRoot()
         val footer = rule.onNodeWithTag(LoginTags.FormFooter, useUnmergedTree = true).getUnclippedBoundsInRoot()
         assertEquals((panel.left + panel.right).value / 2f, (footer.left + footer.right).value / 2f, 0.5f)
+    }
+
+    /**
+     * ta-coik.53: the submit key (`.submitButton`, `button-primary`; `.promptButton` shares the rule) is
+     * 44dp: studio.css:269 `:root .button-primary { min-height: 2.75rem }` outranks
+     * studio-login.module.css:71's 49px. Its touch target still reaches Compose's 48dp minimum.
+     */
+    @Test
+    fun theSignInKeyIs44dpWithA48dpTouchTarget() {
+        launch()
+        rule.waitForIdle()
+        val key = rule.onNodeWithContentDescription("Unlock Tether")
+        val bounds = key.getUnclippedBoundsInRoot()
+        assertEquals(44f, (bounds.bottom - bounds.top).value, 0.5f)
+        val node = key.fetchSemanticsNode()
+        val touchDp = node.touchBoundsInRoot.height / node.layoutInfo.density.density
+        assertTrue("touch target $touchDp dp", touchDp >= 48f - 0.5f)
+    }
+
+    /**
+     * ta-coik.53: `.field input:focus-visible { border-color: var(--accent) }` (studio-login.module.css:68),
+     * not the plain well's violet border and glow.
+     */
+    @Test
+    fun aFocusedInputTakesTheAccentBorder() {
+        launch()
+        rule.waitForIdle()
+        fun edge(): Color = rule.onNodeWithContentDescription("Server URL", useUnmergedTree = true).captureToImage().toPixelMap()
+            .let { it[1, it.height / 2] }
+        val calm = edge()
+        rule.onNode(hasSetTextAction() and hasAnyAncestor(hasContentDescription("Server URL"))).performClick()
+        rule.waitForIdle()
+        val focused = edge()
+        assertTrue("the accent border ($focused, was $calm)", focused != calm && focused.blue > focused.red && focused.blue > focused.green)
     }
 
     /** ta-coik.53: `.field input { height: 50px }` (studio-login.module.css:67). */

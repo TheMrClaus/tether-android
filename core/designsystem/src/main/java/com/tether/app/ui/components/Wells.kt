@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -48,9 +49,32 @@ import com.tether.app.ui.theme.TetherTokens
 fun wellShadows(t: TetherTokens, focused: Boolean): List<CssShadow> =
     if (focused) listOf(CssShadow(false, 0.dp, 0.dp, 0.dp, 3.dp, t.focusGlow)) else emptyList()
 
-/** The well surface on any shape; content goes inside. [face] defaults to the well floor, `--mineral-deep`. */
-fun Modifier.tetherWell(t: TetherTokens, shape: Shape, focused: Boolean = false, face: Color? = null): Modifier =
-    cssSurface(shape, face ?: t.mineralDeep, CssBorder(1.dp, if (focused) t.violetStrong else t.lineStrong), wellShadows(t, focused))
+/** The well surface on any shape; content goes inside. */
+fun Modifier.tetherWell(t: TetherTokens, shape: Shape, focused: Boolean = false): Modifier =
+    cssSurface(shape, t.mineralDeep, CssBorder(1.dp, if (focused) t.violetStrong else t.lineStrong), wellShadows(t, focused))
+
+/**
+ * A screen's own input rule over the plain well, for a screen whose CSS restyles its inputs
+ * (ta-coik.53: studio-login.module.css `.field input`). Each value replaces the well's default.
+ */
+@Immutable
+data class InputWellStyle(
+    val radius: Dp,
+    /** The input's CSS height, held as a floor so a larger font scale still fits. */
+    val minHeight: Dp,
+    val horizontalPadding: Dp,
+    val face: Color,
+    val border: Color,
+    /** The border while focused; no glow is drawn. */
+    val focusBorder: Color,
+    /** A CSS `outline` drawn while focused: its colour, width and offset. */
+    val focusOutline: Color,
+    val focusOutlineWidth: Dp,
+    val focusOutlineOffset: Dp,
+    /** The border while the input is marked invalid (see [TetherInputWell]'s `invalid`), focused or not. */
+    val invalidBorder: Color,
+    val disabledAlpha: Float,
+)
 
 /** A recessed plate / frame (e.g. `.session-elapsed`, `.chat-frame`) holding arbitrary content. */
 @Composable
@@ -96,31 +120,41 @@ fun TetherInputWell(
      * field's suggestions. Ignored below API 35.
      */
     credentialRequest: CredentialRequestData? = null,
-    /** Null: `--radius-md`. A screen whose CSS sets its own input radius passes it (ta-coik.53: the sign-in's 9px). */
-    radius: Dp? = null,
-    /** Null: the touch floor (44dp). Otherwise the input's CSS height, held as a floor so a larger font scale still fits. */
-    minHeight: Dp? = null,
-    /** Null: `space-md` inline padding. */
-    horizontalPadding: Dp? = null,
-    /** Null: the well floor, `--mineral-deep`. */
-    face: Color? = null,
+    /** Null: the plain well. */
+    style: InputWellStyle? = null,
+    /** The screen marks this input invalid ([InputWellStyle.invalidBorder]; the plain well has no such state). */
+    invalid: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(radius ?: t.radiusMd)
+    val shape = RoundedCornerShape(style?.radius ?: t.radiusMd)
     val base = type.body.let { if (fontFamily != null) it.copy(fontFamily = fontFamily) else it }
         .let { if (letterSpacing != TextUnit.Unspecified) it.copy(letterSpacing = letterSpacing) else it }
 
     Box(
         modifier = modifier
             .graphicsLayer {
-                alpha = if (enabled) 1f else DisabledOpacity
+                alpha = if (enabled) 1f else style?.disabledAlpha ?: DisabledOpacity
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
-            .tetherWell(t, shape, focused, face)
-            .heightIn(min = minHeight ?: TetherDimens.touchTargetDp),
+            .then(
+                if (style == null) {
+                    Modifier.tetherWell(t, shape, focused)
+                } else {
+                    // An invalid rule outranks the focus border (equal specificity, later in source on the web).
+                    val edge = when {
+                        invalid -> style.invalidBorder
+                        focused -> style.focusBorder
+                        else -> style.border
+                    }
+                    Modifier
+                        .focusRing(focused, shape, style.focusOutline, style.focusOutlineWidth, style.focusOutlineOffset)
+                        .cssSurface(shape, style.face, CssBorder(1.dp, edge))
+                },
+            )
+            .heightIn(min = style?.minHeight ?: TetherDimens.touchTargetDp),
         contentAlignment = Alignment.CenterStart,
     ) {
         BasicTextField(
@@ -138,7 +172,7 @@ fun TetherInputWell(
                     },
                 )
                 .fillMaxWidth()
-                .padding(horizontal = horizontalPadding ?: t.css.spaceMd, vertical = 11.dp),
+                .padding(horizontal = style?.horizontalPadding ?: t.css.spaceMd, vertical = 11.dp),
             enabled = enabled,
             textStyle = base.copy(color = t.ink),
             cursorBrush = SolidColor(t.violet),
