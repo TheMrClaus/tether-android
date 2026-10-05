@@ -20,8 +20,8 @@ import org.robolectric.annotation.Config
 import org.w3c.dom.Element
 
 /**
- * T4.4: the exported surface stays minimal. MainActivity is the only activity with filters in the
- * release manifest, its filters are exactly the launcher, the FCM click action and
+ * T4.4: the exported surface stays minimal. MainActivity is the only activity with link filters in
+ * the release manifest (T11.2: beside it, the share target takes only SEND / SEND_MULTIPLE), its filters are exactly the launcher, the FCM click action and
  * `tether://session`, nothing claims http(s) (so no autoVerify), and it is `singleTop`: a launcher
  * relaunch must keep whatever was opened above it, which `singleTask` (or clearTaskOnLaunch) clears.
  */
@@ -72,8 +72,21 @@ class DeepLinkManifestTest {
             ),
             main.filterSignatures(),
         )
-        // No other activity in the release manifest.
-        assertEquals(1, activities.size)
+        // T11.2: the only other activity is the share target, with the share sheet's filters only.
+        assertEquals(setOf(".MainActivity", ".share.ShareActivity"), activities.map { it.attr("name") }.toSet())
+    }
+
+    @Test
+    fun theShareTargetTakesOnlyShares() {
+        val share = manifest("src/main/AndroidManifest.xml").children("activity").single { it.attr("name") == ".share.ShareActivity" }
+        assertEquals("true", share.attr("exported"))
+        assertEquals(
+            setOf(
+                "a:android.intent.action.SEND|c:android.intent.category.DEFAULT|d:://",
+                "a:android.intent.action.SEND|a:android.intent.action.SEND_MULTIPLE|c:android.intent.category.DEFAULT|d:://",
+            ),
+            share.filterSignatures(),
+        )
     }
 
     @Test

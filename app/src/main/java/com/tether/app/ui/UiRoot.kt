@@ -29,6 +29,7 @@ import com.tether.app.ui.chat.LocalLinkOpener
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -112,6 +113,16 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                 applyNav(navigator.step(navContextOf(client)))
                 if (navigator.pendingSessionId == null) vm.setBootLinkPending(false)
             }
+    }
+    // T11.2: a share from another app waits in the inbox until the user is signed in and picks
+    // where it goes (the chooser below, over the shell).
+    val share by com.tether.app.share.ShareInbox.pending.collectAsStateWithLifecycle()
+    val shareScope = androidx.compose.runtime.rememberCoroutineScope()
+    val shareDelivery = remember(vm) { com.tether.app.share.ShareDelivery(vm) }
+    fun deliverShare(id: Long, target: com.tether.app.share.ShareTarget) {
+        val taken = com.tether.app.share.ShareInbox.take(id) ?: return
+        if (target is com.tether.app.share.ShareTarget.Session) focusManager.clearFocus(force = true)
+        shareScope.launch { shareDelivery.deliver(taken, target) }
     }
     // T6.2: downloaded tool-media clips belong to one sign-in on one server (ToolMediaCache).
     LaunchedEffect(client) { com.tether.app.ui.chat.syncToolMediaCache(client, context.cacheDir) }
@@ -252,6 +263,16 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                 } else {
                     CompositionLocalProvider(LocalLinkOpener provides linkOpener) {
                         MainShell(vm = vm, prefs = prefs)
+                    }
+                    share?.let { pending ->
+                        val sessions by client.sessions.collectAsStateWithLifecycle()
+                        com.tether.app.ui.share.ShareTargetDialog(
+                            summary = com.tether.app.ui.share.ShareTargetCopy.summary(!pending.text.isNullOrEmpty(), pending.files.size),
+                            sessions = com.tether.app.ui.share.shareTargets(sessions),
+                            onNewSession = { deliverShare(pending.id, com.tether.app.share.ShareTarget.NewSession) },
+                            onSession = { id -> deliverShare(pending.id, com.tether.app.share.ShareTarget.Session(id)) },
+                            onDismiss = { com.tether.app.share.ShareInbox.discard(pending.id) },
+                        )
                     }
                 }
             }

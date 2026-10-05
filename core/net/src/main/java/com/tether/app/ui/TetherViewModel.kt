@@ -237,6 +237,29 @@ class TetherViewModel(
         draftOrigin?.let { draftWrites.trySend(DraftWrite(it, sessionId, text)) }
     }
 
+    private val _composerInserts = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    /**
+     * T11.2: text shared into Tether from another app, waiting for [sessionId]'s composer (the chat
+     * view takes it once its draft is hydrated and adds it to the end, as a paste would; nothing is sent).
+     */
+    val composerInserts: StateFlow<Map<String, String>> = _composerInserts.asStateFlow()
+
+    fun insertIntoComposer(sessionId: String, text: String) {
+        if (text.isEmpty()) return
+        _composerInserts.update { it + (sessionId to appendDraftText(it[sessionId].orEmpty(), text)) }
+    }
+
+    /** The text waiting for [sessionId]'s composer, removed (null: none). */
+    fun takeComposerInsert(sessionId: String): String? {
+        var taken: String? = null
+        _composerInserts.update { m ->
+            taken = m[sessionId]
+            m - sessionId
+        }
+        return taken
+    }
+
     /**
      * T7.4: the composer's staged attachments (one session on one server, memory only). They
      * survive a rotation (this view model) but not process death, and are dropped on a server
@@ -1063,3 +1086,14 @@ internal const val ATTACHMENTS_REFUSED_COPY = "Not connected — the message and
 
 /** T6.7: an error toast's words, and whether a server wrote them ([TetherViewModel.toast]). */
 data class Toast(val text: String, val fromServer: Boolean, val origin: String? = null)
+
+/**
+ * T11.2: [added] (text shared from another app) after what the draft already holds: on a line of its
+ * own when the draft has text that does not already end a line.
+ */
+fun appendDraftText(current: String, added: String): String = when {
+    added.isEmpty() -> current
+    current.isEmpty() -> added
+    current.endsWith("\n") -> current + added
+    else -> current + "\n" + added
+}

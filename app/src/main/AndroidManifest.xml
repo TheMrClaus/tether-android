@@ -73,6 +73,31 @@
             </intent-filter>
         </activity>
 
+        <!-- T11.2: the system share sheet's target. A trampoline that draws nothing: it reads
+             the shared files while the sender's URI grant lasts (share/ShareActivity), hands
+             the share to MainActivity's task and finishes; the shell then asks where it goes.
+             Its own empty affinity and no Recents entry keep it out of Tether's task. The
+             config changes are its own so a rotation does not restart the read. -->
+        <activity
+            android:name=".share.ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
         <!-- FCM message receiver. exported=false: only the FCM system service
              (same APK signature) may start it. The service posts the visible
              server kinds (approval / question / turn_end / resume_choice) on

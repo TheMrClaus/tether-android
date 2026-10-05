@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.mapNotNull
 import com.composables.icons.lucide.Cpu
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.SessionProjection
@@ -437,6 +439,15 @@ fun ChatScreen(
             initialDraft = session?.let { vm.loadedDraft(it.id) },
             awaitDraft = { session?.let { vm.awaitDraft(it.id) } ?: "" },
             onDraftChange = { text -> session?.let { vm.setDraft(it.id, text) } },
+            // T11.2: text shared from another app into this session (taken once, appended to the draft).
+            inserts = remember(session?.id, vm) {
+                val id = session?.id
+                if (id == null) {
+                    kotlinx.coroutines.flow.emptyFlow()
+                } else {
+                    vm.composerInserts.filter { id in it }.mapNotNull { vm.takeComposerInsert(id) }
+                }
+            },
             tree = tree,
             commandActions = commandActions,
             controlActions = controlActions,

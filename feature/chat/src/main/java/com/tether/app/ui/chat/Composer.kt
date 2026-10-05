@@ -230,6 +230,8 @@ fun Composer(
     sendRows: List<com.tether.app.client.PendingSendRow> = emptyList(),
     /** T8.4: the attach sheet's "Add issue or PR" reads (null: the row is not drawn). */
     github: ComposerGitHub? = null,
+    /** T11.2: text shared from another app for this session, added to the end of the draft once it is hydrated. */
+    inserts: kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
@@ -243,10 +245,16 @@ fun Composer(
     }
     val currentOnDraftChange by rememberUpdatedState(onDraftChange)
     val currentAwaitDraft by rememberUpdatedState(awaitDraft)
+    val currentInserts by rememberUpdatedState(inserts)
     LaunchedEffect(session?.id) {
         launch { snapshotFlow { field.text }.drop(1).collect { currentOnDraftChange(it) } }
         val stored = currentAwaitDraft()
         if (field.text.isEmpty() && stored.isNotEmpty()) setDraft(stored)
+        currentInserts.collect { text ->
+            setDraft(com.tether.app.ui.appendDraftText(field.text, text))
+            // Mirrored at once: the change observer above may not have read its first value yet (drop(1)).
+            currentOnDraftChange(field.text)
+        }
     }
     val picked = attachments.staged
 
