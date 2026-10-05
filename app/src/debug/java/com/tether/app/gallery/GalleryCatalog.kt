@@ -49,10 +49,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tether.app.R
 import com.tether.app.ui.components.BrandMark
+import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.Wordmark
+import com.tether.app.ui.icons.ProviderInlineGlyph
 import com.tether.app.ui.icons.ProviderLogo
 import com.tether.app.ui.icons.ProviderLogoDefaults
 import com.tether.app.ui.icons.ProviderLogos
+import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -240,6 +243,22 @@ fun ProviderLogosSection() {
                 }
                 Text(p.ifEmpty { "(empty)" }, color = t.faint, style = caption)
             }
+        }
+    }
+    GalleryRow("brand tiles (ProviderTile, globals.css 11204-11224) · letter fallbacks keep the neutral tile") {
+        for (p in GalleryProviders) {
+            ProviderTile(
+                p,
+                Modifier.size(ProviderLogoDefaults.GlyphSize),
+                shape = RoundedCornerShape(7.2.dp),
+                background = t.graphiteRaised,
+                border = CssBorder(1.dp, t.line),
+            )
+        }
+    }
+    GalleryRow("inline glyphs (ProviderInlineGlyph, .chat-mode-glyph): the mark tinted by its brand, 14dp") {
+        for (p in GalleryProviders) {
+            ProviderInlineGlyph(p, color = t.white, markSize = 14.dp, letterSize = 9.6.sp)
         }
     }
     GalleryRow("bare marks at 24dp and 48dp, ink") {
