@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -570,7 +569,7 @@ private fun ColumnScope.ProviderView(inputs: ModelBrowserInputs, state: ModelBro
                 contentPadding = 0.dp,
             )
         }
-        BrowserGlyph(entry.provider, inputs.providers)
+        BrowserGlyph(entry.provider, inputs.providers, header = true)
         Title(entryTitle(entry), Modifier.widthIn45())
         SearchField(
             state.search,
@@ -899,22 +898,27 @@ private fun ModelRow(row: BrowserRow, inputs: ModelBrowserInputs, actions: Model
     }
 }
 
-/** `.provider-glyph` (1.5rem): the engine's mark, else its glyph letter. */
+/**
+ * The engine's mark, else its glyph letter, in Studio's `.provider-glyph` (studio.css:340: no border,
+ * a 0.45rem corner). A row's is `:root .model-browser-row .provider-glyph` (studio.css:692: 30px on
+ * `--mineral`, the letter 0.62rem from globals.css 9068); the [header]'s is the bare glyph (2rem on
+ * `--graphite-raised`, the letter 0.8rem, globals.css 856). The mark is 58% of the tile (globals.css 879).
+ */
 @Composable
-private fun BrowserGlyph(provider: String, providers: List<ProviderInfo>) {
+private fun BrowserGlyph(provider: String, providers: List<ProviderInfo>, header: Boolean = false) {
     val t = LocalTetherTokens.current
     val glyph = providers.firstOrNull { it.id == provider }?.glyph?.let { LabelText.label(it) }?.takeIf { it.isNotEmpty() }
-    // A verified mark gives the circle its brand tile (globals.css 11204-11224).
+    val side = if (header) 32.dp else 30.dp
+    // A verified mark gives the tile its brand colours (globals.css 11204-11224).
     ProviderTile(
         provider,
-        Modifier.size(24.dp),
+        Modifier.size(side),
         fallback = glyph ?: provider.take(1).uppercase(),
-        shape = CircleShape,
-        background = t.keyFace,
-        border = CssBorder(1.dp, t.lineStrong),
+        shape = RoundedCornerShape(7.2.dp),
+        background = if (header) t.graphiteRaised else t.mineral,
         color = t.ink,
-        markSize = 14.dp,
-        letterSize = 9.92.sp,
+        markSize = side * 0.58f,
+        letterSize = if (header) 12.8.sp else 9.92.sp,
     )
 }
 

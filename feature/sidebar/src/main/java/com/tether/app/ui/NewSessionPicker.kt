@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,7 +44,6 @@ import com.tether.app.client.LabelText
 import com.tether.app.client.NewSessionRow
 import com.tether.app.client.TextCut
 import com.tether.app.protocol.model.ProviderInfo
-import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
@@ -352,20 +351,22 @@ private fun StateLabel(icon: ImageVector, text: String) {
     }
 }
 
-/** `.model-browser-row .provider-glyph`: a 1.5rem glyph circle holding the engine's mark. */
+/**
+ * `:root .model-browser-row .provider-glyph` (studio.css:692, :340): a 30px rounded square (0.45rem
+ * corner, no border) on `--mineral` holding the engine's mark at 58% (globals.css 879), else its letter.
+ */
 @Composable
 private fun CatalogGlyph(provider: String, glyph: String?) {
     val t = LocalTetherTokens.current
-    // A verified mark gives the circle its brand tile (globals.css 11204-11224).
+    // A verified mark gives the tile its brand colours (globals.css 11204-11224).
     ProviderTile(
         provider,
-        Modifier.size(24.dp),
+        Modifier.size(30.dp),
         fallback = glyph,
-        shape = CircleShape,
-        background = t.keyFace,
-        border = CssBorder(1.dp, t.lineStrong),
+        shape = RoundedCornerShape(7.2.dp),
+        background = t.mineral,
         color = t.ink,
-        markSize = 14.dp,
+        markSize = 17.4.dp,
         letterSize = rem(0.62f),
     )
 }
