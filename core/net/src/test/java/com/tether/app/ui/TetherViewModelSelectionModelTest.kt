@@ -313,6 +313,32 @@ class TetherViewModelSelectionModelTest {
         assertEquals("a", vm.selectedSessionId.value)
     }
 
+    // --- ta-coik.46 (a): the restore is owed again after a sign-out --------------------------------
+
+    @Test
+    fun theRememberedChatRestoreRunsAgainAfterASignOut() {
+        // First sign-in: the remembered chat is listed; once the grace passes the restore is over.
+        client.connection.value = ConnectionState.Connected
+        client.sessions.value = listOf(chat("a"))
+        main.scheduler.advanceUntilIdle()
+        val listed = LastOpenedSession("/w", "a", "h-a")
+        vm.onBootView(true, listed)
+        main.scheduler.advanceTimeBy(RESTORE_GRACE_MS + 1)
+        main.scheduler.runCurrent()
+        assertNull(vm.bootRestoreStep(true, listOf(history("h-a")), listed))
+        vm.logout()
+        main.scheduler.advanceUntilIdle()
+        // The next sign-in: its remembered chat has exited, so it is reopened by its historyId.
+        client.connection.value = ConnectionState.Disconnected
+        main.scheduler.runCurrent()
+        client.sessions.value = emptyList()
+        main.scheduler.advanceUntilIdle()
+        val gone = LastOpenedSession("/w", "gone", "h-gone")
+        vm.onBootView(true, gone)
+        assertEquals("gone", vm.pendingSessionId.value)
+        assertEquals("the restore is owed again", "h-gone", vm.bootRestoreStep(true, listOf(history("h-gone")), gone)?.historyId)
+    }
+
     // --- r2: the live list, sign-out and another server -----------------------------------------
 
     @Test

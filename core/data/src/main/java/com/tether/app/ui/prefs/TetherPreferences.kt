@@ -6,6 +6,11 @@ import com.tether.app.protocol.tree.JsStr
 import com.tether.app.protocol.tree.JsValue
 import com.tether.app.ui.theme.ThemeMigration
 import com.tether.app.ui.theme.ThemeMode
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 /**
  * T2.3: the web's `tether.preferences.v1` object (tether hooks/use-preferences.ts:148-212,
@@ -123,7 +128,9 @@ data class TetherPreferences(
                     str(PreferenceKeys.LAST_OPENED_SESSION_ID),
                     raw[PreferenceKeys.LAST_OPENED_HISTORY_ID],
                 ),
-                lastOpenedByOrigin = openedMap(str(PreferenceKeys.LAST_OPENED_BY_ORIGIN)),
+                // ta-coik.46: the JSON record; the tab-line one of ta-coik.41 r2 only until it is rewritten.
+                lastOpenedByOrigin = str(PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON)?.let(::openedJson)
+                    ?: legacyOpenedMap(str(PreferenceKeys.LAST_OPENED_BY_ORIGIN)),
                 sidebarActiveOnly = bool(PreferenceKeys.SIDEBAR_ACTIVE_ONLY, d.sidebarActiveOnly),
                 sidebarUnreadOnly = bool(PreferenceKeys.SIDEBAR_UNREAD_ONLY, d.sidebarUnreadOnly),
                 sidebarHideAgentRuns = bool(PreferenceKeys.SIDEBAR_HIDE_AGENT_RUNS, d.sidebarHideAgentRuns),
@@ -165,10 +172,11 @@ data class TetherPreferences(
             .joinToString("\n") { (id, at) -> "$id\t$at" }
 
         /**
-         * `origin\tsessionId\thistoryId\tcwd` lines (historyId "" = null; the cwd last, so it may hold
-         * a tab). A line without a session id or a cwd is dropped.
+         * The ta-coik.41 r2 layout, read only to migrate: `origin\tsessionId\thistoryId\tcwd` lines
+         * (historyId "" = null; the cwd last, so it may hold a tab). A line without a session id or a
+         * cwd is dropped.
          */
-        private fun openedMap(value: String?): Map<String, LastOpenedSession> {
+        private fun legacyOpenedMap(value: String?): Map<String, LastOpenedSession> {
             if (value.isNullOrEmpty()) return emptyMap()
             val out = LinkedHashMap<String, LastOpenedSession>()
             for (line in value.split('\n')) {
@@ -179,12 +187,39 @@ data class TetherPreferences(
             return out
         }
 
-        internal fun joinOpened(values: Map<String, LastOpenedSession>): String = values.entries
-            .filter { (origin, o) ->
-                listOf(origin, o.sessionId, o.historyId.orEmpty(), o.cwd).none { '\n' in it } &&
-                    listOf(origin, o.sessionId, o.historyId.orEmpty()).none { '\t' in it } && o.sessionId.isNotEmpty()
+        /**
+         * ta-coik.46: `{ origin: { cwd, sessionId, historyId } }`, the web's own record shape per origin
+         * (use-preferences.ts `lastOpenedSession`), so any character in any field (a newline in a folder
+         * name included) round-trips. Fail-soft: unreadable JSON is no record, and an entry without a
+         * string cwd and a non-empty string sessionId is dropped (historyId: a non-empty string or null).
+         */
+        private fun openedJson(value: String): Map<String, LastOpenedSession> {
+            val root = runCatching { Json.parseToJsonElement(value) }.getOrNull() as? JsonObject ?: return emptyMap()
+            val out = LinkedHashMap<String, LastOpenedSession>()
+            for ((origin, entry) in root) {
+                val o = entry as? JsonObject ?: continue
+                val cwd = (o["cwd"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: continue
+                val sessionId = (o["sessionId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+                if (sessionId.isNullOrEmpty()) continue
+                val historyId = (o["historyId"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
+                out[origin] = LastOpenedSession(cwd, sessionId, historyId)
             }
-            .joinToString("\n") { (origin, o) -> "$origin\t${o.sessionId}\t${o.historyId.orEmpty()}\t${o.cwd}" }
+            return out
+        }
+
+        internal fun joinOpened(values: Map<String, LastOpenedSession>): String = buildJsonObject {
+            for ((origin, o) in values) {
+                if (o.sessionId.isEmpty()) continue
+                put(
+                    origin,
+                    buildJsonObject {
+                        put("cwd", JsonPrimitive(o.cwd))
+                        put("sessionId", JsonPrimitive(o.sessionId))
+                        put("historyId", o.historyId?.let(::JsonPrimitive) ?: JsonNull)
+                    },
+                )
+            }
+        }.toString()
 
         /** The web's `{ cwd, sessionId, historyId }`: both ids required, historyId string-or-null. */
         private fun lastOpened(cwd: String?, sessionId: String?, historyId: Any?): LastOpenedSession? {
@@ -233,8 +268,10 @@ object PreferenceKeys {
     const val LAST_OPENED_CWD = "last_opened_cwd"
     const val LAST_OPENED_SESSION_ID = "last_opened_session_id"
     const val LAST_OPENED_HISTORY_ID = "last_opened_history_id"
-    /** ta-coik.41 r2: native-only, `lastOpenedSession` per server origin. */
+    /** ta-coik.41 r2: native-only, `lastOpenedSession` per server origin (tab lines; read only to migrate). */
     const val LAST_OPENED_BY_ORIGIN = "last_opened_by_origin"
+    /** ta-coik.46: the same record as JSON (any character in any field); replaces [LAST_OPENED_BY_ORIGIN]. */
+    const val LAST_OPENED_BY_ORIGIN_JSON = "last_opened_by_origin_json"
     const val SIDEBAR_ACTIVE_ONLY = "sidebar_active_only"
     const val SIDEBAR_UNREAD_ONLY = "sidebar_unread_only"
     const val SIDEBAR_HIDE_AGENT_RUNS = "sidebar_hide_agent_runs"

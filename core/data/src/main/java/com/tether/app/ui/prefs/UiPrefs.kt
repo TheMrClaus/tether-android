@@ -76,6 +76,7 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
         val lastOpenedSessionId = stringPreferencesKey(PreferenceKeys.LAST_OPENED_SESSION_ID)
         val lastOpenedHistoryId = stringPreferencesKey(PreferenceKeys.LAST_OPENED_HISTORY_ID)
         val lastOpenedByOrigin = stringPreferencesKey(PreferenceKeys.LAST_OPENED_BY_ORIGIN)
+        val lastOpenedByOriginJson = stringPreferencesKey(PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON)
         val sidebarActiveOnly = booleanPreferencesKey(PreferenceKeys.SIDEBAR_ACTIVE_ONLY)
         val sidebarUnreadOnly = booleanPreferencesKey(PreferenceKeys.SIDEBAR_UNREAD_ONLY)
         val sidebarHideAgentRuns = booleanPreferencesKey(PreferenceKeys.SIDEBAR_HIDE_AGENT_RUNS)
@@ -174,7 +175,9 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
             prefs.putOrRemove(Keys.lastOpenedCwd, opened?.cwd)
             prefs.putOrRemove(Keys.lastOpenedSessionId, opened?.sessionId)
             prefs.putOrRemove(Keys.lastOpenedHistoryId, opened?.historyId)
-            prefs.putOrRemove(Keys.lastOpenedByOrigin, TetherPreferences.joinOpened(next.lastOpenedByOrigin).ifEmpty { null })
+            // ta-coik.46: written as JSON; the tab-line key it replaces is consumed by the read and dropped.
+            prefs.remove(Keys.lastOpenedByOrigin)
+            prefs.putOrRemove(Keys.lastOpenedByOriginJson, next.lastOpenedByOrigin.takeIf { it.isNotEmpty() }?.let(TetherPreferences::joinOpened))
             prefs[Keys.sidebarActiveOnly] = next.sidebarActiveOnly
             prefs[Keys.sidebarUnreadOnly] = next.sidebarUnreadOnly
             prefs[Keys.sidebarHideAgentRuns] = next.sidebarHideAgentRuns

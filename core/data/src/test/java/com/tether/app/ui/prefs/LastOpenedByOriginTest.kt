@@ -50,12 +50,45 @@ class LastOpenedByOriginTest {
     }
 
     @Test
-    fun storedLinesParseFailSoft() {
+    fun theTabLinesOfBeforeAreStillReadFailSoft() {
         val raw = mapOf(
             PreferenceKeys.LAST_OPENED_BY_ORIGIN to "$a\tsa\tha\t/srv/a\n$b\tsb\t\t/srv/with\ttab\nbroken\n$a-x\t\tha\t/srv/x",
         )
         val parsed = TetherPreferences.parse(raw).lastOpenedByOrigin
         assertEquals(mapOf(a to chatA, b to LastOpenedSession("/srv/with\ttab", "sb", null)), parsed)
-        assertEquals(parsed, TetherPreferences.parse(mapOf(PreferenceKeys.LAST_OPENED_BY_ORIGIN to TetherPreferences.joinOpened(parsed))).lastOpenedByOrigin)
+        // Rewritten as JSON, the same record reads back.
+        assertEquals(parsed, TetherPreferences.parse(mapOf(PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON to TetherPreferences.joinOpened(parsed))).lastOpenedByOrigin)
+    }
+
+    /** ta-coik.46: a folder name may hold any character; the server's remembered chat is never dropped. */
+    @Test
+    fun anyCharacterInAnyFieldRoundTrips() {
+        val odd = mapOf(
+            a to LastOpenedSession("/srv/line\nbreak", "sa", "ha"),
+            b to LastOpenedSession("/srv/tab\there\r\u0000\"quoted\" \\ back/ünï\uD83D\uDE00", "s\tb", null),
+            "$a\n\t\"" to LastOpenedSession("", "sc", "h\nc"),
+        )
+        val json = TetherPreferences.joinOpened(odd)
+        assertEquals(odd, TetherPreferences.parse(mapOf(PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON to json)).lastOpenedByOrigin)
+    }
+
+    @Test
+    fun theJsonRecordWinsAndParsesFailSoft() {
+        val json = """{"$a":{"cwd":"/srv/a","sessionId":"sa","historyId":"ha"},""" +
+            """"$b":{"cwd":"/srv/b","sessionId":"sb","historyId":null},""" +
+            """"no-id":{"cwd":"/x","sessionId":""},"no-cwd":{"sessionId":"s"},"wrong":{"cwd":1,"sessionId":"s"},""" +
+            """"empty-history":{"cwd":"/e","sessionId":"se","historyId":""},"array":[1]}"""
+        val raw = mapOf(
+            PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON to json,
+            PreferenceKeys.LAST_OPENED_BY_ORIGIN to "$a\tlegacy\t\t/srv/legacy",
+        )
+        assertEquals(
+            mapOf(a to chatA, b to LastOpenedSession("/srv/b", "sb", null), "empty-history" to LastOpenedSession("/e", "se", null)),
+            TetherPreferences.parse(raw).lastOpenedByOrigin,
+        )
+        for (junk in listOf("", "not json", "[]", "null", "{\"a\":")) {
+            assertEquals(junk, emptyMap<String, LastOpenedSession>(), TetherPreferences.parse(mapOf(PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON to junk)).lastOpenedByOrigin)
+        }
+        assertEquals("a wrongly typed value is no record", emptyMap<String, LastOpenedSession>(), TetherPreferences.parse(mapOf(PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON to 3)).lastOpenedByOrigin)
     }
 }

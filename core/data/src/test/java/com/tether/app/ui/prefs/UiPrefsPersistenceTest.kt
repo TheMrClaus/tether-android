@@ -77,6 +77,8 @@ class UiPrefsPersistenceTest {
                 "https://a.example" to LastOpenedSession("/srv/a", "s1", "h1"),
                 "https://b.example:8443" to LastOpenedSession("/srv/with\ttab", "s2", null),
                 "" to LastOpenedSession("/srv/none", "s3", "h3"),
+                // ta-coik.46: and a newline (any character).
+                "https://c.example" to LastOpenedSession("/srv/line\nbreak", "s4", "h\n4"),
             ),
             sidebarActiveOnly = true,
             sidebarUnreadOnly = true,
@@ -106,6 +108,25 @@ class UiPrefsPersistenceTest {
             assertEquals(emptyMap<String, LastOpenedSession>(), back.lastOpenedByOrigin)
             assertEquals(260, back.inspectorWidth)
         }
+    }
+
+    /** ta-coik.46: the tab-line record of ta-coik.41 r2 is read, and the next save rewrites it as JSON. */
+    @Test
+    fun theTabLineRecordMigratesToJsonOnTheNextSave() = runBlocking {
+        withStore(prefsFile) { ds ->
+            ds.edit { it[stringPreferencesKey(PreferenceKeys.LAST_OPENED_BY_ORIGIN)] = "$A\ts1\th1\t/srv/with\ttab" }
+        }
+        val expected = mapOf(A to LastOpenedSession("/srv/with\ttab", "s1", "h1"))
+        withPrefs { prefs ->
+            assertEquals(expected, prefs.preferences.first().lastOpenedByOrigin)
+            prefs.setShowEnded(false)
+        }
+        withStore(prefsFile) { ds ->
+            val stored = ds.data.first()
+            assertEquals(null, stored[stringPreferencesKey(PreferenceKeys.LAST_OPENED_BY_ORIGIN)])
+            assertTrue(stored[stringPreferencesKey(PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON)].orEmpty().startsWith("{"))
+        }
+        withPrefs { prefs -> assertEquals(expected, prefs.preferences.first().lastOpenedByOrigin) }
     }
 
     /**
