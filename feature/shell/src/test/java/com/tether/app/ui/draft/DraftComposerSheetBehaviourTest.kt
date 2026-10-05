@@ -195,7 +195,7 @@ class DraftComposerSheetBehaviourTest {
 
     @Test
     fun theEmptyStageAndTheDrawerRaiseTheSheetToo() {
-        runBlocking { prefs.setLastView("sessions") }
+        runBlocking { prefs.setLastView(com.tether.app.client.serverOrigin(DraftFixtures.SERVER), "sessions") }
         launch()
         // Sessions' empty stage: "Start first session".
         tap(ShellTags.StartSessionKey)

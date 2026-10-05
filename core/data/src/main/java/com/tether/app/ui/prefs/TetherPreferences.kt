@@ -7,10 +7,13 @@ import com.tether.app.protocol.tree.JsValue
 import com.tether.app.ui.theme.ThemeMigration
 import com.tether.app.ui.theme.ThemeMode
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 
 /**
  * T2.3: the web's `tether.preferences.v1` object (tether hooks/use-preferences.ts:148-212,
@@ -48,8 +51,16 @@ data class TetherPreferences(
     val sidebarWidth: Int? = null,
     val inspectorWidth: Int? = null,
     val pinnedProjects: List<String> = emptyList(),
+    /**
+     * The folded workspace blocks. In the stored model: the device-wide list the app kept before
+     * ta-coik.47, read only until it is migrated to the current server ([migrateToServer]); in a
+     * [forServer] view: that server's list.
+     */
     val collapsedWorkspaces: List<String> = emptyList(),
-    /** historyId → last time this device opened the conversation (epoch ms). */
+    /**
+     * historyId → last time this device opened the conversation (epoch ms). Stored: the device-wide
+     * map of before ta-coik.47 (read only until migrated); in a [forServer] view: that server's.
+     */
     val lastSeenSessions: Map<String, Long> = emptyMap(),
     /**
      * The single remembered chat the app kept before ta-coik.41 r2. Read only until it is migrated to
@@ -61,6 +72,10 @@ data class TetherPreferences(
      * origin, so each server remembers its own chat). Key "" holds it with no server configured.
      */
     val lastOpenedByOrigin: Map<String, LastOpenedSession> = emptyMap(),
+    /** ta-coik.47: the web's `collapsedWorkspaces` per server origin (key "": no server configured). */
+    val collapsedByOrigin: Map<String, List<String>> = emptyMap(),
+    /** ta-coik.47: the web's `lastSeenSessions` per server origin (key "": no server configured). */
+    val lastSeenByOrigin: Map<String, Map<String, Long>> = emptyMap(),
     val sidebarActiveOnly: Boolean = false,
     val sidebarUnreadOnly: Boolean = false,
     val sidebarHideAgentRuns: Boolean = true,
@@ -82,6 +97,56 @@ data class TetherPreferences(
         val legacy = lastOpenedSession ?: return this
         val byOrigin = if (origin in lastOpenedByOrigin) lastOpenedByOrigin else lastOpenedByOrigin + (origin to legacy)
         return copy(lastOpenedSession = null, lastOpenedByOrigin = byOrigin)
+    }
+
+    /** ta-coik.47: a device-wide value of before is still waiting for [migrateToServer]. */
+    val hasDeviceWideServerRecords: Boolean
+        get() = lastOpenedSession != null || collapsedWorkspaces.isNotEmpty() || lastSeenSessions.isNotEmpty()
+
+    /**
+     * ta-coik.47: every device-wide value of before (the remembered chat, the folded blocks, the
+     * seen stamps) becomes [origin]'s, once: each is cleared, and a server's own record wins.
+     */
+    fun migrateToServer(origin: String): TetherPreferences {
+        if (!hasDeviceWideServerRecords) return this
+        val opened = migrateLastOpened(origin)
+        return opened.copy(
+            collapsedWorkspaces = emptyList(),
+            lastSeenSessions = emptyMap(),
+            collapsedByOrigin = if (collapsedWorkspaces.isEmpty() || origin in collapsedByOrigin) collapsedByOrigin else collapsedByOrigin + (origin to collapsedWorkspaces),
+            lastSeenByOrigin = if (lastSeenSessions.isEmpty() || origin in lastSeenByOrigin) lastSeenByOrigin else lastSeenByOrigin + (origin to lastSeenSessions),
+        )
+    }
+
+    /**
+     * ta-coik.47: the model as the server at [origin] sees it (the web's localStorage is per origin):
+     * [collapsedWorkspaces], [lastSeenSessions] and [lastOpenedSession] are that server's (the
+     * device-wide value of before until it is migrated). Write it back with [updateForServer].
+     */
+    fun forServer(origin: String?): TetherPreferences = copy(
+        collapsedWorkspaces = collapsedByOrigin[origin.orEmpty()] ?: collapsedWorkspaces,
+        lastSeenSessions = lastSeenByOrigin[origin.orEmpty()] ?: lastSeenSessions,
+        lastOpenedSession = lastOpenedFor(origin),
+    )
+
+    /**
+     * ta-coik.47: [transform] a [forServer] view and store it: the per-server fields go to [origin]'s
+     * records (the device-wide values of before migrate there first), the rest as they are.
+     */
+    fun updateForServer(origin: String?, transform: (TetherPreferences) -> TetherPreferences): TetherPreferences {
+        val key = origin.orEmpty()
+        val base = if (origin != null) migrateToServer(origin) else this
+        val scoped = base.forServer(origin)
+        val next = transform(scoped)
+        val opened = next.lastOpenedSession?.takeIf { it != scoped.lastOpenedSession }
+        return next.copy(
+            collapsedWorkspaces = base.collapsedWorkspaces,
+            lastSeenSessions = base.lastSeenSessions,
+            lastOpenedSession = base.lastOpenedSession,
+            collapsedByOrigin = base.collapsedByOrigin + (key to next.collapsedWorkspaces),
+            lastSeenByOrigin = base.lastSeenByOrigin + (key to next.lastSeenSessions),
+            lastOpenedByOrigin = if (opened != null) base.lastOpenedByOrigin + (key to opened) else base.lastOpenedByOrigin,
+        )
     }
 
     companion object {
@@ -131,6 +196,8 @@ data class TetherPreferences(
                 // ta-coik.46: the JSON record; the tab-line one of ta-coik.41 r2 only until it is rewritten.
                 lastOpenedByOrigin = str(PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON)?.let(::openedJson)
                     ?: legacyOpenedMap(str(PreferenceKeys.LAST_OPENED_BY_ORIGIN)),
+                collapsedByOrigin = str(PreferenceKeys.COLLAPSED_BY_ORIGIN_JSON)?.let(::collapsedJson).orEmpty(),
+                lastSeenByOrigin = str(PreferenceKeys.LAST_SEEN_BY_ORIGIN_JSON)?.let(::seenJson).orEmpty(),
                 sidebarActiveOnly = bool(PreferenceKeys.SIDEBAR_ACTIVE_ONLY, d.sidebarActiveOnly),
                 sidebarUnreadOnly = bool(PreferenceKeys.SIDEBAR_UNREAD_ONLY, d.sidebarUnreadOnly),
                 sidebarHideAgentRuns = bool(PreferenceKeys.SIDEBAR_HIDE_AGENT_RUNS, d.sidebarHideAgentRuns),
@@ -207,6 +274,55 @@ data class TetherPreferences(
             return out
         }
 
+        private fun jsonObject(value: String): JsonObject? = runCatching { Json.parseToJsonElement(value) }.getOrNull() as? JsonObject
+
+        /**
+         * ta-coik.47: `{ origin: [cwd, …] }`, the web's `collapsedWorkspaces` per origin. Fail-soft:
+         * unreadable JSON is no record, an origin whose value is not an array is dropped, and so is
+         * an entry that is not a non-empty string.
+         */
+        private fun collapsedJson(value: String): Map<String, List<String>> {
+            val root = jsonObject(value) ?: return emptyMap()
+            val out = LinkedHashMap<String, List<String>>()
+            for ((origin, entry) in root) {
+                val list = entry as? JsonArray ?: continue
+                out[origin] = list.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.takeIf(String::isNotEmpty) }
+            }
+            return out
+        }
+
+        internal fun joinCollapsed(values: Map<String, List<String>>): String = buildJsonObject {
+            for ((origin, list) in values) put(origin, JsonArray(list.filter(String::isNotEmpty).map(::JsonPrimitive)))
+        }.toString()
+
+        /**
+         * ta-coik.47: `{ origin: { historyId: epochMs } }`, the web's `lastSeenSessions` per origin.
+         * Fail-soft: unreadable JSON is no record, an origin whose value is not an object is dropped,
+         * and so is a stamp that is not a finite non-negative number (or has an empty id).
+         */
+        private fun seenJson(value: String): Map<String, Map<String, Long>> {
+            val root = jsonObject(value) ?: return emptyMap()
+            val out = LinkedHashMap<String, Map<String, Long>>()
+            for ((origin, entry) in root) {
+                val stamps = entry as? JsonObject ?: continue
+                val seen = LinkedHashMap<String, Long>()
+                for ((id, at) in stamps) {
+                    val p = at as? JsonPrimitive ?: continue
+                    if (p.isString || id.isEmpty()) continue
+                    val ms = p.longOrNull ?: p.doubleOrNull?.takeIf { it.isFinite() }?.toLong() ?: continue
+                    if (ms >= 0) seen[id] = ms
+                }
+                out[origin] = seen
+            }
+            return out
+        }
+
+        internal fun joinSeenByOrigin(values: Map<String, Map<String, Long>>): String = buildJsonObject {
+            for ((origin, seen) in values) {
+                put(origin, buildJsonObject { for ((id, at) in seen) if (id.isNotEmpty() && at >= 0) put(id, JsonPrimitive(at)) })
+            }
+        }.toString()
+
         internal fun joinOpened(values: Map<String, LastOpenedSession>): String = buildJsonObject {
             for ((origin, o) in values) {
                 if (o.sessionId.isEmpty()) continue
@@ -272,6 +388,12 @@ object PreferenceKeys {
     const val LAST_OPENED_BY_ORIGIN = "last_opened_by_origin"
     /** ta-coik.46: the same record as JSON (any character in any field); replaces [LAST_OPENED_BY_ORIGIN]. */
     const val LAST_OPENED_BY_ORIGIN_JSON = "last_opened_by_origin_json"
+    /** ta-coik.47: `collapsedWorkspaces` per server origin, JSON; replaces [COLLAPSED_WORKSPACES] (read only to migrate). */
+    const val COLLAPSED_BY_ORIGIN_JSON = "collapsed_workspaces_by_origin_json"
+    /** ta-coik.47: `lastSeenSessions` per server origin, JSON; replaces [LAST_SEEN_SESSIONS] (read only to migrate). */
+    const val LAST_SEEN_BY_ORIGIN_JSON = "last_seen_by_origin_json"
+    /** ta-coik.47: the web's `tether:lastView` per server origin, JSON; replaces `last_view` (read only to migrate). */
+    const val LAST_VIEW_BY_ORIGIN_JSON = "last_view_by_origin_json"
     const val SIDEBAR_ACTIVE_ONLY = "sidebar_active_only"
     const val SIDEBAR_UNREAD_ONLY = "sidebar_unread_only"
     const val SIDEBAR_HIDE_AGENT_RUNS = "sidebar_hide_agent_runs"

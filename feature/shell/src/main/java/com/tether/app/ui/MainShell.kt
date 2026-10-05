@@ -335,7 +335,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // restoration (Sessions); a fresh install starts on the Overview.
     LaunchedEffect(Unit) {
         if (ViewHistory.decode(viewHistorySaved).current != null) return@LaunchedEffect
-        val boot = prefs.viewBoot()
+        // ta-coik.47: the server's own remembered view (the web's localStorage is per origin).
+        val boot = prefs.viewBoot(com.tether.app.client.serverOrigin(vm.client.serverUrl.value))
         if (ViewHistory.decode(viewHistorySaved).current != null) return@LaunchedEffect
         val (resolved, _) = DashboardViews.resolve(
             sessionLink = vm.pendingSessionId.value != null || vm.activeId.value != null || vm.openingHistoryId.value != null || vm.bootLinkPending.value,
@@ -356,7 +357,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         }
     }
     // dashboard.tsx `writeStoredView`: remember the last top-level view for the next launch.
-    LaunchedEffect(view) { view?.let { prefs.setLastView(it.key) } }
+    val viewOrigin = com.tether.app.client.serverOrigin(vm.client.serverUrl.collectAsStateWithLifecycle().value)
+    LaunchedEffect(view, viewOrigin) { view?.let { prefs.setLastView(viewOrigin, it.key) } }
     // T15.2 (dashboard.tsx:1392-1443 reviewRequest): the hand-off lands in the session; once a
     // snapshot on this connection has confirmed it, a request no longer pending is said so. A
     // session that never confirms within the bound says it could not be found. Nothing is answered.

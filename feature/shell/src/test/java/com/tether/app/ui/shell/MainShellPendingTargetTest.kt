@@ -57,7 +57,7 @@ class MainShellPendingTargetTest {
         prefs.updatePreferences {
             it.copy(lastOpenedSession = null, lastOpenedByOrigin = emptyMap(), defaultWorkspace = "", showEndedSessions = true, pinnedProjects = emptyList())
         }
-        prefs.setLastView(view)
+        prefs.setLastView(null, view)
     }
 
     private fun list(client: ShellConsentClient, vararg sessions: AgentSession) {

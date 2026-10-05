@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
+import com.tether.app.client.serverOrigin
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
@@ -61,7 +62,9 @@ fun SessionDrawer(
 ) {
     val client = vm.client
     val scope = rememberCoroutineScope()
-    val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
+    // ta-coik.47: the folded blocks and seen stamps are the server's (the web's localStorage is per origin).
+    val stored by remember(prefs, client) { prefs.preferencesFor(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = null)
+    val preferences = stored ?: TetherPreferences.Default
     val connection by client.connection.collectAsStateWithLifecycle()
     val historiesByCwd by client.historiesByCwd.collectAsStateWithLifecycle()
     val sessionOrders by client.sessionOrders.collectAsStateWithLifecycle()
@@ -82,7 +85,7 @@ fun SessionDrawer(
         SidebarController(
             client = client,
             readPreferences = { latestPrefs },
-            updatePreferences = { transform -> scope.launchPreferenceWrite { prefs.updatePreferences(transform) } },
+            updatePreferences = { transform -> scope.launchPreferenceWrite { prefs.updatePreferencesFor(serverOrigin(client.serverUrl.value), transform) } },
             selectWorkspace = vm::selectWorkspace,
         )
     }
@@ -256,7 +259,7 @@ fun WorkspacePickerHost(
     onDismiss: () -> Unit,
 ) {
     val client = vm.client
-    val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
+    val preferences by remember(prefs, client) { prefs.preferencesFor(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
     val directories by client.directories.collectAsStateWithLifecycle()
     val pickedWorkspace by vm.currentWorkspace.collectAsStateWithLifecycle()
@@ -265,7 +268,7 @@ fun WorkspacePickerHost(
         SidebarController(
             client = client,
             readPreferences = { latestPrefs },
-            updatePreferences = { transform -> scope.launchPreferenceWrite { prefs.updatePreferences(transform) } },
+            updatePreferences = { transform -> scope.launchPreferenceWrite { prefs.updatePreferencesFor(serverOrigin(client.serverUrl.value), transform) } },
             selectWorkspace = vm::selectWorkspace,
         )
     }
@@ -273,7 +276,7 @@ fun WorkspacePickerHost(
     val pinned = controller.pinnedWorkspaces(serverSettings, preferences)
     // The stored preferences, not the first frame's defaults, decide which folder is current.
     LaunchedEffect(Unit) {
-        val stored = prefs.preferences.first()
+        val stored = prefs.preferencesFor(client.serverUrl).first()
         client.browse(controller.currentWorkspace(vm.currentWorkspace.value, stored, workspaceRoot) ?: workspaceRoot)
     }
     WorkspaceFolderPicker(client, directories, current, pinned, controller, onDismiss)

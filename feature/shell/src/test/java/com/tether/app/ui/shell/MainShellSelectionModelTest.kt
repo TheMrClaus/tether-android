@@ -70,7 +70,7 @@ class MainShellSelectionModelTest {
         AgentSession(id = id, provider = "claude", name = id, cwd = cwd, status = status, startedAt = 1, updatedAt = 1, historyId = "h-$id")
 
     /** The singleton preferences start from this test's own state (the DataStore outlives a test). */
-    private fun storedState(view: String, remembered: LastOpenedSession?, showEnded: Boolean = true) = runBlocking {
+    private fun storedState(view: String, remembered: LastOpenedSession?, showEnded: Boolean = true, origin: String? = null) = runBlocking {
         prefs.updatePreferences {
             it.copy(
                 lastOpenedSession = null,
@@ -80,7 +80,7 @@ class MainShellSelectionModelTest {
                 pinnedProjects = emptyList(),
             )
         }
-        prefs.setLastView(view)
+        prefs.setLastView(origin, view)
     }
 
     private fun list(client: Client, vararg sessions: AgentSession) {
@@ -154,7 +154,7 @@ class MainShellSelectionModelTest {
         // Remembered under the canonical origin (SettingsStore serverOrigin), configured as typed.
         val serverA = "https://a.example:443"
         val serverB = "https://b.example:443"
-        storedState("sessions", remembered = null)
+        storedState("sessions", remembered = null, origin = serverB)
         runBlocking {
             prefs.updatePreferences {
                 it.copy(lastOpenedByOrigin = mapOf(serverA to LastOpenedSession("/w", "a", "h-a"), serverB to LastOpenedSession("/w", "b", "h-b")))
@@ -174,7 +174,7 @@ class MainShellSelectionModelTest {
     @Test
     fun theSingleRememberedChatOfAnOlderVersionBecomesTheCurrentServersOnce() {
         val serverA = "https://a.example:443"
-        storedState("sessions", remembered = null)
+        storedState("sessions", remembered = null, origin = serverA)
         runBlocking { prefs.updatePreferences { it.copy(lastOpenedSession = LastOpenedSession("/w", "b", "h-b")) } }
         val client = Client()
         client.base.server.value = "https://a.example"
@@ -187,9 +187,36 @@ class MainShellSelectionModelTest {
         assertNull("not another server's", remembered("https://other.example"))
     }
 
+    /** ta-coik.47: the folded blocks and seen stamps an older version kept device-wide become the current server's, once. */
+    @Test
+    fun theDeviceWideFoldedBlocksAndSeenStampsBecomeTheCurrentServersOnce() {
+        val serverA = "https://a.example:443"
+        storedState("overview", remembered = null, origin = serverA)
+        runBlocking {
+            prefs.updatePreferences {
+                it.copy(
+                    collapsedWorkspaces = listOf("/w/folded"),
+                    lastSeenSessions = mapOf("h-old" to 3L),
+                    collapsedByOrigin = emptyMap(),
+                    lastSeenByOrigin = emptyMap(),
+                )
+            }
+        }
+        val client = Client()
+        client.base.server.value = "https://a.example"
+        val vm = TetherViewModel(client)
+        compose(vm)
+        rule.waitUntil(5_000) { !runBlocking { prefs.preferences.first() }.hasDeviceWideServerRecords }
+        val stored = runBlocking { prefs.preferences.first() }
+        assertEquals(listOf("/w/folded"), stored.forServer(serverA).collapsedWorkspaces)
+        assertEquals(mapOf("h-old" to 3L), stored.forServer(serverA).lastSeenSessions)
+        assertTrue("not another server's", stored.forServer("https://other.example:443").collapsedWorkspaces.isEmpty())
+        assertTrue(stored.forServer("https://other.example:443").lastSeenSessions.isEmpty())
+    }
+
     @Test
     fun anotherServerSettlesItsOwnCurrentWorkspace() {
-        storedState("sessions", remembered = null)
+        storedState("sessions", remembered = null, origin = "https://a.example:443")
         runBlocking { prefs.updatePreferences { it.copy(defaultWorkspace = "/w/default-a") } }
         val client = Client()
         client.base.server.value = "https://a.example"
@@ -241,6 +268,33 @@ class MainShellSelectionModelTest {
         assertEquals("h-gone", vm.openingHistoryId.value)
         assertNull(vm.selectedSessionId.value)
         assertTrue("nothing picked while the row opens", client.base.mountCalls.isEmpty())
+    }
+
+    /** ta-coik.47: the reopened chat is stamped seen on the server it was reopened on (dashboard.tsx `reopen`). */
+    @Test
+    fun aReopenedRememberedChatIsSeenOnItsServer() {
+        val serverA = "https://a.example:443"
+        storedState("sessions", remembered = null, origin = serverA)
+        runBlocking {
+            prefs.updatePreferences {
+                it.copy(
+                    lastOpenedByOrigin = mapOf(serverA to LastOpenedSession("/w", "gone", "h-gone")),
+                    lastSeenSessions = emptyMap(),
+                    lastSeenByOrigin = emptyMap(),
+                )
+            }
+        }
+        val client = Client()
+        client.base.server.value = "https://a.example"
+        list(client, chat("a"))
+        val vm = TetherViewModel(client)
+        compose(vm)
+        client.discovered.value = mapOf("/w" to listOf(HistorySession("h-gone", "claude", "gone", "/w", 1)))
+        rule.waitUntil(5_000) { client.resumed.isNotEmpty() }
+        rule.waitUntil(5_000) { "h-gone" in runBlocking { prefs.preferences.first() }.forServer(serverA).lastSeenSessions }
+        val stored = runBlocking { prefs.preferences.first() }
+        assertTrue("not with no server", stored.lastSeenByOrigin[""].orEmpty().isEmpty())
+        assertTrue("not another server's", stored.forServer("https://other.example:443").lastSeenSessions.isEmpty())
     }
 
     @Test

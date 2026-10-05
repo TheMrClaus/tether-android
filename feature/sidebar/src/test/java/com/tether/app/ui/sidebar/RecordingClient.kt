@@ -49,6 +49,9 @@ class RecordingClient(
     override val sessionControls: StateFlow<Map<String, ServerMessage.SessionControls>> = MutableStateFlow(emptyMap())
     override val errors: SharedFlow<String> = MutableSharedFlow()
     override val configured: StateFlow<Boolean> = MutableStateFlow(true)
+    /** ta-coik.47: the configured server (the drawer's folded blocks and seen stamps are its own); null = none. */
+    val server = MutableStateFlow<String?>(null)
+    override val serverUrl: StateFlow<String?> get() = server
     override val trimmedBefore: StateFlow<Map<String, Int>> = MutableStateFlow(emptyMap())
 
     override val historiesByCwd = MutableStateFlow<Map<String, List<HistorySession>>>(emptyMap())

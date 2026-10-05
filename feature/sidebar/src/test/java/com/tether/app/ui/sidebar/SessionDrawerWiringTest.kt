@@ -81,7 +81,7 @@ class SessionDrawerWiringTest {
         // The local stamp lands in tether.preferences.v1 lastSeenSessions (the unread badge clears here at once).
         // Poll off the main looper: the DataStore write the drawer launched completes on it, so a
         // suspending wait on this (the main) thread would deadlock.
-        fun stored() = runBlocking(Dispatchers.IO) { prefs.preferences.first() }.lastSeenSessions
+        fun stored() = runBlocking(Dispatchers.IO) { prefs.preferences.first() }.forServer(null).lastSeenSessions
         rule.waitUntil(5_000) { "hist-1" in stored() }
         val stamp = stored().getValue("hist-1")
         assertEquals((markSeen["seenAt"] as JsonPrimitive).content.toLong(), stamp)

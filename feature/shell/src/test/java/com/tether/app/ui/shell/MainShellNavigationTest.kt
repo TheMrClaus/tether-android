@@ -2,6 +2,9 @@ package com.tether.app.ui.shell
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -28,6 +31,7 @@ import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -57,7 +61,7 @@ abstract class NavigationBase(private val width: Int, private val height: Int) {
     protected val client = ShellConsentClient()
     protected val vm by lazy { TetherViewModel(client) }
 
-    private val window = object : WindowInfo {
+    protected val window = object : WindowInfo {
         override val isWindowFocused: Boolean get() = true
         override val containerSize: IntSize get() = IntSize(width, height)
     }
@@ -92,7 +96,7 @@ abstract class NavigationBase(private val width: Int, private val height: Int) {
         return !rule.activity.onBackPressedDispatcher.hasEnabledCallbacks()
     }
 
-    protected fun storedView(): String? = runBlocking { prefs.viewBoot().storedView }
+    protected fun storedView(): String? = runBlocking { prefs.viewBoot(null).storedView }
 
     protected fun onOverview() = awaitTag(OverviewTags.Root)
 
@@ -147,10 +151,61 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
         rule.waitUntil(5_000) { storedView() == "sessions" }
     }
 
+    /**
+     * ta-coik.47: each server boots on its own remembered view (the web's `tether:lastView` lives in
+     * its per-origin localStorage), a server never used is a fresh origin (the Overview), and a
+     * sign-out keeps every server's records, folded blocks and seen stamps included (localStorage
+     * survives /login; the shell leaves composition while signed out, as UiRoot shows the sign-in).
+     */
+    @Test fun eachServerBootsOnItsOwnViewAndASignOutKeepsTheServersRecords() {
+        val a = "https://a.example:443"
+        val b = "https://b.example:443"
+        runBlocking {
+            prefs.updatePreferences { it.copy(showThinking = true) }
+            prefs.updatePreferencesFor(a) { it.copy(collapsedWorkspaces = listOf("/w/folded"), lastSeenSessions = mapOf("h-seen" to 7L)) }
+            prefs.setLastView(a, "scheduled")
+            prefs.setLastView(b, "sessions")
+        }
+        val records = runBlocking { prefs.preferences.first() }
+        var signedIn by mutableStateOf(true)
+        client.server.value = "https://A.example/"
+        rule.setContent {
+            if (signedIn) TetherTheme { CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, prefs) } }
+        }
+        rule.waitUntil(5_000) { exists(ShellTags.nav(TopBarDestination.Scheduled)) && selected(ShellTags.nav(TopBarDestination.Scheduled)) }
+
+        // Sign out: nothing of any server's is forgotten.
+        vm.logout()
+        rule.waitUntil(5_000) { client.logoutCalls.get() == 1 }
+        rule.runOnIdle { signedIn = false }
+        rule.waitForIdle()
+        assertEquals(records, runBlocking { prefs.preferences.first() })
+        assertEquals("scheduled", runBlocking { prefs.viewBoot(a) }.storedView)
+
+        // A server never used here starts on the Overview, though this install kept preferences.
+        client.server.value = "https://c.example"
+        rule.runOnIdle { signedIn = true }
+        onOverview()
+        assertTrue(selected(ShellTags.nav(TopBarDestination.Overview)))
+        rule.runOnIdle { signedIn = false }
+        rule.waitForIdle()
+
+        // Server B boots on its own view; server A's records are as they were.
+        client.server.value = "https://b.example"
+        rule.runOnIdle { signedIn = true }
+        rule.waitUntil(5_000) { exists(ShellTags.nav(TopBarDestination.Sessions)) && selected(ShellTags.nav(TopBarDestination.Sessions)) }
+        val after = runBlocking { prefs.preferences.first() }
+        assertEquals(listOf("/w/folded"), after.forServer(a).collapsedWorkspaces)
+        assertEquals(mapOf("h-seen" to 7L), after.forServer(a).lastSeenSessions)
+        assertTrue(after.forServer(b).collapsedWorkspaces.isEmpty())
+        assertEquals("scheduled", runBlocking { prefs.viewBoot(a) }.storedView)
+        assertEquals("overview", runBlocking { prefs.viewBoot("https://c.example:443") }.storedView)
+    }
+
     @Test fun theRememberedViewIsRestored() {
         runBlocking {
             prefs.updatePreferences { it.copy(showThinking = true) }
-            prefs.setLastView("overview")
+            prefs.setLastView(null, "overview")
         }
         launch()
         onOverview()
@@ -159,7 +214,7 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
 
     @Test fun aRestoredLastSessionIsShownInSessions() {
         // The selection this app keeps (the view model survives the shell) outranks a remembered Overview.
-        runBlocking { prefs.setLastView("overview") }
+        runBlocking { prefs.setLastView(null, "overview") }
         client.show(session("s1"), freshTree())
         vm.selectSession("s1")
         launch()

@@ -80,7 +80,7 @@ class RefusedPreferenceWriteTest {
     }
 
     @Test fun pinsFromTheWelcomeAndTheDrawerHoldWhenTheDiskRefusesThem() {
-        runBlocking { prefs.setLastView("sessions") }
+        runBlocking { prefs.setLastView(com.tether.app.client.serverOrigin(DraftFixtures.SERVER), "sessions") }
         rule.setContent {
             TetherTheme { CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, prefs) } }
         }

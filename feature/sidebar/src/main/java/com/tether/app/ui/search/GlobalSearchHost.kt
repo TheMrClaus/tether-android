@@ -41,7 +41,8 @@ fun GlobalSearchHost(
     val form by vm.globalSearchForm.collectAsStateWithLifecycle()
     val client = vm.client
     val results by client.globalSearchResults.collectAsStateWithLifecycle()
-    val preferences by prefs.preferences.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
+    // ta-coik.47: the seen stamps and folded blocks are the server's.
+    val preferences by remember(prefs, client) { prefs.preferencesFor(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
     val pickedWorkspace by vm.currentWorkspace.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -50,7 +51,7 @@ fun GlobalSearchHost(
         SidebarController(
             client = client,
             readPreferences = { latestPrefs },
-            updatePreferences = { transform -> scope.launchPreferenceWrite { prefs.updatePreferences(transform) } },
+            updatePreferences = { transform -> scope.launchPreferenceWrite { prefs.updatePreferencesFor(com.tether.app.client.serverOrigin(client.serverUrl.value), transform) } },
             selectWorkspace = vm::selectWorkspace,
         )
     }

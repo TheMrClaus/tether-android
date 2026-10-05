@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.tether.app.client.serverOrigin
 import com.tether.app.ui.theme.ThemeMode
 import java.util.WeakHashMap
 import kotlin.coroutines.cancellation.CancellationException
@@ -17,6 +18,10 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 private val Context.tetherUiDataStore: DataStore<Preferences> by preferencesDataStore(name = "tether_ui_prefs")
 
@@ -77,6 +82,8 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
         val lastOpenedHistoryId = stringPreferencesKey(PreferenceKeys.LAST_OPENED_HISTORY_ID)
         val lastOpenedByOrigin = stringPreferencesKey(PreferenceKeys.LAST_OPENED_BY_ORIGIN)
         val lastOpenedByOriginJson = stringPreferencesKey(PreferenceKeys.LAST_OPENED_BY_ORIGIN_JSON)
+        val collapsedByOriginJson = stringPreferencesKey(PreferenceKeys.COLLAPSED_BY_ORIGIN_JSON)
+        val lastSeenByOriginJson = stringPreferencesKey(PreferenceKeys.LAST_SEEN_BY_ORIGIN_JSON)
         val sidebarActiveOnly = booleanPreferencesKey(PreferenceKeys.SIDEBAR_ACTIVE_ONLY)
         val sidebarUnreadOnly = booleanPreferencesKey(PreferenceKeys.SIDEBAR_UNREAD_ONLY)
         val sidebarHideAgentRuns = booleanPreferencesKey(PreferenceKeys.SIDEBAR_HIDE_AGENT_RUNS)
@@ -94,8 +101,11 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
         val pushPinnedSessions = stringPreferencesKey("push_pinned_sessions")
 
         // T15.4 (lib/dashboard-view.mjs VIEW_STORAGE_KEY `tether:lastView`): the last top-level
-        // view, a key of its own beside the preference model, as on the web.
+        // view, a key of its own beside the preference model, as on the web. ta-coik.47: device-wide
+        // before, read only until the first write moves it to a server.
         val lastView = stringPreferencesKey("last_view")
+        // ta-coik.47: `{ origin: view }` (the web's localStorage is per origin).
+        val lastViewByOrigin = stringPreferencesKey(PreferenceKeys.LAST_VIEW_BY_ORIGIN_JSON)
     }
 
     /**
@@ -108,6 +118,17 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     suspend fun updatePreferences(transform: (TetherPreferences) -> TetherPreferences) {
         save { prefs -> write(prefs, transform(parse(prefs))) }
     }
+
+    /**
+     * ta-coik.47: the model as the server at the origin of [serverUrl] sees it
+     * ([TetherPreferences.forServer]: its folded blocks, seen stamps and remembered chat).
+     */
+    fun preferencesFor(serverUrl: Flow<String?>): Flow<TetherPreferences> =
+        combine(preferences, serverUrl) { p, url -> p.forServer(serverOrigin(url)) }.distinctUntilChanged()
+
+    /** ta-coik.47: [updatePreferences] on [origin]'s view ([TetherPreferences.updateForServer]). */
+    suspend fun updatePreferencesFor(origin: String?, transform: (TetherPreferences) -> TetherPreferences) =
+        updatePreferences { it.updateForServer(origin, transform) }
 
     private fun <T> field(select: (TetherPreferences) -> T): Flow<T> = preferences.map(select).distinctUntilChanged()
 
@@ -150,6 +171,12 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
 
         private val keptByStore = WeakHashMap<DataStore<Preferences>, MutableStateFlow<Preferences?>>()
 
+        /** ta-coik.47: `{ origin: view }`, fail-soft: unreadable JSON is no record, a non-string view is dropped. */
+        private fun viewsJson(value: String?): Map<String, String> {
+            val root = value?.let { runCatching { Json.parseToJsonElement(it) }.getOrNull() } as? JsonObject ?: return emptyMap()
+            return root.entries.mapNotNull { (o, v) -> (v as? JsonPrimitive)?.takeIf { it.isString }?.let { o to it.content } }.toMap()
+        }
+
         private fun parse(prefs: Preferences): TetherPreferences =
             TetherPreferences.parse(prefs.asMap().entries.associate { (key, value) -> key.name to value })
 
@@ -169,8 +196,11 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
             prefs.putOrRemove(Keys.sidebarWidth, next.sidebarWidth)
             prefs.putOrRemove(Keys.inspectorWidth, next.inspectorWidth)
             prefs[Keys.pinnedProjects] = TetherPreferences.joinLines(next.pinnedProjects)
-            prefs[Keys.collapsedWorkspaces] = TetherPreferences.joinLines(next.collapsedWorkspaces)
-            prefs[Keys.lastSeenSessions] = TetherPreferences.joinSeen(next.lastSeenSessions)
+            // ta-coik.47: per server origin as JSON; the device-wide keys of before only until migrated.
+            prefs.putOrRemove(Keys.collapsedWorkspaces, TetherPreferences.joinLines(next.collapsedWorkspaces).takeIf { it.isNotEmpty() })
+            prefs.putOrRemove(Keys.lastSeenSessions, TetherPreferences.joinSeen(next.lastSeenSessions).takeIf { it.isNotEmpty() })
+            prefs.putOrRemove(Keys.collapsedByOriginJson, next.collapsedByOrigin.takeIf { it.isNotEmpty() }?.let(TetherPreferences::joinCollapsed))
+            prefs.putOrRemove(Keys.lastSeenByOriginJson, next.lastSeenByOrigin.takeIf { it.isNotEmpty() }?.let(TetherPreferences::joinSeenByOrigin))
             val opened = next.lastOpenedSession
             prefs.putOrRemove(Keys.lastOpenedCwd, opened?.cwd)
             prefs.putOrRemove(Keys.lastOpenedSessionId, opened?.sessionId)
@@ -193,23 +223,36 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     // ── Top-level view (T15.4) ────────────────────────────────────────────
 
     /**
-     * What a boot of the console resolves its view from (dashboard.tsx `bootView`): the remembered
-     * last view, and whether this install already kept Tether preferences before that record
-     * existed (the web tests its preferences key; here the model's stored theme mode, written by
-     * every save of the model, or a retired theme key an older version wrote). Unreadable storage reads as a fresh
+     * What a boot of the console on the server at [origin] resolves its view from (dashboard.tsx
+     * `bootView`): that server's remembered last view (ta-coik.47: the web's localStorage is per
+     * origin; the device-wide one of before until a write moves it), and whether this install already
+     * kept Tether preferences before that record existed (the web tests its preferences key; here the
+     * model's stored theme mode, written by every save of the model, or a retired theme key an older
+     * version wrote) while no server has a view record yet: once one has, a server without one is a
+     * fresh origin, as a browser's never-visited origin is. Unreadable storage reads as a fresh
      * install, like the web's blocked localStorage.
      */
-    suspend fun viewBoot(): ViewBoot = runCatching {
+    suspend fun viewBoot(origin: String?): ViewBoot = runCatching {
         val stored = data.first()
+        val views = viewsJson(stored[Keys.lastViewByOrigin])
         ViewBoot(
-            storedView = stored[Keys.lastView],
-            hasExistingPreferences = Keys.themeMode in stored || Keys.themeFamily in stored || Keys.theme in stored,
+            storedView = views[origin.orEmpty()] ?: stored[Keys.lastView],
+            hasExistingPreferences = views.isEmpty() && (Keys.themeMode in stored || Keys.themeFamily in stored || Keys.theme in stored),
         )
     }.getOrElse { ViewBoot(storedView = null, hasExistingPreferences = false) }
 
-    /** Remember the top-level view on screen (dashboard.tsx `writeStoredView`). */
-    suspend fun setLastView(view: String) {
-        runCatching { save { it[Keys.lastView] = view } }
+    /**
+     * Remember the top-level view on screen for the server at [origin] (dashboard.tsx
+     * `writeStoredView`); the device-wide record of before is dropped (it was read for this boot).
+     */
+    suspend fun setLastView(origin: String?, view: String) {
+        runCatching {
+            save { prefs ->
+                val views = viewsJson(prefs[Keys.lastViewByOrigin]) + (origin.orEmpty() to view)
+                prefs[Keys.lastViewByOrigin] = buildJsonObject { for ((o, v) in views) put(o, JsonPrimitive(v)) }.toString()
+                prefs.remove(Keys.lastView)
+            }
+        }
     }
 
     // ── Push notifications ────────────────────────────────────────────────

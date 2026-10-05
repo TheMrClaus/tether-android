@@ -80,6 +80,9 @@ class UiPrefsPersistenceTest {
                 // ta-coik.46: and a newline (any character).
                 "https://c.example" to LastOpenedSession("/srv/line\nbreak", "s4", "h\n4"),
             ),
+            // ta-coik.47: per server origin, any character.
+            collapsedByOrigin = mapOf(A to listOf("/srv/line\nbreak"), B to emptyList()),
+            lastSeenByOrigin = mapOf(A to mapOf("h\t1" to 7L), "" to mapOf("h0" to 0L)),
             sidebarActiveOnly = true,
             sidebarUnreadOnly = true,
             sidebarHideAgentRuns = false,
@@ -182,7 +185,7 @@ class UiPrefsPersistenceTest {
             withStore(prefsFile) { ds -> ds.edit { p -> stored.forEach { (k, v) -> p[stringPreferencesKey(k)] = v } } }
             withPrefs { prefs ->
                 assertEquals("$stored", expected, prefs.themeMode.first())
-                assertTrue("$stored predates the view record", prefs.viewBoot().hasExistingPreferences)
+                assertTrue("$stored predates the view record", prefs.viewBoot(null).hasExistingPreferences)
                 prefs.setShowThinking(true) // any save of the model
             }
             withStore(prefsFile) { ds ->
@@ -355,18 +358,123 @@ class UiPrefsPersistenceTest {
      */
     @Test
     fun viewBootReadsTheRememberedViewAndWhetherPreferencesExist() = runBlocking {
-        withPrefs { prefs -> assertEquals(ViewBoot(storedView = null, hasExistingPreferences = false), prefs.viewBoot()) }
+        withPrefs { prefs -> assertEquals(ViewBoot(storedView = null, hasExistingPreferences = false), prefs.viewBoot(null)) }
         withPrefs { prefs -> prefs.updatePreferences { it.copy(showThinking = true) } }
-        withPrefs { prefs -> assertEquals(ViewBoot(storedView = null, hasExistingPreferences = true), prefs.viewBoot()) }
-        withPrefs { prefs -> prefs.setLastView("overview") }
-        withPrefs { prefs -> assertEquals(ViewBoot(storedView = "overview", hasExistingPreferences = true), prefs.viewBoot()) }
+        withPrefs { prefs -> assertEquals(ViewBoot(storedView = null, hasExistingPreferences = true), prefs.viewBoot(null)) }
+        withPrefs { prefs -> prefs.setLastView(null, "overview") }
+        // ta-coik.47: once a server has a view record, a server without one is a fresh origin.
+        withPrefs { prefs -> assertEquals(ViewBoot(storedView = "overview", hasExistingPreferences = false), prefs.viewBoot(null)) }
         // Only a remembered view (no model saved yet): still not an "existing" install.
         prefsFile.delete()
-        withPrefs { prefs -> prefs.setLastView("sessions") }
-        withPrefs { prefs -> assertEquals(ViewBoot(storedView = "sessions", hasExistingPreferences = false), prefs.viewBoot()) }
+        withPrefs { prefs -> prefs.setLastView(null, "sessions") }
+        withPrefs { prefs -> assertEquals(ViewBoot(storedView = "sessions", hasExistingPreferences = false), prefs.viewBoot(null)) }
         // A legacy flat theme alone marks an install that predates the view record.
         prefsFile.delete()
         withStore(prefsFile) { ds -> ds.edit { it[stringPreferencesKey(PreferenceKeys.LEGACY_THEME)] = "night" } }
-        withPrefs { prefs -> assertTrue(prefs.viewBoot().hasExistingPreferences) }
+        withPrefs { prefs -> assertTrue(prefs.viewBoot(null).hasExistingPreferences) }
+    }
+
+    /** ta-coik.47: each server remembers its own last view (the web's `tether:lastView` is per origin). */
+    @Test
+    fun theLastViewIsPerServer() = runBlocking {
+        withPrefs { prefs ->
+            prefs.updatePreferences { it.copy(showThinking = true) }
+            prefs.setLastView(A, "scheduled")
+            prefs.setLastView(B, "overview")
+        }
+        withPrefs { prefs ->
+            assertEquals("scheduled", prefs.viewBoot(A).storedView)
+            assertEquals("overview", prefs.viewBoot(B).storedView)
+            // A server with no record is a fresh origin, though this install kept preferences.
+            assertEquals(ViewBoot(storedView = null, hasExistingPreferences = false), prefs.viewBoot("https://c.example:443"))
+            assertEquals(ViewBoot(storedView = null, hasExistingPreferences = false), prefs.viewBoot(null))
+            prefs.setLastView(A, "sessions")
+        }
+        withPrefs { prefs ->
+            assertEquals("sessions", prefs.viewBoot(A).storedView)
+            assertEquals("overview", prefs.viewBoot(B).storedView)
+        }
+    }
+
+    /** ta-coik.47: the device-wide view of before is this boot's server's; its first write moves it there. */
+    @Test
+    fun theDeviceWideLastViewIsMigratedToTheCurrentServerOnce() = runBlocking {
+        withStore(prefsFile) { ds ->
+            ds.edit {
+                it[stringPreferencesKey("last_view")] = "scheduled"
+                it[stringPreferencesKey(PreferenceKeys.THEME_MODE)] = "dark"
+            }
+        }
+        withPrefs { prefs ->
+            assertEquals(ViewBoot(storedView = "scheduled", hasExistingPreferences = true), prefs.viewBoot(A))
+            prefs.setLastView(A, "scheduled")
+        }
+        withStore(prefsFile) { ds -> assertEquals(null, ds.data.first()[stringPreferencesKey("last_view")]) }
+        withPrefs { prefs ->
+            assertEquals("scheduled", prefs.viewBoot(A).storedView)
+            assertEquals("another server does not inherit it", ViewBoot(storedView = null, hasExistingPreferences = false), prefs.viewBoot(B))
+        }
+        // An install of before the view record (preferences, no view): the first server boots Sessions.
+        prefsFile.delete()
+        withStore(prefsFile) { ds -> ds.edit { it[stringPreferencesKey(PreferenceKeys.THEME_MODE)] = "dark" } }
+        withPrefs { prefs ->
+            assertEquals(ViewBoot(storedView = null, hasExistingPreferences = true), prefs.viewBoot(A))
+            prefs.setLastView(A, "sessions")
+            assertEquals(ViewBoot(storedView = null, hasExistingPreferences = false), prefs.viewBoot(B))
+        }
+    }
+
+    @Test
+    fun aCorruptViewRecordReadsAsNone() = runBlocking {
+        for (garbage in listOf("not json", "[\"overview\"]", "{\"$A\":3}", "{")) {
+            prefsFile.delete()
+            withStore(prefsFile) { ds -> ds.edit { it[stringPreferencesKey(PreferenceKeys.LAST_VIEW_BY_ORIGIN_JSON)] = garbage } }
+            withPrefs { prefs ->
+                assertEquals(garbage, ViewBoot(storedView = null, hasExistingPreferences = false), prefs.viewBoot(A))
+                prefs.setLastView(B, "overview")
+                assertEquals(garbage, "overview", prefs.viewBoot(B).storedView)
+            }
+        }
+        // An origin key of any characters round-trips.
+        val odd = "\n\t\"\\😀"
+        withPrefs { prefs -> prefs.setLastView(odd, "scheduled") }
+        withPrefs { prefs -> assertEquals("scheduled", prefs.viewBoot(odd).storedView) }
+    }
+
+    /**
+     * ta-coik.47: the folded blocks and seen stamps are stored per server as JSON; the device-wide keys
+     * of before are read until the migration moves them, and are then gone from the file.
+     */
+    @Test
+    fun theFoldedBlocksAndSeenStampsArePerServerOnDisk() = runBlocking {
+        withStore(prefsFile) { ds ->
+            ds.edit {
+                it[stringPreferencesKey(PreferenceKeys.COLLAPSED_WORKSPACES)] = "/srv/x\n/srv/y"
+                it[stringPreferencesKey(PreferenceKeys.LAST_SEEN_SESSIONS)] = "h1\t5"
+            }
+        }
+        withPrefs { prefs ->
+            assertEquals(listOf("/srv/x", "/srv/y"), prefs.preferences.first().forServer(A).collapsedWorkspaces)
+            prefs.updatePreferences { it.migrateToServer(A) }
+        }
+        withStore(prefsFile) { ds ->
+            val stored = ds.data.first()
+            assertEquals(null, stored[stringPreferencesKey(PreferenceKeys.COLLAPSED_WORKSPACES)])
+            assertEquals(null, stored[stringPreferencesKey(PreferenceKeys.LAST_SEEN_SESSIONS)])
+            assertTrue(stored[stringPreferencesKey(PreferenceKeys.COLLAPSED_BY_ORIGIN_JSON)].orEmpty().startsWith("{"))
+            assertTrue(stored[stringPreferencesKey(PreferenceKeys.LAST_SEEN_BY_ORIGIN_JSON)].orEmpty().startsWith("{"))
+        }
+        withPrefs { prefs ->
+            prefs.updatePreferencesFor(B) { it.copy(collapsedWorkspaces = listOf("/srv/new\nline"), lastSeenSessions = mapOf("h\t2" to 9L)) }
+        }
+        withPrefs { prefs ->
+            val stored = prefs.preferences.first()
+            assertEquals(listOf("/srv/x", "/srv/y"), stored.forServer(A).collapsedWorkspaces)
+            assertEquals(mapOf("h1" to 5L), stored.forServer(A).lastSeenSessions)
+            assertEquals(listOf("/srv/new\nline"), stored.forServer(B).collapsedWorkspaces)
+            assertEquals(mapOf("h\t2" to 9L), stored.forServer(B).lastSeenSessions)
+            // A server's view by its URL (the canonical origin).
+            assertEquals(listOf("/srv/x", "/srv/y"), prefs.preferencesFor(kotlinx.coroutines.flow.flowOf("https://A.example/")).first().collapsedWorkspaces)
+        }
     }
 }

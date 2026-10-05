@@ -23,6 +23,8 @@ import kotlinx.coroutines.CoroutineScope
  *   :856-886; `reopen` :465-479: the block becomes current, resume, seen, the drawer closes);
  * - the one-time pick ([TetherViewModel.pickIfNothingSelected], :752-763);
  * - the chat on screen is remembered as `lastOpenedSession` (:829-835), per server origin (r2);
+ * - ta-coik.47: the device-wide records of before (remembered chat, folded blocks, seen stamps) move
+ *   to the current server once;
  * - ta-coik.42: while a pending target is listed, its block is the current workspace (:1153-1160).
  * Its own composable, so a preference change recomposes this and not the shell.
  */
@@ -53,28 +55,32 @@ internal fun WebSelectionEffects(
     val serverUrl by client.serverUrl.collectAsStateWithLifecycle()
     // r2: each server remembers its own chat (the web's localStorage is per origin).
     val origin = com.tether.app.client.serverOrigin(serverUrl)
-    val remembered = loaded.lastOpenedFor(origin)
-    val scoped = loaded.copy(lastOpenedSession = remembered)
+    // ta-coik.47: and its own folded blocks and seen stamps.
+    val scoped = loaded.forServer(origin)
+    val remembered = scoped.lastOpenedSession
 
     val visible = SidebarModel.visibleSessions(sessions, loaded.showEndedSessions)
     val current = SidebarController.resolveCurrentWorkspace(picked, scoped, workspaceRoot)
     val workspaces = SidebarModel.sidebarWorkspaces(SidebarController.pinnedWorkspacesOf(serverSettings, loaded), current)
     val histories = current?.let { historiesByCwd[it] }.orEmpty()
 
-    val latestPrefs by rememberUpdatedState(loaded)
+    val latestPrefs by rememberUpdatedState(scoped)
     val controller = remember(vm, prefs, scope) {
         SidebarController(
             client = client,
             readPreferences = { latestPrefs },
-            updatePreferences = { transform -> scope.launchPreferenceWrite { prefs.updatePreferences(transform) } },
+            updatePreferences = { transform ->
+                scope.launchPreferenceWrite { prefs.updatePreferencesFor(com.tether.app.client.serverOrigin(client.serverUrl.value), transform) }
+            },
             selectWorkspace = vm::selectWorkspace,
         )
     }
 
-    // r2: the single chat remembered before per-server memory becomes this server's, once.
-    LaunchedEffect(origin, loaded.lastOpenedSession != null) {
-        if (origin != null && loaded.lastOpenedSession != null) {
-            scope.launchPreferenceWrite { prefs.updatePreferences { it.migrateLastOpened(origin) } }
+    // r2: the single chat remembered before per-server memory becomes this server's, once; ta-coik.47:
+    // with the folded blocks and seen stamps the app kept device-wide.
+    LaunchedEffect(origin, loaded.hasDeviceWideServerRecords) {
+        if (origin != null && loaded.hasDeviceWideServerRecords) {
+            scope.launchPreferenceWrite { prefs.updatePreferences { it.migrateToServer(origin) } }
         }
     }
     // use-tether.ts :783-785: `ready` fixes the current workspace (the remembered chat's folder, the

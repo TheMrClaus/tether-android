@@ -61,7 +61,7 @@ class RefusedPreferenceWriteTest {
     private val prefs = UiPrefs.on(disk)
 
     // Off the main looper: the write the composition launched runs on it.
-    private fun seen() = runBlocking(Dispatchers.IO) { prefs.preferences.first() }.lastSeenSessions
+    private fun seen() = runBlocking(Dispatchers.IO) { prefs.preferences.first() }.forServer(null).lastSeenSessions
 
     @Test fun aDrawerTapMarksSeenWhenTheDiskRefusesTheStamp() {
         val live = F.live("s1", "Finished job", cwd = F.APP, ago = 5, historyId = "hist-1").copy(updatedAt = System.currentTimeMillis() - 60_000)
