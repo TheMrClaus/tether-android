@@ -177,6 +177,16 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     suspend fun setPinnedProjects(origin: String?, projects: List<String>) = updatePreferencesFor(origin) { it.copy(pinnedProjects = projects) }
 
     /**
+     * ta-coik.55: the model picker's pin / unpin key (chat-view.tsx 90fbb9f :2281-2286
+     * toggleModelPin) on the server at [origin]'s own `pinnedModels`: a pinned [modelId] is dropped,
+     * any other appended (pin order kept). Read-modify-write on the stored record, so two quick taps
+     * never lose one another.
+     */
+    suspend fun toggleModelPin(origin: String?, modelId: String) = updatePreferencesFor(origin) {
+        it.copy(pinnedModels = if (modelId in it.pinnedModels) it.pinnedModels.filter { id -> id != modelId } else it.pinnedModels + modelId)
+    }
+
+    /**
      * ta-coik.52: the Overview's filter choice the server at [origin] last had (overview.tsx 90fbb9f
      * :43-55 `readChoice` on the per-origin `tether:overviewFilters`; read when the Overview opens).
      * Fail-soft: unreadable storage or a corrupt record reads as the default choice.

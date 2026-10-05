@@ -213,6 +213,8 @@ fun Composer(
     controlActions: SessionControlActions = SessionControlActions.Unavailable,
     /** T7.2: the device's pinned legacy models (lib/model-picker.mjs groupModelOptions). */
     pinnedModels: List<String> = emptyList(),
+    /** ta-coik.55: pin / unpin a legacy model in this server's [pinnedModels] (the Model menu's pin key); null draws none. */
+    onToggleModelPin: ((String) -> Unit)? = null,
     /** T6.6: the session a handed-off source continued in (null: gone, or not handed off). */
     handoffTarget: AgentSession? = null,
     /** T6.6: open another session (the handoff lock's link). Navigation only, never a wire mutation. */
@@ -524,6 +526,7 @@ fun Composer(
     val providerV2 = session != null && (composerControls?.codexV2 == true || (session.provider == "opencode" && session.engineGeneration == OPENCODE_V2))
     val handlers = ControlHandlers(
         chooseModel = { chooseModel(it) },
+        toggleModelPin = onToggleModelPin,
         chooseEffort = ::chooseEffort,
         chooseMode = ::chooseMode,
         toggleAuto = ::toggleAuto,

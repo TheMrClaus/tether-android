@@ -1,7 +1,10 @@
 package com.tether.app.ui.chat
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
@@ -12,6 +15,10 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertWidthIsAtLeast
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -24,6 +31,9 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import com.tether.app.client.CodexSnapshot
 import com.tether.app.client.SessionControlsGuard
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -58,10 +68,18 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
     var origin by mutableStateOf("https://tether.test")
     val requests = mutableListOf<String>()
     val prompts = mutableListOf<String>()
+    /** ta-coik.55: the per-server preference store the Model menu's pin key writes (null: no pin key). */
+    var prefs: com.tether.app.ui.prefs.UiPrefs? = null
+    var serverUrl by mutableStateOf("https://tether.test")
 
     fun show() {
         rule.mainClock.autoAdvance = false
         rule.setContent {
+            val store = prefs
+            val pins by androidx.compose.runtime.remember(store) {
+                store?.preferencesFor(snapshotFlow { serverUrl })?.map { it.pinnedModels } ?: flowOf(emptyList())
+            }.collectAsState(emptyList())
+            val scope = rememberCoroutineScope()
             ComposerHost(TetherSkin.StudioDark) {
                 Composer(
                     session = session,
@@ -75,6 +93,8 @@ internal class ControlsHost(private val rule: androidx.compose.ui.test.junit4.An
                     onRequestControls = { requests += "session-controls" },
                     liveness = ComposerLiveness.Live,
                     controlActions = recorder.actions(lock, codex, opencode, origin),
+                    pinnedModels = pins,
+                    onToggleModelPin = store?.let { s -> { id -> scope.launch { s.toggleModelPin(com.tether.app.client.serverOrigin(serverUrl), id) } } },
                 )
             }
         }
@@ -522,6 +542,61 @@ class SessionControlsTabletBehaviourTest {
     }
 
     @Test
+    fun theModelMenuPinsAndUnpinsALegacyModelOnThisServerAndRegroupsInPlace() {
+        // ta-coik.55: tether-select.tsx 90fbb9f :271-310 + chat-view.tsx :2281-2307 — the pin key on a
+        // pinnable (Legacy models) or pinned row toggles the id in this server's pinnedModels; the menu
+        // stays open and re-groups; nothing goes on the wire and the model is not chosen.
+        val store = MemoryPrefsStore()
+        h.prefs = com.tether.app.ui.prefs.UiPrefs.on(store)
+        h.serverUrl = "https://a.example"
+        h.show()
+        h.click("control-model")
+        rule.onNodeWithTag("control-pin-claude-opus-4-1")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Pin Opus 4.1")))
+            .assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
+        rule.onNodeWithContentDescription("Legacy models").assertExists()
+        // Advertised rows carry no pin key.
+        rule.onAllNodesWithTag("control-pin-claude-sonnet-5").assertCountEquals(0)
+        h.click("control-pin-claude-opus-4-1")
+        assertEquals(listOf("claude-opus-4-1"), pinsOf(h.prefs!!, "https://a.example"))
+        assertTrue("pinned on B too: ${pinsOf(h.prefs!!, "https://b.example")}", pinsOf(h.prefs!!, "https://b.example").isEmpty())
+        // Still open, promoted to the main list (the group had only this row, so it is gone), now an Unpin key.
+        rule.onNodeWithContentDescription("Legacy models").assertDoesNotExist()
+        rule.onNodeWithTag("control-pin-claude-opus-4-1")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Unpin Opus 4.1")))
+        h.click("control-pin-claude-opus-4-1")
+        assertTrue(pinsOf(h.prefs!!, "https://a.example").isEmpty())
+        rule.onNodeWithContentDescription("Legacy models").assertExists()
+        assertTrue("sent ${h.recorder.sent}", h.recorder.sent.isEmpty())
+        // The row itself still chooses the model.
+        h.click("control-option-claude-opus-4-1")
+        assertEquals(listOf<SessionControl>(SessionControl.Model("claude-opus-4-1")), h.recorder.sent)
+    }
+
+    @Test
+    fun aPinIsReadAndWrittenPerServer() {
+        val store = MemoryPrefsStore()
+        h.prefs = com.tether.app.ui.prefs.UiPrefs.on(store)
+        kotlinx.coroutines.runBlocking { h.prefs!!.toggleModelPin(com.tether.app.client.serverOrigin("https://b.example"), "claude-opus-4-1") }
+        h.serverUrl = "https://a.example"
+        h.show()
+        h.click("control-model")
+        // B's pin is not A's: on A the row is still in the Legacy group, pinnable.
+        rule.onNodeWithContentDescription("Legacy models").assertExists()
+        rule.onNodeWithTag("control-pin-claude-opus-4-1")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Pin Opus 4.1")))
+        h.serverUrl = "https://b.example"
+        h.settle()
+        rule.onNodeWithContentDescription("Legacy models").assertDoesNotExist()
+        h.click("control-pin-claude-opus-4-1")
+        assertTrue(pinsOf(h.prefs!!, "https://b.example").isEmpty())
+        assertTrue(pinsOf(h.prefs!!, "https://a.example").isEmpty())
+    }
+
+    private fun pinsOf(prefs: com.tether.app.ui.prefs.UiPrefs, url: String): List<String> =
+        kotlinx.coroutines.runBlocking { prefs.preferencesFor(flowOf(url)).first().pinnedModels }
+
+    @Test
     fun theOpencodeAutoToggleTurnsOnAndOffOnTheTap() {
         // ta-coik.7: chat-view.tsx:2550-2561 toggleAuto, no confirmation either way.
         h.session = SessionControlFixtures.opencode
@@ -607,4 +682,14 @@ class SessionControlsTabletBehaviourTest {
         rule.onNodeWithTag("control-mode").assertIsNotEnabled()
         assertTrue(h.recorder.sent.isEmpty())
     }
+}
+
+/** ta-coik.55: an in-memory preferences store (the per-server pin writes land here). */
+internal class MemoryPrefsStore : androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> {
+    private val disk = kotlinx.coroutines.flow.MutableStateFlow(androidx.datastore.preferences.core.emptyPreferences())
+    override val data: kotlinx.coroutines.flow.Flow<androidx.datastore.preferences.core.Preferences> = disk
+
+    override suspend fun updateData(
+        transform: suspend (t: androidx.datastore.preferences.core.Preferences) -> androidx.datastore.preferences.core.Preferences,
+    ): androidx.datastore.preferences.core.Preferences = transform(disk.value).also { disk.value = it }
 }

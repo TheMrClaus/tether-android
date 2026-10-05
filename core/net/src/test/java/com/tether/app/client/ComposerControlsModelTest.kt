@@ -136,6 +136,19 @@ class ComposerControlsModelTest {
     }
 
     @Test
+    fun legacyRowsAreMarkedPinnedOrPinnableAsTheWebMarksThem() {
+        // ta-coik.55: lib/model-picker.mjs 90fbb9f :509-510 — pinned legacy rows `pinned`, the group's
+        // rows `pinnable`, advertised rows neither (so they get no pin key).
+        val row = derive(session("claude"), claudeControls, pins = listOf(legacyB.value))
+        val (pinned, plain) = row.model!!.options.partition { it.pinned }
+        assertEquals(listOf(legacyB.value), pinned.map { it.value })
+        assertTrue(plain.none { it.pinned || it.pinnable })
+        assertTrue(row.model!!.legacy.all { it.pinnable && !it.pinned })
+        // A pin set naming an advertised model leaves that row unmarked (only legacy rows are pinnable).
+        assertTrue(derive(session("claude"), claudeControls, pins = listOf(opus.value)).model!!.options.none { it.pinned || it.pinnable })
+    }
+
+    @Test
     fun fastModeFollowsTheSelectedModelAndTheSessionsReport() {
         assertNull(derive(session("claude").copy(model = sonnet.value), claudeControls).fastMode)
         assertEquals(

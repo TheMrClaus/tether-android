@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,6 +62,7 @@ import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.prefs.launchPreferenceWrite
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
@@ -180,6 +182,7 @@ fun ChatScreen(
     }
     val codexMap by vm.client.codexControls.collectAsStateWithLifecycle()
     val opencodeMap by vm.client.opencodeControls.collectAsStateWithLifecycle()
+    val prefsScope = rememberCoroutineScope()
     val pinnedModels by remember(prefs, vm.client) { prefs.preferencesFor(vm.client.serverUrl).map { it.pinnedModels }.distinctUntilChanged() }.collectAsStateWithLifecycle(emptyList())
     // T13.2 / T6.6 r3: the session controls and the auto-continue grant (and its pending
     // confirmation, which closes on any lock). ta-coik.24: neither locks offline or catching up, as
@@ -438,6 +441,8 @@ fun ChatScreen(
             commandActions = commandActions,
             controlActions = controlActions,
             pinnedModels = pinnedModels,
+            // ta-coik.55: written to the record of the server this picker reads (chat-view.tsx 90fbb9f :2281-2286).
+            onToggleModelPin = { id -> prefsScope.launchPreferenceWrite { prefs.toggleModelPin(com.tether.app.client.serverOrigin(serverUrl), id) } },
             handoffTarget = handoffTarget,
             onOpenSession = { id -> vm.selectSession(id) },
             runActions = runActions,

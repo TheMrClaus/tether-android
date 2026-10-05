@@ -185,6 +185,11 @@ internal class ControlHandlers(
     val openSheet: (SheetView) -> Unit = {},
     /** T6.6: set-auto-continue-on-limit (the flip of the drawn value; the Composer checks it). */
     val setAutoContinue: (Boolean) -> Unit = {},
+    /**
+     * ta-coik.55: pin / unpin a legacy model on this server (chat-view.tsx 90fbb9f :2281-2286
+     * toggleModelPin), drawn by the wide row's Model menu only (the web's sheet has no pin key).
+     */
+    val toggleModelPin: ((String) -> Unit)? = null,
 )
 
 // ---------------------------------------------------------------------------------------------
@@ -224,6 +229,7 @@ internal fun ComposerOptionsRow(
                 maxWidth = 176.dp,
                 onSelect = handlers.chooseModel,
                 testTag = "control-model",
+                onPin = handlers.toggleModelPin,
             )
         }
         controls.effort?.let { effort ->
@@ -444,6 +450,8 @@ fun ControlSelect(
     // ta-23f: TetherSelect `triggerIcon` (the worktree select's Split glyph) and the chip's `is-active`.
     icon: ImageVector? = null,
     active: Boolean = false,
+    /** ta-coik.55: the pin / unpin key on `pinned` / `pinnable` rows (TetherSelect onPinAction); keeps the menu open. */
+    onPin: ((String) -> Unit)? = null,
 ) {
     var open by remember { mutableStateOf(false) }
     var opensUp by remember { mutableStateOf(true) }
@@ -487,6 +495,7 @@ fun ControlSelect(
                         open = false
                         onSelect(value)
                     },
+                    onPin = onPin,
                 )
             }
         }
@@ -499,7 +508,7 @@ fun ControlSelect(
  * with its staleness note (the phone sheet's form of the web's flyout).
  */
 @Composable
-internal fun ControlMenu(control: SelectControl, armedRows: Boolean, opensUp: Boolean, onSelect: (String) -> Unit) {
+internal fun ControlMenu(control: SelectControl, armedRows: Boolean, opensUp: Boolean, onSelect: (String) -> Unit, onPin: ((String) -> Unit)? = null) {
     val t = LocalTetherTokens.current
     val screen = LocalConfiguration.current
     Column(
@@ -512,21 +521,30 @@ internal fun ControlMenu(control: SelectControl, armedRows: Boolean, opensUp: Bo
             .padding(1.dp)
             .verticalScroll(rememberScrollState()),
     ) {
-        ControlOptionList(control, armedRows, onSelect, divided = true)
+        ControlOptionList(control, armedRows, onSelect, divided = true, onPin = onPin)
     }
 }
 
 /** The rows of [control] (and its legacy group), shared by the menu and the sheet. */
 @Composable
-internal fun ControlOptionList(control: SelectControl, armedRows: Boolean, onSelect: (String) -> Unit, divided: Boolean, selectedOverride: String? = control.value) {
+internal fun ControlOptionList(
+    control: SelectControl,
+    armedRows: Boolean,
+    onSelect: (String) -> Unit,
+    divided: Boolean,
+    selectedOverride: String? = control.value,
+    onPin: ((String) -> Unit)? = null,
+) {
+    // ta-coik.55: chat-view.tsx 90fbb9f :2307 — only rows marked pinned / pinnable carry the pin action.
+    fun pinOf(option: ControlOption): (() -> Unit)? = onPin?.takeIf { option.pinned || option.pinnable }?.let { pin -> { pin(option.value) } }
     control.options.forEachIndexed { index, option ->
-        ControlOptionRow(option, option.value == selectedOverride, armedRows, divider = divided && (index < control.options.lastIndex || control.legacy.isNotEmpty())) { onSelect(option.value) }
+        ControlOptionRow(option, option.value == selectedOverride, armedRows, divider = divided && (index < control.options.lastIndex || control.legacy.isNotEmpty()), onPin = pinOf(option)) { onSelect(option.value) }
     }
     if (control.legacy.isNotEmpty()) {
         SectionLabel("Legacy models")
         control.legacyNote?.let { SheetHint(it) }
         control.legacy.forEachIndexed { index, option ->
-            ControlOptionRow(option, option.value == selectedOverride, armedRows, divider = divided && index < control.legacy.lastIndex) { onSelect(option.value) }
+            ControlOptionRow(option, option.value == selectedOverride, armedRows, divider = divided && index < control.legacy.lastIndex, onPin = pinOf(option)) { onSelect(option.value) }
         }
     }
 }
@@ -538,16 +556,20 @@ internal fun ControlOptionList(control: SelectControl, armedRows: Boolean, onSel
  * [armedRow] (kept name): the row carries the [StaleTapGuard]; it has no arm delay (ta-coik.9).
  */
 @Composable
-fun ControlOptionRow(option: ControlOption, selected: Boolean, armedRow: Boolean, divider: Boolean, onClick: () -> Unit) {
+fun ControlOptionRow(option: ControlOption, selected: Boolean, armedRow: Boolean, divider: Boolean, onPin: (() -> Unit)? = null, onClick: () -> Unit) {
     // ta-coik.9: a guarded row acts on the first tap; a press on the option that was at this row before is dropped.
-    if (armedRow) StaleTapGuard(option.value) { guard -> OptionRowBody(option, selected, divider, guard, onClick) }
-    else OptionRowBody(option, selected, divider, Modifier, onClick)
+    if (armedRow) StaleTapGuard(option.value) { guard -> OptionRowBody(option, selected, divider, guard, onPin, onClick) }
+    else OptionRowBody(option, selected, divider, Modifier, onPin, onClick)
 }
 
 @Composable
-private fun OptionRowBody(option: ControlOption, selected: Boolean, divider: Boolean, guard: Modifier, onClick: () -> Unit) {
+private fun OptionRowBody(option: ControlOption, selected: Boolean, divider: Boolean, guard: Modifier, onPin: (() -> Unit)?, onClick: () -> Unit) {
+    if (onPin != null) PinnableOptionRowBody(option, selected, divider, guard, onPin, onClick) else PlainOptionRowBody(option, selected, divider, guard, onClick)
+}
+
+@Composable
+private fun PlainOptionRowBody(option: ControlOption, selected: Boolean, divider: Boolean, guard: Modifier, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val usable = !option.disabled
@@ -579,26 +601,133 @@ private fun OptionRowBody(option: ControlOption, selected: Boolean, divider: Boo
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
         ) {
-            Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(3.2.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(option.label, style = type.body.copy(fontSize = 13.12.sp, lineHeight = 1.35.em, fontWeight = FontWeight(if (selected) 650 else 400)), color = labelColor)
-                    if (option.tag != null) {
-                        Text(
-                            option.tag!!,
-                            style = type.body.copy(fontSize = 10.4.sp, fontWeight = FontWeight(500)),
-                            color = t.muted,
-                            modifier = Modifier
-                                .padding(start = 5.2.dp)
-                                .cssSurface(RoundedCornerShape(3.dp), border = CssBorder(1.dp, t.line))
-                                .padding(horizontal = 4.16.dp, vertical = 0.52.dp),
-                        )
-                    }
-                }
-                option.description?.let { Text(it, style = type.body.copy(fontSize = 11.2.sp, lineHeight = 1.45.em), color = t.muted) }
-            }
+            OptionCopy(option, selected, labelColor, Modifier.weight(1f, fill = false))
             if (selected) Icon(TetherIcons.Check, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
         }
         if (divider) Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+    }
+}
+
+/** `.tether-select-option-copy`: the label (with its provider tag) over the description. */
+@Composable
+private fun OptionCopy(option: ControlOption, selected: Boolean, labelColor: Color, modifier: Modifier) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(3.2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(option.label, style = type.body.copy(fontSize = 13.12.sp, lineHeight = 1.35.em, fontWeight = FontWeight(if (selected) 650 else 400)), color = labelColor)
+            if (option.tag != null) {
+                Text(
+                    option.tag!!,
+                    style = type.body.copy(fontSize = 10.4.sp, fontWeight = FontWeight(500)),
+                    color = t.muted,
+                    modifier = Modifier
+                        .padding(start = 5.2.dp)
+                        .cssSurface(RoundedCornerShape(3.dp), border = CssBorder(1.dp, t.line))
+                        .padding(horizontal = 4.16.dp, vertical = 0.52.dp),
+                )
+            }
+        }
+        option.description?.let { Text(it, style = type.body.copy(fontSize = 11.2.sp, lineHeight = 1.45.em), color = t.muted) }
+    }
+}
+
+/**
+ * ta-coik.55: a `pinned` / `pinnable` model row (tether-select.tsx 90fbb9f :271-310): the row's own
+ * select area, then `.tether-select-option-actions` — the pin key and the selected Check. The pin key
+ * is its own button beside the row's (the web's `stopPropagation`): it never selects the model and
+ * never closes the menu; the list re-groups as the server's pinned set changes.
+ */
+@Composable
+private fun PinnableOptionRowBody(option: ControlOption, selected: Boolean, divider: Boolean, guard: Modifier, onPin: () -> Unit, onClick: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val usable = !option.disabled
+    val labelColor = when {
+        option.danger -> t.warning
+        selected -> t.white
+        else -> t.ink
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = if (option.disabled) DisabledOpacity else 1f
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            }
+            .then(if (pressed && usable) Modifier.background(t.violetWash) else Modifier),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier
+                    .weight(1f)
+                    .then(guard)
+                    .clickable(interaction, indication = null, enabled = usable, role = Role.Button, onClick = onClick)
+                    .clearAndSetSemantics {
+                        role = Role.Button
+                        this.selected = selected
+                        contentDescription = listOfNotNull(option.label, option.tag, option.description).joinToString(", ")
+                        if (!usable) disabled() else onClick(option.label) { onClick(); true }
+                        testTag = "control-option-${option.value}"
+                    }
+                    .heightIn(min = 44.dp)
+                    .padding(start = t.css.spaceMd, top = t.css.spaceMd, bottom = t.css.spaceMd),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OptionCopy(option, selected, labelColor, Modifier.weight(1f, fill = false))
+            }
+            Row(
+                Modifier.padding(end = t.css.spaceMd),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+            ) {
+                ModelPinKey(option, onPin)
+                if (selected) Icon(TetherIcons.Check, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
+            }
+        }
+        if (divider) Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+    }
+}
+
+/**
+ * `.tether-select-pin` (globals.css 90fbb9f :7678-7711, :7976-7995): a 1.625rem key — `--key-face`,
+ * `1px --key-side`, `--radius-sm`, a 13px Pin (PinOff while pinned) in `--ink`; pressed takes
+ * `--key-face-hover` and `--white`. Always visible on touch (the web hides the unpin key only on a
+ * fine pointer until hover). Named as the web names it ("Pin <label>" / "Unpin <label>"); a 48dp
+ * touch target around the key.
+ */
+@Composable
+private fun ModelPinKey(option: ControlOption, onPin: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val name = if (option.pinned) "Unpin ${option.label}" else "Pin ${option.label}"
+    Box(
+        Modifier
+            .size(48.dp)
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onPin)
+            .clearAndSetSemantics {
+                role = Role.Button
+                contentDescription = name
+                onClick(name) { onPin(); true }
+                testTag = "control-pin-${option.value}"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(26.dp)
+                .cssSurface(RoundedCornerShape(t.radiusSm), if (pressed) t.keyFaceHover else t.keyFace, CssBorder(1.dp, t.keySide)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (option.pinned) TetherIcons.PinOff else TetherIcons.Pin,
+                contentDescription = null,
+                tint = if (pressed) t.white else t.ink,
+                modifier = Modifier.size(13.dp),
+            )
+        }
     }
 }
 

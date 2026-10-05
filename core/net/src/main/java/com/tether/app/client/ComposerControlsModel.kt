@@ -49,6 +49,13 @@ data class ControlOption(
     val tag: String? = null,
     val danger: Boolean = false,
     val disabled: Boolean = false,
+    /**
+     * ta-coik.55: lib/model-picker.mjs groupModelOptions (90fbb9f :509-510) marks a legacy model row
+     * `pinned` (promoted to the main list) or `pinnable` (in the "Legacy models" group); the picker
+     * draws its pin / unpin key on exactly these rows (tether-select.tsx :271).
+     */
+    val pinned: Boolean = false,
+    val pinnable: Boolean = false,
 )
 
 /** A select: its rows, the value in force, whether it can be opened. [legacy] = the "Legacy models" group. */
@@ -374,8 +381,8 @@ object ComposerControlsModel {
         )
         val live = models.take(LabelText.MAX_ITEMS).filter { it.legacy != true }.map(::toOption)
         val legacy = models.take(LabelText.MAX_ITEMS).filter { it.legacy == true }
-        val pinnedRows = legacy.filter { it.value in pinned }.map(::toOption)
-        val unpinned = legacy.filter { it.value !in pinned }.map(::toOption)
+        val pinnedRows = legacy.filter { it.value in pinned }.map { toOption(it).copy(pinned = true) }
+        val unpinned = legacy.filter { it.value !in pinned }.map { toOption(it).copy(pinnable = true) }
         return (live + pinnedRows) to unpinned
     }
 
