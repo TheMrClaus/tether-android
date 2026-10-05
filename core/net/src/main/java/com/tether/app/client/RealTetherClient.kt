@@ -585,6 +585,8 @@ class RealTetherClient(
     private val changeRequestsState = MutableStateFlow<Map<String, ChangeRequestReading>>(emptyMap())
     // ta-coik.14: the latest worktree-logs reply per session (use-tether.ts:922-926).
     private val worktreeLogsState = MutableStateFlow<Map<String, WorktreeLogsReading>>(emptyMap())
+    // T8.5: the console-wide metadata drafts (use-tether.ts:305), oldest first.
+    private val metadataDraftsState = MutableStateFlow<List<PendingMetadataDraft>>(emptyList())
     // L5: the (sessionId, path) pairs this client asked for; a git-diff-file reply for anything
     // else is dropped (a server cannot fill the card with hunks nobody requested).
     private val requestedGitFileDiffs = java.util.concurrent.ConcurrentHashMap.newKeySet<Pair<String, String>>()
@@ -631,6 +633,7 @@ class RealTetherClient(
     override val worktreeScripts: StateFlow<Map<String, JsonObject>> = worktreeScriptsState
     override val changeRequests: StateFlow<Map<String, ChangeRequestReading>> = changeRequestsState
     override val worktreeLogs: StateFlow<Map<String, WorktreeLogsReading>> = worktreeLogsState
+    override val metadataDrafts: StateFlow<List<PendingMetadataDraft>> = metadataDraftsState
     override val errors: SharedFlow<String> = errorsFlow
     override val serverErrors: SharedFlow<ServerErrorText> = serverErrorsFlow
 
@@ -3162,6 +3165,11 @@ class RealTetherClient(
                         (message.sessionId to WorktreeLogsReading(message.name, lines, message.dropped))
                 }
             }
+            // T8.5: use-tether.ts:1171-1193, both replies into the one bounded list.
+            is ServerMessage.MetadataDraftResult -> ifCurrent(webSocket) { addMetadataDraft(PendingMetadataDraft(message.requestId, message.result)) }
+            is ServerMessage.MetadataDraftError -> ifCurrent(webSocket) {
+                addMetadataDraft(PendingMetadataDraft(message.requestId, com.tether.app.protocol.MetadataDraft.Failure(message.error)))
+            }
             is ServerMessage.GitDiffFile -> ifCurrent(webSocket) {
                 if (!requestedGitFileDiffs.remove(message.sessionId to message.path)) return@ifCurrent
                 val current = gitFileDiffsState.value
@@ -4780,6 +4788,19 @@ class RealTetherClient(
     override fun requestWorktreeLogs(sessionId: String, name: String): Boolean =
         sendFrame(ClientMessage.WorktreeLogsRequest(sessionId, name)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
 
+    // T8.5: use-tether.ts:1867-1881. A fresh id per request; a frame not sent says so (337-341).
+    override fun requestMetadataDraft(draftKind: String, sessionId: String): Boolean =
+        sendFrame(ClientMessage.MetadataDraftRequest(draftRequestIds(), draftKind, sessionId)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
+
+    override fun dismissMetadataDraft(requestId: String) {
+        metadataDraftsState.update { current -> current.filterNot { it.requestId == requestId } }
+    }
+
+    /** use-tether.ts:1175-1185: replace any reply for the same id, append, keep the last [METADATA_DRAFT_LIMIT]. */
+    private fun addMetadataDraft(draft: PendingMetadataDraft) {
+        metadataDraftsState.update { current -> (current.filterNot { it.requestId == draft.requestId } + draft).takeLast(METADATA_DRAFT_LIMIT) }
+    }
+
     override fun requestSessionControls(sessionId: String) {
         sendFrame(ClientMessage.SessionControlsRequest(sessionId))
     }
@@ -5106,6 +5127,10 @@ class RealTetherClient(
     @Volatile
     internal var nodeRequestIds: () -> String = { "node-" + UUID.randomUUID() }
 
+    /** Test seam (T8.5): each metadata draft request's id (use-tether.ts:1873, a fresh UUID). */
+    @Volatile
+    internal var draftRequestIds: () -> String = { UUID.randomUUID().toString() }
+
     /**
      * Another server's registry and event log, or ones seen before a sign-out, must never show.
      * (The web reloads the page on every sign-in, which starts both over.)
@@ -5118,6 +5143,8 @@ class RealTetherClient(
         nodesState.value = emptyList()
         nodeResultState.value = null
         serverProtocolVersionState.value = null
+        // T8.5: the web's pendingDrafts start over with the page.
+        metadataDraftsState.value = emptyList()
         eventLogState.update { EventLog(generation = it.generation + 1) }
         // T15.1: signed out (Lock) or signed in anew: no overview data or subscription survives it.
         synchronized(lock) { overviewSync.clear() }

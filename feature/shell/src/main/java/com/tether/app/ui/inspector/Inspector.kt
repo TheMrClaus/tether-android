@@ -144,6 +144,9 @@ object InspectorTags {
     const val RefreshPullRequest = "inspector-pull-request-refresh"
     const val PullRequestUnopened = "inspector-pull-request-unopened"
     const val ScriptLog = "inspector-script-log"
+    const val DraftActions = "inspector-draft-actions"
+    const val DraftCommitMessage = "inspector-draft-commit-message"
+    const val DraftPullRequest = "inspector-draft-pull-request"
     const val Limits = "inspector-limits"
     const val Services = "inspector-services"
     const val ServiceOpen = "inspector-service-open"
@@ -200,6 +203,8 @@ fun ColumnScope.Inspector(
     onWorktreeScript: (name: String, action: String) -> Unit = { _, _ -> },
     /** ta-coik.14 (dashboard.tsx:1459): "Output of", asks for the script's recent output. */
     onWorktreeLogs: (name: String) -> Unit = {},
+    /** T8.5 (dashboard.tsx:1461, repository-panel.tsx:42/46): "commitMessage" | "pullRequest" for this session. */
+    onRequestDraft: (draftKind: String) -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth().testTag(InspectorTags.Root)) {
         HeaderBlock(model.identity, model.header)
@@ -218,7 +223,7 @@ fun ColumnScope.Inspector(
             McpHealthCard(servers, "Plugins", compact = false, count = { n -> "$n loaded" })
         }
         model.tokens?.let { TokensBandView(it) }
-        model.repository?.let { RepositoryPanel(it, fileDiffs, onRequestFileDiff, onRefreshChangeRequest) }
+        model.repository?.let { RepositoryPanel(it, fileDiffs, onRequestFileDiff, onRefreshChangeRequest, onRequestDraft) }
         model.services?.let { ServicesCard(it, serviceOpener, serviceOpen, onWorktreeScript, onWorktreeLogs) }
         if (model.codexNotices.isNotEmpty()) {
             Column(
@@ -973,6 +978,7 @@ private fun RepositoryPanel(
     fileDiffs: Map<String, ServerMessage.GitDiffFile>?,
     onRequestFileDiff: (String) -> Unit,
     onRefresh: () -> Unit,
+    onRequestDraft: (String) -> Unit,
 ) {
     val t = LocalTetherTokens.current
     Column(
@@ -988,6 +994,7 @@ private fun RepositoryPanel(
         repo.branch?.let { branch ->
             RepoLine(TetherIcons.GitBranch, listOf(branch), repo.divergence, code = true)
         }
+        if (repo.canDraft) DraftActions(onRequestDraft)
         repo.pullRequest?.let { pr -> PullRequestRow(pr, onRefresh) }
         repo.changes?.let { diff ->
             var open by rememberSaveable { mutableStateOf(false) }
@@ -1050,6 +1057,58 @@ private fun PullRequestRow(pr: PullRequestLine, onRefresh: () -> Unit) {
                 .semantics { liveRegion = LiveRegionMode.Polite }
                 .testTag(InspectorTags.PullRequestUnopened),
         )
+    }
+}
+
+/**
+ * T8.5 repository-panel.tsx:40-51 (`.repository-draft-actions`, globals.css 10677-10699): the two
+ * draft keys, one under the other. A tap sends at once (no confirmation, as on the web); the reply
+ * opens the shell's metadata draft panel.
+ */
+@Composable
+private fun DraftActions(onRequestDraft: (String) -> Unit) {
+    val t = LocalTetherTokens.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = t.css.spaceMd)
+            .semantics { contentDescription = "Generate a draft" }
+            .testTag(InspectorTags.DraftActions),
+        verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    ) {
+        DraftKey(TetherIcons.GitCommitHorizontal, "Draft commit message", "From staged changes", Modifier.testTag(InspectorTags.DraftCommitMessage)) {
+            onRequestDraft("commitMessage")
+        }
+        DraftKey(TetherIcons.GitPullRequest, "Draft pull request", "Title and description to review", Modifier.testTag(InspectorTags.DraftPullRequest)) {
+            onRequestDraft("pullRequest")
+        }
+    }
+}
+
+/** One `.repository-draft-actions button`: the glyph, the strong label over its small line; 3rem tall. */
+@Composable
+private fun DraftKey(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, detail: String, modifier: Modifier, onClick: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val shape = RoundedCornerShape(t.radiusKey)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background(t.keyFace, shape)
+            .border(1.dp, t.keySide, shape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) {}
+            .padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
+    ) {
+        Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(17.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
+            Text(label, style = cssText(type.ui, 0.74f, 650), color = t.ink)
+            Text(detail, style = cssText(type.ui, 0.64f, 400, lineHeight = 1.4f), color = t.muted)
+        }
     }
 }
 

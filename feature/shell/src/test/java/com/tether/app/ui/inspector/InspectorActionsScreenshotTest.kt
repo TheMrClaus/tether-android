@@ -26,15 +26,18 @@ import org.robolectric.annotation.Config
  * worktree-services-card.tsx:101-163): the pull request link and its refresh key; a running, a
  * starting and a stopped script with their keys; `inspector-actions-log` with "Output of dev" open
  * on its reply, `inspector-actions-log-empty` with "Output of test" open before any ("No output
- * yet."). Both Studio skins, phone and tablet.
+ * yet."). T8.5 `inspector-actions-drafts`: the same with the server's metadata generation on, the
+ * "Draft commit message" / "Draft pull request" keys under the branch (repository-panel.tsx:40-51).
+ * Both Studio skins, phone and tablet.
  */
-enum class InspectorActionsShot(val id: String, val open: String?) {
+enum class InspectorActionsShot(val id: String, val open: String?, val drafts: Boolean = false) {
     Keys("inspector-actions", null),
     Log("inspector-actions-log", "dev"),
     LogEmpty("inspector-actions-log-empty", "test"),
+    Drafts("inspector-actions-drafts", null, drafts = true),
 }
 
-private val actionsModel: InspectorModel = InspectorBoards.model(
+private fun actionsModel(drafts: Boolean): InspectorModel = InspectorBoards.model(
     InspectorBoards.session(worktree = WorktreeInfo(path = "/w", branch = "feat/inspector-actions", status = "active", mode = "branch-off")),
     replies = InspectorReplies(
         worktreeScripts = obj(
@@ -54,6 +57,7 @@ private val actionsModel: InspectorModel = InspectorBoards.model(
             0,
         ),
     ),
+    metadataGenerationEnabled = drafts,
 )
 
 internal fun ComposeContentTestRule.snapInspectorActions(shot: InspectorActionsShot, skin: TetherSkin, size: ScreenSize) {
@@ -71,7 +75,7 @@ internal fun ComposeContentTestRule.snapInspectorActions(shot: InspectorActionsS
         },
     ) {
         Column(Modifier.width(if (tablet) 368.dp else 390.dp)) {
-            Inspector(actionsModel, null, onSelectRun = {}, fileDiffs = null, onRequestFileDiff = {}, env = { InspectorBoards.env })
+            Inspector(actionsModel(shot.drafts), null, onSelectRun = {}, fileDiffs = null, onRequestFileDiff = {}, env = { InspectorBoards.env })
         }
     }
 }

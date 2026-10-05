@@ -792,6 +792,25 @@ interface TetherClient {
      */
     fun requestWorktreeLogs(sessionId: String, name: String): Boolean = false
 
+    /**
+     * T8.5 (use-tether.ts:301-305, 1171-1193): the out-of-band commit-message / pull-request drafts
+     * the server answered, oldest first, at most [METADATA_DRAFT_LIMIT] (the web's DRAFT_LIMIT 8).
+     * NOT per session: one list for the whole console, as the web's `pendingDrafts`. A reply for a
+     * requestId already listed replaces it in place at the end. Kept across a reconnect and a
+     * session switch; emptied on a sign-out and a new sign-in (the web reloads the page then).
+     */
+    val metadataDrafts: StateFlow<List<PendingMetadataDraft>> get() = NO_METADATA_DRAFTS
+
+    /**
+     * T8.5 (use-tether.ts:1867-1875): `metadata-draft-request` with a fresh requestId; [draftKind] is
+     * "commitMessage" | "pullRequest". Fire-and-forget: the reply lands in [metadataDrafts]. False
+     * when not sent, said in [errors] as the web's `send` does (use-tether.ts:337-341).
+     */
+    fun requestMetadataDraft(draftKind: String, sessionId: String): Boolean = false
+
+    /** T8.5 (use-tether.ts:1877-1881): drop one draft from [metadataDrafts]; purely client-side. */
+    fun dismissMetadataDraft(requestId: String) {}
+
     // ------------------------------------------------------------------
     // v109 multi-host node registry (Settings -> Nodes, UI in T10.3). See NodeRegistry.kt.
     // ------------------------------------------------------------------
@@ -1118,6 +1137,17 @@ private val NO_WORKTREE_DIFFS: StateFlow<Map<String, kotlinx.serialization.json.
 private val NO_WORKTREE_SCRIPTS: StateFlow<Map<String, kotlinx.serialization.json.JsonObject>> = MutableStateFlow(emptyMap())
 private val NO_CHANGE_REQUESTS: StateFlow<Map<String, ChangeRequestReading>> = MutableStateFlow(emptyMap())
 private val NO_WORKTREE_LOGS: StateFlow<Map<String, WorktreeLogsReading>> = MutableStateFlow(emptyMap())
+private val NO_METADATA_DRAFTS: StateFlow<List<PendingMetadataDraft>> = MutableStateFlow(emptyList())
+
+/** use-tether.ts:1185 / 1191 `DRAFT_LIMIT`: the most drafts kept without a dismissal. */
+const val METADATA_DRAFT_LIMIT = 8
+
+/**
+ * use-tether.ts:88-91 `PendingDraft`: one reply to a `metadata-draft-request`, keyed by the
+ * client-minted [requestId]. A `metadata-draft-error` is a [com.tether.app.protocol.MetadataDraft.Failure]
+ * too (the web folds both into `ok: false`).
+ */
+data class PendingMetadataDraft(val requestId: String, val draft: com.tether.app.protocol.MetadataDraft)
 
 /** One `change-request` reply: the raw `ChangeRequestState | null`, and whether the lookup failed. */
 data class ChangeRequestReading(val changeRequest: kotlinx.serialization.json.JsonObject?, val unknown: Boolean)

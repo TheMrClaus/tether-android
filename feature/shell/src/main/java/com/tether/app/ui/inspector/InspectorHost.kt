@@ -45,6 +45,9 @@ fun ColumnScope.InspectorHost(
     // T15.7: a service's "Open" link resolves only against the paired server's canonical origin.
     val serverUrl by vm.client.serverUrl.collectAsStateWithLifecycle()
     val origin = serverOrigin(serverUrl)
+    // T8.5 dashboard.tsx:1460: `serverSettings?.settings.metadataGenerationEnabled === true` (strictly true).
+    val serverSettings by vm.client.serverSettings.collectAsStateWithLifecycle()
+    val metadataGeneration = metadataGenerationEnabled(serverSettings)
     val now = rememberTickingNow(60_000)
     // ta-coik.10: the attention strip's rate-limit / wrap-up alerts expire on their own at the
     // window's reset (the web's RateLimitNotice / WrapUpNotice timers; the CLI may never send the
@@ -53,8 +56,8 @@ fun ColumnScope.InspectorHost(
     val runs = remember(view) { collectSubagentRuns(view?.obj) }
     val replies = InspectorReplies(diffs[session.id], scripts[session.id], changeRequests[session.id], logs[session.id])
     // Keyed on the minute tick and the expiry; derived at the real instant it recomputes.
-    val model = remember(session, providers, view, runs, selected[session.id], replies, now, origin, expiry) {
-        inspectorModel(session, providers, view, runs, selected[session.id], replies, ReadingEnv.current(), origin)
+    val model = remember(session, providers, view, runs, selected[session.id], replies, now, origin, expiry, metadataGeneration) {
+        inspectorModel(session, providers, view, runs, selected[session.id], replies, ReadingEnv.current(), origin, metadataGeneration)
     }
     Inspector(
         model = model,
@@ -68,7 +71,15 @@ fun ColumnScope.InspectorHost(
         onRefreshChangeRequest = { vm.client.requestChangeRequest(session.id, refresh = true) },
         onWorktreeScript = { name, action -> vm.client.controlWorktreeScript(session.id, name, action) },
         onWorktreeLogs = { name -> vm.client.requestWorktreeLogs(session.id, name) },
+        // T8.5 dashboard.tsx:1461 `onRequestDraft: requestDraft`, for this session.
+        onRequestDraft = { kind -> vm.client.requestMetadataDraft(kind, session.id) },
     )
+}
+
+/** dashboard.tsx:1460: `=== true`, so only a JSON `true` turns the draft keys on. */
+internal fun metadataGenerationEnabled(settings: com.tether.app.protocol.ServerMessage.ServerSettings?): Boolean {
+    val value = settings?.settings?.get("metadataGenerationEnabled") as? kotlinx.serialization.json.JsonPrimitive ?: return false
+    return !value.isString && value.content == "true"
 }
 
 /**

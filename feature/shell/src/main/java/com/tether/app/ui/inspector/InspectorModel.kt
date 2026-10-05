@@ -327,6 +327,11 @@ data class RepositorySection(
     val pullRequest: PullRequestLine?,
     val changes: WorktreeDiffSummaryView?,
     val changedFiles: Int,
+    /**
+     * T8.5 (repository-panel.tsx:27, 40-51): "Draft commit message" / "Draft pull request" are
+     * shown when the server's metadata generation is on and the session is not read-only.
+     */
+    val canDraft: Boolean = false,
 ) {
     val changesCount: String get() = "$changedFiles ${if (changedFiles == 1) "file" else "files"}"
 }
@@ -431,6 +436,8 @@ fun inspectorModel(
     env: ReadingEnv,
     /** T15.7: the paired server's canonical origin (`serverOrigin(serverUrl)`); null = no service link. */
     serverOrigin: String? = null,
+    /** T8.5 (dashboard.tsx:1460): `serverSettings?.settings.metadataGenerationEnabled === true`. */
+    metadataGenerationEnabled: Boolean = false,
 ): InspectorModel {
     val activeRun = selectedRunId?.let { id -> runs.firstOrNull { it.runId == id } }
     val metrics = TelemetryMetrics.from(session.metrics)
@@ -450,7 +457,7 @@ fun inspectorModel(
         mcpHealth = session.provider != "opencode" && state != null,
         opencodePlugins = session.engineGeneration == "opencode-serve-v2" && state != null,
         tokens = tokensBand(session, state, runs, metrics, env),
-        repository = repository(session, replies, serverOrigin),
+        repository = repository(session, replies, serverOrigin, metadataGenerationEnabled),
         services = if (session.worktree != null) services(replies.worktreeScripts, session.id, serverOrigin, replies.worktreeLogs) else null,
         codexNotices = if (session.engineGeneration == "codex-app-server-v2" && state != null) {
             // Render-only here: the transcript's copy of each notice carries the dismiss X.
@@ -802,11 +809,18 @@ internal fun pullRequestLine(reading: ChangeRequestReading, consoleOrigin: Strin
     return PullRequestLine("Pull request #$number", changeRequestLine(cr).ifEmpty { null }, url)
 }
 
-internal fun repository(session: AgentSession, replies: InspectorReplies, consoleOrigin: String? = null): RepositorySection? {
+internal fun repository(
+    session: AgentSession,
+    replies: InspectorReplies,
+    consoleOrigin: String? = null,
+    metadataGenerationEnabled: Boolean = false,
+): RepositorySection? {
     val branch = session.metrics?.gitBranch?.takeIf { it.isNotEmpty() } ?: session.worktree?.branch?.takeIf { it.isNotEmpty() }
     val diff = worktreeDiffSummary(replies.worktreeDiff)
     val cr = replies.changeRequest
-    if (branch == null && diff == null && cr == null) return null
+    // repository-panel.tsx:27-28: `metadataGenerationEnabled && onRequestDraft && !session.readOnly`.
+    val canDraft = metadataGenerationEnabled && !session.readOnly
+    if (branch == null && diff == null && cr == null && !canDraft) return null
     val changed = diff?.let { (it.committed + it.uncommitted).map { e -> e.path }.toSet().size } ?: 0
     return RepositorySection(
         branch = branch?.let(::code),
@@ -814,6 +828,7 @@ internal fun repository(session: AgentSession, replies: InspectorReplies, consol
         pullRequest = cr?.let { pullRequestLine(it, consoleOrigin) },
         changes = diff,
         changedFiles = changed,
+        canDraft = canDraft,
     )
 }
 

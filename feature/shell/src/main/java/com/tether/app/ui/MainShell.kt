@@ -731,6 +731,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // T9.2: the Accounts dialog and the reset confirmations (the inspector's Codex one too).
     com.tether.app.ui.usage.UsageAccountsDialog(accounts, codexReset, claudeReset)
 
+    // T8.5 dashboard.tsx:1886-1887: the metadata draft panel, at the shell's root so a draft shows
+    // whatever the phone's sheet or the tablet's columns are drawing.
+    com.tether.app.ui.metadata.MetadataDraftPanelHost(vm.client)
+
     // T5.3: the cross-harness global search modal (dashboard.tsx:1701-1711).
     GlobalSearchHost(vm = vm, prefs = prefs, sessions = sessions, workspaceRoot = workspaceRoot, onCloseDrawer = shell::closeDrawer)
 
