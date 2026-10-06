@@ -1,5 +1,7 @@
 package com.tether.app.ui.shell
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
@@ -81,7 +83,7 @@ class RefusedPreferenceWriteTest {
     }
 
     @Test fun pinsFromTheWelcomeAndTheDrawerHoldWhenTheDiskRefusesThem() {
-        runBlocking { prefs.setLastView(com.tether.app.client.serverOrigin(DraftFixtures.SERVER), "sessions") }
+        runPrefsWrite { prefs.setLastView(com.tether.app.client.serverOrigin(DraftFixtures.SERVER), "sessions") }
         rule.setContent {
             TetherTheme { CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, prefs) } }
         }

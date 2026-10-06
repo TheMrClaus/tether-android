@@ -1,5 +1,7 @@
 package com.tether.app.ui.shell
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
@@ -70,7 +72,7 @@ class MainShellSelectionModelTest {
         AgentSession(id = id, provider = "claude", name = id, cwd = cwd, status = status, startedAt = 1, updatedAt = 1, historyId = "h-$id")
 
     /** The singleton preferences start from this test's own state (the DataStore outlives a test). */
-    private fun storedState(view: String, remembered: LastOpenedSession?, showEnded: Boolean = true, origin: String? = null) = runBlocking {
+    private fun storedState(view: String, remembered: LastOpenedSession?, showEnded: Boolean = true, origin: String? = null) = runPrefsWrite {
         prefs.updatePreferences {
             it.copy(
                 lastOpenedSession = null,
@@ -156,7 +158,7 @@ class MainShellSelectionModelTest {
         val serverA = "https://a.example:443"
         val serverB = "https://b.example:443"
         storedState("sessions", remembered = null, origin = serverB)
-        runBlocking {
+        runPrefsWrite {
             prefs.updatePreferences {
                 it.copy(lastOpenedByOrigin = mapOf(serverA to LastOpenedSession("/w", "a", "h-a"), serverB to LastOpenedSession("/w", "b", "h-b")))
             }
@@ -176,7 +178,7 @@ class MainShellSelectionModelTest {
     fun theSingleRememberedChatOfAnOlderVersionBecomesTheCurrentServersOnce() {
         val serverA = "https://a.example:443"
         storedState("sessions", remembered = null, origin = serverA)
-        runBlocking { prefs.updatePreferences { it.copy(lastOpenedSession = LastOpenedSession("/w", "b", "h-b")) } }
+        runPrefsWrite { prefs.updatePreferences { it.copy(lastOpenedSession = LastOpenedSession("/w", "b", "h-b")) } }
         val client = Client()
         client.base.server.value = "https://a.example"
         list(client, chat("a"), chat("b"))
@@ -193,7 +195,7 @@ class MainShellSelectionModelTest {
     fun theDeviceWideFoldedBlocksAndSeenStampsBecomeTheCurrentServersOnce() {
         val serverA = "https://a.example:443"
         storedState("overview", remembered = null, origin = serverA)
-        runBlocking {
+        runPrefsWrite {
             prefs.updatePreferences {
                 it.copy(
                     collapsedWorkspaces = listOf("/w/folded"),
@@ -219,14 +221,14 @@ class MainShellSelectionModelTest {
     @Test
     fun anotherServerSettlesItsOwnCurrentWorkspace() {
         storedState("sessions", remembered = null, origin = "https://a.example:443")
-        runBlocking { prefs.updatePreferences { it.copy(defaultWorkspace = "/w/default-a") } }
+        runPrefsWrite { prefs.updatePreferences { it.copy(defaultWorkspace = "/w/default-a") } }
         val client = Client()
         client.base.server.value = "https://a.example"
         val vm = TetherViewModel(client)
         compose(vm)
         rule.waitUntil(5_000) { vm.currentWorkspace.value != null }
         assertEquals("/w/default-a", vm.currentWorkspace.value)
-        runBlocking { prefs.updatePreferences { it.copy(defaultWorkspace = "/w/default-b") } }
+        runPrefsWrite { prefs.updatePreferences { it.copy(defaultWorkspace = "/w/default-b") } }
         rule.runOnIdle { client.base.server.value = "https://b.example" }
         rule.waitUntil(5_000) { vm.currentWorkspace.value == "/w/default-b" }
     }
@@ -277,7 +279,7 @@ class MainShellSelectionModelTest {
     fun aReopenedRememberedChatIsSeenOnItsServer() {
         val serverA = "https://a.example:443"
         storedState("sessions", remembered = null, origin = serverA)
-        runBlocking {
+        runPrefsWrite {
             prefs.updatePreferences {
                 it.copy(
                     lastOpenedByOrigin = mapOf(serverA to LastOpenedSession("/w", "gone", "h-gone")),
@@ -345,7 +347,7 @@ class MainShellSelectionModelTest {
         client.base.sessions.value = listOf(chat("a", status = "exited"), chat("b")) // End session
         rule.waitForIdle()
         assertEquals("kept, nothing picked over it", "a", vm.selectedSessionId.value)
-        runBlocking { prefs.updatePreferencesFor(com.tether.app.client.serverOrigin(client.serverUrl.value)) { it.copy(showEndedSessions = true) } }
+        runPrefsWrite { prefs.updatePreferencesFor(com.tether.app.client.serverOrigin(client.serverUrl.value)) { it.copy(showEndedSessions = true) } }
         rule.waitUntil(5_000) { client.base.mountCalls.size == 2 }
         assertEquals("listed again: mounted again", listOf("a", "a"), client.base.mountCalls.toList())
     }
@@ -355,7 +357,7 @@ class MainShellSelectionModelTest {
     fun showEndedSessionsIsTheServersOwn() {
         val a = "https://a.example:443"
         storedState("sessions", remembered = null, showEnded = true, origin = a)
-        runBlocking { prefs.updatePreferencesFor(a) { it.copy(showEndedSessions = false) } }
+        runPrefsWrite { prefs.updatePreferencesFor(a) { it.copy(showEndedSessions = false) } }
         val client = Client()
         client.base.server.value = "https://a.example"
         list(client, chat("a"), chat("b"))
@@ -366,10 +368,10 @@ class MainShellSelectionModelTest {
         client.base.sessions.value = listOf(chat("a", status = "exited"), chat("b")) // End session
         rule.waitForIdle()
         // Another server's setting changes nothing here.
-        runBlocking { prefs.updatePreferencesFor("https://b.example:443") { it.copy(showEndedSessions = true) } }
+        runPrefsWrite { prefs.updatePreferencesFor("https://b.example:443") { it.copy(showEndedSessions = true) } }
         rule.waitForIdle()
         assertEquals("off on this server: the ended chat stays off screen", listOf("a"), client.base.mountCalls.toList())
-        runBlocking { prefs.updatePreferencesFor(a) { it.copy(showEndedSessions = true) } }
+        runPrefsWrite { prefs.updatePreferencesFor(a) { it.copy(showEndedSessions = true) } }
         rule.waitUntil(5_000) { client.base.mountCalls.size == 2 }
     }
 
@@ -382,7 +384,7 @@ class MainShellSelectionModelTest {
         vm.selectSession("ended") // its open's attach waits for the chat view it causes
         compose(vm)
         assertEquals(listOf("ended"), client.base.mountCalls.toList())
-        runBlocking { prefs.updatePreferencesFor(com.tether.app.client.serverOrigin(client.serverUrl.value)) { it.copy(showEndedSessions = true) } }
+        runPrefsWrite { prefs.updatePreferencesFor(com.tether.app.client.serverOrigin(client.serverUrl.value)) { it.copy(showEndedSessions = true) } }
         rule.waitForIdle()
         // Listed now: the chat view mounts for the first time, and that mount is the open's.
         assertEquals("never mounted (and unmounted) before the setting was read", listOf("ended"), client.base.mountCalls.toList())

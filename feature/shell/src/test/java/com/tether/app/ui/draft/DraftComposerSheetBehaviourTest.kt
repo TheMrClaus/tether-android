@@ -1,5 +1,7 @@
 package com.tether.app.ui.draft
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -195,7 +197,7 @@ class DraftComposerSheetBehaviourTest {
 
     @Test
     fun theEmptyStageAndTheDrawerRaiseTheSheetToo() {
-        runBlocking { prefs.setLastView(com.tether.app.client.serverOrigin(DraftFixtures.SERVER), "sessions") }
+        runPrefsWrite { prefs.setLastView(com.tether.app.client.serverOrigin(DraftFixtures.SERVER), "sessions") }
         launch()
         // Sessions' empty stage: "Start first session".
         tap(ShellTags.StartSessionKey)
@@ -221,7 +223,7 @@ class DraftComposerSheetBehaviourTest {
     @Test
     fun everyTapReachesTheModel() {
         client.directories.value = DirectoryListing(current = "/srv/other", parent = "/srv", entries = emptyList())
-        runBlocking { prefs.updatePreferences { it.copy(pinnedProjects = listOf("/srv/ws/app"), defaultWorkspace = "/srv/ws/docs") } }
+        runPrefsWrite { prefs.updatePreferences { it.copy(pinnedProjects = listOf("/srv/ws/app"), defaultWorkspace = "/srv/ws/docs") } }
         openSheet()
         // ta-2uq: the Model chip's browser picks the row and its model; the chip names them.
         pick("personal")

@@ -1,5 +1,7 @@
 package com.tether.app.ui.shell
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
@@ -84,7 +86,7 @@ class MainShellOverviewTest {
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         // ta-coik.52: the process-wide store starts empty here (another class's per-server records,
         // the no-server one included, would otherwise carry over).
-        kotlinx.coroutines.runBlocking { prefs.updatePreferences { com.tether.app.ui.prefs.TetherPreferences.Default } }
+        runPrefsWrite { prefs.updatePreferences { com.tether.app.ui.prefs.TetherPreferences.Default } }
         rule.setContent { TetherTheme { CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, prefs) } } }
         rule.waitForIdle()
         assertEquals(emptyList<String>(), client.seenCalls)

@@ -59,7 +59,7 @@ class ColdStartLinkViewTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         Settings.Global.putFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
         // The worst case: this install remembers the Overview, and has kept preferences.
-        runBlocking {
+        runPrefsWrite {
             UiPrefs(context).updatePreferences { it.copy(showThinking = true) }
             UiPrefs(context).setLastView(com.tether.app.client.serverOrigin(NavTestClient.PAIRED), "overview")
         }
@@ -93,7 +93,7 @@ class ColdStartLinkViewTest {
 
     @Test fun withoutALinkTheRememberedOverviewIsTheBoot() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        runBlocking { UiPrefs(context).setLastView(com.tether.app.client.serverOrigin(NavTestClient.PAIRED), "overview") }
+        runPrefsWrite { UiPrefs(context).setLastView(com.tether.app.client.serverOrigin(NavTestClient.PAIRED), "overview") }
         rule.setContent { UiRoot(client = client, launchIntent = null) }
         rule.runOnIdle {
             client.configuredFlow.value = true

@@ -1,5 +1,7 @@
 package com.tether.app.ui.shell
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
@@ -53,7 +55,7 @@ class MainShellPendingTargetTest {
     private fun chat(id: String, cwd: String = "/w") =
         AgentSession(id = id, provider = "claude", name = id, cwd = cwd, status = "ready", startedAt = 1, updatedAt = 1, historyId = "h-$id")
 
-    private fun storedState(view: String) = runBlocking {
+    private fun storedState(view: String) = runPrefsWrite {
         prefs.updatePreferences {
             it.copy(lastOpenedSession = null, lastOpenedByOrigin = emptyMap(), defaultWorkspace = "", showEndedSessions = true, pinnedProjects = emptyList())
         }

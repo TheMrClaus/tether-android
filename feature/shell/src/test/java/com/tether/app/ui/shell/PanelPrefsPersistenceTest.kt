@@ -1,5 +1,7 @@
 package com.tether.app.ui.shell
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.ui.prefs.UiPrefs
 import kotlinx.coroutines.flow.first
@@ -16,7 +18,7 @@ import org.robolectric.RobolectricTestRunner
  */
 @RunWith(RobolectricTestRunner::class)
 class PanelPrefsPersistenceTest {
-    @Test fun widthsAndCollapseRoundTripThroughTheStore() = runBlocking {
+    @Test fun widthsAndCollapseRoundTripThroughTheStore() = runPrefsWrite {
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         prefs.updatePreferences { it.copy(showThinking = true) }
         val committed = PanelPrefs(sidebarWidth = 336, inspectorWidth = 300, sidebarCollapsed = true)

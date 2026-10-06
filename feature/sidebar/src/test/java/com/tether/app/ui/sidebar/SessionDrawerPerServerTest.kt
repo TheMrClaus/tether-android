@@ -1,5 +1,7 @@
 package com.tether.app.ui.sidebar
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
@@ -45,7 +47,7 @@ class SessionDrawerPerServerTest {
     private val serverB = "https://b.example:443"
 
     @Before
-    fun freshPreferences() = runBlocking {
+    fun freshPreferences() = runPrefsWrite {
         prefs.updatePreferences {
             it.copy(
                 showEndedSessions = true,
@@ -85,7 +87,7 @@ class SessionDrawerPerServerTest {
     /** ta-coik.51: a link to an ended chat, nothing picked, "Show ended sessions" off: not on screen, not seen. */
     @Test
     fun anEndedTargetThatIsNotListedIsNotMarkedSeen() {
-        runBlocking { prefs.setShowEnded(null, false) }
+        runPrefsWrite { prefs.setShowEnded(null, false) }
         val target = ended()
         val client = RecordingClient(sessions = listOf(target))
         drawer(client, listOf(target), selectedId = target.id)
@@ -109,7 +111,7 @@ class SessionDrawerPerServerTest {
 
     @Test
     fun eachServerHasItsOwnSeenStamps() {
-        runBlocking {
+        runPrefsWrite {
             prefs.updatePreferencesFor(serverA) { it.copy(lastSeenSessions = mapOf("hist-a" to 11L)) }
             prefs.updatePreferencesFor(serverB) { it.copy(lastSeenSessions = mapOf("hist-b" to 22L)) }
         }

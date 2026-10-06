@@ -1,5 +1,7 @@
 package com.tether.app.ui.shell
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -142,7 +144,7 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
     }
 
     @Test fun anInstallThatKeptPreferencesKeepsLastSessionRestoration() {
-        runBlocking { prefs.updatePreferences { it.copy(showThinking = true) } }
+        runPrefsWrite { prefs.updatePreferences { it.copy(showThinking = true) } }
         client.show(session("s1"), freshTree())
         launch()
         awaitTag(ShellTags.Sidebar)
@@ -160,7 +162,7 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
     @Test fun eachServerBootsOnItsOwnViewAndASignOutKeepsTheServersRecords() {
         val a = "https://a.example:443"
         val b = "https://b.example:443"
-        runBlocking {
+        runPrefsWrite {
             prefs.updatePreferences { it.copy(showThinking = true) }
             prefs.updatePreferencesFor(a) { it.copy(collapsedWorkspaces = listOf("/w/folded"), lastSeenSessions = mapOf("h-seen" to 7L)) }
             // ta-coik.52: and every other preference, and the Overview's filters.
@@ -216,7 +218,7 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
     }
 
     @Test fun theRememberedViewIsRestored() {
-        runBlocking {
+        runPrefsWrite {
             prefs.updatePreferences { it.copy(showThinking = true) }
             prefs.setLastView(null, "overview")
         }
@@ -227,7 +229,7 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
 
     @Test fun aRestoredLastSessionIsShownInSessions() {
         // The selection this app keeps (the view model survives the shell) outranks a remembered Overview.
-        runBlocking { prefs.setLastView(null, "overview") }
+        runPrefsWrite { prefs.setLastView(null, "overview") }
         client.show(session("s1"), freshTree())
         vm.selectSession("s1")
         launch()

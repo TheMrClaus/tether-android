@@ -1,5 +1,7 @@
 package com.tether.app.ui
 
+import com.tether.app.nav.runPrefsWrite
+
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -41,7 +43,7 @@ class LoginVariantPerServerTest {
 
     @Test fun theSignInScreenIsTheServersOwnChoice() {
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext<Context>())
-        runBlocking { prefs.setLoginVariant(serverOrigin(a), LoginVariant.Retro) }
+        runPrefsWrite { prefs.setLoginVariant(serverOrigin(a), LoginVariant.Retro) }
         rule.setContent { UiRoot(client = client) }
         rule.waitUntil(5_000) { retroShown() }
         rule.runOnIdle { client.serverUrlFlow.value = b }
@@ -68,7 +70,7 @@ class ThemePerServerTest {
 
     @Test fun theThemeIsTheServersOwn() {
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext<Context>())
-        runBlocking { prefs.setThemeMode(serverOrigin("https://a.example"), com.tether.app.ui.theme.ThemeMode.Dark) }
+        runPrefsWrite { prefs.setThemeMode(serverOrigin("https://a.example"), com.tether.app.ui.theme.ThemeMode.Dark) }
         rule.setContent { UiRoot(client = client) }
         rule.waitUntil(5_000) { luminance() < 0.3f }
         rule.runOnIdle { client.serverUrlFlow.value = "https://b.example" }

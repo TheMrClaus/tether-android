@@ -1,5 +1,7 @@
 package com.tether.app.ui.shell
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
@@ -165,7 +167,7 @@ class MainShellEndSessionTest {
     /** A preference store of this test's own, with Settings → General's "Confirm before ending" set. */
     private fun prefsConfirming(confirm: Boolean): UiPrefs {
         val store = PreferenceDataStoreFactory.create(scope = CoroutineScope(Dispatchers.IO + storeJob)) { File(tmp.root, "ui.preferences_pb") }
-        return UiPrefs.on(store).also { prefs -> runBlocking { prefs.updatePreferences { it.copy(confirmBeforeEnd = confirm) } } }
+        return UiPrefs.on(store).also { prefs -> runPrefsWrite { prefs.updatePreferences { it.copy(confirmBeforeEnd = confirm) } } }
     }
 
     private val storeJob = Job()
@@ -210,7 +212,7 @@ class MainShellEndSessionTest {
     fun confirmBeforeEndIsTheServersOwn() {
         val store = PreferenceDataStoreFactory.create(scope = CoroutineScope(Dispatchers.IO + storeJob)) { File(tmp.root, "ui.preferences_pb") }
         val prefs = UiPrefs.on(store)
-        runBlocking {
+        runPrefsWrite {
             prefs.updatePreferencesFor("https://a.example:443") { it.copy(confirmBeforeEnd = false) }
             prefs.updatePreferencesFor("https://b.example:443") { it.copy(confirmBeforeEnd = true) }
         }

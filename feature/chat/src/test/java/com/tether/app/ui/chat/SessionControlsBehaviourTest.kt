@@ -1,5 +1,7 @@
 package com.tether.app.ui.chat
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -612,7 +614,7 @@ class SessionControlsTabletBehaviourTest {
     fun aPinIsReadAndWrittenPerServer() {
         val store = MemoryPrefsStore()
         h.prefs = com.tether.app.ui.prefs.UiPrefs.on(store)
-        kotlinx.coroutines.runBlocking { h.prefs!!.toggleModelPin(com.tether.app.client.serverOrigin("https://b.example"), "claude-opus-4-1") }
+        runPrefsWrite { h.prefs!!.toggleModelPin(com.tether.app.client.serverOrigin("https://b.example"), "claude-opus-4-1") }
         h.serverUrl = "https://a.example"
         h.show()
         h.click("control-model")

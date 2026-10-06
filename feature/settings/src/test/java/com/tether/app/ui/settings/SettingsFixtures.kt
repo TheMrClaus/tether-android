@@ -1,5 +1,7 @@
 package com.tether.app.ui.settings
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -36,7 +38,7 @@ class PrefsStore(private val tmp: TemporaryFolder) : ExternalResource() {
 
     override fun after() = runBlocking { job.cancel() }
 
-    fun seed(vararg raw: Pair<String, Any>) = runBlocking {
+    fun seed(vararg raw: Pair<String, Any>) = runPrefsWrite {
         store.edit { p ->
             raw.forEach { (k, v) ->
                 when (v) {

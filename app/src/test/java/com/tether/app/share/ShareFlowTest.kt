@@ -1,5 +1,7 @@
 package com.tether.app.share
 
+import com.tether.app.nav.runPrefsWrite
+
 import android.content.Context
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -46,7 +48,7 @@ class ShareFlowTest {
     fun setUp() {
         val resolver = ApplicationProvider.getApplicationContext<Context>().contentResolver
         Settings.Global.putFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 0f)
-        kotlinx.coroutines.runBlocking {
+        runPrefsWrite {
             com.tether.app.ui.prefs.UiPrefs(ApplicationProvider.getApplicationContext<Context>()).setLastView(serverOrigin(NavTestClient.PAIRED), "sessions")
         }
         clearInbox()

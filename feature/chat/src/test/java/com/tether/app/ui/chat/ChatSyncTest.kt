@@ -1,5 +1,7 @@
 package com.tether.app.ui.chat
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -471,7 +473,7 @@ class ChatSyncTest {
             scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + storeJob),
         ) { java.io.File(tmp.root, "ui.preferences_pb") }
         val prefs = UiPrefs.on(store)
-        kotlinx.coroutines.runBlocking { prefs.updatePreferences { it.copy(confirmBeforeEnd = false) } }
+        runPrefsWrite { prefs.updatePreferences { it.copy(confirmBeforeEnd = false) } }
         host(client, running, header = true, prefs = prefs)
         rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
         rule.waitForIdle()

@@ -1,5 +1,7 @@
 package com.tether.app.ui.shell
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -39,13 +41,13 @@ abstract class PersistedPanelsBase {
 
     @Before fun resetStore() {
         prefs = UiPrefs(ApplicationProvider.getApplicationContext())
-        runBlocking { prefs.updatePreferences { PanelPrefs().applyTo(it).copy(preferencesByOrigin = emptyMap()) } }
+        runPrefsWrite { prefs.updatePreferences { PanelPrefs().applyTo(it).copy(preferencesByOrigin = emptyMap()) } }
     }
 
     /** ta-coik.52: no server configured (the "" record). */
     private val noServer = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
-    protected fun seed(panels: PanelPrefs) = runBlocking { prefs.updatePreferences { panels.applyTo(it) } }
+    protected fun seed(panels: PanelPrefs) = runPrefsWrite { prefs.updatePreferences { panels.applyTo(it) } }
 
     protected fun stored(): PanelPrefs = runBlocking { PanelPrefs.from(prefs.preferences.first().forServer(null)) }
 
@@ -123,7 +125,7 @@ class PersistedPanelsTest : PersistedPanelsBase() {
 class PersistedPanelsPerServerTest : PersistedPanelsBase() {
     @Test fun eachServerKeepsItsOwnColumns() {
         val server = kotlinx.coroutines.flow.MutableStateFlow<String?>("https://a.example")
-        runBlocking { prefs.updatePreferencesFor("https://b.example:443") { PanelPrefs(sidebarWidth = 360).applyTo(it) } }
+        runPrefsWrite { prefs.updatePreferencesFor("https://b.example:443") { PanelPrefs(sidebarWidth = 360).applyTo(it) } }
         rule.setContent { ExpandedShellUnderTest(TetherSkin.StudioDark, PhoneShellState(), ExpandedFixtures.idle, persisted = rememberPersistedPanels(prefs, server)) }
         awaitWidth(ShellTags.Sidebar, 272f)
         rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput {

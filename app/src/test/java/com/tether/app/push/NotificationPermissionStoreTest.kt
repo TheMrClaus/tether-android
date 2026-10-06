@@ -1,5 +1,7 @@
 package com.tether.app.push
 
+import com.tether.app.nav.runPrefsWrite
+
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.ui.prefs.UiPrefs
@@ -22,7 +24,7 @@ import org.robolectric.annotation.Config
 class NotificationPermissionStoreTest {
 
     @Test
-    fun markAskedIsPersistedInUiPrefs() = runBlocking {
+    fun markAskedIsPersistedInUiPrefs() = runPrefsWrite {
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext<Context>())
         val store = NotificationPermissionAskedStore.of(prefs)
         withTimeout(10_000) {

@@ -1,5 +1,7 @@
 package com.tether.app.ui.settings
 
+import com.tether.app.testsupport.runPrefsWrite
+
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -44,7 +46,7 @@ class SettingsPerServerTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithTag(t).fetchSemanticsNodes().singleOrNull()?.config?.getOrNull(SemanticsProperties.Selected) == true }
 
     @Test fun generalAndAppearanceAreTheServersOwn() {
-        runBlocking {
+        runPrefsWrite {
             store.prefs.updatePreferencesFor(a) { it.copy(themeMode = ThemeMode.Light, defaultWorkspace = "/srv/a") }
             store.prefs.updatePreferencesFor(b) { it.copy(themeMode = ThemeMode.Light, showThinking = true, defaultWorkspace = "/srv/b") }
         }
