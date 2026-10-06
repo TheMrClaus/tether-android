@@ -191,6 +191,16 @@ class UsageHttpTest {
         assertEquals(1, server.requestCount)
     }
 
+    @Test fun aScreenDrawnWithNoRecordedServerReachesTheCurrentOne() = runBlocking<Unit> {
+        // ta-coik.70: the web's usage fetches are relative same-origin; no recorded origin is not a refusal.
+        server.enqueue(ok(UsageWireFixtures.ACCOUNTS))
+        assertTrue(usage.accounts(null, null) is UsageCall.Ok)
+        assertEquals("/api/usage/accounts", take().path)
+        server.enqueue(ok("""{"ok":true,"outcome":"reset"}"""))
+        assertTrue(usage.consumeResetCredit(null, "cr_1", null) is UsageCall.Ok)
+        assertEquals(UsageSource.CONSUME_PATH, take().path)
+    }
+
     @Test fun nothingIsSentToAnotherServerOrWithoutACredential() = runBlocking<Unit> {
         assertEquals(UsageCall.Failed(UsageFailure.OtherServer), usage.accounts("https://other.example.test", null))
         authority = FilesAuthority.SignedOut

@@ -98,7 +98,10 @@ class FixedRouteHttp(
             is FilesAuthority.Paired -> authority
         }
         val origin = serverOrigin(paired.origin.toString()) ?: return Outcome.SignedOut
-        if (expectedOrigin == null || origin != expectedOrigin) return Outcome.OtherOrigin(origin)
+        // A null drawn origin means no server was recorded (the web's relative same-origin fetch): it goes to
+        // the current paired server. Only a recorded DIFFERENT origin is refused, with nothing sent.
+        val wanted = expectedOrigin ?: origin
+        if (origin != wanted) return Outcome.OtherOrigin(origin)
         // r2 (security F4): the helper itself refuses a path that is not plain segments (no dot
         // segment, escape, query, fragment or empty segment), whatever its caller passes.
         if (!PATH.matches(path)) return Outcome.NotBuilt(origin)
@@ -128,7 +131,7 @@ class FixedRouteHttp(
         if (
             request.method != method.name ||
             !sameOrigin(request.url, paired.origin) ||
-            serverOrigin(request.url.toString()) != expectedOrigin ||
+            serverOrigin(request.url.toString()) != wanted ||
             request.url.encodedPath != path ||
             !queryIs(request.url, query)
         ) {
