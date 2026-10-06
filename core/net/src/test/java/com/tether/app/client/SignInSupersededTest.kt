@@ -50,6 +50,13 @@ class SignInSupersededTest {
         @Volatile var loginStatus = 200
         @Volatile var claimGate: CountDownLatch? = null
         @Volatile var verifyGate: CountDownLatch? = null
+
+        /** ta-uchk L2: what `POST /api/auth/logout` and `DELETE /api/devices/<id>` answer. */
+        @Volatile var revokeStatus = 200
+
+        /** ta-uchk L2: the claim answer names no device id; `GET /api/devices` marks the caller's device `current` (or not). */
+        @Volatile var claimOmitsDeviceId = false
+        @Volatile var listMarksCurrent = true
         val loginArrived = CountDownLatch(1)
         val claimArrived = CountDownLatch(1)
         val verifyArrived = CountDownLatch(1)
@@ -59,6 +66,9 @@ class SignInSupersededTest {
 
         /** Path and Authorization of each `DELETE /api/devices/<id>`. */
         val deviceRevokes = ConcurrentLinkedQueue<Pair<String, String>>()
+
+        /** The Authorization header of each `GET /api/devices`. */
+        val deviceLists = ConcurrentLinkedQueue<String>()
 
         val base: String get() = server.url("/").toString().trimEnd('/')
 
@@ -72,6 +82,11 @@ class SignInSupersededTest {
             loginGate?.countDown()
             claimGate?.countDown()
             verifyGate?.countDown()
+        }
+
+        private fun revokeAnswer(body: String): MockResponse = when {
+            revokeStatus != 200 -> MockResponse().setResponseCode(revokeStatus).setBody("""{"error":"no"}""")
+            else -> ok(body)
         }
 
         private fun ok(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
@@ -96,15 +111,21 @@ class SignInSupersededTest {
                 path == "/api/devices/claim" -> {
                     claimArrived.countDown()
                     claimGate?.await(15, TimeUnit.SECONDS)
-                    ok("""{"ok":true,"token":"$deviceToken","device":{"id":"$deviceId","label":"Pixel"}}""")
+                    if (claimOmitsDeviceId) ok("""{"ok":true,"token":"$deviceToken","device":{"label":"Pixel"}}""")
+                    else ok("""{"ok":true,"token":"$deviceToken","device":{"id":"$deviceId","label":"Pixel"}}""")
                 }
                 path == "/api/auth/logout" -> {
                     logouts += request.getHeader("Cookie").orEmpty()
-                    ok("""{"ok":true}""")
+                    revokeAnswer("""{"ok":true}""")
+                }
+                request.method == "GET" && path == "/api/devices" -> {
+                    deviceLists += request.getHeader("Authorization").orEmpty()
+                    if (listMarksCurrent) ok("""{"devices":[{"id":"other-device"},{"id":"$deviceId","current":true}],"pairings":[]}""")
+                    else ok("""{"devices":[{"id":"other-device"}],"pairings":[]}""")
                 }
                 request.method == "DELETE" && path.startsWith("/api/devices/") -> {
                     deviceRevokes += path to request.getHeader("Authorization").orEmpty()
-                    ok("""{"ok":true,"serviceSessions":0,"disconnected":0}""")
+                    revokeAnswer("""{"ok":true,"serviceSessions":0,"disconnected":0}""")
                 }
                 path == "/api/auth/session" ->
                     if (request.getHeader("Cookie") != null || request.getHeader("Authorization") != null) ok("""{"authenticated":true}""")
@@ -122,9 +143,24 @@ class SignInSupersededTest {
         runCatching { b.server.shutdown() }
     }
 
+    /** ta-uchk L2: the number of `POST /api/auth/logout` calls the client MADE (the cut ones too). */
+    private val logoutCalls = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** ta-uchk L2: while true, every `POST /api/auth/logout` fails on the wire (no answer: an IOException). */
+    @Volatile private var cutLogouts = false
+
     private fun client(settings: SettingsStore = InMemorySettings()) = RealTetherClient(
         settings = settings,
-        httpClient = OkHttpClient.Builder().sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager).build(),
+        httpClient = OkHttpClient.Builder()
+            .sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager)
+            .addInterceptor { chain ->
+                if (chain.request().url.encodedPath == "/api/auth/logout") {
+                    logoutCalls.incrementAndGet()
+                    if (cutLogouts) throw java.io.IOException("cut")
+                }
+                chain.proceed(chain.request())
+            }
+            .build(),
         scope = scope,
     )
 
@@ -422,5 +458,322 @@ class SignInSupersededTest {
         assertEquals(OriginStanding.OtherServer, client.originStanding(a.base))
         awaitTrue("A's late session is revoked") { a.logouts.any { it == "tether_session=${a.passwordCookie}" } }
         assertTrue("nothing of B's revoked", b.logouts.isEmpty())
+    }
+
+    // ---- ta-uchk: the sign-out that lands while the store is written ---------------------------
+
+    /**
+     * ta-uchk L1: the store write LANDS, then the user signs out, and a start() begun after that sign-out
+     * reads the attempt's credential from the store and adopts it. When the attempt then finds it was
+     * signed out, that adoption is undone (and it stays recorded as forgotten) even if the take-back of
+     * the store write fails too.
+     */
+    private fun aStartQueuedDuringTheAttemptAdoptsItsCredential(revertFails: Boolean) {
+        a.start()
+        val inner = InMemorySettings()
+        val holding = CompletableDeferred<Unit>()
+        val proceed = CompletableDeferred<Unit>()
+        val written = CompletableDeferred<Unit>()
+        val afterWrite = CompletableDeferred<Unit>()
+        val gateSessions = java.util.concurrent.atomic.AtomicBoolean(false)
+        val reverts = java.util.concurrent.atomic.AtomicInteger(0)
+        val settings = object : SettingsStore by inner {
+            // The write is held, then LANDS, then is held again before the attempt looks at what happened.
+            override suspend fun setServer(baseUrl: String, credential: Credential) {
+                holding.complete(Unit)
+                proceed.await()
+                inner.setServer(baseUrl, credential)
+                written.complete(Unit)
+                afterWrite.await()
+            }
+
+            // A start() that began after the sign-out reads the store only once the write has landed.
+            override suspend fun session(): Session {
+                if (gateSessions.get()) written.await()
+                return inner.session()
+            }
+
+            override suspend fun revertServerIf(expected: Credential, previousBaseUrl: String?): Boolean {
+                reverts.incrementAndGet()
+                if (revertFails) throw java.io.IOException("store down")
+                return inner.revertServerIf(expected, previousBaseUrl)
+            }
+        }
+        val client = client(settings).also { it.revokeRetryMs = 10 }
+        val signIn = scope.async { client.login(a.base, "correct horse", "") }
+        runBlocking { withTimeout(10_000) { holding.await() } }
+        runBlocking { client.logout() }
+        assertEquals("signed out", OriginStanding.SignedOut, client.originStanding(a.base))
+        // The start() that began after the logout reads the attempt's credential from the store.
+        gateSessions.set(true)
+        client.start()
+        proceed.complete(Unit)
+        awaitTrue("the queued start() adopted the attempt's credential") { client.originStanding(a.base) == OriginStanding.Configured }
+        afterWrite.complete(Unit)
+        assertEquals(LoginResult.Superseded, runBlocking { signIn.await() })
+        assertEquals("the user's sign-out stands in memory", OriginStanding.SignedOut, client.originStanding(a.base))
+        awaitTrue("the login screen shows") { client.connection.value is ConnectionState.AuthRequired }
+        if (revertFails) {
+            assertEquals("the take-back was tried twice", 2, reverts.get())
+            assertEquals("the store still holds it (the take-back failed)", a.passwordCookie, stored(inner).cookieValue())
+        } else {
+            assertNull("the store write is taken back", stored(inner))
+        }
+        // Another start() (an activity re-created) adopts nothing, whatever the store still holds.
+        client.start()
+        Thread.sleep(400)
+        assertEquals(OriginStanding.SignedOut, client.originStanding(a.base))
+        assertTrue("never Connected", client.connection.value !is ConnectionState.Connected)
+    }
+
+    @Test fun aStartQueuedDuringTheAttemptDoesNotKeepItsCredentialAfterTheLogout() =
+        aStartQueuedDuringTheAttemptAdoptsItsCredential(revertFails = false)
+
+    @Test fun aStartQueuedDuringTheAttemptDoesNotKeepItsCredentialEvenWhenTheTakeBackFails() =
+        aStartQueuedDuringTheAttemptAdoptsItsCredential(revertFails = true)
+
+    // ---- ta-uchk L3 / L4: the take-back of the store write ------------------------------------
+
+    /** A store whose [setServer] is held (before it writes) until the test lets it go, and whose take-back is [revert]. */
+    private inner class WriteHeld(val inner: InMemorySettings, val revert: suspend (SettingsStore, Credential, String?) -> Boolean) : SettingsStore by inner {
+        val writing = CompletableDeferred<Unit>()
+        val proceed = CompletableDeferred<Unit>()
+        val reverts = java.util.concurrent.atomic.AtomicInteger(0)
+
+        override suspend fun setServer(baseUrl: String, credential: Credential) {
+            writing.complete(Unit)
+            proceed.await()
+            inner.setServer(baseUrl, credential)
+        }
+
+        override suspend fun revertServerIf(expected: Credential, previousBaseUrl: String?): Boolean {
+            reverts.incrementAndGet()
+            return revert(inner, expected, previousBaseUrl)
+        }
+    }
+
+    /**
+     * ta-uchk L3: a stop() while the store is written wipes the store, the server URL the attempt would
+     * "put back" with it. The take-back must not bring that URL back.
+     */
+    @Test fun aTakeBackNeverRestoresAServerUrlAStopWiped() {
+        a.start()
+        b.start()
+        val inner = InMemorySettings(initialBaseUrl = b.base)
+        val settings = WriteHeld(inner) { s, c, p -> s.revertServerIf(c, p) }
+        val client = client(settings)
+        val signIn = scope.async { client.login(a.base, "correct horse", "") }
+        runBlocking { withTimeout(10_000) { settings.writing.await() } }
+        client.stop()
+        awaitTrue("stop()'s wipe landed") { storedUrl(inner) == null }
+        settings.proceed.complete(Unit)
+        assertEquals(LoginResult.Superseded, runBlocking { signIn.await() })
+        assertNull("the credential is taken back", stored(inner))
+        assertNull("and the URL the wipe removed does not come back", storedUrl(inner))
+        assertEquals(OriginStanding.SignedOut, client.originStanding(a.base))
+    }
+
+    /** Positive control of L3: with no stop(), the URL stored before is put back (as aSignOutDuringTheStoreWrite...). */
+    @Test fun aTakeBackAfterALogoutStillRestoresTheServerUrlStoredBefore() {
+        a.start()
+        b.start()
+        val inner = InMemorySettings(initialBaseUrl = b.base)
+        val settings = WriteHeld(inner) { s, c, p -> s.revertServerIf(c, p) }
+        val client = client(settings)
+        val signIn = scope.async { client.login(a.base, "correct horse", "") }
+        runBlocking { withTimeout(10_000) { settings.writing.await() } }
+        runBlocking { client.logout() }
+        settings.proceed.complete(Unit)
+        assertEquals(LoginResult.Superseded, runBlocking { signIn.await() })
+        assertNull(stored(inner))
+        assertEquals(b.base, storedUrl(inner))
+    }
+
+    /** ta-uchk L4: one failed take-back is tried once more and lands. */
+    @Test fun aFailedTakeBackIsTriedOnceMore() {
+        a.start()
+        val inner = InMemorySettings()
+        val calls = java.util.concurrent.atomic.AtomicInteger(0)
+        val settings = WriteHeld(inner) { s, c, p -> if (calls.getAndIncrement() == 0) throw java.io.IOException("store down") else s.revertServerIf(c, p) }
+        val client = client(settings)
+        val signIn = scope.async { client.login(a.base, "correct horse", "") }
+        runBlocking { withTimeout(10_000) { settings.writing.await() } }
+        runBlocking { client.logout() }
+        settings.proceed.complete(Unit)
+        assertEquals(LoginResult.Superseded, runBlocking { signIn.await() })
+        assertEquals(2, settings.reverts.get())
+        assertNull("the second try landed", stored(inner))
+    }
+
+    /**
+     * ta-uchk L4: a double failure is not swallowed. The credential stays in the store (nothing can be
+     * done about that), so it is recorded as forgotten: no start() brings it back into memory.
+     */
+    @Test fun aDoubleTakeBackFailureKeepsTheCredentialForgotten() {
+        a.start()
+        val inner = InMemorySettings()
+        val settings = WriteHeld(inner) { _, _, _ -> throw java.io.IOException("store down") }
+        val client = client(settings)
+        val signIn = scope.async { client.login(a.base, "correct horse", "") }
+        runBlocking { withTimeout(10_000) { settings.writing.await() } }
+        runBlocking { client.logout() }
+        settings.proceed.complete(Unit)
+        assertEquals(LoginResult.Superseded, runBlocking { signIn.await() })
+        assertEquals("tried twice, then given up", 2, settings.reverts.get())
+        assertEquals("it is still in the store", a.passwordCookie, stored(inner).cookieValue())
+        client.start()
+        Thread.sleep(500)
+        assertEquals("but never adopted from it", OriginStanding.SignedOut, client.originStanding(a.base))
+    }
+
+    // ---- ta-uchk L2: the revoke of a superseded sign-in ----------------------------------------
+
+    private fun lateSignInRevoked(console: Console): RealTetherClient {
+        val client = client().also { it.revokeRetryMs = 10 }
+        val late = heldPasswordSignIn(client, console)
+        passkeyWins(client, console)
+        console.loginGate!!.countDown()
+        assertEquals(LoginResult.Superseded, runBlocking { late.await() })
+        return client
+    }
+
+    @Test fun aRevokeThatAnswersNon2xxIsTriedOnceMore() {
+        a.start()
+        a.revokeStatus = 500
+        lateSignInRevoked(a)
+        awaitTrue("tried twice") { a.logouts.size == 2 }
+        Thread.sleep(300)
+        assertEquals("and no more than twice", 2, a.logouts.size)
+    }
+
+    @Test fun aRevokeThatNeverAnswersIsTriedOnceMore() {
+        a.start()
+        cutLogouts = true
+        lateSignInRevoked(a)
+        Thread.sleep(500)
+        assertEquals("tried twice, no more", 2, logoutCalls.get())
+        assertTrue("neither reached the console", a.logouts.isEmpty())
+    }
+
+    @Test fun aRevokeThatWorksIsNotRepeated() {
+        a.start()
+        lateSignInRevoked(a)
+        awaitTrue("revoked") { a.logouts.size == 1 }
+        Thread.sleep(300)
+        assertEquals(1, a.logouts.size)
+    }
+
+    @Test fun aDeviceRevokeThatAnswersNon2xxIsTriedOnceMore() {
+        a.start()
+        a.revokeStatus = 503
+        val client = client().also { it.revokeRetryMs = 10 }
+        a.claimGate = CountDownLatch(1)
+        val late = scope.async { client.pair(a.base, "ABCD-EFGH", "Pixel") }
+        assertTrue(a.claimArrived.await(10, TimeUnit.SECONDS))
+        passkeyWins(client, a)
+        a.claimGate!!.countDown()
+        assertEquals(PairResult.Superseded, runBlocking { late.await() })
+        awaitTrue("tried twice") { a.deviceRevokes.size == 2 }
+    }
+
+    /** A claim answer without a device id: the id is asked of the server (`current`), then the device is revoked. */
+    @Test fun aDeviceTokenWithoutAnIdIsRevokedThroughTheDeviceList() {
+        a.start()
+        a.claimOmitsDeviceId = true
+        val client = client().also { it.revokeRetryMs = 10 }
+        a.claimGate = CountDownLatch(1)
+        val late = scope.async { client.pair(a.base, "ABCD-EFGH", "Pixel") }
+        assertTrue(a.claimArrived.await(10, TimeUnit.SECONDS))
+        passkeyWins(client, a)
+        a.claimGate!!.countDown()
+        assertEquals(PairResult.Superseded, runBlocking { late.await() })
+        awaitTrue("the late device is revoked") { a.deviceRevokes.isNotEmpty() }
+        assertEquals(listOf("/api/devices/${a.deviceId}" to "Bearer ${a.deviceToken}"), a.deviceRevokes.toList())
+        assertEquals(listOf("Bearer ${a.deviceToken}"), a.deviceLists.toList())
+    }
+
+    /** No id and none to be found: nothing is revoked, and nothing breaks (the sign-in that stands is untouched). */
+    @Test fun aDeviceTokenWithoutAnIdThatTheServerDoesNotNameChangesNothing() {
+        a.start()
+        a.claimOmitsDeviceId = true
+        a.listMarksCurrent = false
+        val settings = InMemorySettings()
+        val client = client(settings)
+        a.claimGate = CountDownLatch(1)
+        val late = scope.async { client.pair(a.base, "ABCD-EFGH", "Pixel") }
+        assertTrue(a.claimArrived.await(10, TimeUnit.SECONDS))
+        passkeyWins(client, a)
+        a.claimGate!!.countDown()
+        assertEquals(PairResult.Superseded, runBlocking { late.await() })
+        awaitTrue("the list was asked") { a.deviceLists.isNotEmpty() }
+        Thread.sleep(300)
+        assertTrue("no revoke without an id", a.deviceRevokes.isEmpty())
+        assertEquals(a.passkeyCookie, stored(settings).cookieValue())
+    }
+
+    // ---- ta-uchk: the modal passkey and the autofill pick release their sign-in ticket ---------
+
+    /**
+     * ta-coik.1 r4 test gap: a passkey attempt to another server that ends EARLY (refused before any
+     * ceremony) must release its ticket: otherwise it stays "a newer sign-in to another server, still
+     * pending" and the older password sign-in is never adopted.
+     */
+    @Test fun r4NewerPasskeyRefusedEarlyReleasesItsTicket() {
+        a.start()
+        b.start()
+        val settings = InMemorySettings()
+        val client = client(settings)
+        val older = startHeld(client, b)
+        val refused = runBlocking { client.passkeyLogin(a.base, RecordingPasskeys(available = false)) }
+        assertTrue("the modal passkey was refused before any ceremony: $refused", refused is LoginResult.PasskeyFailed)
+        b.loginGate!!.countDown()
+        assertEquals("the refused newer attempt holds nothing back", LoginResult.Success, runBlocking { older.await() })
+        assertEquals(b.base, storedUrl(settings))
+    }
+
+    /** The same through the ceremony: the user dismisses the prompt (the modal path's own `finally`). */
+    @Test fun aDismissedModalPasskeyToAnotherServerReleasesItsTicket() {
+        a.start()
+        b.start()
+        val settings = InMemorySettings()
+        val client = client(settings)
+        val older = startHeld(client, b)
+        val dismissed = runBlocking { client.passkeyLogin(a.base, RecordingPasskeys(answer = PasskeyCeremony.Dismissed)) }
+        assertEquals(LoginResult.PasskeyDismissed, dismissed)
+        b.loginGate!!.countDown()
+        assertEquals(LoginResult.Success, runBlocking { older.await() })
+        assertEquals(b.base, storedUrl(settings))
+    }
+
+    /** An autofill pick (passkeyLoginFinish) is a newer attempt to another server; ended early, it releases its ticket. */
+    @Test fun anAutofillPickToAnotherServerThatEndsEarlyReleasesItsTicket() {
+        a.start()
+        b.start()
+        val settings = InMemorySettings()
+        val client = client(settings)
+        val older = startHeld(client, b)
+        val request = (runBlocking { client.passkeyLoginStart(a.base) } as PasskeyLoginStart.Ready).request
+        assertEquals(LoginResult.PasskeyDismissed, runBlocking { client.passkeyLoginFinish(request, PasskeyCeremony.Dismissed) })
+        b.loginGate!!.countDown()
+        assertEquals(LoginResult.Success, runBlocking { older.await() })
+        assertEquals(b.base, storedUrl(settings))
+    }
+
+    /** Positive control: the same autofill pick, still PENDING at its console, does hold the older attempt back. */
+    @Test fun anAutofillPickToAnotherServerThatIsStillPendingDecides() {
+        a.start()
+        b.start()
+        val settings = InMemorySettings()
+        val client = client(settings)
+        val older = startHeld(client, b)
+        val request = (runBlocking { client.passkeyLoginStart(a.base) } as PasskeyLoginStart.Ready).request
+        a.verifyGate = CountDownLatch(1)
+        val pick = scope.async { client.passkeyLoginFinish(request, PasskeyCeremony.Done(PasskeyFixtures.AUTHENTICATION_RESPONSE)) }
+        assertTrue(a.verifyArrived.await(10, TimeUnit.SECONDS))
+        b.loginGate!!.countDown()
+        assertEquals(LoginResult.Superseded, runBlocking { older.await() })
+        a.verifyGate!!.countDown()
+        assertEquals(LoginResult.Success, runBlocking { pick.await() })
+        assertEquals(a.base, storedUrl(settings))
     }
 }

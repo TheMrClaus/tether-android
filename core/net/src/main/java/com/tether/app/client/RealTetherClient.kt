@@ -154,6 +154,15 @@ private const val MIRROR_HYDRATE_TIMEOUT_MS = 15_000L
 /** A mirror bind that has not answered by then means no mirror for this process (T13.1, M2). */
 private const val MIRROR_BIND_TIMEOUT_MS = 5_000L
 
+/**
+ * ta-rv0o 1l: how long the socket waits at the local-bind gate ([RealTetherClient.awaitLocalBind]). The binds
+ * inside are bounded (a mirror bind, the boot purge: 5 s each); the unsent-input read is not, so the gate is.
+ */
+private const val LOCAL_BIND_TIMEOUT_MS = 20_000L
+
+/** ta-uchk L2: the pause before a superseded sign-in's revoke is tried a second time. */
+private const val REVOKE_RETRY_MS = 300L
+
 /** Upper bound on the frame thread's wait for a seqless event's mirror cursor clear (T13.1). */
 private const val SEQLESS_CLEAR_WAIT_MS = 2_000L
 
@@ -453,6 +462,11 @@ class RealTetherClient(
      * arrives. A count, not a flag: overlapping start() calls (an activity re-created) each hold it.
      */
     private val localBindsInFlight = MutableStateFlow(0)
+
+    // ta-rv0o 1l: the credential start() last adopted FROM THE STORE (not one a sign-in in this process
+    // brought). If the local-bind gate times out while it is still the one in force, it is un-adopted
+    // again: the end state of a settings read that failed. Guarded by [lock].
+    private var adoptedFromStore: Credential? = null
     // ta-jt9 L-B: bumped by every sign-out (logout(), stop(), a credential the server rejected).
     // A start() adopts what it read from the store only if no sign-out happened since it began:
     // its snapshot may predate the sign-out and still hold the credential being forgotten.
@@ -1264,14 +1278,28 @@ class RealTetherClient(
         return adopted
     }
 
+    /** One try of a take-back of a store write: true = it ran (whatever it answered), false = it threw. */
+    private suspend fun takeBack(back: suspend () -> Boolean): Boolean = try {
+        back()
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        false
+    }
+
     /** [adoptCredential]'s body, under [adoptMutex]. */
     private suspend fun adoptIfCurrent(base: HttpUrl, credential: Credential, ticket: SignInTicket): Boolean {
         // ta-coik.1 r3: claimed under the lock, before anything is written: any other sign-in that began
         // at [generation] is late from here on, and a sign-out from here on moves the generation again.
+        var wipeAtClaim = 0L
         val claimed = synchronized(lock) {
             if (signInGeneration != ticket.generation) return false
             // ta-coik.1 r4: a newer sign-in to another server is still running: it decides.
             if (overtakenLocked(ticket)) return false
+            // ta-uchk L3: the stop() count as of the claim: a stop() after it wiped the store this
+            // attempt reads its "previous server" from, so a take-back must not put that server back.
+            wipeAtClaim = pendingWipe
             ++signInGeneration
         }
         // ta-jt9 L-A2: the boot purge decides on the store as the boot found it, so no sign-in
@@ -1316,10 +1344,33 @@ class RealTetherClient(
         var previous: WebSocket? = null
         var previousWasOpen = false
         var switch: OriginSwitch? = null
+        var tookBack: WebSocket? = null
+        var undone = false
         val signedOutMeanwhile = synchronized(lock) {
             // ta-coik.1 r3: a sign-out (logout(), stop()) while the store was written: the user's
             // sign-out stands. Nothing goes into memory; the store write is taken back below.
-            if (signInGeneration != claimed) return@synchronized true
+            if (signInGeneration != claimed) {
+                // ta-uchk L1: the credential this attempt wrote is the one the user's sign-out forgot.
+                // Recorded as forgotten at once (a start() never adopts it from the store, however it
+                // read, even when the take-back below fails) and the epoch moved (a start() already
+                // reading its snapshot adopts nothing). A start() that got in between the sign-out and
+                // this point may have loaded it into memory from the store: that is undone here, the
+                // socket it opened included.
+                forgottenCredential = credential
+                signOutEpoch++
+                if (credentialValue == credential) {
+                    credentialValue = null
+                    if (serverOrigin(baseUrlValue?.toString().orEmpty()) == serverOrigin(base.toString())) baseUrlValue = null
+                    adoptedFromStore = null
+                    stopped = true
+                    cancelTimersLocked()
+                    endConnectAttemptsLocked()
+                    tookBack = detachSocketLocked()
+                    undone = true
+                    connectionState.value = ConnectionState.Disconnected
+                }
+                return@synchronized true
+            }
             // Whatever socket is still bound belongs to the PREVIOUS sign-in
             // (possibly another server): let it go now, or connectNow() would
             // keep using it and a node-add would hand a peer bearer to the old
@@ -1353,12 +1404,26 @@ class RealTetherClient(
         if (signedOutMeanwhile) {
             // Only this credential is taken back (compare-and-clear): never a newer one. ta-coik.1 r4
             // (ta-5csf I2): with it the URL it moved, back to the one stored before (when that read).
+            tookBack?.cancel()
+            if (undone) {
+                // ta-uchk L1: the early start() had put the credential in memory: nothing of it shows.
+                clearSignInViews()
+                if (synchronized(lock) { credentialValue == null }) enterAuthRequired()
+            }
             if (stored) {
-                runCatching {
-                    if (configuredBeforeRead) settings.revertServerIf(credential, configuredBefore)
+                // ta-uchk L3: a stop() since the claim wiped the store, the URL it held included: there is
+                // no previous server to put back, only the credential (and the URL it wrote) to drop.
+                val wiped = synchronized(lock) { pendingWipe != wipeAtClaim }
+                val back: suspend () -> Boolean = {
+                    if (configuredBeforeRead || wiped) settings.revertServerIf(credential, if (wiped) null else configuredBefore)
                     else settings.clearCredentialIf(credential)
                 }
+                // ta-uchk L4: a failed take-back is tried once more; failing again, the credential stays
+                // recorded as forgotten for the life of this process (a start() never adopts it).
+                if (!takeBack(back) && !takeBack(back)) synchronized(lock) { forgottenCredential = credential }
             }
+            // ta-uchk L1: after the take-back (the wipe asks the store whether a credential is still kept).
+            if (undone) wipeMirror()
             return false
         }
         if (switch != null) raceHook?.invoke(RacePoint.ServerMoved, null)
@@ -1389,29 +1454,63 @@ class RealTetherClient(
      * its device. Only to the server that minted it; best effort, bounded by [LOGOUT_CALL_TIMEOUT_MS].
      */
     private suspend fun revokeSuperseded(base: HttpUrl, credential: Credential, deviceId: String?) {
+        if (blockedBeforeConnect(base)) return
         val request = when (credential) {
             is Credential.Cookie -> Request.Builder()
                 .url(base.resolve("/api/auth/logout")!!)
                 .post(ByteArray(0).toRequestBody("application/json".toMediaType()))
             is Credential.DeviceToken -> {
-                val id = deviceId?.takeIf { SUPERSEDED_DEVICE_ID.matches(it) } ?: return
+                // ta-uchk L2: a claim answer without a usable device id is not the end of it: the server
+                // marks the device of the calling token (`current`) in its device list, so the id is asked
+                // there, with this token. Still none: logged, and nothing more can be revoked from here.
+                val id = deviceId?.takeIf { SUPERSEDED_DEVICE_ID.matches(it) } ?: currentDeviceId(base, credential)
+                if (id == null) {
+                    trace.mark("revoke-no-device-id")
+                    return
+                }
                 Request.Builder()
                     .url(base.newBuilder().encodedPath("/").query(null).fragment(null).addPathSegment("api").addPathSegment("devices").addPathSegment(id).build())
                     .delete()
             }
         }.authorize(credential, base).build()
-        if (blockedBeforeConnect(base)) return
-        withContext(Dispatchers.IO) {
-            try {
-                authHttp.newBuilder()
-                    .callTimeout(LOGOUT_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                    .build()
-                    .newCall(request)
-                    .execute()
-                    .close()
-            } catch (_: IOException) {
-                // Best effort, as a sign-out's revoke.
+        // ta-uchk L2: done only on a 2xx; a failed call (any other status, or no answer) is tried once more.
+        for (attempt in 0..1) {
+            if (attempt > 0) delay(revokeRetryMs)
+            val done = withContext(Dispatchers.IO) {
+                try {
+                    authHttp.newBuilder()
+                        .callTimeout(LOGOUT_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                        .build()
+                        .newCall(request)
+                        .execute()
+                        .use { it.isSuccessful }
+                } catch (_: IOException) {
+                    false
+                }
             }
+            if (done) return
+        }
+        trace.mark("revoke-failed")
+    }
+
+    /** ta-uchk L2: the id of the device [credential] (a device token) belongs to, from `GET /api/devices` (`current`); null if unknown. */
+    private suspend fun currentDeviceId(base: HttpUrl, credential: Credential): String? = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(base.newBuilder().encodedPath("/").query(null).fragment(null).addPathSegment("api").addPathSegment("devices").build())
+                .get()
+                .authorize(credential, base)
+                .build()
+            authHttp.newBuilder().callTimeout(LOGOUT_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS).build().newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                (parseJsonObject(response)?.get("devices") as? kotlinx.serialization.json.JsonArray)
+                    ?.mapNotNull { it as? JsonObject }
+                    ?.firstOrNull { (it["current"] as? JsonPrimitive)?.content == "true" }
+                    ?.let { it.stringField("id") }
+                    ?.takeIf { SUPERSEDED_DEVICE_ID.matches(it) }
+            }
+        } catch (_: IOException) {
+            null
         }
     }
 
@@ -2093,6 +2192,7 @@ class RealTetherClient(
                     // Adopted as a pair, never the credential under another URL.
                     baseUrlValue = base
                     credentialValue = session.credential
+                    adoptedFromStore = session.credential
                 } else if (baseUrlValue == null && base != null) {
                     baseUrlValue = base
                 }
@@ -2129,10 +2229,11 @@ class RealTetherClient(
                 // keeps a late bind from publishing the dead sign-in's list, and the bind's own
                 // credential check wipes it again.
                 val canConnect = synchronized(lock) { baseUrlValue != null && credentialValue != null }
-                if (canConnect) {
-                    connectNow()
-                    connectedEarly = true
-                }
+                // ta-rv0o 1k: only a connect that actually began counts. One that returned because the
+                // client is halted (background-suspended, version-halted) did nothing: it is tried again
+                // after the bind (and a halt that lifts meanwhile connects on its own signal: the
+                // foreground signal and retryConnection() both call connectNow()).
+                if (canConnect) connectedEarly = connectNow()
                 // Restore before the first drain or write (an unreadable store is
                 // "nothing to redeliver", never a failed start).
                 bindPendingToCurrentServer()
@@ -2149,11 +2250,13 @@ class RealTetherClient(
     }
 
     /**
-     * ta-coik.36: the socket waits here for [localBindsInFlight] to drain (see there). No timeout
-     * of its own: the bind is bounded inside (M2), and every holder releases in a finally.
+     * ta-coik.36: the socket waits here for [localBindsInFlight] to drain (see there). Every holder
+     * releases in a finally and the binds inside are bounded (M2), except the unsent-input read, so
+     * ta-rv0o 1l: the wait is bounded too. False = it timed out ([failClosedOnBindTimeout]).
      */
-    private suspend fun awaitLocalBind() {
-        if (localBindsInFlight.value > 0) localBindsInFlight.first { it == 0 }
+    private suspend fun awaitLocalBind(): Boolean {
+        if (localBindsInFlight.value == 0) return true
+        return withTimeoutOrNull(localBindTimeoutMs) { localBindsInFlight.first { it == 0 }; true } ?: false
     }
 
     override fun stop() {
@@ -2723,19 +2826,24 @@ class RealTetherClient(
         return ws
     }
 
-    private fun connectNow() {
+    /**
+     * Starts a connect attempt. False only when nothing was started because the client is halted
+     * ([haltedLocked]) or has no pair to connect with; true when one began or is already underway.
+     */
+    private fun connectNow(): Boolean {
         val base: HttpUrl
         val credential: Credential
         val generation: Long
         synchronized(lock) {
-            if (haltedLocked() || connecting || socket != null) return
+            if (haltedLocked()) return false
+            if (connecting || socket != null) return true
             val b = baseUrlValue
             val c = credentialValue
             if (b == null || c == null) {
                 // Before start() read the settings (e.g. an early lifecycle
                 // signal) "no credential" is not known yet: stay quiet.
                 if (settingsLoaded) enterAuthRequired()
-                return
+                return false
             }
             connecting = true
             base = b
@@ -2748,7 +2856,7 @@ class RealTetherClient(
             // reconnectIfIdle() re-evaluates once access is granted.
             synchronized(lock) { connecting = false }
             connectionState.value = ConnectionState.LocalNetworkBlocked
-            return
+            return true
         }
         connectionState.value = ConnectionState.Connecting
         trace.mark("probe-sent")
@@ -2797,7 +2905,7 @@ class RealTetherClient(
                 ProbeVerdict.Authenticated -> {
                     // ta-coik.36: the probe may have been sent while start() was still binding the
                     // saved copy and the unsent input; the socket is not opened before they are.
-                    awaitLocalBind()
+                    if (!awaitLocalBind() && failClosedOnBindTimeout(base, credential, generation)) return@launch
                     openSocket(base, credential, generation)
                 }
                 ProbeVerdict.Rejected -> handleCredentialRejected(
@@ -2826,6 +2934,28 @@ class RealTetherClient(
                 }
             }
         }
+        return true
+    }
+
+    /**
+     * ta-rv0o 1l: the local-bind gate timed out ([awaitLocalBind]) for the attempt of [generation]. True =
+     * the attempt is over and nothing may be opened. When the pair in force is the one start() adopted
+     * from the store (not one a sign-in in this process brought), it is let go again and the login screen
+     * shows: the end state of a settings read that failed (see start(): nothing adopted, nothing bound,
+     * no signed-out reason, the next start() reads again), never a connect on a pair the bind never
+     * finished with. A sign-in's own pair connects on (false), as it does when the store does not read.
+     */
+    private fun failClosedOnBindTimeout(base: HttpUrl, credential: Credential, generation: Long): Boolean {
+        synchronized(lock) {
+            if (staleLocked(generation)) return true
+            if (credentialValue !== credential || adoptedFromStore !== credential) return false
+            endConnectAttemptsLocked()
+            credentialValue = null
+            if (baseUrlValue == base) baseUrlValue = null
+            adoptedFromStore = null
+        }
+        enterAuthRequired()
+        return true
     }
 
     /**
@@ -5476,6 +5606,14 @@ class RealTetherClient(
     /** Test seam: the pause between start()'s settings reads (production: [SETTINGS_READ_RETRY_MS]). */
     @Volatile
     internal var settingsReadRetryMs: Long = SETTINGS_READ_RETRY_MS
+
+    /** Test seam: the bound on the local-bind gate (production: [LOCAL_BIND_TIMEOUT_MS]). */
+    @Volatile
+    internal var localBindTimeoutMs: Long = LOCAL_BIND_TIMEOUT_MS
+
+    /** Test seam: the pause before a superseded sign-in's revoke is retried (production: [REVOKE_RETRY_MS]). */
+    @Volatile
+    internal var revokeRetryMs: Long = REVOKE_RETRY_MS
 
     /** Test seam: the bound on a mirror bind (production: [MIRROR_BIND_TIMEOUT_MS]). */
     @Volatile
