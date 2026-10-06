@@ -3,7 +3,6 @@ package com.tether.app.ui.text
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -21,7 +20,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -33,9 +31,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import com.tether.app.ui.components.CssBorder
-import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.PreDisplay
-import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -154,10 +150,10 @@ fun safePreDisplay(terminal: Boolean = false): PreDisplay {
 // ---- copy -------------------------------------------------------------------------------------
 
 /**
- * A copy's notice: its [message], and the exact source its "Copy raw" key puts on the clipboard.
- * r4: that key is the ONLY raw copy path (the code key has no long press).
+ * A copy's notice (information only: the clipboard already holds the exact source, nothing more
+ * is needed to get it). [message] says how many hidden controls the copied text carries.
  */
-class CopyNotice(val message: String, val raw: String, val serial: Long)
+class CopyNotice(val message: String, val serial: Long)
 
 /** The copy notice in scope (the transcript's); a copy outside one shows none. */
 @Stable
@@ -166,15 +162,12 @@ class CopyNotices {
         private set
     private var serial = 0L
 
-    /** A safe copy that showed [hidden] controls as tokens; "Copy raw" puts [raw] on the clipboard. */
-    fun show(hidden: Int, raw: String) {
-        current = CopyNotice(SafeText.copyNotice(hidden), raw, ++serial)
+    /** A copy whose exact text carries [hidden] controls the screen draws as tokens. */
+    fun show(hidden: Int) {
+        current = CopyNotice(SafeText.copyNotice(hidden), ++serial)
     }
 
-    /**
-     * r3: every copy, clean or not, first clears the notice: a "Copy raw" left from an earlier copy
-     * must never put that earlier payload on the clipboard.
-     */
+    /** Every copy, clean or not, first clears the notice: an earlier copy's notice never outlives it. */
     fun clear() {
         current = null
     }
@@ -194,39 +187,47 @@ fun putOnClipboard(context: Context, text: String, label: String = "text"): Bool
 }.getOrDefault(false)
 
 /**
- * Copy what [display] draws the SAFE way ([SafeText.forCopy]): the dangerous controls as their
- * visible tokens, the rest exactly. When any was shown, [notices] offers "Copy raw" ([raw], or
- * the display decoded). ta-28i r2: [strict] copies every token visibly ([SafeText.forCopy]). False
- * when the clipboard is unavailable.
+ * ta-coik.64: copy the EXACT source text of what [display] draws, as the web's
+ * `navigator.clipboard.writeText` does ([raw] when the caller has it, else the display decoded by
+ * [SafeText.original]). The screen keeps drawing hidden controls as visible tokens; the clipboard
+ * never carries one. When the text carries any, [notices] says so (information, not a step). False
+ * when the clipboard is unavailable. [strict] only widens what the notice counts (one-line names).
  */
-fun copySafely(context: Context, display: String, notices: CopyNotices?, raw: String? = null, label: String = "text", strict: Boolean = false): Boolean {
+fun copyExact(context: Context, display: String, notices: CopyNotices?, raw: String? = null, label: String = "text", strict: Boolean = false): Boolean {
     notices?.clear()
-    val copied = SafeText.forCopy(display, strict)
-    val ok = putOnClipboard(context, copied.text, label)
-    if (ok && copied.hidden > 0) notices?.show(copied.hidden, raw ?: SafeText.original(display))
+    val ok = putOnClipboard(context, raw ?: SafeText.original(display), label)
+    if (ok) {
+        val hidden = SafeText.forCopy(display, strict).hidden
+        if (hidden > 0) notices?.show(hidden)
+    }
     return ok
 }
 
 /**
- * T6.7 + ta-blf: the clipboard a transcript row's selection copies through: the text the
- * selection copied is what the row DRAWS; this puts [SafeText.forCopy] of it on the system
- * clipboard (tokens decoded, dangerous controls kept visible, break opportunities dropped) and,
- * when it kept any, tells [notices] (which offers "Copy raw"). A copy with nothing to change
- * passes through untouched, rich text and all.
+ * T6.7 + ta-coik.64: the clipboard a transcript row's selection copies through: the text the
+ * selection copied is what the row DRAWS (hidden controls as visible tokens, break opportunities
+ * between); this puts the EXACT source on the system clipboard ([SafeText.original]: tokens
+ * decoded to the characters they stand for, break opportunities dropped), as the browser copies
+ * the page's own text, and, when the text carries hidden controls, tells [notices] (information
+ * only). A copy with nothing drawn in it passes through untouched, rich text and all.
  */
 class SafeCopyClipboard(private val delegate: Clipboard, private val notices: CopyNotices?) : Clipboard {
     override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
 
     override suspend fun setClipEntry(clipEntry: ClipEntry?) {
-        notices?.clear() // r3: never leave an earlier copy's "Copy raw" behind
+        notices?.clear() // never leave an earlier copy's notice behind
         if (clipEntry == null) return delegate.setClipEntry(null)
         val data = clipEntry.clipData
         val text = if (data.itemCount > 0) data.getItemAt(0).text else null
         if (text == null) return delegate.setClipEntry(clipEntry)
-        val copied = SafeText.forCopy(text)
-        if (copied.text == text.toString() && text.indexOf(SafeText.MARK) < 0) return delegate.setClipEntry(clipEntry)
-        delegate.setClipEntry(ClipEntry(ClipData.newPlainText(data.description?.label ?: "text", copied.text)))
-        if (copied.hidden > 0) notices?.show(copied.hidden, SafeText.original(text))
+        val hidden = SafeText.forCopy(text).hidden
+        val exact = SafeText.original(text)
+        if (exact == text.toString() && text.indexOf(SafeText.MARK) < 0) {
+            delegate.setClipEntry(clipEntry)
+        } else {
+            delegate.setClipEntry(ClipEntry(ClipData.newPlainText(data.description?.label ?: "text", exact)))
+        }
+        if (hidden > 0) notices?.show(hidden)
     }
 
     override val nativeClipboard get() = delegate.nativeClipboard
@@ -241,15 +242,14 @@ private fun CharSequence.indexOf(c: Char): Int {
 const val COPY_NOTICE_MS: Long = 8_000L
 
 /**
- * The copy notice: "N hidden control characters copied as ⟨U+…⟩" and a "Copy raw" key that puts
- * the exact source on the clipboard. Polite live region: TalkBack reads it once.
+ * The copy notice: "N hidden control characters in the copied text, drawn as ⟨U+…⟩" (information
+ * only: the clipboard holds the exact text already). Polite live region: TalkBack reads it once.
  */
 @Composable
 fun CopyNoticeHost(notices: CopyNotices, modifier: Modifier = Modifier) {
     val notice = notices.current ?: return
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val context = LocalContext.current
     LaunchedEffect(notice.serial) {
         delay(COPY_NOTICE_MS)
         notices.dismiss(notice)
@@ -259,26 +259,13 @@ fun CopyNoticeHost(notices: CopyNotices, modifier: Modifier = Modifier) {
         modifier
             .widthIn(max = 480.dp)
             .cssSurface(shape, background = t.graphiteRaised, border = CssBorder(1.dp, t.line))
-            .padding(start = t.css.spaceMd, end = t.css.spaceXs)
+            .padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm)
             .semantics(mergeDescendants = false) { liveRegion = LiveRegionMode.Polite }
             .testTag(COPY_NOTICE_TAG),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-        Text(notice.message, style = type.body, color = t.ink, modifier = Modifier.weight(1f, fill = false))
-        val raw = notice.raw
-        TetherKey(
-            onClick = {
-                putOnClipboard(context, raw)
-                notices.dismiss(notice)
-            },
-            classes = KeyClasses.ButtonSecondary,
-            label = "Copy raw",
-            contentDescription = "Copy raw, with the hidden control characters",
-            modifier = Modifier.testTag(COPY_RAW_TAG),
-        )
+        Text(notice.message, style = type.body, color = t.ink)
     }
 }
 
 const val COPY_NOTICE_TAG = "copy-notice"
-const val COPY_RAW_TAG = "copy-raw"

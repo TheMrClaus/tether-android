@@ -79,6 +79,15 @@ class MainShellResumeCommandTest {
         rule.onNodeWithContentDescription("Copy this session's Tether id").assertIsDisplayed()
     }
 
+    /** ta-coik.64: a command with an NBSP, a zero-width space and a bidi override is copied byte for byte, no second step. */
+    @Test fun aCommandWithHiddenCharactersIsCopiedExactly() {
+        val hostile = "cd -- /srv/ap\u200Bp\u00A0x && claude --resume ${"\u202E"}abc"
+        host(hostile)
+        rule.onNodeWithContentDescription(IDLE_NAME).performClick()
+        rule.waitForIdle()
+        assertEquals(hostile, clip())
+    }
+
     @Test fun hiddenWhenTheSessionHasNoResumeCommand() {
         host(null)
         rule.onNodeWithTag(ShellTags.ResumeCommandKey).assertDoesNotExist()

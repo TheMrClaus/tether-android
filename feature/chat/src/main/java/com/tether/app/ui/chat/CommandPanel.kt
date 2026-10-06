@@ -186,7 +186,7 @@ private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
  * it streams, the violet caret while it runs), and the foot naming the log file. Output and names are
  * the server's words drawn by the shared terminal rule: nothing in them can reorder, hide, or pass
  * for the app's own text, and nothing is hidden from the operator. The row is selectable; a copy
- * goes through the transcript's SafeCopyClipboard (tokens, never a hidden control).
+ * goes through the transcript's SafeCopyClipboard (the exact output, the drawn tokens decoded).
  */
 @Composable
 internal fun CommandOutputPanel(view: CommandOutputView) {

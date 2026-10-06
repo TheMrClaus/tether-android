@@ -689,7 +689,7 @@ private fun PreviewPane(state: FileBrowserState, masterDetail: Boolean, studioPh
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
         val pad = if (studioPhone) 16.dp else 24.dp
-        // ta-28i: a copy from the text preview shows its hidden controls as tokens, with "Copy raw".
+        // ta-28i + ta-coik.64: a copy from the text preview is the exact source; the notice only informs.
         val notices = remember(selected.path) { CopyNotices() }
         Box(Modifier.fillMaxWidth().weight(1f).padding(pad), contentAlignment = Alignment.Center) {
             PreviewContent(state, selected, notices)
@@ -760,8 +760,8 @@ private fun PreviewContent(state: FileBrowserState, entry: WorkspaceFileEntry, n
  * code point, lone surrogate and C0/C1 control (except TAB and the line break) is a visible
  * `--warning` token, and every line lays out LTR ([codeDirection]) whatever the UI direction; RTL
  * letters stay letters. Each line is its own layout, so nothing reaches past its line. A copy goes
- * through [SafeCopyClipboard]: the hidden controls as their visible tokens, a notice saying how
- * many, and the notice's "Copy raw" as the only way to the exact source (no long press copies raw).
+ * through [SafeCopyClipboard]: the exact source (the drawn tokens decoded), and a notice saying how
+ * many hidden controls it holds.
  */
 @Composable
 private fun TextPreview(text: String, notices: CopyNotices) {
@@ -844,13 +844,13 @@ internal fun previewLines(text: String): List<String> = previewPieces(text).map 
  * ta-28i r2: copying ACROSS preview lines. Each line is its own Text in one SelectionContainer, and
  * the selection joins the selected parts of the Texts with a "\n" between them (whatever the file
  * had), so a CRLF lost its CR, a TAB came back as two spaces, and a pathological long line split
- * into pieces gained line breaks it never had: "Copy raw" was not the source. So each drawn piece
+ * into pieces gained line breaks it never had: the copy was not the source. So each drawn piece
  * but the file's last carries an invisible END marker (the line's own "\n", its "\r\n", or "no
  * break": the piece continues the line), and each TAB (drawn at two columns, the web's
  * `tab-size: 2`) a marker before its two spaces; [Clipboard] turns each END marker and the
  * selection's "\n" after it into the source's break, and each tab marker and its spaces into the
- * TAB, before the safe copy ([SafeCopyClipboard]) sees the text. So the safe copy AND "Copy raw"
- * keep the file's line breaks, CRLFs and tabs. The markers are WORD JOINER + ZWNJ / ZWJ: zero-width,
+ * TAB, before the exact copy ([SafeCopyClipboard]) sees the text. So the copy
+ * keeps the file's line breaks, CRLFs and tabs. The markers are WORD JOINER + ZWNJ / ZWJ: zero-width,
  * and never in a code display otherwise (the code rule draws every WJ, ZWNJ and ZWJ of the file as
  * a token), so file content can never pass for one. A selection that starts inside a tab's two
  * spaces copies those spaces as spaces.

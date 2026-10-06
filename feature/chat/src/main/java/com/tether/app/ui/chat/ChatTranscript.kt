@@ -386,7 +386,7 @@ private fun ChatTranscriptBody(
             )
         }
 
-        // ta-blf r2: "N hidden control characters copied as ⟨U+…⟩", with "Copy raw".
+        // ta-coik.64: information only: how many hidden controls the copied (exact) text holds.
         CopyNoticeHost(copyNotices, Modifier.align(Alignment.BottomCenter).padding(horizontal = t.css.spaceLg, vertical = t.css.spaceLg))
     }
 }
@@ -421,8 +421,8 @@ private fun ChatRow(
         // T6.7: the transcript's words are selectable and copyable, as on the web, one row at a time:
         // a selection can never run across the transcript or into the header and composer (the
         // runaway selection the web fixed, globals.css:136-160). Rows that are controls, not
-        // reading, stay out of it. ta-blf: a copy never carries a hidden control the reader did not
-        // see ([SafeCopyClipboard]; the copy notice offers "Copy raw").
+        // reading, stay out of it. ta-coik.64: a copy is the exact source text, as the browser's
+        // ([SafeCopyClipboard] decodes the drawn tokens; the copy notice only informs).
         if (item.selectableText) {
             SelectableRow { ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone) }
         } else {
@@ -433,7 +433,7 @@ private fun ChatRow(
 
 /**
  * T6.7: one row's words in their own selection (a selection never runs across rows), copied through
- * [SafeCopyClipboard] (ta-blf: never a hidden control the reader did not see). The row's keys still
+ * [SafeCopyClipboard] (ta-coik.64: the exact source, the drawn tokens decoded). The row's keys still
  * take their taps; a key that must never join a selection says so itself ([NoticeDismissButton]).
  */
 @Composable

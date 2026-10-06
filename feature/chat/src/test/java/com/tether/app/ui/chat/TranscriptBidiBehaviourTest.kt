@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
@@ -35,7 +36,6 @@ import com.tether.app.protocol.reduce.evNullTurn
 import com.tether.app.protocol.reduce.freshTree
 import com.tether.app.protocol.reduce.tree
 import com.tether.app.ui.text.COPY_NOTICE_TAG
-import com.tether.app.ui.text.COPY_RAW_TAG
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -57,9 +57,9 @@ import org.robolectric.annotation.Config
 /**
  * ta-blf: the transcript never draws a bidi override raw, code shows every invisible and bidi
  * code point, isolates and marks reorder nothing outside real RTL text, real RTL text keeps its
- * order, nothing leaks past its line, TalkBack reads tokens as words, and a copy never carries a
- * hidden control the reader did not see ("Copy raw" gives the exact text). Every control here is
- * an escape.
+ * order, nothing leaks past its line, TalkBack reads tokens as words, and a copy never hides a
+ * hidden control the reader did not see ON SCREEN (ta-coik.64: the clipboard itself gets the exact
+ * source text, as the web's). Every control here is an escape.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi", shadows = [NoMagnifier::class])
@@ -76,6 +76,7 @@ class TranscriptBidiBehaviourTest {
         const val RLI = "\u2067"
         const val PDI = "\u2069"
         const val RLM = "\u200F"
+        const val LRM = "\u200E"
         const val WJ = "\u2060"
         const val ZWSP = "\u200B"
         const val ARABIC = "\u0645\u0631\u062D\u0628\u0627 \u0628\u0627\u0644\u0639\u0627\u0644\u0645" // "hello world"
@@ -86,7 +87,7 @@ class TranscriptBidiBehaviourTest {
         val ALL_BIDI = OVERRIDES + listOf(LRI, RLI, "\u2068", PDI, "\u200E", RLM, "\u061C")
         fun tok(cp: Int) = "\u2060⟨U+%04X⟩".format(cp)
         fun vis(cp: Int) = "⟨U+%04X⟩".format(cp)
-        const val NOTICE_2 = "2 hidden control characters copied as ⟨U+…⟩"
+        const val NOTICE_2 = "Copied text has 2 hidden control characters, drawn as ⟨U+…⟩"
     }
 
     private fun show(
@@ -522,26 +523,27 @@ class TranscriptBidiBehaviourTest {
         assertTrue(code.contains("U+202E"))
     }
 
-    @Test fun theCopyKeyCopiesSafelyAndOnlyTheNoticeCopiesRaw() {
-        show(fixture("Show me.", "```\n$FENCE\n```"))
+    /** ta-coik.64: one tap copies the EXACT fence (bidi, zero-width, NBSP); the screen still draws tokens. */
+    @Test fun theCopyKeyCopiesTheExactFenceWhileTheScreenKeepsItsTokens() {
+        val fence = "$FENCE\u00A0nbsp${LRM}lrm"
+        show(fixture("Show me.", "```\n$fence\n```"))
+        rule.onNodeWithText("const admin = \"${tok(0x202E)}", substring = true, useUnmergedTree = true).assertExists()
         rule.onAllNodesWithContentDescription("Copy code").onFirst().performClick()
         rule.waitForIdle()
-        assertEquals("const admin = \"${vis(0x202E)}${vis(0x2066)} x\"; // zwsp$ZWSP", clip())
+        assertEquals(hex(clip().orEmpty()).toString(), fence, clip())
+        // The notice only informs; there is no second step to get the raw text.
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertIsDisplayed()
-        rule.onNodeWithText(NOTICE_2).assertExists()
-        rule.onNodeWithTag(COPY_RAW_TAG).performClick()
-        rule.waitForIdle()
-        assertEquals(FENCE, clip())
+        rule.onAllNodes(hasText("Copy raw")).assertCountEquals(0)
     }
 
-    /** r4: the key has no long press (a long press is a tap): the notice's "Copy raw" is the only raw copy path. */
-    @Test fun aLongPressOnTheCopyKeyNeverCopiesRaw() {
+    /** The key has no long press (a long press is a tap): the one tap already copies the exact text. */
+    @Test fun aLongPressOnTheCopyKeyCopiesTheSameExactText() {
         show(fixture("Show me.", "```\n$FENCE\n```"))
         val key = rule.onAllNodesWithContentDescription("Copy code").onFirst()
         assertFalse("no long-click action", key.fetchSemanticsNode().config.contains(SemanticsActions.OnLongClick))
         key.performTouchInput { longClick(center) }
         rule.waitForIdle()
-        assertEquals("const admin = \"${vis(0x202E)}${vis(0x2066)} x\"; // zwsp$ZWSP", clip())
+        assertEquals(FENCE, clip())
         rule.onNodeWithText(NOTICE_2).assertExists()
     }
 
@@ -583,26 +585,22 @@ class TranscriptBidiBehaviourTest {
 
     // ---- copy --------------------------------------------------------------------------------
 
-    @Test fun aRowsSelectionCopiesHiddenControlsVisiblyAndCopyRawGivesTheOriginal() {
+    @Test fun aRowsSelectionCopiesTheExactSourceAndNoticesTheHiddenControls() {
         val menu = MenuSpy()
         show(fixture(SPOOF, "Plain reply with an RTL mark: $HEBREW$RLM."), menu)
         selectAllAndCopy(menu, "parser")
         val prompt = checkNotNull(clip())
-        assertTrue("the visible form: ${hex(prompt)}", prompt.contains("Fix the ${vis(0x202E)}parser${vis(0x202C)} bug now"))
-        assertFalse(prompt.contains(WJ) || prompt.contains(RLO) || prompt.contains(PDF))
+        assertTrue("the exact source: ${hex(prompt)}", prompt.contains(SPOOF))
+        assertFalse("no visible-token form: ${hex(prompt)}", prompt.contains("⟨U+") || prompt.contains(WJ))
         rule.onNodeWithText(NOTICE_2).assertIsDisplayed()
-        rule.onNodeWithTag(COPY_RAW_TAG).performClick()
-        rule.waitForIdle()
-        assertTrue("Copy raw: ${hex(clip()!!)}", clip()!!.contains(SPOOF))
-        rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
         // Real RTL text copies exactly, with no notice.
         selectAllAndCopy(menu, "Plain reply")
         assertTrue(clip()!!.contains("Plain reply with an RTL mark: $HEBREW$RLM."))
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
     }
 
-    /** r3: every copy clears the notice first: an earlier copy's "Copy raw" can never be left behind. */
-    @Test fun aStaleCopyRawIsNeverLeftBehind() {
+    /** Every copy clears the notice first: an earlier copy's notice can never describe a later copy. */
+    @Test fun aStaleNoticeIsNeverLeftBehind() {
         val menu = MenuSpy()
         show(
             ChatFixtures.fold(
@@ -612,13 +610,13 @@ class TranscriptBidiBehaviourTest {
             menu,
         )
         selectAllAndCopy(menu, "parser")
-        rule.onNodeWithTag(COPY_RAW_TAG).assertExists()
+        rule.onNodeWithTag(COPY_NOTICE_TAG).assertExists()
         selectAllAndCopy(menu, "A clean reply")
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
         // The copy key too.
         rule.onAllNodesWithContentDescription("Copy code")[0].performClick()
         rule.waitForIdle()
-        rule.onNodeWithTag(COPY_RAW_TAG).assertExists()
+        rule.onNodeWithTag(COPY_NOTICE_TAG).assertExists()
         // (The first key now says "Copied": the clean fence's key is the only "Copy code".)
         rule.onAllNodesWithContentDescription("Copy code").onFirst().performClick()
         rule.waitForIdle()
@@ -626,12 +624,12 @@ class TranscriptBidiBehaviourTest {
         assertEquals("clean code", clip())
     }
 
-    /** r3: a bidi mark code shows as a token is copied as the token, and counted. */
-    @Test fun aTokenisedMarkIsCopiedVisibly() {
+    /** A bidi mark code shows as a token is copied as the mark itself, and counted. */
+    @Test fun aTokenisedMarkIsCopiedExactly() {
         show(fixture("Show me.", "```\nx = 1${RLM}2${RLM}3\n```"))
         rule.onAllNodesWithContentDescription("Copy code").onFirst().performClick()
         rule.waitForIdle()
-        assertEquals("x = 1${vis(0x200F)}2${vis(0x200F)}3", clip())
+        assertEquals("x = 1${RLM}2${RLM}3", clip())
         rule.onNodeWithText(NOTICE_2).assertExists()
     }
 

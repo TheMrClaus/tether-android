@@ -70,20 +70,18 @@ package com.tether.app.ui.text
  * (cursor moves, erase, OSC titles and clipboard payloads, 8-bit C1 forms) is shown, never
  * interpreted: its ESC / C1 introducer and terminator are tokens and its payload is plain text.
  *
- * COPY ([forCopy], [original]): a copy never carries a hidden control the reader did not see.
- * The DANGEROUS set ([dangerous]: C0 except TAB/LF/CRLF, DEL, C1, U+202A-U+202E,
- * U+2066-U+2069, U+2028/U+2029 (line terminators to some tools), tag characters outside the
- * three flags), and any mark drawn as a token, and (ta-28i r2) any TAB or LF token the one-line
- * rule drew, is
- * copied as its VISIBLE token text, without the mark (`⟨U+001B⟩`), and the copy reports how many
- * ("N hidden control characters copied as ⟨U+…⟩"). Everything else, including every character
- * real RTL writing needs (letters, the marks it kept, ZWNJ/ZWJ), copies exactly. [original] gives
- * the exact source text for the copy notice's "Copy raw", the only raw copy path; [hiddenIn]
- * counts exactly what [forCopy] would show. Inserted break opportunities never reach a
- * copy, and neither does a U+2060 left over when a selection cuts a token in two. A selection that
- * STARTS between the two halves of a break opportunity keeps a leading U+200B: the copy path hands
- * over the selected text only, no offset, and in prose a U+200B is real content, so it cannot be
- * told apart. It is zero-width and outside the dangerous set.
+ * COPY ([original], [forCopy], [hiddenIn]; ta-coik.64): a copy puts the EXACT source on the
+ * clipboard, as the web does ([original] decodes the drawn tokens back to the characters they stand
+ * for and drops the inserted break opportunities); the screen alone shows hidden characters as
+ * tokens. [forCopy] is the COUNT: it renders what the DANGEROUS set ([dangerous]: C0 except
+ * TAB/LF/CRLF, DEL, C1, U+202A-U+202E, U+2066-U+2069, U+2028/U+2029, tag characters outside the
+ * three flags), any mark drawn as a token, and (ta-28i r2) any TAB or LF token the one-line rule
+ * drew, would show, and how many, for the copy notice's information ("N hidden control characters
+ * in the copied text"); [hiddenIn] counts exactly what [forCopy] would. Inserted break
+ * opportunities never reach a copy, and neither does a U+2060 left over when a selection cuts a
+ * token in two. A selection that STARTS between the two halves of a break opportunity keeps a
+ * leading U+200B: the copy path hands over the selected text only, no offset, and in prose a U+200B
+ * is real content, so it cannot be told apart.
  *
  * Cost: one linear pass per text; a text with nothing to escape (almost all) comes back as the
  * same String. Adjacent tokens are one styled span with a break opportunity between them, and a
@@ -462,7 +460,7 @@ object SafeText {
         if (cp <= 0xFFFF) repeat(times) { append(cp.toChar()) } else repeat(times) { appendCodePoint(cp) }
     }
 
-    /** The exact source text of a drawn (possibly partial) [display]: "Copy raw". */
+    /** The exact source text of a drawn (possibly partial) [display]: what a copy puts on the clipboard. */
     fun original(display: CharSequence): String {
         val s = display.toString()
         var at = s.indexOf(MARK)
@@ -489,14 +487,14 @@ object SafeText {
         return out.toString()
     }
 
-    /** What a copy puts on the clipboard, and how many hidden control characters it shows as tokens. */
+    /** What a copy would show as visible tokens ([text]) and how many hidden control characters that is ([hidden]): the notice's count. */
     class Copied(val text: String, val hidden: Int)
 
     /**
-     * The clipboard text of a drawn [display] (see COPY in the class doc). ta-28i r2: [strict] (a
-     * copy of a one-line name, path or id: the working directory, a session id) copies EVERY token as
-     * its visible text and counts it, a zero-width space, a TAB or a line break included, so the
-     * notice and "Copy raw" appear whenever the copy is not exactly the plain text the reader saw.
+     * The visible-token form of a drawn [display] and its count (see COPY in the class doc; the
+     * clipboard gets [original], not this). ta-28i r2: [strict] (a one-line name, path or id: the
+     * working directory, a session id) renders and counts EVERY token, a zero-width space, a TAB or
+     * a line break included, so the notice appears whenever the copy is not plain text.
      */
     fun forCopy(display: CharSequence, strict: Boolean = false): Copied {
         val s = display.toString()
@@ -571,9 +569,10 @@ object SafeText {
      */
     fun hiddenIn(raw: String, rule: Rule = Rule.Code): Int = forCopy(encode(raw, rule)).hidden
 
-    /** The notice a copy with hidden characters shows. */
+    /** The information a copy with hidden characters shows (the clipboard holds them exactly). */
     fun copyNotice(hidden: Int): String =
-        if (hidden == 1) "1 hidden control character copied as $OPEN" + "U+…$CLOSE" else "$hidden hidden control characters copied as $OPEN" + "U+…$CLOSE"
+        if (hidden == 1) "Copied text has 1 hidden control character, drawn as $OPEN" + "U+…$CLOSE"
+        else "Copied text has $hidden hidden control characters, drawn as $OPEN" + "U+…$CLOSE"
 
     /**
      * `word-break: break-all` for an already-drawn [display]: a break opportunity between every two

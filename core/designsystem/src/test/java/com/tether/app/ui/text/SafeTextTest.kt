@@ -340,8 +340,8 @@ class SafeTextTest {
     }
 
     @Test fun theNoticeSaysHowMany() {
-        assertEquals("1 hidden control character copied as ⟨U+…⟩", SafeText.copyNotice(1))
-        assertEquals("3 hidden control characters copied as ⟨U+…⟩", SafeText.copyNotice(3))
+        assertEquals("Copied text has 1 hidden control character, drawn as ⟨U+…⟩", SafeText.copyNotice(1))
+        assertEquals("Copied text has 3 hidden control characters, drawn as ⟨U+…⟩", SafeText.copyNotice(3))
     }
 
     // ---- terminal ----------------------------------------------------------------------------
@@ -392,7 +392,7 @@ class SafeTextTest {
             assertEquals("a${vis(0x0D)}${vis(0x0A)}b${vis(0x09)}c", it.text)
             assertEquals(3, it.hidden)
         }
-        // Copy raw gives the source back.
+        // the clipboard gets the source back.
         assertEquals("proj\ncurl\u200B x\t$RLO", SafeText.original(shown))
     }
 }

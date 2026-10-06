@@ -44,7 +44,7 @@ import com.tether.app.ui.search.GlobalSearchHost
 import com.tether.app.ui.text.CopyNoticeHost
 import com.tether.app.ui.text.CopyNotices
 import com.tether.app.ui.text.SafeText
-import com.tether.app.ui.text.copySafely
+import com.tether.app.ui.text.copyExact
 import com.tether.app.ui.text.proseText
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -345,11 +345,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // Off, the header's End session sends at once; on (and until the stored value is read), it asks.
     val confirmBeforeEndFlow = remember(prefs) { prefs.preferencesFor(vm.client.serverUrl).map { it.confirmBeforeEnd }.distinctUntilChanged() }
     val confirmBeforeEnd by confirmBeforeEndFlow.collectAsStateWithLifecycle(initialValue = true)
-    // ta-28i: the working directory and the session id are server text: a copy carries them the SAFE
-    // way (a hidden control as its visible token), and the notice's "Copy raw" is the only raw path.
-    // r2: one-line names (TAB / LF / CR are tokens) copied strictly: EVERY token counts, a zero-width
-    // space or a line break included, so the notice always says when the copy is not plain text.
-    // The session id is copied without being shown, which is why this copy is strict.
+    // ta-28i + ta-coik.64: the working directory, the session id and the resume command are server text:
+    // a copy puts the EXACT string on the clipboard (dashboard.tsx writeText(cwd / id / command)); the
+    // screen draws a hidden control as a visible token and the notice only says how many the copy holds.
+    // One-line names are counted strictly (a zero-width space or a line break included).
     val copyNotices = remember { CopyNotices() }
     var copiedPath by remember { mutableStateOf(false) }
     var copiedTetherId by remember { mutableStateOf(false) }
@@ -490,20 +489,18 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onTogglePinned = { session?.let { vm.client.pin(it.id, !it.pinned) } },
                 onCopyPath = {
                     session?.let {
-                        if (copySafely(context, SafeText.line(it.cwd), copyNotices, raw = it.cwd, label = "Working directory", strict = true)) copiedPath = true
+                        if (copyExact(context, SafeText.line(it.cwd), copyNotices, raw = it.cwd, label = "Working directory", strict = true)) copiedPath = true
                     }
                 },
                 onCopyTetherId = {
                     session?.let {
-                        if (copySafely(context, SafeText.line(it.id), copyNotices, raw = it.id, label = "Tether session id", strict = true)) copiedTetherId = true
+                        if (copyExact(context, SafeText.line(it.id), copyNotices, raw = it.id, label = "Tether session id", strict = true)) copiedTetherId = true
                     }
                 },
-                // dashboard.tsx copyResumeCommand: the server-built command, nothing when there is none. A
-                // command is pasted into a shell, so it is copied the confirm-before-run way (SafeText.exact:
-                // a lookalike space shows as a token) and "Copy raw" stays the way to the exact bytes.
+                // dashboard.tsx copyResumeCommand: the server-built command, exactly, nothing when there is none.
                 onCopyResumeCommand = {
                     session?.resumeCommand?.let { cmd ->
-                        if (copySafely(context, SafeText.exact(cmd), copyNotices, raw = cmd, label = "Resume command", strict = true)) copiedResumeCommand = true
+                        if (copyExact(context, SafeText.exact(cmd), copyNotices, raw = cmd, label = "Resume command", strict = true)) copiedResumeCommand = true
                     }
                 },
             )

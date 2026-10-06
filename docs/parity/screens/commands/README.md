@@ -75,8 +75,8 @@ Montages (`web | android | diff`), 6 skins at phone size, built by
    token (a CRLF stays a line break). **Android divergence:** the web draws all of it raw in a
    `<pre>`. The panel draws a bounded tail: only a raw tail of twice its 16,000-character bound is
    encoded, and the drawn tail is cut on a unit boundary, never inside a token. The row is
-   selectable, and a copy goes through the transcript's `SafeCopyClipboard`: tokens, never a hidden
-   control; "Copy raw" is the notice's key. Command names, argument hints, descriptions, agent and
+   selectable, and a copy goes through the transcript's `SafeCopyClipboard`, which puts the exact
+   output on the clipboard (the drawn tokens decoded, as the web copies its raw `<pre>`; ta-coik.64). Command names, argument hints, descriptions, agent and
    model names and signals go through `LabelText`, and the palette offers only names that are already
    clean. The output is plain text in a framed mono panel: it cannot draw a control, a link or an
    approval.

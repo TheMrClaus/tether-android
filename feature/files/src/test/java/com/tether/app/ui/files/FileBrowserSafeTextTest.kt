@@ -27,7 +27,6 @@ import com.tether.app.client.FilesResult
 import com.tether.app.client.WorkspaceFileEntry
 import com.tether.app.ui.files.FilesFixtures.ROOT
 import com.tether.app.ui.text.COPY_NOTICE_TAG
-import com.tether.app.ui.text.COPY_RAW_TAG
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.TetherSkin
@@ -47,7 +46,7 @@ import org.robolectric.annotation.Config
 /**
  * ta-28i: the file browser draws server text by the shared rules. A file body is CODE (the Trojan
  * Source case: every bidi / invisible control a visible token, every line LTR, in an LTR and an RTL
- * UI), a copy from it carries the visible form with a notice and "Copy raw"; file names and paths
+ * UI), a copy from it is the exact source (ta-coik.64) with an informational notice; file names and paths
  * are code everywhere they show (rows, preview head, actions, delete and rename titles, TalkBack
  * words); a server's error is prose; the session title is a label. Real Hebrew and Arabic stay
  * letters, in their order.
@@ -210,7 +209,7 @@ class FileBrowserSafeTextTest {
         }
     }
 
-    @Test fun aCopyFromThePreviewCarriesTheVisibleFormAndOnlyCopyRawCarriesTheSource() {
+    @Test fun aCopyFromThePreviewIsTheExactSourceWhileTheScreenKeepsItsTokens() {
         val menu = MenuSpy()
         val browser = state()
         rule.setContent {
@@ -229,18 +228,13 @@ class FileBrowserSafeTextTest {
         rule.waitForIdle()
         menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey)
         rule.waitForIdle()
-        val copied = checkNotNull(clip())
-        assertTrue("the visible form: ${hex(copied)}", copied.contains("\"user${vis(0x202E)} ${vis(0x2066)}// Check if admin${vis(0x2069)} ${vis(0x2066)}\")"))
-        for (c in listOf(RLO, LRI, PDI, "\u2060")) assertFalse("raw U+%04X copied".format(c[0].code), copied.contains(c))
+        // ta-coik.64: one copy, the file byte for byte (hidden controls, line breaks, CRLFs, the lone CR),
+        // with no visible-token form and no second step.
+        assertEquals("the exact source: ${hex(clip().orEmpty())}", TROJAN, clip())
         rule.onNodeWithTag(COPY_NOTICE_TAG).assertIsDisplayed()
-        assertTrue(spoken().any { Regex("^\\d+ hidden control characters copied as \u27E8U\\+\u2026\u27E9$").matches(it) })
-        // r2: the lines keep their breaks (a CRLF stays a CRLF) in the safe copy too.
-        assertTrue("line breaks: ${hex(copied)}", copied.contains("{\r\n    grant();\u200B\r\n// "))
-        rule.onNodeWithTag(COPY_RAW_TAG).performClick()
-        rule.waitForIdle()
-        // r2: "Copy raw" of the whole preview is the file, byte for byte (line breaks, CRLFs, the lone CR).
-        assertEquals("Copy raw: ${hex(clip()!!)}", TROJAN, clip())
-        rule.onNodeWithTag(COPY_NOTICE_TAG).assertDoesNotExist()
+        assertTrue(spoken().any { Regex("^Copied text has \\d+ hidden control characters, drawn as \u27E8U\\+\u2026\u27E9$").matches(it) })
+        // The screen still draws the tokens.
+        assertTrue(spoken().toString(), spoken().any { it.contains(tok(0x202E)) })
     }
 
     /** r2 (security L2): a selection over two lines copies them WITH their line break and tabs. */
