@@ -168,14 +168,18 @@ internal fun VideoPreview(player: VideoPlayer, name: String) {
 
 /**
  * The controller draws in its own window, so the box's clip never reaches it and its dark backing would
- * square off the box's bottom corners. The controller view clips itself instead: only its two bottom
- * corners are rounded, by the box's radius (the web rounds all four with controls, globals.css 2878-2879).
- * The outline reaches [radiusPx] above the view so the top edge stays straight.
+ * square off the box's corners. The controller view clips itself to the BOX's rounded rectangle instead,
+ * expressed in its own coordinates: it sits flush with the box's bottom, so the box's top edge is
+ * `boxHeight - view.height` above the view's. A bar taller than most of a short (landscape phone) box thus
+ * has its top corners cut by the box's top curves too, and a bar much shorter than the box only its bottom
+ * ones (the web rounds all four corners with controls, globals.css 2878-2879). [boxHeight] is read at every
+ * outline pass; call `invalidateOutline()` when it changes.
  */
-internal fun roundBottomCorners(view: View, radiusPx: Float) {
+internal fun roundBoxCorners(view: View, boxHeight: () -> Int, radiusPx: Float) {
     view.outlineProvider = object : ViewOutlineProvider() {
         override fun getOutline(view: View, outline: Outline) {
-            outline.setRoundRect(0, -radiusPx.roundToInt(), view.width, view.height, radiusPx)
+            val above = (boxHeight() - view.height).coerceAtLeast(0)
+            outline.setRoundRect(0, -above, view.width, view.height, radiusPx)
         }
     }
     view.clipToOutline = true
@@ -243,6 +247,10 @@ internal class VideoHost(
     init {
         frame.addView(texture, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER))
         frame.viewTreeObserver.addOnGlobalLayoutListener(relayout)
+        // The box's size is part of the controller's clip: a rotation or resize recomputes it.
+        frame.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) controller.invalidateOutline()
+        }
         texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
                 val mine = Surface(texture)
@@ -260,7 +268,7 @@ internal class VideoHost(
             override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
         }
         controller.setMediaPlayer(player.control)
-        roundBottomCorners(controller, radiusPx)
+        roundBoxCorners(controller, { frame.height }, radiusPx)
         controller.setAnchorView(frame)
         controller.isEnabled = false
         frame.isClickable = true
@@ -299,6 +307,7 @@ internal class VideoHost(
     private fun showFor(playing: Boolean) {
         if (!frame.isAttachedToWindow) return
         if (playing) controller.show() else controller.show(0)
+        controller.invalidateOutline()
         shownAt = anchorBounds()
     }
 
