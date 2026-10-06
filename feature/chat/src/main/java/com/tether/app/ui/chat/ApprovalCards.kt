@@ -102,14 +102,12 @@ private fun pMargin(r: Float) = (r * TetherTypography.SP_PER_REM).dp
 /** Why no card of this session can be answered right now; the copy is the visible reason. */
 enum class ConsentLock(val copy: String) {
     /**
-     * No connection. ta-coik.24: the chat screen no longer applies this (nor [CatchingUp]) to the
-     * cards or the session controls ([commandKeyLock]), as the web draws them live whatever the link;
-     * it remains the fail-closed default of a screen with no session ([ConsentActions.Unavailable]).
+     * No connection. ta-coik.24: the chat screen no longer applies this to the cards or the session
+     * controls ([commandKeyLock]), as the web draws them live whatever the link; it remains the
+     * fail-closed default of a screen with no session ([ConsentActions.Unavailable]). ta-coik.57: there
+     * is no "catching up" lock at all: the web locks nothing while a session is catching up.
      */
     Offline("Connect to answer. This is a saved copy."),
-
-    /** Connected, but the session's snapshot has not landed on this connection yet (see [Offline]). */
-    CatchingUp("Catching up… You can answer once the latest state is in."),
 
     /** `session.readOnly`: an imported replay Tether does not drive (the session controls and Stop keys; ta-coik.26: never the cards). */
     ReadOnly("Read-only: Tether isn’t driving this conversation, so it can’t answer here."),
@@ -121,13 +119,12 @@ enum class ConsentLock(val copy: String) {
 /**
  * The lock for [session] (pure; tested; the session controls and Stop keys use it, ta-coik.26: the
  * approval and question cards no longer do): read-only and handed-off first (they hold whatever the
- * link does), then no connection, then a projection not yet confirmed live on this connection.
+ * link does), then no connection. ta-coik.57: whether the projection is live yet locks nothing.
  */
-fun consentLock(connected: Boolean, live: Boolean, session: AgentSession?): ConsentLock? = when {
+fun consentLock(connected: Boolean, session: AgentSession?): ConsentLock? = when {
     session?.readOnly == true -> ConsentLock.ReadOnly
     !session?.handedOffTo.isNullOrEmpty() -> ConsentLock.HandedOff
     !connected -> ConsentLock.Offline
-    !live -> ConsentLock.CatchingUp
     else -> null
 }
 

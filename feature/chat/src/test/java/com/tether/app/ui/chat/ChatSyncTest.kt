@@ -102,7 +102,7 @@ class ChatSyncTest {
         client.sync.value = saved()
         host(client)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("approval-allow"))
-        rule.onNodeWithText(ConsentLock.CatchingUp.copy).assertDoesNotExist()
+        rule.onNodeWithText("Catching up", substring = true).assertDoesNotExist()
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:s1:req-w:allow"), client.consentCalls)

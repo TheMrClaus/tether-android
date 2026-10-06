@@ -100,13 +100,29 @@ class ApprovalModelTest {
 
     @Test fun theLockNamesWhyInOrder() {
         val s = AgentSession(id = "s1", provider = "claude", name = "n", cwd = "/w", status = "active", startedAt = 1, updatedAt = 1)
-        assertNull(consentLock(connected = true, live = true, session = s))
-        assertEquals(ConsentLock.CatchingUp, consentLock(connected = true, live = false, session = s))
-        assertEquals(ConsentLock.Offline, consentLock(connected = false, live = true, session = s))
-        assertEquals(ConsentLock.Offline, consentLock(connected = false, live = false, session = s))
-        assertEquals(ConsentLock.ReadOnly, consentLock(connected = true, live = true, session = s.copy(readOnly = true)))
-        assertEquals(ConsentLock.HandedOff, consentLock(connected = true, live = true, session = s.copy(handedOffTo = "s2")))
-        assertEquals(ConsentLock.ReadOnly, consentLock(connected = false, live = false, session = s.copy(readOnly = true, handedOffTo = "s2")))
+        assertNull(consentLock(connected = true, session = s))
+        assertEquals(ConsentLock.Offline, consentLock(connected = false, session = s))
+        assertEquals(ConsentLock.Offline, consentLock(connected = false, session = s))
+        assertEquals(ConsentLock.ReadOnly, consentLock(connected = true, session = s.copy(readOnly = true)))
+        assertEquals(ConsentLock.HandedOff, consentLock(connected = true, session = s.copy(handedOffTo = "s2")))
+        assertEquals(ConsentLock.ReadOnly, consentLock(connected = false, session = s.copy(readOnly = true, handedOffTo = "s2")))
+    }
+
+    /**
+     * ta-coik.57: both ChatScreen paths (ChatScreen.kt controlLock, stopLock) hand the lock to a key only
+     * through [commandKeyLock] (proved before the dead "Catching up" lock was deleted: it never reached a key). Over every link / read-only / handed-off combination, what
+     * reaches a key is nothing, Read-only or Handed-off: never a "Catching up" (or offline) lock, as on
+     * the web (chat-view.tsx 29537e0 draws these keys live whatever the link).
+     */
+    @Test fun noCatchingUpOrOfflineLockEverReachesAKey() {
+        val s = AgentSession(id = "s1", provider = "claude", name = "n", cwd = "/w", status = "active", startedAt = 1, updatedAt = 1)
+        for (connected in listOf(true, false)) for (readOnly in listOf(true, false)) for (handedOff in listOf(null, "s2")) {
+            val session = s.copy(readOnly = readOnly, handedOffTo = handedOff)
+            val reaching = commandKeyLock(consentLock(connected, session))
+            assertTrue("connected=$connected readOnly=$readOnly handedOff=$handedOff -> $reaching", reaching == null || reaching.name == "ReadOnly" || reaching.name == "HandedOff")
+            if (!readOnly && handedOff == null) assertNull("a healthy session's keys are never locked", reaching)
+        }
+        assertNull(commandKeyLock(null))
     }
 
     @Test fun aChoiceSendsOnlyWhatItsGrantAllows() {

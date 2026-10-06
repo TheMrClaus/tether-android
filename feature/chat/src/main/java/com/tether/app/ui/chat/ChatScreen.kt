@@ -141,7 +141,7 @@ fun ChatScreen(
     // ta-coik.22: a copy that is not live (offline, catching up) leaves the command keys live, as the
     // web does ([commandKeyLock]); a tap asks the client, which refuses off a live link and says why.
     val stopLock = stopLockCopy(
-        commandKeyLock(consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, liveNow, session)),
+        commandKeyLock(consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, session)),
     )
     // L3: the stop is bound to the server origin this row was drawn for. ta-coik.22: no "Stopping…"
     // latch (the web's Stop key has none), and no lock at all: the web draws the running commands'
@@ -193,7 +193,7 @@ fun ChatScreen(
     // on the web (chat-view.tsx 90fbb9f :2503, :2970, :3018, :4491, :4495 call `send` whatever the
     // link, use-tether.ts :337-344); the client sends on an open socket for the server they were drawn
     // for and says the link is reconnecting otherwise. Read-only and handed off keep their lock.
-    val controlLock = commandKeyLock(consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, liveNow, session))
+    val controlLock = commandKeyLock(consentLock(connection == com.tether.app.client.ConnectionState.Connected && consentOrigin != null, session))
     val controlActions = remember(session?.id, controlLock, consentOrigin, vm, codexMap[session?.id], opencodeMap[session?.id]) {
         val s = session
         // Bound to the server this row was drawn for: a tap on another server's row is refused.

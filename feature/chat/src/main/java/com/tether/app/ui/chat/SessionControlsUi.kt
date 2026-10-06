@@ -115,7 +115,6 @@ class SessionControlActions(
 internal fun controlLockCopy(lock: ConsentLock?): String? = when (lock) {
     null -> null
     ConsentLock.Offline -> "Connect to change session settings."
-    ConsentLock.CatchingUp -> "Catching up… Settings can change once this session is live."
     ConsentLock.ReadOnly -> "Read-only: Tether isn’t driving this conversation."
     ConsentLock.HandedOff -> "This session was handed off."
 }

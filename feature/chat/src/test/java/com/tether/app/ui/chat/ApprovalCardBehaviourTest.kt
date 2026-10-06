@@ -1501,7 +1501,7 @@ class ApprovalScreenBehaviourTest {
             client.link.value = ConnectionState.Connected
         }
         rule.waitForIdle()
-        rule.onNodeWithText(ConsentLock.CatchingUp.copy).assertDoesNotExist()
+        rule.onNodeWithText("Catching up", substring = true).assertDoesNotExist()
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(List(2) { "approval:s1:req-w:allow" }, client.consentCalls)

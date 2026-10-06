@@ -214,13 +214,12 @@ private fun TodoItemRow(item: ProgressItem) {
 // --- Background commands ------------------------------------------------------------------------
 
 /**
- * Whether a Stop key may send, and why not in words (T6.3's lock rules: a saved copy, catching
- * up, read-only, handed off). Null = it may.
+ * Whether a Stop key may send, and why not in words (T6.3's lock rules: a saved copy,
+ * read-only, handed off). Null = it may.
  */
 internal fun stopLockCopy(lock: ConsentLock?): String? = when (lock) {
     null -> null
     ConsentLock.Offline -> "Connect to stop it. This is a saved copy."
-    ConsentLock.CatchingUp -> "Catching up… Stop is available once this session is live."
     ConsentLock.ReadOnly -> "Read-only: Tether isn't driving this conversation."
     ConsentLock.HandedOff -> "This session was handed off."
 }
@@ -239,7 +238,7 @@ internal fun stopLockCopy(lock: ConsentLock?): String? = when (lock) {
  * `submitted`, which a send refused by a closed socket never sets, use-tether.ts :337-344).
  */
 internal fun commandKeyLock(lock: ConsentLock?): ConsentLock? = when (lock) {
-    ConsentLock.Offline, ConsentLock.CatchingUp -> null
+    ConsentLock.Offline -> null
     else -> lock
 }
 
