@@ -158,14 +158,10 @@ fun PhoneShell(
     // ta-coik.30: opening the drawer, by whichever path (the top bar's key, the chat's "Sessions"
     // key, any other openDrawer), takes focus and the keyboard away from the composer, as the web's
     // sidebar blurs the input. The draft stays; closing the drawer does not bring the keyboard back.
-    val focusManager = LocalFocusManager.current
-    val keyboard = LocalSoftwareKeyboardController.current
-    LaunchedEffect(state.drawerOpen) {
-        if (state.drawerOpen) {
-            focusManager.clearFocus(force = true)
-            keyboard?.hide()
-        }
-    }
+    PutKeyboardAwayWhile(state.drawerOpen)
+    // ta-coik.31: so does opening the top bar's right-hand tools menu (tapping the key moves the
+    // browser's focus off the textarea, which closes its keyboard).
+    PutKeyboardAwayWhile(state.menuOpen)
     val windowWidth = LocalWindowInfo.current.containerSize.width.let { with(LocalDensity.current) { it.toDp().value.toInt() } }
     val topbarState = TopbarState(
         current = current,
@@ -256,5 +252,22 @@ fun PhoneShell(
         }
 
         if (state.menuOpen) TopbarMenu(actions = barActions, state = topbarState, onDismiss = state::closeMenu)
+    }
+}
+
+/**
+ * ta-coik.30 / ta-coik.31: while [open] turns true, focus leaves whatever holds it (the composer) and
+ * the soft keyboard is hidden, as a browser's does when a top bar key takes the tap. The draft stays,
+ * and closing the surface does not bring the keyboard back (the effect acts only when [open]).
+ */
+@Composable
+internal fun PutKeyboardAwayWhile(open: Boolean) {
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(open) {
+        if (open) {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+        }
     }
 }

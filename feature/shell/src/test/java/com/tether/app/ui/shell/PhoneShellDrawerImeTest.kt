@@ -124,6 +124,39 @@ class PhoneShellDrawerImeTest {
         assertClosingLeavesTheKeyboardDown(state)
     }
 
+    /** ta-coik.31: the top bar's right-hand tools menu takes the keyboard away too (the browser's focus move). */
+    @Test fun theToolsMenuKeyPutsTheKeyboardAway() {
+        val state = PhoneShellState()
+        show(state)
+        typeADraft()
+        rule.onNodeWithContentDescription("Menu: navigation and tools", substring = true).performClick()
+        rule.waitForIdle()
+        assertTrue(state.menuOpen)
+        composer().assertIsNotFocused()
+        assertTrue("the IME hide was not requested: ${keyboard.calls}", "hide" in keyboard.calls)
+        assertEquals("half a thought", composerText())
+        // Closing the menu keeps the keyboard down and the draft in place.
+        keyboard.calls.clear()
+        rule.runOnUiThread { state.closeMenu() }
+        rule.waitForIdle()
+        assertFalse(state.menuOpen)
+        composer().assertIsNotFocused()
+        assertFalse("closing the menu raised the keyboard: ${keyboard.calls}", "show" in keyboard.calls)
+        assertEquals("half a thought", composerText())
+    }
+
+    @Test fun anyOtherOpenMenuPutsTheKeyboardAway() {
+        val state = PhoneShellState()
+        show(state)
+        typeADraft()
+        rule.runOnUiThread { state.toggleMenu() }
+        rule.waitForIdle()
+        assertTrue(state.menuOpen)
+        composer().assertIsNotFocused()
+        assertTrue("the IME hide was not requested: ${keyboard.calls}", "hide" in keyboard.calls)
+        assertEquals("half a thought", composerText())
+    }
+
     private companion object {
         const val ComposerTag = "test-composer"
     }

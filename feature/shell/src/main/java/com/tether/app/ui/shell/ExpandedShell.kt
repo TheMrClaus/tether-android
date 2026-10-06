@@ -100,6 +100,8 @@ fun ExpandedShell(
 ) {
     val t = LocalTetherTokens.current
     LaunchedEffect(Unit) { state.closeDrawer() }
+    // ta-coik.31: opening the tools menu takes focus and the keyboard away from the composer (the web's focus move).
+    PutKeyboardAwayWhile(state.menuOpen)
 
     BoxWithConstraints(modifier.fillMaxSize().testTag(ShellTags.Shell)) {
         val viewport = maxWidth.value.roundToInt()
