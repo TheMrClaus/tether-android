@@ -156,7 +156,22 @@ class SessionControlsTransmissionTest {
     fun aControlDrawnForAnotherServerIsRefused() {
         val (client, _) = connected()
         assertEquals(ControlResult.NotLive, client.sessionControl("s1", SessionControl.Mode("plan"), "https://other.example"))
-        assertEquals(ControlResult.NotLive, client.sessionControl("s1", SessionControl.Mode("plan"), null))
+        assertTrue(controlFrames().isEmpty())
+    }
+
+    /**
+     * ta-coik.29: a key drawn offline (consentOrigin null: no server recorded) and tapped in the first frame
+     * after the handshake sends, as the web's `send` does on any open socket; it is not "another server".
+     */
+    @Test
+    fun aKeyDrawnOfflineWithNoServerRecordedSendsInTheFrameAfterTheHandshake() {
+        val (client, _) = connected()
+        assertEquals(ControlResult.Sent, client.sessionControl("s1", SessionControl.Mode("plan"), null))
+        val frames = controlFrames()
+        assertEquals(1, frames.size)
+        assertEquals("set-mode", frames[0].type())
+        // A key drawn for a server that is not this one is still refused.
+        assertEquals(ControlResult.NotLive, client.sessionControl("s1", SessionControl.Mode("plan"), "https://other.example"))
         assertTrue(controlFrames().isEmpty())
     }
 

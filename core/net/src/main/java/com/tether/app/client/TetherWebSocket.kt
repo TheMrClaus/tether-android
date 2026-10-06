@@ -222,6 +222,11 @@ internal class TetherWebSocket private constructor(
         return response.socket ?: throw ProtocolException("The upgrade response carries no socket")
     }
 
+    // ta-coik.28 (decided: no cap on an INCOMING message). The browser's WebSocket has none (hooks/use-tether.ts
+    // :720 `new WebSocket`, :755 the "message" listener takes whatever arrives), and the server's `maxPayload`
+    // (server.mjs 29537e0 :10090, LIMITS.WS_FRAME_BYTES) bounds frames TO the server, not the ones it sends.
+    // Nothing proves a server send cannot exceed any bound chosen here, and a cap would make the app take
+    // less than the browser does, so none is set.
     private val readerCallback = object : WebSocketFrames.Reader.Callback {
         override fun onText(text: String) = listener.onMessage(this@TetherWebSocket, text)
 

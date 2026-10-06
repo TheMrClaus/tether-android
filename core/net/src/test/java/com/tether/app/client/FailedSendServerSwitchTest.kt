@@ -50,4 +50,19 @@ class FailedSendServerSwitchTest {
         assertTrue("the sender finished", !sender.isAlive)
         assertTrue("A's failed bubble was published after the switch to B", f.client.failedSends.value.isEmpty())
     }
+
+    /** ta-coik.34: the same race with a sign-out (stop()) landing in the window instead of a switch. */
+    @Test
+    fun aBubbleComputedBeforeASignOutIsNeverPublishedAfterIt() {
+        fillOnA()
+        val hold = f.Hold(RacePoint.FailedComputed)
+        val sender = Thread { f.client.send("s1", "one too many") }.apply { start() }
+        hold.awaitReached()
+        f.client.stop()
+        assertTrue("the sign-out cleared what was there", f.client.failedSends.value.isEmpty())
+        hold.release()
+        sender.join(20_000)
+        assertTrue("the sender finished", !sender.isAlive)
+        assertTrue("A's failed bubble was published after the sign-out", f.client.failedSends.value.isEmpty())
+    }
 }

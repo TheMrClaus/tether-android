@@ -35,6 +35,11 @@ class LocalBindTimeoutTest {
                 paths += request.path.orEmpty()
                 return if (request.path == "/api/auth/session") {
                     MockResponse().setHeader("Content-Type", "application/json").setBody("""{"authenticated":true}""")
+                } else if (request.path == "/healthz") {
+                    MockResponse().setHeader("Content-Type", "application/json").setBody(HEALTH_143)
+                } else if (request.path == "/api/auth/login") {
+                    MockResponse().setHeader("Content-Type", "application/json").setBody("""{"ok":true}""")
+                        .addHeader("set-cookie", "tether_session=fresh; Path=/; HttpOnly")
                 } else {
                     MockResponse().setResponseCode(404).setBody("""{"error":"not found"}""")
                 }
@@ -98,6 +103,30 @@ class LocalBindTimeoutTest {
         assertEquals(listOf("/api/auth/session"), paths.toList())
         assertNull("no signed-out reason: no server said anything", client.signedOutReason.value)
         hung.complete(Unit)
+    }
+
+    /**
+     * ta-huo3: the hung start() is let go of the gate when the wait times out, so the connects after it
+     * (a fresh sign-in's) do not each wait out the timeout behind it.
+     */
+    @Test fun aFreshSignInAfterTheTimeoutDoesNotWaitOutTheTimeoutAgain() {
+        val hung = CompletableDeferred<Unit>()
+        val timeoutMs = 2_000L
+        // Only start()'s own read hangs; the sign-in's bind reads the store too and answers.
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val client = client(PendingReadSeam { if (reads.getAndIncrement() == 0) hung.await() }, timeoutMs = timeoutMs)
+        try {
+            client.start()
+            awaitTrue("the login screen shows") { client.connection.value is ConnectionState.AuthRequired }
+            // The bind is STILL hung. A fresh sign-in connects on its own pair.
+            val before = System.nanoTime()
+            assertEquals(LoginResult.Success, runBlocking { client.login(base, "pw", "operator") })
+            awaitTrue("the sign-in's connect reached the socket upgrade") { paths.any { it.startsWith("/ws") } }
+            val tookMs = (System.nanoTime() - before) / 1_000_000
+            assertTrue("it did not wait the timeout again (took ${tookMs} ms of a ${timeoutMs} ms gate)", tookMs < timeoutMs - 500)
+        } finally {
+            hung.complete(Unit)
+        }
     }
 
     @Test fun aBindThatEndsInTimeConnectsAsBefore() {

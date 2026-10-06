@@ -463,6 +463,25 @@ class RealTetherClient(
      */
     private val localBindsInFlight = MutableStateFlow(0)
 
+    /**
+     * ta-huo3: who holds [localBindsInFlight], one token per start() (guarded by [lock]). The count is
+     * always this set's size. A holder that never ends is let go by the gate's timeout
+     * ([awaitLocalBind]), so a later connect (a fresh sign-in's) does not wait out the timeout again;
+     * the hung start()'s own release afterwards is then a no-op, never a second decrement.
+     */
+    private val localBindHolders = HashSet<Any>()
+
+    /** Caller holds [lock]. */
+    private fun acquireLocalBindLocked(): Any = Any().also {
+        localBindHolders.add(it)
+        localBindsInFlight.value = localBindHolders.size
+    }
+
+    /** Idempotent. Caller holds [lock]. */
+    private fun releaseLocalBindLocked(holder: Any) {
+        if (localBindHolders.remove(holder)) localBindsInFlight.value = localBindHolders.size
+    }
+
     // ta-rv0o 1l: the credential start() last adopted FROM THE STORE (not one a sign-in in this process
     // brought). If the local-bind gate times out while it is still the one in force, it is un-adopted
     // again: the end state of a settings read that failed. Guarded by [lock].
@@ -2178,6 +2197,7 @@ class RealTetherClient(
                 if (connect) connectNow()
                 return@launch
             }
+            var bindHolder: Any? = null
             val switch = synchronized(lock) {
                 val base = session.baseUrl?.toHttpUrlOrNull()
                 if (signOutEpoch != startEpoch || signOutClearsInFlight.value > 0 ||
@@ -2200,7 +2220,7 @@ class RealTetherClient(
                 // ta-coik.36: held in the SAME critical section that adopts the pair, so no connect
                 // (this one's, or a lifecycle signal's) can open a socket between the adoption and
                 // the local bind below without seeing it.
-                localBindsInFlight.value++
+                bindHolder = acquireLocalBindLocked()
                 // The first start of a process binds the store (and whatever was
                 // filed before it) to the configured server; a server that
                 // changed under a bound store is an origin switch.
@@ -2239,7 +2259,7 @@ class RealTetherClient(
                 bindPendingToCurrentServer()
                 trace.mark("saved-copy-bound")
             } finally {
-                synchronized(lock) { localBindsInFlight.value-- }
+                synchronized(lock) { bindHolder?.let(::releaseLocalBindLocked) }
             }
             if (baseUrlValue == null || credentialValue == null) {
                 enterAuthRequired()
@@ -2256,7 +2276,17 @@ class RealTetherClient(
      */
     private suspend fun awaitLocalBind(): Boolean {
         if (localBindsInFlight.value == 0) return true
-        return withTimeoutOrNull(localBindTimeoutMs) { localBindsInFlight.first { it == 0 }; true } ?: false
+        // The holders this wait is for: only these are let go on a timeout (a start() that began later is
+        // not hung yet).
+        val waitedFor = synchronized(lock) { localBindHolders.toList() }
+        if (waitedFor.isEmpty()) return true
+        val ended = withTimeoutOrNull(localBindTimeoutMs) { localBindsInFlight.first { it == 0 }; true } ?: false
+        if (!ended) {
+            // ta-huo3: whoever still holds the gate after the timeout is hung. Its hold ends here, or every
+            // later connect (a fresh sign-in's) would wait out the timeout again behind it.
+            synchronized(lock) { waitedFor.forEach(::releaseLocalBindLocked) }
+        }
+        return ended
     }
 
     override fun stop() {
@@ -5179,7 +5209,8 @@ class RealTetherClient(
     /**
      * T7.2: the one path a session control takes to the wire. Under the lock, in order: a live,
      * handshaken socket of a running (not halted) client; the control drawn for THIS server
-     * ([expectedOrigin] = the socket's origin); ta-coik.23: not the session's liveness (the web's `send`
+     * ([expectedOrigin] = the socket's origin; null = drawn with no live socket, ta-coik.29: never "another
+     * server"); ta-coik.23: not the session's liveness (the web's `send`
      * puts `rate-limit-resume` and every control on any OPEN socket, use-tether.ts 90fbb9f :337-344,
      * :1661-1665; a refusal comes back as a shown `error`); listed, and neither
      * read-only nor handed off (fail closed) — the exception (T6.6 r2, ta-coik.23 r2): every
@@ -5195,7 +5226,10 @@ class RealTetherClient(
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized ControlResult.NotConnected
-            if (expectedOrigin != origin) return@synchronized ControlResult.NotLive
+            // ta-coik.29: a key drawn while no socket was live (consentOrigin null: offline, nothing recorded)
+            // belongs to no other server, so a tap on it in the first frame after the handshake sends, as the
+            // web's `send` does on any open socket. Only a key drawn for a DIFFERENT server is refused.
+            if (expectedOrigin != null && expectedOrigin != origin) return@synchronized ControlResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized ControlResult.Locked
             if (session.readOnly && !SessionControlsGuard.allowedWhileReadOnly(control)) return@synchronized ControlResult.Locked
             if (!session.handedOffTo.isNullOrEmpty() && !SessionControlsGuard.allowedWhileHandedOff(control)) return@synchronized ControlResult.Locked

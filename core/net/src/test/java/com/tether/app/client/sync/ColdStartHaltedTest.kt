@@ -2,6 +2,7 @@ package com.tether.app.client.sync
 
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.ConnectionTimings
+import com.tether.app.client.isReconnectDelay
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
@@ -79,6 +80,36 @@ class ColdStartHaltedTest {
         h.expectFrame("hello")
         h.await(h.client.connection) { it == ConnectionState.Connected }
         assertEquals("one probe, one upgrade: nothing connected twice", 2, h.server.requestCount)
+    }
+
+    /**
+     * ta-huo3, the test that fails on the code before 1k (an early connect that returned halted counted as
+     * "connected early"): the halt lifts during the bind and that connect fails (the server drops it), so the
+     * attempt ends with only a backoff wait pending. start()'s own retry after the bind is what connects,
+     * at once; before 1k nothing did until the backoff fired.
+     */
+    @Test
+    fun aHaltThatLiftsDuringTheBindWhoseConnectFailedIsRetriedByStartAfterTheBind() {
+        val release = holdBind()
+        h.server.enqueue(okhttp3.mockwebserver.MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AT_START))
+        h.enqueueConnect()
+        val p = bootSuspended()
+        try {
+            assertTrue("the bind is held", holdEntered!!.await(20, TimeUnit.SECONDS))
+            Thread.sleep(400)
+            assertEquals("suspended: the early connect sent nothing", 0, h.server.requestCount)
+            h.client.setAppForeground(true)
+            // The lifted halt's own connect failed: a backoff wait is pending (never fired here).
+            p.scheduler.await { isReconnectDelay(it) }
+            assertNull("no socket yet: the bind is not done", h.sockets.poll(0, TimeUnit.MILLISECONDS))
+        } finally {
+            release.complete(Unit)
+        }
+        val ws = h.sockets.poll(20, TimeUnit.SECONDS)
+        assertTrue("start() connected again after the bind, without the backoff firing", ws != null)
+        ws!!.send(com.tether.app.client.readyFrame())
+        h.expectFrame("hello")
+        h.await(h.client.connection) { it == ConnectionState.Connected }
     }
 
     @Test
