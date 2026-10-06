@@ -146,6 +146,40 @@ class MainShellPendingTargetTest {
         rule.waitUntil(5_000) { vm.currentWorkspace.value == "/elsewhere" }
     }
 
+    /**
+     * ta-coik.54 (WebSelection's pinned workspaces read): the block that owns a listed target is found among
+     * the signed-in server's OWN pins (the web's preferences are per origin), never another server's or the
+     * device-wide ones. "/proj" is pinned on server A only: its "/proj/sub" chat belongs to "/proj" there,
+     * and on server B (no pin of its own) to itself.
+     */
+    private fun pinsOf(a: List<String>, b: List<String>) = runPrefsWrite {
+        prefs.updatePreferences { it.copy(preferencesByOrigin = emptyMap(), pinnedProjects = emptyList()) }
+        prefs.updatePreferencesFor("https://a.example:443") { it.copy(pinnedProjects = a) }
+        prefs.updatePreferencesFor("https://b.example:443") { it.copy(pinnedProjects = b) }
+    }
+
+    private fun currentAfterOpeningSubTargetOn(server: String): String? {
+        val client = ShellConsentClient().also { it.server.value = server }
+        val vm = aOnScreen(client)
+        rule.runOnIdle { vm.openSession("x") }
+        rule.waitForIdle()
+        list(client, chat("a"), chat("b"), chat("x", cwd = "/proj/sub"))
+        rule.waitUntil(5_000) { vm.currentWorkspace.value?.startsWith("/proj") == true }
+        return vm.currentWorkspace.value
+    }
+
+    @Test
+    fun aListedTargetsOwningBlockIsFoundAmongThisServersOwnPins() {
+        pinsOf(a = listOf("/proj"), b = listOf("/elsewhere"))
+        assertEquals("/proj", currentAfterOpeningSubTargetOn("https://a.example"))
+    }
+
+    @Test
+    fun anotherServersPinsDoNotOwnTheTarget() {
+        pinsOf(a = listOf("/proj"), b = listOf("/elsewhere"))
+        assertEquals("/proj/sub", currentAfterOpeningSubTargetOn("https://b.example"))
+    }
+
     @Test
     fun theTargetBeingListedMovesNoView() {
         val client = ShellConsentClient()

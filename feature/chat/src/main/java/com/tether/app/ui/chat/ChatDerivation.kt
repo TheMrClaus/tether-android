@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.tree.JsObj
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,25 +32,42 @@ internal val LocalChatDerivationDispatcher = staticCompositionLocalOf<CoroutineD
  */
 internal val LocalChatDerivationObserver = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
+/** ta-nx60: where a failed rebuild is reported (the last rows stay on screen). Tests inject their own. */
+internal val LocalChatDerivationFailureLog = staticCompositionLocalOf<(Throwable) -> Unit> {
+    { t -> runCatching { android.util.Log.w("ChatDerivation", "a rebuild failed; the last rows stay", t) } }
+}
+
 private class DerivedHolder<T, C>(first: T, var builtFor: Any?) {
     var value by mutableStateOf(first)
     var wanted: Any? = builtFor
     var capture: () -> C = { error("unset") }
     var compute: (C) -> T = { error("unset") }
     var onPublish: (T) -> Unit = {}
+    var onFailure: (Throwable) -> Unit = {}
     var dispatcher: CoroutineDispatcher = Dispatchers.Default
     var job: Job? = null
 
-    /** Builds [wanted], then whatever was wanted meanwhile, one build at a time, until the newest is shown. */
+    /**
+     * Builds [wanted], then whatever was wanted meanwhile, one build at a time, until the newest is shown.
+     * ta-nx60: a build that throws (anything but a cancellation) is logged and the last value stays on
+     * screen; that input counts as handled, so it is not retried in a loop, and the next change builds again.
+     */
     suspend fun pump() {
         while (builtFor !== wanted) {
             val target = wanted
-            val captured = capture() // main thread: reads Compose state, takes immutable snapshots
-            val build = compute
-            val result = withContext(dispatcher) { build(captured) }
-            builtFor = target
-            value = result
-            onPublish(result) // main thread, in build order: every build's effects land, even for a superseded input
+            try {
+                val captured = capture() // main thread: reads Compose state, takes immutable snapshots
+                val build = compute
+                val result = withContext(dispatcher) { build(captured) }
+                builtFor = target
+                value = result
+                onPublish(result) // main thread, in build order: every build's effects land, even for a superseded input
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                builtFor = target
+                onFailure(e)
+            }
         }
     }
 }
@@ -78,6 +96,7 @@ internal fun <T, C> rememberDerived(
     val holder = remember(sessionKey) { DerivedHolder<T, C>(compute(capture()).also(onPublish), inputs) }
     val scope = rememberCoroutineScope()
     holder.dispatcher = LocalChatDerivationDispatcher.current
+    holder.onFailure = LocalChatDerivationFailureLog.current
     SideEffect {
         holder.wanted = inputs
         holder.capture = capture

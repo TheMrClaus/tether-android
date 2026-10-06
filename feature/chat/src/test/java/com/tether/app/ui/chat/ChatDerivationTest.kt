@@ -132,4 +132,110 @@ class ChatDerivationTest {
         rule.onNodeWithText("Reply of B", substring = true).assertExists()
         rule.onNodeWithText("Reply of A", substring = true).assertDoesNotExist()
     }
+
+    // ------------------------------------------------------------------
+    // ta-nx60: the build loop itself (rememberDerived), with a plain string result
+    // ------------------------------------------------------------------
+
+    private class In(val n: Int)
+
+    private class Recorder {
+        val computed = ConcurrentLinkedQueue<Int>()
+        val published = ConcurrentLinkedQueue<String>()
+        val failures = ConcurrentLinkedQueue<Throwable>()
+    }
+
+    private fun showDerived(dispatcher: QueueDispatcher, rec: Recorder, input: () -> In, shown: () -> Boolean = { true }, boom: (Int) -> Boolean = { false }) {
+        rule.setContent {
+            CompositionLocalProvider(
+                LocalChatDerivationDispatcher provides dispatcher,
+                LocalChatDerivationFailureLog provides { t -> rec.failures += t },
+            ) {
+                if (shown()) {
+                    val inputs = input()
+                    val value = rememberDerived<String, Int>(
+                        sessionKey = "s",
+                        inputs = inputs,
+                        capture = { inputs.n },
+                        onPublish = { rec.published += it },
+                        compute = { n ->
+                            rec.computed += n
+                            if (boom(n)) throw IllegalStateException("boom $n")
+                            "value-$n"
+                        },
+                    )
+                    androidx.compose.foundation.text.BasicText(value)
+                }
+            }
+        }
+        rule.waitForIdle()
+    }
+
+    private fun drainUntilQuiet(dispatcher: QueueDispatcher) {
+        repeat(4) {
+            dispatcher.drainOnWorker()
+            rule.waitForIdle()
+        }
+    }
+
+    @Test
+    fun aBurstOfChangesBuildsTheLastOneAndNeverTheOnesBetween() {
+        val dispatcher = QueueDispatcher()
+        val rec = Recorder()
+        var input by mutableStateOf(In(0))
+        showDerived(dispatcher, rec, { input })
+        rule.onNodeWithText("value-0").assertExists()
+        for (n in 1..5) {
+            rule.runOnIdle { input = In(n) }
+            rule.waitForIdle()
+        }
+        assertEquals("nothing built off the queue yet", listOf(0), rec.computed.toList())
+        rule.onNodeWithText("value-0").assertExists()
+        drainUntilQuiet(dispatcher)
+        rule.onNodeWithText("value-5").assertExists()
+        assertEquals("the in-flight build, then the newest: 2..4 were never built", listOf(0, 1, 5), rec.computed.toList())
+        assertEquals(listOf("value-0", "value-1", "value-5"), rec.published.toList())
+        assertTrue(rec.failures.isEmpty())
+    }
+
+    @Test
+    fun leavingTheChatCancelsTheBuildInFlightAndPublishesNothingAfter() {
+        val dispatcher = QueueDispatcher()
+        val rec = Recorder()
+        var input by mutableStateOf(In(0))
+        var shown by mutableStateOf(true)
+        showDerived(dispatcher, rec, { input }, { shown })
+        rule.runOnIdle { input = In(1) }
+        rule.waitForIdle()
+        assertEquals("a rebuild is queued", 1, dispatcher.queue.size)
+        rule.runOnIdle { shown = false }
+        rule.waitForIdle()
+        drainUntilQuiet(dispatcher)
+        assertEquals("the cancelled build never ran", listOf(0), rec.computed.toList())
+        assertEquals("and nothing was published after the dispose", listOf("value-0"), rec.published.toList())
+        assertTrue("a cancellation is not a failure", rec.failures.isEmpty())
+    }
+
+    @Test
+    fun aBuildThatThrowsKeepsTheLastRowsLogsOnceAndTheNextChangeBuildsAgain() {
+        val dispatcher = QueueDispatcher()
+        val rec = Recorder()
+        var input by mutableStateOf(In(0))
+        showDerived(dispatcher, rec, { input }, boom = { it == 1 })
+        rule.runOnIdle { input = In(1) }
+        rule.waitForIdle()
+        drainUntilQuiet(dispatcher)
+        rule.onNodeWithText("value-0").assertExists()
+        assertEquals("tried once, not retried in a loop", listOf(0, 1), rec.computed.toList())
+        assertEquals(1, rec.failures.size)
+        assertEquals("boom 1", rec.failures.single().message)
+        assertEquals("nothing was published for it", listOf("value-0"), rec.published.toList())
+
+        rule.runOnIdle { input = In(2) }
+        rule.waitForIdle()
+        drainUntilQuiet(dispatcher)
+        rule.onNodeWithText("value-2").assertExists()
+        assertEquals(listOf(0, 1, 2), rec.computed.toList())
+        assertEquals(1, rec.failures.size)
+    }
 }

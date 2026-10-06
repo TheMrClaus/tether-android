@@ -481,5 +481,45 @@ class ChatSyncTest {
         assertEquals(listOf("s1@$TEST_ORIGIN"), client.killCalls)
     }
 
+    /**
+     * ta-coik.54 (ChatScreen's header read): "Confirm before ending" is the configured server's own, as the
+     * web's preferences are per origin. Both ways round, so a read of another server's record, of the
+     * device-wide one, or of a constant, fails one of them.
+     */
+    private fun headerOnServer(server: String, a: Boolean, b: Boolean, deviceWide: Boolean): ChatTestClient {
+        val running = session.copy(status = "active")
+        val client = ChatTestClient().also { it.reports = true }
+        client.show(running, ApprovalFixtures.write, live = true)
+        client.sync.value = live("s1")
+        client.server.value = server
+        val store = androidx.datastore.preferences.core.PreferenceDataStoreFactory.create(
+            scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + storeJob),
+        ) { java.io.File(tmp.root, "ui.preferences_pb") }
+        val prefs = UiPrefs.on(store)
+        runPrefsWrite {
+            prefs.updatePreferencesFor("https://a.example:443") { it.copy(confirmBeforeEnd = a) }
+            prefs.updatePreferencesFor("https://b.example:443") { it.copy(confirmBeforeEnd = b) }
+            prefs.updatePreferencesFor(null) { it.copy(confirmBeforeEnd = deviceWide) }
+        }
+        host(client, running, header = true, prefs = prefs)
+        rule.onNodeWithContentDescription("End session").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        return client
+    }
+
+    @Test
+    fun theHeaderEndsAtOnceWhenThisServerTurnedConfirmOffThoughAnotherAndTheDefaultAsk() {
+        val client = headerOnServer("https://a.example", a = false, b = true, deviceWide = true)
+        rule.onNodeWithText("End session?").assertDoesNotExist()
+        assertEquals(listOf("s1@$TEST_ORIGIN"), client.killCalls)
+    }
+
+    @Test
+    fun theHeaderAsksWhenThisServerKeepsConfirmOnThoughAnotherAndTheDefaultAreOff() {
+        val client = headerOnServer("https://a.example", a = true, b = false, deviceWide = false)
+        rule.onNodeWithText("End session?").assertExists()
+        assertTrue(client.killCalls.isEmpty())
+    }
+
     private fun confirmKey() = rule.onNodeWithTag(END_SESSION_CONFIRM_TAG)
 }
