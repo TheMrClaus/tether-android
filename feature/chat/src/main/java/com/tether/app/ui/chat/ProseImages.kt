@@ -127,6 +127,51 @@ private fun cut(nodes: List<MdInline>): List<Seg> {
 
 private fun blank(nodes: List<MdInline>): Boolean = nodes.all { it is MdInline.Text && it.text.isBlank() }
 
+private fun withChildren(node: MdInline, children: List<MdInline>): MdInline = when (node) {
+    is MdInline.Link -> node.copy(children = children)
+    is MdInline.Span -> node.copy(children = children)
+    is MdInline.Strong -> node.copy(children = children)
+    is MdInline.Em -> node.copy(children = children)
+    else -> node
+}
+
+private fun childrenOf(node: MdInline): List<MdInline>? = when (node) {
+    is MdInline.Link -> node.children
+    is MdInline.Span -> node.children
+    is MdInline.Strong -> node.children
+    is MdInline.Em -> node.children
+    else -> null
+}
+
+/** [nodes] without the whitespace at their start (through styled and linked runs); emptied nodes go. */
+internal fun trimStartNodes(nodes: List<MdInline>): List<MdInline> {
+    for ((i, node) in nodes.withIndex()) {
+        val kids = childrenOf(node)
+        val head: MdInline? = when {
+            node is MdInline.Text -> node.text.trimStart().takeIf { it.isNotEmpty() }?.let { node.copy(text = it) }
+            kids != null -> trimStartNodes(kids).takeIf { it.isNotEmpty() }?.let { withChildren(node, it) }
+            else -> node
+        }
+        if (head != null) return listOf(head) + nodes.drop(i + 1)
+    }
+    return emptyList()
+}
+
+/** [nodes] without the whitespace at their end. */
+internal fun trimEndNodes(nodes: List<MdInline>): List<MdInline> {
+    for (i in nodes.indices.reversed()) {
+        val node = nodes[i]
+        val kids = childrenOf(node)
+        val tail: MdInline? = when {
+            node is MdInline.Text -> node.text.trimEnd().takeIf { it.isNotEmpty() }?.let { node.copy(text = it) }
+            kids != null -> trimEndNodes(kids).takeIf { it.isNotEmpty() }?.let { withChildren(node, it) }
+            else -> node
+        }
+        if (tail != null) return nodes.take(i) + tail
+    }
+    return emptyList()
+}
+
 /**
  * [lines] as the pieces the web's flow draws: text lines stay one block (joined by the `<br/>`),
  * pictures on one line sit side by side, and a picture on a line of its own stacks under the line
@@ -146,10 +191,14 @@ internal fun proseTextPieces(lines: List<List<MdInline>>): List<ProsePiece> {
         segs.forEachIndexed { i, seg ->
             when (seg) {
                 is Seg.Run -> {
-                    // Blanks beside a picture are the gap between inline-blocks, never a line of text.
+                    // Blanks beside a picture are the gap between inline-blocks, never a line of text: a
+                    // run's blank edge that touches a picture is dropped (no stray " sits inline" space).
                     val nextIsImage = segs.getOrNull(i + 1) is Seg.Img
-                    if (!(blank(seg.nodes) && (afterImage || nextIsImage))) {
-                        text.add(seg.nodes)
+                    var nodes = seg.nodes
+                    if (afterImage) nodes = trimStartNodes(nodes)
+                    if (nextIsImage) nodes = trimEndNodes(nodes)
+                    if (!(blank(nodes) && (afterImage || nextIsImage))) {
+                        text.add(nodes)
                         afterImage = false
                     }
                 }
@@ -232,11 +281,12 @@ internal fun ProseImage(image: MdInline.Image, style: TextStyle, t: TetherTokens
     val item = remember(image.src) { ToolMediaItem(ToolMediaItem.KIND_IMAGE, "image/*", image.src) }
     var open by rememberSaveable(image.src) { mutableStateOf(false) }
     val shape = RoundedCornerShape(t.radiusMd)
-    when (val state = rememberMediaImage(item)) {
+    when (val state = rememberMediaImage(item, prose = true)) {
         is MediaImage.Ok -> {
-            // CSS px = dp: a picture shows at its own size, capped at the column width and 320dp.
-            val w = state.bitmap.width.dp
-            val h = state.bitmap.height.dp
+            // CSS px = dp: `.md-img` shows at the SOURCE's natural size (not the sampled decode's),
+            // `max-width: 100%` of the column and `max-height: 320px`, aspect kept.
+            val w = state.naturalWidth.dp
+            val h = state.naturalHeight.dp
             Image(
                 bitmap = state.bitmap,
                 contentDescription = image.alt,

@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.width
 import com.tether.app.client.FilesResult
 import com.tether.app.client.HttpPublicImages
 import com.tether.app.client.PublicImageSource
@@ -155,13 +156,34 @@ class ProseImagesTest {
         val got = pieces("**bold ![](/a.png) more**")
         assertEquals(
             listOf(
-                ProsePiece.Text(listOf(listOf(Strong(listOf(Text("bold ")))))),
+                ProsePiece.Text(listOf(listOf(Strong(listOf(Text("bold")))))),
                 ProsePiece.Images(listOf(a)),
-                ProsePiece.Text(listOf(listOf(Strong(listOf(Text(" more")))))),
+                ProsePiece.Text(listOf(listOf(Strong(listOf(Text("more")))))),
             ),
             got,
         )
         assertTrue(Em(listOf(Text("x"))) is MdInline)
+    }
+
+    @Test fun theBlanksAtTheCutAreTrimmedSoNoStraySpaceStartsOrEndsALine() {
+        val b = Image("https://ci.example.test/badge.png", "ci")
+        assertEquals(
+            listOf(
+                ProsePiece.Text(listOf(listOf(Text("the badge")))),
+                ProsePiece.Images(listOf(b)),
+                ProsePiece.Text(listOf(listOf(Text("sits inline with the text.")))),
+            ),
+            pieces("the badge ![ci](https://ci.example.test/badge.png) sits inline with the text."),
+        )
+        // Inner spacing and a link's own edges survive; only the cut's side is trimmed.
+        assertEquals(
+            listOf(
+                ProsePiece.Text(listOf(listOf(Text("a  b")))),
+                ProsePiece.Images(listOf(b)),
+                ProsePiece.Text(listOf(listOf(Text("c  d")))),
+            ),
+            pieces("a  b   ![ci](https://ci.example.test/badge.png)   c  d"),
+        )
     }
 
     // ── the drawn image ──────────────────────────────────────────────────────────────────────
@@ -193,6 +215,43 @@ class ProseImagesTest {
         rule.onNodeWithTag("md-image").performClick()
         rule.waitForIdle()
         rule.onNodeWithTag("media-lightbox").assertExists()
+    }
+
+    // r2 sizing: laid out from the SOURCE's natural pixels (`.md-img`: natural size, max-width 100%
+    // of the column, max-height 320px, aspect kept), whatever the (sampled) decode's own size is.
+    private fun drawn(natural: Pair<Int, Int>, columnDp: Int): Pair<Float, Float> {
+        // The decode is a small stand-in: the layout must come from the natural size, not from it.
+        val loader = ToolFixtures.FakeLoader(MediaImage.Ok(ToolFixtures.checker(40, 25), natural.first, natural.second))
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
+                CompositionLocalProvider(LocalToolMediaLoader provides loader) {
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.width(columnDp.dp)) {
+                        MarkdownText("![shot](/tmp/a.png)", color = androidx.compose.ui.graphics.Color.White)
+                    }
+                }
+            }
+        }
+        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag("md-image")).fetchSemanticsNodes().isNotEmpty() }
+        val size = rule.onNodeWithTag("md-image").fetchSemanticsNode().size
+        return with(rule.density) { size.width.toDp().value to size.height.toDp().value }
+    }
+
+    @Test fun aWideScreenshotFillsTheColumnAndKeepsItsAspect() {
+        val (w, h) = drawn(1280 to 800, columnDp = 360)
+        assertEquals(360f, w, 1f)
+        assertEquals(225f, h, 1f)
+    }
+
+    @Test fun aTallPhoneShotIsCappedAt320DpHighAndKeepsItsAspect() {
+        val (w, h) = drawn(1080 to 2400, columnDp = 360)
+        assertEquals(320f, h, 1f)
+        assertEquals(144f, w, 1f)
+    }
+
+    @Test fun aSmallImageKeepsItsNaturalSize() {
+        val (w, h) = drawn(120 to 80, columnDp = 360)
+        assertEquals(120f, w, 1f)
+        assertEquals(80f, h, 1f)
     }
 
     @Test fun aFailedLoadDegradesToTheAltAndImageUnavailable() {
@@ -245,6 +304,22 @@ class ProseImagesTest {
         assertTrue("$got", got is MediaImage.Ok)
         assertEquals(listOf("/tmp/a bé.png"), files.paths)
         assertEquals(MediaLimits.MAX_IMAGE_BYTES, files.cap)
+    }
+
+    @Test fun aProsePictureKeepsItsNaturalSizeAndDecodesUnderItsOwnLargerBound() = runBlocking {
+        val big = java.io.ByteArrayOutputStream().also {
+            android.graphics.Bitmap.createBitmap(2560, 1440, android.graphics.Bitmap.Config.ARGB_8888).compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }.toByteArray()
+        val r = repo(FakeFiles(big))
+        val tile = r.image(item("/api/files?path=%2Ftmp%2Fa.png")) as MediaImage.Ok
+        val prose = r.prose(item("/api/files?path=%2Ftmp%2Fa.png")) as MediaImage.Ok
+        // The tile is sampled to <= 512 (2560 -> /8 = 320), the prose picture to <= 1280 (/2 = 1280x720);
+        // both carry the source's real size, and each tier is cached under its own key.
+        assertEquals(320, tile.bitmap.width)
+        assertEquals(1280, prose.bitmap.width)
+        assertEquals(2560 to 1440, prose.naturalWidth to prose.naturalHeight)
+        assertEquals(2560 to 1440, tile.naturalWidth to tile.naturalHeight)
+        assertTrue(prose.bitmap.width * prose.bitmap.height * 4L <= MediaLimits.PROSE_DECODED_BYTES)
     }
 
     @Test fun aServedFileThatIsNotAPictureOrIsMissingOrTooLargeFails() = runBlocking {

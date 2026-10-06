@@ -22,7 +22,9 @@ import org.robolectric.annotation.Config
 
 /**
  * ta-coik.58 (#242): a prose picture in an assistant reply, loaded (`prose-image`) and failed
- * (`prose-image-failed`: "alt (image unavailable)"), Studio light and dark at phone size.
+ * (`prose-image-failed`: "alt (image unavailable)"), Studio light and dark at phone size. The loaded fixture
+ * is a 1280x800 screenshot (r2: a picture is laid out from the source's natural size, so a wide
+ * shot fills the column), in a well tall enough that nothing is clipped.
  */
 private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
 
@@ -31,7 +33,7 @@ private const val REPLY = "The build page after the fix:\n\n![build page](/tmp/s
 private fun AndroidComposeTestRule<*, ComponentActivity>.snap(skin: TetherSkin, loader: ToolMediaLoader, tag: String, name: String) {
     mainClock.autoAdvance = false
     setContent {
-        ChatHost(skin, wellHeight = 360.dp) {
+        ChatHost(skin, wellHeight = 780.dp) {
             CompositionLocalProvider(LocalToolMediaLoader provides loader) {
                 Column(Modifier.padding(12.dp)) {
                     MarkdownBody(parseMarkdown(REPLY), LocalTetherTypography.current.chatBody, com.tether.app.ui.theme.LocalTetherTokens.current.ink)
@@ -51,7 +53,7 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.snap(skin: TetherSkin, 
 class ProseImageScreenshotTest(private val skin: TetherSkin) {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
-    @Test fun loaded() = rule.snap(skin, ToolFixtures.FakeLoader(MediaImage.Ok(ToolFixtures.checker(240, 150))), "md-image", "prose-image")
+    @Test fun loaded() = rule.snap(skin, ToolFixtures.FakeLoader(MediaImage.Ok(ToolFixtures.checker(1280, 800, tile = 80))), "md-image", "prose-image")
 
     @Test fun failed() = rule.snap(skin, ToolFixtures.FakeLoader(MediaImage.Failed), "md-image-missing", "prose-image-failed")
 

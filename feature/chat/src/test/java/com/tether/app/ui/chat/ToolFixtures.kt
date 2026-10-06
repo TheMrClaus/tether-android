@@ -185,11 +185,11 @@ object ToolFixtures {
     }
 
     /** A deterministic 48×32 checker (the seeder's fixturePng tiles) for any picture. */
-    fun checker(width: Int = 48, height: Int = 32): androidx.compose.ui.graphics.ImageBitmap {
+    fun checker(width: Int = 48, height: Int = 32, tile: Int = 8): androidx.compose.ui.graphics.ImageBitmap {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         for (y in 0 until height) for (x in 0 until width) {
-            val tile = ((x / 8) + (y / 8)) % 2
-            bitmap.setPixel(x, y, if (tile == 1) 0xFF5C6EE6.toInt() else 0xFFECEEF4.toInt())
+            val square = ((x / tile) + (y / tile)) % 2
+            bitmap.setPixel(x, y, if (square == 1) 0xFF5C6EE6.toInt() else 0xFFECEEF4.toInt())
         }
         return bitmap.asImageBitmap()
     }

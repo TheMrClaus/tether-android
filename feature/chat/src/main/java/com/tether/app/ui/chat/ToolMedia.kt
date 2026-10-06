@@ -92,7 +92,11 @@ import kotlinx.coroutines.withContext
 /** What loading one picture came to. */
 @Immutable
 sealed interface MediaImage {
-    data class Ok(val bitmap: ImageBitmap) : MediaImage
+    /**
+     * [naturalWidth] x [naturalHeight]: the SOURCE image's real pixel size (the header's, before the
+     * bounded decode sampled it down), which is what an inline prose picture is laid out from.
+     */
+    data class Ok(val bitmap: ImageBitmap, val naturalWidth: Int = bitmap.width, val naturalHeight: Int = bitmap.height) : MediaImage
     data object TooLarge : MediaImage
 
     /** T6.8: a sign-in gateway answered instead of Tether ([ToolMediaResult.Blocked]). */
@@ -129,6 +133,9 @@ internal object MediaCopy {
 interface ToolMediaLoader {
     /** [full]: the viewer's larger decode; otherwise the in-row thumbnail. */
     suspend fun image(item: ToolMediaItem, full: Boolean = false): MediaImage
+
+    /** ta-coik.58: an inline prose picture, decoded to [MediaLimits.PROSE_SIDE] (default: the thumbnail). */
+    suspend fun prose(item: ToolMediaItem): MediaImage = image(item)
     suspend fun video(item: ToolMediaItem): MediaVideo
 }
 
@@ -149,6 +156,14 @@ object MediaLimits {
     /** A row thumbnail: at most this many pixels a side and bytes decoded (it shows ≤ 320dp tall). */
     const val THUMB_SIDE: Int = 512
     const val THUMB_DECODED_BYTES: Long = 1L * 1024L * 1024L
+
+    /**
+     * An inline prose picture (ta-coik.58): enough for a column-wide picture at about 2.6x density
+     * without softness, 1280 x 1280 x 4 = ~6.5 MB decoded (a third of [CACHE_BYTES], where the
+     * viewer's 16 MB would take two thirds of it).
+     */
+    const val PROSE_SIDE: Int = 1280
+    const val PROSE_DECODED_BYTES: Long = 1280L * 1280L * 4L
 
     /** The viewer's decode. */
     const val FULL_SIDE: Int = 2048
@@ -242,6 +257,9 @@ object BoundedMediaDecoder {
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
         decodeFile(file.path, options)
+        // The header's size, read NOW: the full decode below rewrites outWidth/outHeight to the sampled size.
+        val naturalWidth = options.outWidth
+        val naturalHeight = options.outHeight
         val sample = plan(options.outWidth, options.outHeight, if (options.outConfig == Bitmap.Config.RGBA_F16) 8 else 4, maxSide, maxBytes)
         when {
             options.outWidth <= 0 || options.outHeight <= 0 -> MediaImage.Failed
@@ -256,7 +274,7 @@ object BoundedMediaDecoder {
                         bitmap.recycle()
                         MediaImage.TooLarge
                     }
-                    else -> MediaImage.Ok(bitmap.asImageBitmap())
+                    else -> MediaImage.Ok(bitmap.asImageBitmap(), naturalWidth, naturalHeight)
                 }
             }
         }
@@ -416,25 +434,29 @@ class ToolMediaRepository(
     private val imageTimeoutMs: Long = MediaLimits.IMAGE_TIMEOUT_MS,
     private val videoTimeoutMs: Long = MediaLimits.VIDEO_TIMEOUT_MS,
 ) : ToolMediaLoader {
-    private val cache = object : LruCache<String, ImageBitmap>(MediaLimits.CACHE_BYTES) {
-        override fun sizeOf(key: String, value: ImageBitmap): Int = value.asAndroidBitmap().allocationByteCount
+    private val cache = object : LruCache<String, MediaImage.Ok>(MediaLimits.CACHE_BYTES) {
+        override fun sizeOf(key: String, value: MediaImage.Ok): Int = value.bitmap.asAndroidBitmap().allocationByteCount
     }
 
     private val tmpDir: File get() = File(cacheDir, TMP_DIR).apply { mkdirs() }
 
-    override suspend fun image(item: ToolMediaItem, full: Boolean): MediaImage {
+    override suspend fun image(item: ToolMediaItem, full: Boolean): MediaImage = load(item, if (full) Tier.Full else Tier.Thumb)
+
+    override suspend fun prose(item: ToolMediaItem): MediaImage = load(item, Tier.Prose)
+
+    private suspend fun load(item: ToolMediaItem, tier: Tier): MediaImage {
         if (item.isVideo) return MediaImage.Failed
         // R3-L2: an over-size data: picture is refused before anything touches it (no hashing).
         parseDataUri(item.src)?.let { if (it.payloadLength.toLong() / 4 * 3 > MediaLimits.MAX_IMAGE_BYTES) return MediaImage.TooLarge }
         return try {
             // The key is computed once, off the main thread.
-            val key = withContext(Dispatchers.IO) { cacheKey(item.src, full) }
-            cache.get(key)?.let { return MediaImage.Ok(it) }
+            val key = withContext(Dispatchers.IO) { cacheKey(item.src, tier) }
+            cache.get(key)?.let { return it }
             // The timeout starts once a load slot is held (a queued picture is not "slow").
             val result = MediaGates.images.withPermit {
-                kotlinx.coroutines.withTimeoutOrNull(imageTimeoutMs) { withContext(Dispatchers.IO) { loadImage(item.src, full) } }
+                kotlinx.coroutines.withTimeoutOrNull(imageTimeoutMs) { withContext(Dispatchers.IO) { loadImage(item.src, tier) } }
             } ?: MediaImage.Failed
-            if (result is MediaImage.Ok) cache.put(key, result.bitmap)
+            if (result is MediaImage.Ok) cache.put(key, result)
             result
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -446,9 +468,9 @@ class ToolMediaRepository(
         }
     }
 
-    private suspend fun loadImage(src: String, full: Boolean): MediaImage {
-        val side = if (full) MediaLimits.FULL_SIDE else MediaLimits.THUMB_SIDE
-        val bytes = if (full) MediaLimits.FULL_DECODED_BYTES else MediaLimits.THUMB_DECODED_BYTES
+    private suspend fun loadImage(src: String, tier: Tier): MediaImage {
+        val side = tier.side
+        val bytes = tier.bytes
         var tmp: File? = null
         try {
             val file = File.createTempFile("img", ".part", tmpDir).also { tmp = it }
@@ -582,14 +604,23 @@ class ToolMediaRepository(
         }
     }
 
+    /** A decode tier: the transcript's tile thumbnail, an inline prose picture, the viewer. */
+    internal enum class Tier(val key: String, val side: Int, val bytes: Long) {
+        Thumb("thumb", MediaLimits.THUMB_SIDE, MediaLimits.THUMB_DECODED_BYTES),
+        Prose("prose", MediaLimits.PROSE_SIDE, MediaLimits.PROSE_DECODED_BYTES),
+        Full("full", MediaLimits.FULL_SIDE, MediaLimits.FULL_DECODED_BYTES),
+    }
+
     internal companion object {
         const val TMP_DIR = "tool-media-tmp"
 
         /** Memory-cache key: the sha256 of the source (a data: URI can be megabytes long). */
-        fun cacheKey(src: String, full: Boolean): String {
+        fun cacheKey(src: String, tier: Tier): String {
             keysComputed.incrementAndGet()
-            return sha256Hex(src.toByteArray(Charsets.UTF_8)) + if (full) ":full" else ":thumb"
+            return sha256Hex(src.toByteArray(Charsets.UTF_8)) + ":" + tier.key
         }
+
+        fun cacheKey(src: String, full: Boolean): String = cacheKey(src, if (full) Tier.Full else Tier.Thumb)
 
         /** How many keys were hashed (a test seam: an over-size data: picture must cost none). */
         internal val keysComputed = java.util.concurrent.atomic.AtomicInteger()
@@ -741,10 +772,10 @@ private fun MediaUnavailable(text: String, clickable: Modifier, detail: String? 
 
 /** Null while loading; the loader's answer after. No loader (a preview) stays null. */
 @Composable
-internal fun rememberMediaImage(item: ToolMediaItem, full: Boolean = false): MediaImage? {
+internal fun rememberMediaImage(item: ToolMediaItem, full: Boolean = false, prose: Boolean = false): MediaImage? {
     val loader = LocalToolMediaLoader.current
-    val state by produceState<MediaImage?>(initialValue = null, item.src, loader, full) {
-        value = loader?.image(item, full)
+    val state by produceState<MediaImage?>(initialValue = null, item.src, loader, full, prose) {
+        value = if (prose) loader?.prose(item) else loader?.image(item, full)
     }
     return state
 }
