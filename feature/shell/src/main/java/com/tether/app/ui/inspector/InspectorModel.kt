@@ -248,6 +248,8 @@ data class RunRow(
     val gap: String?,
     val model: RunSetting?,
     val effort: RunSetting?,
+    /** inspector.tsx:471 `title` on "effort not set": why no effort reading ([effortMissingReason]); null when there is one. */
+    val effortMissingReason: String? = null,
     val active: Boolean,
     val nested: Boolean,
 ) {
@@ -706,6 +708,18 @@ internal fun runModelReading(run: SubagentRun, declared: SubagentDefault?): Pair
     return model to effort
 }
 
+/**
+ * inspector.tsx:401-409 `effortMissingReason` (#245): why a run has no effort reading. Never asserts the
+ * agent type sets none: the defaults map only lists types whose definition was FOUND declaring
+ * something, so "absent" means "no declaration found", not "declares nothing".
+ */
+internal fun effortMissingReason(agentType: String?): String =
+    if (!agentType.isNullOrEmpty()) {
+        "The Agent call set no effort, and no effort declaration was found for the \"$agentType\" agent type (looked in the session's project and Claude home agent files)"
+    } else {
+        "The Agent call set no effort, and the run names no agent type to look a declaration up for"
+    }
+
 internal fun subagentsBand(runs: List<SubagentRun>, activeRunId: String?, defaults: Map<String, SubagentDefault>): SubagentsBand? {
     if (runs.isEmpty()) return null
     val summary = subagentRosterSummary(runs)
@@ -726,6 +740,8 @@ internal fun subagentsBand(runs: List<SubagentRun>, activeRunId: String?, defaul
             gap = if (measured) null else usageGapReason(run),
             model = model,
             effort = effort,
+            // inspector.tsx:471 `title`: on the "effort not set" span, the reason there is no reading.
+            effortMissingReason = if (effort == null) effortMissingReason(run.agentType) else null,
             active = run.runId == activeRunId,
             nested = run.depth > 1,
         )

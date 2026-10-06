@@ -22,8 +22,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -124,6 +129,9 @@ object InspectorTags {
     /** ta-m7ef: the Services card's i-th "did not run" sentence (setup first, then teardown). */
     fun serviceSkipped(i: Int) = "inspector-service-skipped:$i"
     const val Root = "inspector"
+
+    /** inspector.tsx:471: the run row's "effort not set" line, with the reason it is missing on a long-press. */
+    const val EffortMissingReason = "inspector-effort-missing-reason"
     const val UseCodexReset = "inspector-codex-reset-use"
     const val Identity = "inspector-identity"
     const val Header = "inspector-header"
@@ -692,6 +700,7 @@ private fun RunList(rows: List<RunRow>, onSelect: (String?) -> Unit) {
 }
 
 /** `.ti-run-row`: title and status · tokens, then model · effort with their provenance. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RunRowView(row: RunRow, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
@@ -746,26 +755,41 @@ private fun RunRowView(row: RunRow, onClick: () -> Unit) {
         }
         val noteStyle = SpanStyle(color = t.faint, fontFamily = type.ui, fontSize = (0.6f * 16).sp)
         val missing = SpanStyle(color = t.faint, fontFamily = type.ui)
-        Text(
-            buildAnnotatedString {
-                fun setting(s: RunSetting?, absent: String, alwaysNote: Boolean) {
-                    if (s == null) {
-                        withStyle(missing) { append(absent) }
-                        return
+        val settings: @Composable () -> Unit = {
+            Text(
+                buildAnnotatedString {
+                    fun setting(s: RunSetting?, absent: String, alwaysNote: Boolean) {
+                        if (s == null) {
+                            withStyle(missing) { append(absent) }
+                            return
+                        }
+                        appendSeg(s.text, t)
+                        if (s.note.isNotEmpty() || (alwaysNote && s.note.isNotEmpty())) withStyle(noteStyle) { append(" ${s.note}") }
                     }
-                    appendSeg(s.text, t)
-                    if (s.note.isNotEmpty() || (alwaysNote && s.note.isNotEmpty())) withStyle(noteStyle) { append(" ${s.note}") }
-                }
-                setting(row.model, "model not captured", false)
-                append(" · ")
-                setting(row.effort, "effort not set", true)
-            },
-            style = cssText(type.mono, 0.72f, 400),
-            color = t.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 18.4.dp),
-        )
+                    setting(row.model, "model not captured", false)
+                    append(" · ")
+                    setting(row.effort, "effort not set", true)
+                },
+                style = cssText(type.mono, 0.72f, 400),
+                color = t.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 18.4.dp),
+            )
+        }
+        // inspector.tsx:471 `title`: the reason an effort is missing, on a long-press (the web's hover).
+        val reason = row.effortMissingReason
+        if (reason != null) {
+            TooltipBox(
+                positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                tooltip = { PlainTooltip { Text(reason) } },
+                state = rememberTooltipState(),
+                modifier = Modifier.testTag(InspectorTags.EffortMissingReason),
+                content = { settings() },
+            )
+        } else {
+            settings()
+        }
     }
 }
 

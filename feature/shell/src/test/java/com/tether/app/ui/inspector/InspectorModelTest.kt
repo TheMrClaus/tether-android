@@ -341,6 +341,28 @@ class InspectorModelTest {
         assertEquals(listOf(null, null, null, null), reading(unserved, null))
     }
 
+    /** #245 (inspector.tsx:401-409, :471): a run with no effort reading says why, in the web's words. */
+    @Test
+    fun aRunWithNoEffortSaysWhyAndOneWithEffortSaysNothing() {
+        assertEquals(
+            "The Agent call set no effort, and no effort declaration was found for the \"code-reviewer\" agent type (looked in the session's project and Claude home agent files)",
+            effortMissingReason("code-reviewer"),
+        )
+        val noType = "The Agent call set no effort, and the run names no agent type to look a declaration up for"
+        assertEquals(noType, effortMissingReason(null))
+        assertEquals(noType, effortMissingReason(""))
+
+        val st = InspectorBoards.Reference.state
+        val runs = com.tether.app.ui.chat.collectSubagentRuns(st.obj)
+        val old = InspectorBoards.Reference.session(InspectorBoards.Reference.metrics.copy(subagentDefaults = null))
+        val rows = inspectorModel(old, InspectorBoards.Reference.providers, st, runs, null, InspectorReplies(), InspectorBoards.env).subagents!!.rows
+        rows.forEachIndexed { i, row ->
+            if (row.effort == null) assertEquals(effortMissingReason(runs[i].agentType), row.effortMissingReason) else assertNull(row.effortMissingReason)
+        }
+        assertTrue("some run has no effort reading", rows.any { it.effort == null })
+        assertTrue("some run has one", rows.any { it.effort != null })
+    }
+
     /** Declared defaults are Claude's: another provider's metrics never label a run "declared". */
     @Test
     fun declaredDefaultsApplyToClaudeOnly() {
