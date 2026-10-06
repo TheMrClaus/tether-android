@@ -21,6 +21,10 @@
      - files/datastore/tether_drafts.preferences_pb holds unsent composer text
        per server origin (T2.3/T7.1): user content, like the unsent input in the
        settings file, so it stays on this device too.
+     - files/datastore/tether_ui_prefs.preferences_pb holds the UI preferences: server
+       origins, workspace paths and session ids (no credentials). The web keeps the same
+       state in localStorage, which is never backed up or transferred, so it stays on
+       this device too.
      - databases/ (the whole domain) holds the T13.1 journal mirror: session
        transcripts, row-sealed under a data key whose Keystore wrapper never leaves
        the device. It is a cache rebuilt from the server, so nothing is lost by
@@ -34,6 +38,8 @@
         <exclude domain="file" path="tether_settings.preferences_pb.tmp" />
         <exclude domain="file" path="datastore/tether_drafts.preferences_pb" />
         <exclude domain="file" path="datastore/tether_drafts.preferences_pb.tmp" />
+        <exclude domain="file" path="datastore/tether_ui_prefs.preferences_pb" />
+        <exclude domain="file" path="datastore/tether_ui_prefs.preferences_pb.tmp" />
         <exclude domain="sharedpref" path="com.google.android.gms.appid.xml" />
         <exclude domain="sharedpref" path="tether_push_firebase.xml" />
         <exclude domain="database" path="." />
@@ -44,6 +50,8 @@
         <exclude domain="file" path="tether_settings.preferences_pb.tmp" />
         <exclude domain="file" path="datastore/tether_drafts.preferences_pb" />
         <exclude domain="file" path="datastore/tether_drafts.preferences_pb.tmp" />
+        <exclude domain="file" path="datastore/tether_ui_prefs.preferences_pb" />
+        <exclude domain="file" path="datastore/tether_ui_prefs.preferences_pb.tmp" />
         <exclude domain="sharedpref" path="com.google.android.gms.appid.xml" />
         <exclude domain="sharedpref" path="tether_push_firebase.xml" />
         <exclude domain="database" path="." />

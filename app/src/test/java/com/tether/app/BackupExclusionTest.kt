@@ -51,6 +51,9 @@ class BackupExclusionTest {
         // T7.1: unsent composer drafts are user content (preferencesDataStore keeps them in files/datastore/).
         "file" to "datastore/${DraftStore.FILE_NAME}",
         "file" to "datastore/${DraftStore.FILE_NAME}.tmp",
+        // ta-v4e1: UI prefs (server origins, workspace paths, session ids); the web's localStorage is never backed up.
+        "file" to "datastore/tether_ui_prefs.preferences_pb",
+        "file" to "datastore/tether_ui_prefs.preferences_pb.tmp",
     )
 
     @Test
