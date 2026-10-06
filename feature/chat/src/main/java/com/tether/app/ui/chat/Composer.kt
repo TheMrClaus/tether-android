@@ -496,13 +496,6 @@ fun Composer(
         return if (!menuDismissed && matches.isNotEmpty() && !busy) matches else null
     }
 
-    fun openModelPicker() {
-        if (composerControls?.model == null) return
-        onRequestControls() // refresh to the live list if the session has since warmed
-        sheetAt = SheetView.Model
-        menuDismissed = true
-    }
-
     /**
      * T7.2: one operator choice to the client's guard; a refusal is said in words. Every switch,
      * the most permissive ones included, is sent on the tap, as on the web.
@@ -661,18 +654,11 @@ fun Composer(
         val info = commands.find { it.name == name || it.aliases.orEmpty().contains(name) }
         val canonical = info?.name ?: name
 
-        // `/model <name>` mutates what Tether owns: a guarded control (T7.2), never on Codex.
+        // `/model <name>` mutates what Tether owns: a guarded control (T7.2), never on Codex. Bare
+        // `/model` is a read and is forwarded to the CLI like any other command (chat-view.tsx 29537e0
+        // :3081 `&& arg`, :193-198): the operator sees the CLI's own list of the ids it accepts.
         if (canonical == "model" || name == "model") {
-            if (arg.isEmpty()) {
-                // T7.2's divergence (docs/parity/screens/controls): bare /model on Claude opens the
-                // Model list; elsewhere it is forwarded to the CLI, as on the web.
-                if (claude && composerControls?.model != null) {
-                    openModelPicker()
-                    setDraft("")
-                    return true
-                }
-                return false
-            }
+            if (arg.isEmpty()) return false
             if (s.provider == "codex") return false
             if (!typedModelAllowed(s.provider) || composerControls?.model == null) return false
             modelCommand(arg)
@@ -695,7 +681,7 @@ fun Composer(
         return false
     }
 
-    /** chat-view.tsx:3058-3069 acceptCommand: completing the name leaves the draft ready for an argument. */
+    /** chat-view.tsx 29537e0 :3126-3134 acceptCommand: completing the name leaves the draft ready for an argument. */
     fun acceptCommand(command: SessionCommandOption) {
         menuDismissed = true
         if (!command.supported) {
@@ -703,11 +689,8 @@ fun Composer(
             setDraft("")
             return
         }
-        if ((command.name == "model" || command.aliases.orEmpty().contains("model")) && claude && composerControls?.model != null) {
-            openModelPicker()
-            setDraft("")
-            return
-        }
+        // /model is not special-cased (chat-view.tsx 29537e0 :3126-3134): `/model ` invites the id the
+        // picker's list may not carry, which is the whole point of typing it.
         setDraft("/${command.name} ")
     }
 

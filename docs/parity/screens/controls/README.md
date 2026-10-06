@@ -35,13 +35,13 @@ Codex / opencode-serve session's row):
 2. **Provider-controls panels live in the session sheet** (hub row "Provider controls", and a
    "Provider controls" key at the end of the tablet row). The web keeps them in Settings → Advanced,
    which the app does not have yet (T10.1).
-3. **Bare `/model`** on Claude opens the sheet's Model list; the web forwards it to the CLI as prompt
-   text (slash passthrough is T7.3; on the other engines a bare `/model` is sent as text, as on the
-   web). `/model <arg>` matches the web on every engine with a model select except Codex
-   (chat-view.tsx:3015-3024): a listed match, else a plausible id (`looksLikeModelId`) pinned with
-   the "not in the known list" notice, else refused with the reason. The client's guard allows a
-   typed id for exactly the same engines (`typedModelAllowed`), and a refused typed id says so in
-   its own words. On Codex `/model …` stays an ordinary message.
+3. *(Retired by ta-9cp.)* A bare `/model` is forwarded to the CLI as prompt text, as on the web
+   (chat-view.tsx 29537e0 :3081, :193-198), and picking /model in the slash menu fills the draft with
+   `/model ` (:3126-3134); the app no longer opens its own Model list for it. `/model <arg>` matches
+   the web on every engine with a model select except Codex: a listed match, else a plausible id
+   (`looksLikeModelId`) pinned with the "not in the known list" notice, else refused with the reason.
+   The client's guard allows a typed id for exactly the same engines (`typedModelAllowed`), and a
+   refused typed id says so in its own words. On Codex `/model …` stays an ordinary message.
 4. **No pin/unpin affordance** on legacy models (the web's desktop select has one; its phone sheet
    does not). Pins set elsewhere are honoured (`groupModelOptions`).
 5. **No Shift+Tab mode cycling**: the web offers it only to a fine pointer with hover; the app is a

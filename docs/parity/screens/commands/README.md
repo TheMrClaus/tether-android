@@ -48,8 +48,8 @@ Montages (`web | android | diff`), 6 skins at phone size, built by
    or alias) are refused with the web's words. `/clear`, `/reset`, `/new` and `/compact` warn, then
    forward. Everything else, **including a typed name the inventory does not list, is sent as ordinary
    prompt text, as on the web**: the CLI advertises exactly what it can dispatch headless, and it parses
-   a leading "/" itself. Kept from T7.2: a bare `/model` on Claude opens the Model list (the web forwards
-   it; see `../controls/README.md` item 4).
+   a leading "/" itself. That includes a bare `/model` (ta-9cp), and picking /model in the palette
+   fills the draft with `/model `, as on the web.
 4. **Inventory events.** The palette reads the projection's `cliInventory`:
    - `native_session_id` carries the init inventory;
    - `cli_commands_changed` replaces the commands;

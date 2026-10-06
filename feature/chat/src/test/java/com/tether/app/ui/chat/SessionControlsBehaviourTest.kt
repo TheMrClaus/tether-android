@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertIsEnabled
@@ -411,6 +412,40 @@ class SessionControlsPhoneBehaviourTest {
         rule.onNodeWithContentDescription("Message the agent").performImeAction()
         h.settle()
         assertEquals(listOf<SessionControl>(SessionControl.Model("gpt-9-preview", typed = true)), h.recorder.sent)
+    }
+
+    @Test
+    fun aBareModelIsForwardedToTheCliAndOpensNoModelList() {
+        // ta-9cp: chat-view.tsx 29537e0 :3081 (`&& arg`): only `/model <arg>` is native; a bare `/model`
+        // is a read, forwarded as prompt text so the operator sees the CLI's own list of ids.
+        h.show()
+        rule.onNodeWithContentDescription("Message the agent").performTextInput("/model")
+        h.settle()
+        // Enter on the open slash menu completes the name (acceptCommand), leaving `/model `; the next Enter sends.
+        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        h.settle()
+        rule.onNodeWithContentDescription("Message the agent").assertTextEquals("/model ")
+        assertTrue(h.prompts.isEmpty())
+        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        h.settle()
+        assertEquals(listOf("/model"), h.prompts)
+        assertTrue("no control sent: ${h.recorder.sent}", h.recorder.sent.isEmpty())
+        rule.onAllNodesWithTag("sheet-row-Model").assertCountEquals(0)
+        rule.onAllNodesWithTag("control-option-claude-sonnet-5").assertCountEquals(0)
+    }
+
+    @Test
+    fun pickingModelInTheSlashMenuFillsTheDraftAndOpensNoModelList() {
+        // ta-9cp: chat-view.tsx 29537e0 :3126-3134 acceptCommand: `/model ` invites the id the picker may not carry.
+        h.show()
+        rule.onNodeWithContentDescription("Message the agent").performTextInput("/mod")
+        h.settle()
+        rule.onNodeWithContentDescription("/model [model], Switch the model for this session, Tether").performClick()
+        h.settle()
+        rule.onNodeWithContentDescription("Message the agent").assertTextEquals("/model ")
+        assertTrue(h.prompts.isEmpty() && h.recorder.sent.isEmpty())
+        rule.onAllNodesWithTag("sheet-row-Model").assertCountEquals(0)
+        rule.onAllNodesWithTag("control-option-claude-sonnet-5").assertCountEquals(0)
     }
 
     @Test
