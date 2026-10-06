@@ -55,13 +55,12 @@ class FileBrowserMediaTest {
         assertEquals("", s.previewError)
     }
 
-    @Test fun thereIsNoSizeCapAndNoTooLargeState() = runTest {
+    @Test fun thereIsNoSizeCapOnAVideo() = runTest {
         val s = browser()
         s.open()
         advanceUntilIdle()
         s.selectFile(file("movie.mkv.mp4", 40L * 1024 * 1024 * 1024))
         assertNotNull(s.video)
-        assertFalse(s.imageTooLarge)
         assertEquals("", s.previewError)
         assertEquals(1, platform.players.size)
     }

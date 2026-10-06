@@ -176,6 +176,8 @@ class FileBrowserRecreationTest {
     /** Starts the system picker from the Upload key and returns its request code. */
     private fun pickUpload(): Int {
         compose.onNodeWithContentDescription("Upload files").performClick()
+        // ta-coik.67: the key opens the chooser; "Choose files" is the system picker.
+        compose.onNodeWithText(UploadChooserCopy.CHOOSE_FILES).performClick()
         var code = -1
         scenario.onActivity { code = shadowOf(it).nextStartedActivityForResult.requestCode }
         return code

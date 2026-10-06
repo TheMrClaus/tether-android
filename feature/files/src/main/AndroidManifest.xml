@@ -17,6 +17,21 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/workspace_file_paths" />
         </provider>
+
+        <!-- ta-coik.67 "Take photo" in the Upload chooser: a write grant on ONE capture file under
+             cache/workspace-capture/ (res/xml/workspace_capture_paths.xml), handed to the camera
+             app through ACTION_IMAGE_CAPTURE. Its own provider, apart from the read-only share one.
+             Not exported; access only through the per-intent URI grant. No CAMERA permission is
+             declared (the camera app holds its own). -->
+        <provider
+            android:name="com.tether.app.ui.files.WorkspaceCaptureProvider"
+            android:authorities="${applicationId}.workspacecapture"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/workspace_capture_paths" />
+        </provider>
     </application>
 
 </manifest>

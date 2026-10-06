@@ -62,7 +62,6 @@ class FileBrowserSvgTest {
         s.selectFile(file("huge.svg", 5L * 1024 * 1024 * 1024))
         advanceUntilIdle()
         assertNotNull(s.svg)
-        assertFalse(s.imageTooLarge)
         assertEquals("", s.previewError)
     }
 

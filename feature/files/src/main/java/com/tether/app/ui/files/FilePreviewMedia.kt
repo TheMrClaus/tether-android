@@ -82,12 +82,6 @@ internal fun ImagePreview(state: FileBrowserState, entry: WorkspaceFileEntry) {
             PreviewPicture(image, entry.name, size)
         }
         svg != null -> SvgPreview(state, svg, entry)
-        state.imageTooLarge -> StateBlock(
-            TetherIcons.FileImage,
-            "Image preview is limited to ${FileFormat.size(BrowserLimits.MAX_IMAGE_PREVIEW_BYTES)} and ${BrowserLimits.MAX_IMAGE_PIXELS / 1_000_000} megapixels in the app. The file remains unchanged.",
-            title = "Image is too large to preview",
-            iconSize = 30.dp,
-        )
         state.previewLoading -> StateBlock(null, "Opening image preview…", spinner = true)
     }
 }

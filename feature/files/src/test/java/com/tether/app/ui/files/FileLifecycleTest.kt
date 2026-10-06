@@ -35,6 +35,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -313,9 +314,34 @@ class FileLifecycleTest {
         return out.toByteArray()
     }
 
-    @Test fun aPixelBombHeaderIsRefusedBeforeDecodingAndAnImageStillDecodes() {
+    /** A valid grayscale PNG of [w] x [h] solid black, streamed (a few hundred KB on disk for a 150 MP picture). */
+    private fun writeSolidPng(file: File, w: Int, h: Int) {
+        fun chunk(type: String, data: ByteArray): ByteArray {
+            val crc = CRC32().apply { update(type.toByteArray()); update(data) }.value.toInt()
+            return ByteBuffer.allocate(12 + data.size).putInt(data.size).put(type.toByteArray()).put(data).putInt(crc).array()
+        }
+        val idat = ByteArrayOutputStream()
+        java.util.zip.DeflaterOutputStream(idat, java.util.zip.Deflater(1)).use { z ->
+            val row = ByteArray(1 + w) // filter byte 0, then w black pixels
+            repeat(h) { z.write(row) }
+        }
+        val ihdr = ByteBuffer.allocate(13).putInt(w).putInt(h).put(8).put(0).put(0).put(0).put(0).array()
+        file.outputStream().use { out ->
+            out.write(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A))
+            out.write(chunk("IHDR", ihdr))
+            out.write(chunk("IDAT", idat.toByteArray()))
+            out.write(chunk("IEND", ByteArray(0)))
+        }
+    }
+
+    @Test fun aPixelBombHeaderIsNeverRefusedOnItsClaimAndAnImageStillDecodes() {
+        // A header claiming 900 MP over a few bytes of data: decoded sampled (or failing on its own
+        // truncation), never "too large", never a bitmap past the bounds.
         val bomb = cache.newScratch().apply { writeBytes(pngHeader(30_000, 30_000)) }
-        assertEquals(Decoded.TooLarge, BoundedImages.decode(bomb))
+        when (val decoded = BoundedImages.decode(bomb)) {
+            is Decoded.Ok -> assertTrue(decoded.bitmap.allocationByteCount <= BrowserLimits.MAX_DECODED_BYTES)
+            Decoded.Failed -> Unit
+        }
         val real = cache.newScratch()
         Bitmap.createBitmap(48, 32, Bitmap.Config.ARGB_8888).apply { eraseColor(AColor.BLUE) }
             .compress(Bitmap.CompressFormat.PNG, 100, real.outputStream())
@@ -324,16 +350,57 @@ class FileLifecycleTest {
         assertEquals(Decoded.Failed, BoundedImages.decode(cache.newScratch().apply { writeText("not an image") }))
     }
 
-    @Test fun aDecoderThatThrowsIsTooLargeOrFailedNeverACrash() {
+    @Test fun a150MegapixelPictureIsDecodedSampledDownNotRefused() {
+        // Past the old 100 MP refusal: 12248 x 12248 = 150.0 MP (the web's <img> shows it).
+        val big = cache.newScratch()
+        writeSolidPng(big, 12_248, 12_248)
+        assertTrue("a few hundred KB on disk", big.length() < 4L * 1024 * 1024)
+        val runtime = Runtime.getRuntime()
+        System.gc()
+        val before = runtime.totalMemory() - runtime.freeMemory()
+        val decoded = BoundedImages.decode(big) as Decoded.Ok
+        val after = runtime.totalMemory() - runtime.freeMemory()
+        val bitmap = decoded.bitmap
+        assertTrue("${bitmap.width} x ${bitmap.height}", bitmap.width <= BrowserLimits.MAX_IMAGE_SIDE && bitmap.height <= BrowserLimits.MAX_IMAGE_SIDE)
+        assertTrue("${bitmap.allocationByteCount} B", bitmap.allocationByteCount <= BrowserLimits.MAX_DECODED_BYTES)
+        assertEquals("sampled by a power of two: 12248 / 4", 3_062, bitmap.width)
+        println("PROBE 150MP decode -> ${bitmap.width}x${bitmap.height}, ${bitmap.allocationByteCount / 1024 / 1024} MiB bitmap, JVM heap delta ${(after - before) / 1024 / 1024} MiB")
+    }
+
+    @Test fun anImageOver32MiBIsDownloadedWithoutACapAndPreviewed() = runBlocking {
+        // The old native-only cap was 32 MiB: a 40 MiB listing size neither refuses nor caps the download.
+        val png = ByteArrayOutputStream().also { Bitmap.createBitmap(48, 32, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        val big = FilesFixtures.file("big.png", 40L * 1024 * 1024)
+        files.downloads[big.path] = png
+        val loaded = platform.loadImage(files, big)
+        assertTrue("$loaded", loaded is ImageLoad.Ok)
+        assertEquals(listOf(Long.MAX_VALUE), files.downloadCaps)
+        assertTrue("the scratch copy is gone", cache.root.listFiles().isNullOrEmpty())
+    }
+
+    @Test fun anImageThatCannotBeDecodedIsTheWebsCopyNotATooLargeState() = runBlocking {
+        files.downloads[entry.path] = "not an image".toByteArray()
+        val loaded = platform.loadImage(files, entry) as ImageLoad.Failed
+        assertEquals("This image could not be displayed.", loaded.message)
+        assertTrue(cache.root.listFiles().isNullOrEmpty())
+    }
+
+    @Test fun aDecoderThatRunsOutOfMemoryIsRetriedSmallerThenFailsNeverACrash() {
         val file = cache.newScratch().apply { writeBytes(pngHeader(64, 64)) }
-        var calls = 0
+        val samples = mutableListOf<Int>()
         fun boundsThenThrow(error: Throwable): (String, android.graphics.BitmapFactory.Options) -> Bitmap? = { path, options ->
-            calls++
-            if (options.inJustDecodeBounds) android.graphics.BitmapFactory.decodeFile(path, options) else throw error
+            if (options.inJustDecodeBounds) {
+                android.graphics.BitmapFactory.decodeFile(path, options)
+            } else {
+                samples += options.inSampleSize
+                throw error
+            }
         }
-        assertEquals(Decoded.TooLarge, BoundedImages.decode(file, boundsThenThrow(OutOfMemoryError("bitmap"))))
+        assertEquals(Decoded.Failed, BoundedImages.decode(file, boundsThenThrow(OutOfMemoryError("bitmap"))))
+        assertEquals("each retry halves again", listOf(1, 2, 4, 8), samples)
+        samples.clear()
         assertEquals(Decoded.Failed, BoundedImages.decode(file, boundsThenThrow(IllegalArgumentException("bitmap too large"))))
-        assertEquals(4, calls)
+        assertEquals("a decoder error is not retried", listOf(1), samples)
     }
 
     @Test fun sweepsRunOffTheMainThread() {
@@ -351,6 +418,37 @@ class FileLifecycleTest {
         platform.claimShare(share)
         cache.sweepExpired()
         assertTrue("the receiving app gets its full window", File(share.id).exists())
+    }
+
+    /**
+     * ta-3pf (ta-u2n verifier, mutation V3): finishing the activity clears the ViewModel, and that
+     * may sweep only what is past its window. A share the receiving app is still reading must
+     * survive it (sweeping everything there would delete it mid-read); one past its window goes.
+     */
+    @Test fun aClaimedShareSurvivesTheViewModelBeingClearedAndAnExpiredOneDoesNot() = runBlocking {
+        files.downloads[entry.path] = byteArrayOf(1)
+        val claimed = (platform.shareCopy(files, entry) as FilesResult.Ok).value
+        platform.claimShare(claimed)
+        val expired = (platform.shareCopy(files, entry) as FilesResult.Ok).value
+        platform.claimShare(expired)
+        File(expired.id).walkTopDown().forEach { it.setLastModified(System.currentTimeMillis() - FileCache.SHARE_GRACE_MS - 5_000) }
+        val scratch = cache.newScratch("preview").apply { writeText("in flight") }
+
+        val store = androidx.lifecycle.ViewModelStore()
+        val model = androidx.lifecycle.ViewModelProvider(
+            store,
+            object : androidx.lifecycle.ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
+                    FileBrowserViewModel(files, platform, kotlinx.coroutines.flow.MutableStateFlow<String?>("https://server-a")) as T
+            },
+        )[FileBrowserViewModel::class.java]
+        assertNotNull(model)
+        store.clear() // the activity finished for good: onCleared
+
+        assertTrue("a share inside its window is still being read by the receiving app", File(claimed.id).exists())
+        assertFalse("past its window it goes", File(expired.id).exists())
+        assertTrue("by age only: a scratch copy in flight stays", scratch.exists())
     }
 
     @Test fun f16CountsEightBytesAPixel() {

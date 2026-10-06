@@ -66,17 +66,20 @@ class AndroidBrowserPlatform(
     /** Shared copies made but not yet handed to the share sheet, by id (their directory). */
     private val unclaimed = ConcurrentHashMap<String, File>()
 
+    /**
+     * The web's `<img>` has no size cap, so neither does this: the file streams to a scratch copy on
+     * disk (no byte limit; a full disk is an I/O failure) and is decoded from there, sampled down to
+     * fit the memory bounds ([BoundedImages]) rather than refused. Any failure is "could not be displayed".
+     */
     override suspend fun loadImage(files: WorkspaceFiles, entry: WorkspaceFileEntry): ImageLoad = withContext(Dispatchers.IO) {
-        if (entry.size > BrowserLimits.MAX_IMAGE_PREVIEW_BYTES) return@withContext ImageLoad.TooLarge
         var scratch: File? = null
         try {
             val file = cache.newScratch().also { scratch = it }
-            val result = file.outputStream().use { out -> files.download(entry.path, BrowserLimits.MAX_IMAGE_PREVIEW_BYTES, out) }
+            val result = file.outputStream().use { out -> files.download(entry.path, Long.MAX_VALUE, out) }
             when (result) {
-                is FilesResult.Failed -> if (result.tooLarge) ImageLoad.TooLarge else ImageLoad.Failed(result.message)
+                is FilesResult.Failed -> ImageLoad.Failed(FileBrowserState.IMAGE_ERROR)
                 is FilesResult.Ok -> when (val decoded = BoundedImages.decode(file)) {
                     is Decoded.Ok -> ImageLoad.Ok(decoded.bitmap.asImageBitmap())
-                    Decoded.TooLarge -> ImageLoad.TooLarge
                     Decoded.Failed -> ImageLoad.Failed(FileBrowserState.IMAGE_ERROR)
                 }
             }

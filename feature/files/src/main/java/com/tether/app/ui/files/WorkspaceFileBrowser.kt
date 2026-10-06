@@ -62,8 +62,8 @@ private const val VIEW_MODEL_KEY = "workspace-file-browser"
 
 /**
  * components/workspace-file-browser.tsx as a native modal: shown while [FileBrowserState.isOpen]
- * (open it with [FileBrowserState.open]). Uploads come from the system document picker and
- * stream to the server; Save to device goes through the system "create document" picker; Share
+ * (open it with [FileBrowserState.open]). Uploads come from the system document picker or the
+ * system camera (the Upload key's chooser) and stream to the server; Save to device goes through the system "create document" picker; Share
  * hands one downloaded copy to the system share sheet through a read-only URI grant.
  */
 @Composable
@@ -87,6 +87,16 @@ fun WorkspaceFileBrowser(state: FileBrowserState) {
             destination,
         )
     }
+    // ta-coik.67: the system camera, beside the picker (the web's file input offers both on Android).
+    val takePhoto = rememberUploadCapture(
+        onPhoto = { photo -> state.upload(listOf(photo), uploadInto.also { uploadInto = null }) },
+        onUnavailable = { words ->
+            uploadInto = null
+            state.reportError(words)
+        },
+    )
+    // The Upload key's chooser is open (kept across a rotation, like the picker's folder).
+    var choosingUpload by rememberSaveable { mutableStateOf(false) }
     var saving by rememberPendingSave()
     val createDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         val entry = saving
@@ -126,7 +136,7 @@ fun WorkspaceFileBrowser(state: FileBrowserState) {
             onClose = state::close,
             onUpload = {
                 uploadInto = state.currentDir
-                pickUploads.launch(arrayOf("*/*"))
+                choosingUpload = true
             },
             modifier = Modifier.graphicsLayer {
                 val p = progress.value
@@ -135,6 +145,21 @@ fun WorkspaceFileBrowser(state: FileBrowserState) {
             },
         )
 
+        if (choosingUpload) {
+            SubDialog({ choosingUpload = false }) {
+                UploadChooserContent(
+                    onChooseFiles = {
+                        choosingUpload = false
+                        pickUploads.launch(arrayOf("*/*"))
+                    },
+                    onTakePhoto = {
+                        choosingUpload = false
+                        takePhoto()
+                    },
+                    onCancel = { choosingUpload = false },
+                )
+            }
+        }
         state.itemActions?.let { entry ->
             SubDialog(state::closeItemActions) {
                 ItemActionsContent(

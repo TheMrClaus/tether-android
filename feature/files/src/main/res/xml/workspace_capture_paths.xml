@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ta-coik.67: the only directory the WorkspaceCaptureProvider serves: the camera's capture files
+     in the app cache (written by the camera app through a one-off write grant, uploaded from the
+     app-made file and deleted by the browser). Apart from workspace_file_paths.xml, the read side. -->
+<paths>
+    <cache-path name="capture" path="workspace-capture/" />
+</paths>

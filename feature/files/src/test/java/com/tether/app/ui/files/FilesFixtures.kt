@@ -94,7 +94,7 @@ class FakeFiles : WorkspaceFiles {
         enter("upload", parent, name)
         uploadThrows?.let { throw it }
         uploaded += name to source.open().use { it.readBytes() }
-        return failures["upload:$name"] ?: FilesResult.Ok(WorkspaceMutation(parent))
+        return failures["upload:$name"] ?: failures["upload"] ?: FilesResult.Ok(WorkspaceMutation(parent))
     }
 
     override suspend fun head(path: String): FilesResult<FileHead> = enter("head", path).let { FilesResult.Ok(FileHead(0, null)) }
@@ -124,8 +124,12 @@ class FakeFiles : WorkspaceFiles {
         return FilesResult.Ok(RangeRead(ByteArray(count) { ((offset + it) % 251).toByte() }, size, rangeOrigin))
     }
 
+    /** The byte cap each [download] was asked for, in order. */
+    val downloadCaps = mutableListOf<Long>()
+
     override suspend fun download(path: String, maxBytes: Long, sink: OutputStream): FilesResult<Long> {
         enter("download", path)
+        downloadCaps += maxBytes
         val body = downloads[path] ?: return FilesResult.Failed("This file could not be opened.", 404)
         sink.write(body)
         return FilesResult.Ok(body.size.toLong())

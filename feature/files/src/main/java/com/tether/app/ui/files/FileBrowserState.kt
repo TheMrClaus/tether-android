@@ -55,9 +55,10 @@ data class DestinationPicker(
 
 /**
  * One document picked for upload: the provider's display name (checked by [UploadNames] before
- * anything is sent) and its byte stream.
+ * anything is sent) and its byte stream. [onFinished] runs once the upload is over for it, whatever
+ * way it ended (sent, failed, refused, cancelled): a scratch photo deletes itself there.
  */
-class PickedUpload(val displayName: String?, val source: UploadSource)
+class PickedUpload(val displayName: String?, val source: UploadSource, val onFinished: () -> Unit = {})
 
 /** A downloaded copy ready to hand to the system share sheet; [id] names it to the platform. */
 data class ShareReady(val uri: Uri, val mimeType: String, val name: String, val id: String)
@@ -67,7 +68,6 @@ enum class SweepMode { Expired, All }
 
 sealed interface ImageLoad {
     data class Ok(val image: ImageBitmap) : ImageLoad
-    data object TooLarge : ImageLoad
     data class Failed(val message: String) : ImageLoad
 }
 
@@ -162,8 +162,6 @@ class FileBrowserState(
     var text by mutableStateOf<String?>(null)
         private set
     var image by mutableStateOf<ImageBitmap?>(null)
-        private set
-    var imageTooLarge by mutableStateOf(false)
         private set
 
     /** The selected SVG, parsed; the preview draws it at the size it is shown at. */
@@ -277,7 +275,6 @@ class FileBrowserState(
         image = null
         svg = null
         releaseVideo()
-        imageTooLarge = false
         previewError = ""
         previewLoading = false
         previewFullscreen = false
@@ -336,7 +333,6 @@ class FileBrowserState(
         text = null
         image = null
         svg = null
-        imageTooLarge = false
         previewError = ""
         val kind = FileKinds.previewKind(entry)
         if (kind == PreviewKind.Video) {
@@ -378,7 +374,6 @@ class FileBrowserState(
                 if (previewJob !== self) return@launchLatest
                 when (result) {
                     is ImageLoad.Ok -> image = result.image
-                    ImageLoad.TooLarge -> imageTooLarge = true
                     // The web's <img onError> copy.
                     is ImageLoad.Failed -> previewError = IMAGE_ERROR
                 }
@@ -409,7 +404,6 @@ class FileBrowserState(
         text = null
         image = null
         svg = null
-        imageTooLarge = false
         previewError = ""
         previewLoading = false
         previewFullscreen = false
@@ -563,7 +557,7 @@ class FileBrowserState(
         if (picked.isEmpty()) return
         mutationError = ""
         notice = null
-        scope.launch {
+        val job = scope.launch {
             // The folder the Upload key was pressed in (kept across a configuration change by the host).
             val dir = destination ?: currentDir
             for (item in picked) {
@@ -583,6 +577,15 @@ class FileBrowserState(
             // the web the upload error only flashes; keep it, it is the only word the user gets.
             mutationError = lastError
         }
+        // Sent, failed, refused or cancelled (sign-out, a cleared owner, a scope already gone):
+        // scratch copies go, even when the body never ran.
+        job.invokeOnCompletion { picked.forEach { item -> runCatching { item.onFinished() } } }
+    }
+
+    /** A word for the mutation banner from the host (the camera could not start). */
+    fun reportError(message: String) {
+        mutationError = message
+        notice = null
     }
 
     // --- Native exports ---

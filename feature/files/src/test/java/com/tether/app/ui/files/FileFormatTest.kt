@@ -97,18 +97,19 @@ class FileFormatTest {
         dir.deleteRecursively()
     }
 
-    @Test fun decodeSizingSamplesByBytesAndRefusesAPixelBomb() {
+    @Test fun decodeSizingSamplesByBytesAndNeverRefuses() {
         // A 4096² 16-bit PNG decodes to RGBA_F16: 128 MiB at full size, so it is halved to 32 MiB.
         assertEquals(2, BoundedImages.plan(4096, 4096, bytesPerPixel = 8))
         assertEquals(1, BoundedImages.plan(4096, 4096, bytesPerPixel = 4))
         // 8000 x 1000 fits in bytes but not in sides.
         assertEquals(2, BoundedImages.plan(8000, 1000, bytesPerPixel = 4))
-        // 100 MP exactly is sampled (sides 2500, 25 MB); a claim past it is refused outright.
+        // 100 MP is sampled (sides 2500, 25 MB); a claim past it is sampled further, never refused.
         assertEquals(4, BoundedImages.plan(10_000, 10_000, bytesPerPixel = 4))
-        assertEquals(null, BoundedImages.plan(30_000, 30_000, bytesPerPixel = 4))
-        assertEquals(null, BoundedImages.plan(100_001, 1_000, bytesPerPixel = 4))
+        assertEquals(8, BoundedImages.plan(30_000, 30_000, bytesPerPixel = 4))
+        assertEquals(4, BoundedImages.plan(12_248, 12_248, bytesPerPixel = 4))
+        assertEquals(32, BoundedImages.plan(100_001, 1_000, bytesPerPixel = 4))
         for ((w, h, bpp) in listOf(Triple(4096, 4096, 8), Triple(9999, 9999, 8), Triple(12_000, 8_000, 4), Triple(65_000, 1_500, 8))) {
-            val sample = BoundedImages.plan(w, h, bpp)!!
+            val sample = BoundedImages.plan(w, h, bpp)
             val bytes = (w / sample).toLong() * (h / sample) * bpp
             assertTrue("$w x $h @$bpp -> 1/$sample = $bytes B", bytes <= BrowserLimits.MAX_DECODED_BYTES && w / sample <= 4096 && h / sample <= 4096)
         }

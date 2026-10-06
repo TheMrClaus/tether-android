@@ -9,6 +9,7 @@ import com.tether.app.ui.files.FilesFixtures.readme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -170,16 +171,16 @@ class FileBrowserStateTest {
         advanceUntilIdle()
         assertEquals("loadImage $ROOT/shot.png", platform.calls.last())
         assertEquals("This image could not be displayed.", s.previewError)
-        platform.image = ImageLoad.TooLarge
-        s.selectFile(FilesFixtures.file("big.jpg", 99))
+        // No size state: a big file is loaded like any other (ta-coik.66), whatever it claims.
+        platform.image = ImageLoad.Failed("x")
+        s.selectFile(FilesFixtures.file("big.jpg", 40L * 1024 * 1024 * 1024))
         advanceUntilIdle()
-        assertTrue(s.imageTooLarge)
-        assertEquals("", s.previewError)
+        assertEquals("loadImage $ROOT/big.jpg", platform.calls.last())
+        assertEquals("This image could not be displayed.", s.previewError)
     }
 
     @Test fun openingAFolderCancelsAPendingPreview() = runTest {
         platform.imageGate = CompletableDeferred()
-        platform.image = ImageLoad.TooLarge
         val s = browser()
         s.open()
         advanceUntilIdle()
@@ -190,7 +191,8 @@ class FileBrowserStateTest {
         platform.imageGate!!.complete(Unit)
         advanceUntilIdle()
         assertNull(s.selected)
-        assertFalse(s.imageTooLarge)
+        assertNull(s.image)
+        assertEquals("", s.previewError)
     }
 
     @Test fun newFolderPostsTheTrimmedNameInTheCurrentFolderAndReloads() = runTest {
@@ -336,6 +338,40 @@ class FileBrowserStateTest {
         advanceUntilIdle()
         assertEquals(listOf("list $ROOT", "upload $ROOT report.pdf", "upload $ROOT upload", "list $ROOT"), files.calls)
         assertEquals("the refused one says why, in the server's words", UploadNames.INVALID, s.mutationError)
+    }
+
+    /** ta-coik.67: a scratch photo deletes itself whatever way its upload ends. */
+    @Test fun aPickedUploadIsFinishedWhateverWayItEnds() = runTest {
+        val s = browser()
+        s.open()
+        advanceUntilIdle()
+        var finished = 0
+        fun picked(name: String?) = PickedUpload(name, bytesSource(byteArrayOf(1)), onFinished = { finished++ })
+        s.upload(listOf(picked("a.jpg"), picked("evil\u0000.jpg")))
+        advanceUntilIdle()
+        assertEquals("sent, and refused for its name", 2, finished)
+        files.failures["upload"] = FilesResult.Failed("That file could not be uploaded.")
+        s.upload(listOf(picked("b.jpg")))
+        advanceUntilIdle()
+        assertEquals("failed", 3, finished)
+    }
+
+    @Test fun aPickedUploadIsFinishedWhenItsSessionEndsMidUploadAndWhenItsScopeIsAlreadyGone() = runTest {
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+        val s = FileBrowserState(files, platform, scope).apply { cwd = ROOT; sessionName = FilesFixtures.SESSION }
+        s.open()
+        advanceUntilIdle()
+        var finished = 0
+        files.gates["upload"] = CompletableDeferred()
+        s.upload(listOf(PickedUpload("a.jpg", bytesSource(byteArrayOf(1)), onFinished = { finished++ })))
+        advanceUntilIdle()
+        assertEquals("still uploading", 0, finished)
+        scope.cancel()
+        advanceUntilIdle()
+        assertEquals("cancelled mid-upload", 1, finished)
+        s.upload(listOf(PickedUpload("b.jpg", bytesSource(byteArrayOf(1)), onFinished = { finished++ })))
+        advanceUntilIdle()
+        assertEquals("a scope that is gone never starts the body, the copy still goes", 2, finished)
     }
 
     @Test fun theIdentityIsTheServerWhileSignedInAndNothingOnceRefused() {

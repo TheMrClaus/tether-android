@@ -111,23 +111,27 @@ class FileCache(cacheDir: File) {
     }
 }
 
-/** What an image decode came to. */
+/** What an image decode came to: a bitmap, or "could not be displayed". There is no "too large". */
 sealed interface Decoded {
     data class Ok(val bitmap: Bitmap) : Decoded
-    data object TooLarge : Decoded
     data object Failed : Decoded
 }
 
 /**
- * Bitmap decoding for the image preview, bounded three ways: the file is at most
- * [BrowserLimits.MAX_IMAGE_PREVIEW_BYTES] (enforced while downloading); a header that claims more
- * than [BrowserLimits.MAX_IMAGE_PIXELS] is refused before any pixel is decoded; and the decode is
- * sampled down until neither side passes [BrowserLimits.MAX_IMAGE_SIDE] AND the bitmap fits in
+ * Bitmap decoding for the image preview. The web's `<img>` shows any image the browser can decode,
+ * so there is no byte cap and no pixel-count refusal here (ta-coik.66): memory is bounded by
+ * SUBSAMPLING instead. The file is on disk (never in memory); the decode is sampled down until
+ * neither side passes [BrowserLimits.MAX_IMAGE_SIDE] AND the bitmap fits in
  * [BrowserLimits.MAX_DECODED_BYTES] at the config the decoder reports (8 bytes a pixel for a
- * 16-bit/HDR source that decodes to RGBA_F16, 4 otherwise). So neither a decompression bomb nor a
- * wide-gamut 4096² image can exhaust memory or trip the canvas's "bitmap too large" limit.
+ * 16-bit/HDR source that decodes to RGBA_F16, 4 otherwise). A 150-megapixel picture therefore
+ * decodes at 1/4 or smaller, row by row, like a decompression bomb of any size: never a refusal.
+ * The one failure left is a decode that still cannot run (an unreadable file, no memory even at
+ * the sampled size after [MAX_ATTEMPTS] halvings), which is the web's "could not be displayed".
  */
 object BoundedImages {
+    /** Each retry after an out-of-memory or an over-budget bitmap halves the size again. */
+    const val MAX_ATTEMPTS = 4
+
     fun decode(
         file: File,
         // The platform decoder; a parameter only so tests can make it throw.
@@ -138,27 +142,33 @@ object BoundedImages {
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
         decodeFile(file.path, options)
-        val sample = plan(options.outWidth, options.outHeight, bytesPerPixel(options.outConfig))
-        when {
-            options.outWidth <= 0 || options.outHeight <= 0 -> Decoded.Failed
-            sample == null -> Decoded.TooLarge
-            else -> {
-                options.inJustDecodeBounds = false
+        if (options.outWidth <= 0 || options.outHeight <= 0) {
+            Decoded.Failed
+        } else {
+            options.inJustDecodeBounds = false
+            var sample = plan(options.outWidth, options.outHeight, bytesPerPixel(options.outConfig))
+            var result: Decoded = Decoded.Failed
+            for (attempt in 1..MAX_ATTEMPTS) {
                 options.inSampleSize = sample
-                val bitmap = decodeFile(file.path, options)
-                when {
-                    bitmap == null -> Decoded.Failed
-                    // The decoder's own answer, whatever config it chose.
-                    bitmap.allocationByteCount > BrowserLimits.MAX_DECODED_BYTES -> {
-                        bitmap.recycle()
-                        Decoded.TooLarge
-                    }
-                    else -> Decoded.Ok(bitmap)
+                val bitmap = try {
+                    decodeFile(file.path, options)
+                } catch (_: OutOfMemoryError) {
+                    sample = sample shl 1
+                    continue
                 }
+                // The decoder's own answer, whatever config it chose.
+                if (bitmap != null && bitmap.allocationByteCount > BrowserLimits.MAX_DECODED_BYTES) {
+                    bitmap.recycle()
+                    sample = sample shl 1
+                    continue
+                }
+                result = if (bitmap == null) Decoded.Failed else Decoded.Ok(bitmap)
+                break
             }
+            result
         }
     } catch (_: OutOfMemoryError) {
-        Decoded.TooLarge
+        Decoded.Failed
     } catch (_: RuntimeException) {
         Decoded.Failed
     }
@@ -166,27 +176,23 @@ object BoundedImages {
     /** RGBA_F16 (16-bit PNG, HDR AVIF) is 8 bytes a pixel; count everything else as 4 (ARGB_8888, the widest of the rest). */
     fun bytesPerPixel(config: Bitmap.Config?): Int = if (config == Bitmap.Config.RGBA_F16) 8 else 4
 
-    /**
-     * The power-of-two sample that fits [width] × [height] at [bytesPerPixel] under both caps, or
-     * null when the header claims more than [BrowserLimits.MAX_IMAGE_PIXELS] (refused, not sampled:
-     * the decoder would still inflate every row).
-     */
+    /** The power-of-two sample that fits [width] x [height] at [bytesPerPixel] under both caps (at least 1; any size has one). */
     fun plan(
         width: Int,
         height: Int,
         bytesPerPixel: Int,
         maxSide: Int = BrowserLimits.MAX_IMAGE_SIDE,
         maxBytes: Long = BrowserLimits.MAX_DECODED_BYTES,
-    ): Int? {
+    ): Int {
         if (width <= 0 || height <= 0) return 1
-        if (width.toLong() * height > BrowserLimits.MAX_IMAGE_PIXELS) return null
         var sample = 1
-        while (true) {
+        while (sample > 0) {
             val w = (width / sample).toLong()
             val h = (height / sample).toLong()
             if (w <= maxSide && h <= maxSide && w * h * bytesPerPixel <= maxBytes) return sample
-            sample *= 2
+            sample = sample shl 1
         }
+        return 1 shl 30
     }
 }
 
@@ -237,17 +243,14 @@ class ContentUploadSource(
 }
 
 object BrowserLimits {
-    /** Native-only: the web's <img> has no cap; the app downloads an image to decode it. */
-    const val MAX_IMAGE_PREVIEW_BYTES: Long = 32L * 1024L * 1024L
+    // No byte cap and no pixel-count cap on the file (the web's <img> has none): these two bound
+    // only the DECODED bitmap, by subsampling (ta-coik.66).
 
     /** Decoded images are sampled down to at most this many pixels a side… */
     const val MAX_IMAGE_SIDE: Int = 4096
 
     /** …and at most this many bytes (well under the 100 MB canvas limit). */
     const val MAX_DECODED_BYTES: Long = 64L * 1024L * 1024L
-
-    /** A header claiming more pixels than this is refused outright. */
-    const val MAX_IMAGE_PIXELS: Long = 100_000_000L
 
     /** Saving to the device or sharing out streams at most this much (the server's own upload cap). */
     const val MAX_EXPORT_BYTES: Long = 512L * 1024L * 1024L
