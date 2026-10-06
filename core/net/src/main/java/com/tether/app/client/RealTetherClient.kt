@@ -3144,7 +3144,8 @@ class RealTetherClient(
             }
             // T5.1: v67 order, v63 seen, v50/v128 server settings (SidebarSync.kt); ta-t7l: v16 advanced settings.
             // ta-q6p: v84 the custom-providers registry (SidebarSync.kt, dropped with the settings frames).
-            is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings, is ServerMessage.AdvancedSettings ->
+            is ServerMessage.SessionOrder, is ServerMessage.Seen, is ServerMessage.ServerSettings, is ServerMessage.AdvancedSettings,
+            is ServerMessage.ArchiveStaleResult ->
                 ifCurrent(webSocket) { sidebarSync.onFrame(message) }
             // r2 (security F1): stamped with this socket's epoch: a list from before a reconnect is never written back.
             is ServerMessage.Providers -> ifCurrent(webSocket) {
@@ -5185,6 +5186,15 @@ class RealTetherClient(
         sendFrame(SidebarSync.setSessionOrder(cwd, order)).also { sent -> if (sent) sidebarSync.applyLocalOrder(cwd, order) }
 
     override fun requestServerSettings(): Boolean = sendFrame(ClientMessage.ServerSettingsRequest)
+
+    override val archiveStale: StateFlow<ArchiveStaleReply?> = sidebarSync.archiveStale
+
+    override fun requestArchiveStale(mode: String, days: Int, exceptSessionId: String?, origin: String?): Boolean {
+        val frame = ClientMessage.ArchiveStale(mode, days, exceptSessionId?.takeIf { it.isNotEmpty() })
+        return if (origin == null) sendFrame(frame) else sendFrameFor(origin, frame)
+    }
+
+    override fun clearArchiveStale() = sidebarSync.clearArchiveStale()
 
     override fun setPinnedWorkspaces(pinned: List<String>): Boolean = sendFrame(SidebarSync.setPinnedWorkspaces(pinned))
 

@@ -42,6 +42,8 @@ data class SidebarState(
      * A row's End session carries the origin captured when it was armed (or swiped open).
      */
     val origin: String? = null,
+    /** v141: the client's latest `archive-stale-result`, which steps the "Archive idle sessions" dialog. */
+    val archiveStale: com.tether.app.client.ArchiveStaleReply? = null,
 )
 
 /** One workspace block as rendered (session-sidebar.tsx:997-1190). */
@@ -61,6 +63,10 @@ data class BlockView(
     val expanded: Boolean,
     val hiddenRuns: Int,
     val manualOrder: Boolean,
+    /** Issue #244: rows idle beyond a week, folded into the collapsed "Older" row (0 = no band). */
+    val olderCount: Int = 0,
+    /** The band is expanded: its rows are listed after the recent ones. */
+    val olderOpen: Boolean = false,
 )
 
 data class SidebarView(
@@ -85,7 +91,12 @@ object SidebarViewModel {
         if (state.openingHistoryId != null) entry.history?.historyId == state.openingHistoryId
         else entry.live != null && entry.live.id == state.activeSessionId
 
-    fun view(state: SidebarState, visibleCounts: Map<String, Int> = emptyMap(), drag: DragPreview? = null): SidebarView {
+    fun view(
+        state: SidebarState,
+        visibleCounts: Map<String, Int> = emptyMap(),
+        drag: DragPreview? = null,
+        olderOpen: Set<String> = emptySet(),
+    ): SidebarView {
         val byKey = HashMap<String, SidebarEntry>()
         state.filteredSessions.forEach { byKey[it.key] = it }
         state.sidebarSessions.forEach { byKey.putIfAbsent(it.key, it) }
@@ -124,8 +135,27 @@ object SidebarViewModel {
             val name = Format.projectName(workspace)
             val path = Format.compactPath(workspace, state.workspaceRoot)
             val showPath = path != "~/$name" && path != "~"
+            // Issue #244 (session-sidebar.tsx:1028-1042): fold rows idle beyond a week. Never while a
+            // lens/query is on, and never a pinned / working / waiting / unread / selected row (or a
+            // parent with a working / selected delegate child). Expanded, the older rows follow the recent ones.
+            val band = if (!filtering) {
+                SidebarWorkspaces.splitRecentOlder(
+                    rows,
+                    state.now,
+                    SidebarWorkspaces.SIDEBAR_RECENT_MS,
+                    { row -> ((row["lastMessageAt"] as? JsNum) ?: (row["updatedAt"] as? JsNum))?.value },
+                ) { row ->
+                    val e = entry(row)
+                    e.live?.pinned == true || Web.hasWorkInProgress(row) || Web.hasUnseenWork(row) || isActiveEntry(state, e) ||
+                        grouping.childrenByKey[e.key].orEmpty().any { Web.hasWorkInProgress(it) || isActiveEntry(state, entry(it)) }
+                }
+            } else {
+                SidebarWorkspaces.RecentOlder(rows, emptyList())
+            }
+            val olderIsOpen = workspace in olderOpen
+            val shownRows = if (olderIsOpen) band.recent + band.older else band.recent
             val page = SidebarWorkspaces.paginateWorkspaceRows(
-                JsArr.of(rows),
+                JsArr.of(shownRows),
                 visibleCounts[workspace]?.let { JsNum(it.toDouble()) },
                 Web.WORKSPACE_PAGE_SIZE.toDouble(),
             ) { isActiveEntry(state, entry(it)) }
@@ -145,6 +175,9 @@ object SidebarViewModel {
                 expanded = page["expanded"] == com.tether.app.protocol.tree.JsBool.TRUE,
                 hiddenRuns = hiddenRuns,
                 manualOrder = state.sessionOrders[workspace].orEmpty().isNotEmpty(),
+                // session-sidebar.tsx:1193 — the toggle only once every recent row is on screen.
+                olderCount = if ((page["remaining"] as JsNum).value.toInt() == 0) band.older.size else 0,
+                olderOpen = olderIsOpen,
             )
         }
         return SidebarView(

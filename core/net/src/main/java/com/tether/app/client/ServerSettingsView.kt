@@ -60,6 +60,8 @@ enum class ServerSetting(val key: String, val kind: SettingKind, val maxBytes: I
     ShutdownDrainMs("shutdownDrainMs", SettingKind.Number),
     MessageInterruptMode("messageInterruptMode", SettingKind.Choice),
     ClaudeModelFallback("claudeModelFallback", SettingKind.Choice),
+    /** v142 (tether #244 part D): archive sessions idle longer than this many days, unattended; 0 = off (the default). */
+    AutoArchiveIdleDays("autoArchiveIdleDays", SettingKind.Number),
     ArchiveOnMerge("archiveOnMerge", SettingKind.Toggle),
     DefaultPermissionMode("defaultPermissionMode", SettingKind.Choice),
     DefaultSandboxPolicy("defaultSandboxPolicy", SettingKind.Choice),
@@ -168,7 +170,8 @@ class ServerSettingsView private constructor(
 
     /**
      * v142 (tether #244 part D): `autoArchiveIdleDays` — sessions idle longer than this many days are archived,
-     * unattended; 0 = off (the default). Typed and tolerated only (its row is a later piece): a missing or
+     * unattended; 0 = off (the default). The Advanced tab's row ([ServerSetting.AutoArchiveIdleDays]) shows
+     * the number as the server holds it; this reading is for callers that want the days: a missing or
      * wrongly typed value, a fraction, or one outside 0..3650 reads as off.
      */
     val autoArchiveIdleDays: Int

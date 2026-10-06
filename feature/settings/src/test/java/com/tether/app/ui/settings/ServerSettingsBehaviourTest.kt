@@ -141,7 +141,7 @@ class ServerSettingsBehaviourTest {
         assertEquals(at.sorted(), at)
         for (label in listOf("Host", "Port", "Password", "Proxy token", "State directory", "Workspace root", "Persistent mode", "Task telemetry",
             "Max warm sessions", "Max concurrent turns", "Idle eviction (ms)", "Background hard cap (ms)", "Sweep interval (ms)", "Shutdown drain (ms)",
-            "Message while busy", "Claude model fallback", "Archive on merge", "Default permission mode", "Default sandbox tier",
+            "Message while busy", "Claude model fallback", "Auto-archive idle sessions (days)", "Archive on merge", "Default permission mode", "Default sandbox tier",
             "Default to isolated worktree", "Allowed folders", "Spawn extra writable roots", "Detached agent launches", "Claude CLI version")) {
             assertTrue(label, all.contains(label))
         }
@@ -228,6 +228,47 @@ class ServerSettingsBehaviourTest {
         port.performImeAction()
         compose.waitForIdle()
         assertEquals(listOf(json("""{"type":"set-server-settings","settings":{"port":60000}}""")), writer.frames())
+    }
+
+    /**
+     * tether #244 part D (settings-dialog.tsx 29537e0 :2351): the Auto-archive idle sessions row is a number
+     * row after the model fallback and before Archive on merge, off (0) by default; it saves through the same
+     * server-settings path as every other row, as the number the field holds (no app-only range check: the
+     * server validates 0-3650), and an emptied field is null as the web writes it.
+     */
+    @Test fun autoArchiveIdleDaysIsAnOffByDefaultNumberRowThatSavesThroughTheServerSettingsPath() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(writer = writer))
+        val all = texts()
+        val label = all.indexOf("Auto-archive idle sessions (days)")
+        assertTrue(label >= 0)
+        assertTrue(all.indexOf("Claude model fallback") < label && label < all.indexOf("Archive on merge"))
+        assertTrue(all.contains("Archive sessions idle longer than this (0 = off)"))
+        val field = tag(ServerSettingsTags.input(ServerSetting.AutoArchiveIdleDays)).performScrollTo()
+        assertTrue("off by default: the field holds 0", allSemantics().contains("EditableText=0"))
+        field.performTextReplacement("14")
+        field.performImeAction()
+        compose.waitForIdle()
+        assertEquals(listOf(json("""{"type":"set-server-settings","settings":{"autoArchiveIdleDays":14}}""")), writer.frames())
+        assertTrue(writer.patches.all { it.second == ORIGIN })
+    }
+
+    @Test fun autoArchiveIdleDaysShowsTheServersValueAndEmptyingItWritesNull() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("autoArchiveIdleDays" to 30))), writer = writer))
+        val field = tag(ServerSettingsTags.input(ServerSetting.AutoArchiveIdleDays)).performScrollTo()
+        assertTrue(allSemantics().contains("EditableText=30"))
+        field.performTextReplacement("")
+        field.performImeAction()
+        compose.waitForIdle()
+        assertEquals(listOf(json("""{"type":"set-server-settings","settings":{"autoArchiveIdleDays":null}}""")), writer.frames())
+    }
+
+    @Test fun autoArchiveIdleDaysSetByTheEnvironmentIsLockedAndSendsNothing() {
+        val writer = RecordingWriter()
+        show(ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(), envForced = mapOf("autoArchiveIdleDays" to true)), writer = writer))
+        tag(ServerSettingsTags.input(ServerSetting.AutoArchiveIdleDays)).performScrollTo().assertIsNotEnabled()
+        assertEquals(emptyList<Any>(), writer.patches)
     }
 
     /** r2: without a server (signed out) no settings are drawn, even with a frame in hand. */

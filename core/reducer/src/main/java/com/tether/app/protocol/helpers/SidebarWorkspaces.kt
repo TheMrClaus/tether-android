@@ -85,4 +85,32 @@ object SidebarWorkspaces {
             "expanded" to js(limit > pageSize),
         )
     }
+
+    /** lib/sidebar-workspaces.mjs:113 SIDEBAR_RECENT_MS — the "Older" band's default horizon (issue #244): 7 days. */
+    const val SIDEBAR_RECENT_MS: Long = 7L * 24 * 60 * 60 * 1000
+
+    /** The two bands [splitRecentOlder] returns (lib/sidebar-workspaces.mjs:126 `{ recent, older }`). */
+    data class RecentOlder<T>(val recent: List<T>, val older: List<T>)
+
+    /**
+     * lib/sidebar-workspaces.mjs:126 splitRecentOlder — pure and non-destructive: nothing is archived or
+     * hidden irreversibly. A row is never folded when [isKeep] (pinned, working, waiting, unread,
+     * selected) or when its activity time is unknown ([activityAt] returns epoch ms, null/NaN = unknown).
+     */
+    fun <T> splitRecentOlder(
+        rows: List<T>,
+        now: Long,
+        horizonMs: Long,
+        activityAt: (T) -> Double?,
+        isKeep: ((T) -> Boolean)? = null,
+    ): RecentOlder<T> {
+        val recent = ArrayList<T>()
+        val older = ArrayList<T>()
+        for (row in rows) {
+            val at = activityAt(row)
+            val stale = at != null && at.isFinite() && at > 0 && now - at >= horizonMs
+            if (stale && !(isKeep != null && isKeep(row))) older.add(row) else recent.add(row)
+        }
+        return RecentOlder(recent, older)
+    }
 }

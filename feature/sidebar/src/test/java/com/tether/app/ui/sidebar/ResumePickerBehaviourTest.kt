@@ -67,6 +67,8 @@ class ResumePickerBehaviourTest {
                     workspaceRoot = F.ROOT,
                     onSelect = vm::selectSession,
                     onClose = { closed++ },
+                    // The fixtures' own clock: the "Older" band's horizon is measured from it, not from the host's.
+                    clock = { F.NOW },
                 )
             }
         }

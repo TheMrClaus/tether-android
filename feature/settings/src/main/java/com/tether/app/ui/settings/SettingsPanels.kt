@@ -309,6 +309,7 @@ private fun AdvancedPanel(narrow: Boolean, binding: ServerSettingsBinding, githu
                 ServerNumberRow(AdvancedRows.shutdownDrainMs, view, binding, narrow)
                 ServerSelectRow(AdvancedRows.messageInterruptMode, AdvancedRows.messageInterruptModes, view, binding, narrow)
                 ServerSelectRow(AdvancedRows.claudeModelFallback, AdvancedRows.claudeModelFallbacks, view, binding, narrow)
+                ServerNumberRow(AdvancedRows.autoArchiveIdleDays, view, binding, narrow)
                 ServerToggleRow(AdvancedRows.archiveOnMerge, view, binding, narrow)
             }
             SettingsSection(AdvancedRows.DEFAULTS, AnnotatedString(AdvancedRows.DEFAULTS_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("defaults"))) {

@@ -59,6 +59,8 @@ fun SessionDrawer(
     onOpenScheduledActions: (() -> Unit)? = null,
     /** T9.3: the Scheduled destination is on screen (the key reads `is-active`). */
     scheduledActionsActive: Boolean = false,
+    /** The wall clock behind the relative times and the "Older" band's 7-day horizon (the web's Date.now()). */
+    clock: () -> Long = System::currentTimeMillis,
 ) {
     val client = vm.client
     val scope = rememberCoroutineScope()
@@ -70,6 +72,7 @@ fun SessionDrawer(
     val sessionOrders by client.sessionOrders.collectAsStateWithLifecycle()
     val remoteSeen by client.remoteSeen.collectAsStateWithLifecycle()
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
+    val archiveStale by client.archiveStale.collectAsStateWithLifecycle()
     val directories by client.directories.collectAsStateWithLifecycle()
     // T5.3: the debounced workspace content search (use-tether.ts searchResults).
     val contentHits by client.searchResults.collectAsStateWithLifecycle()
@@ -103,11 +106,11 @@ fun SessionDrawer(
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
 
     // Relative times tick while the list is composed (the web re-renders on every broadcast).
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var now by remember { mutableLongStateOf(clock()) }
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
-            now = System.currentTimeMillis()
+            now = clock()
         }
     }
 
@@ -151,6 +154,7 @@ fun SessionDrawer(
         origin = consentOrigin,
         scheduledActionCount = scheduled.schedules.count { it.status != "completed" } + scheduled.continuations.size,
         scheduledActionsActive = scheduledActionsActive,
+        archiveStale = archiveStale,
     )
 
     // T5.3 dashboard.tsx:835-844 — debounce the typed filter into a server-side content search;

@@ -247,6 +247,9 @@ class SidebarController(
         onOpenSettings = onOpenSettings,
         onCollapse = { updatePreferences { it.copy(sidebarCollapsed = true) } },
         onOpenGlobalSearch = onOpenGlobalSearch,
+        // use-tether.ts requestArchiveStale / setArchiveStale(null): the dialog's preview and bounded run.
+        onArchiveStale = { mode, days, except, origin -> client.requestArchiveStale(mode, days, except, origin) },
+        onClearArchiveStale = client::clearArchiveStale,
     )
 
     companion object {

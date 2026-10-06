@@ -152,6 +152,20 @@ class ServerSettingsViewTest {
         assertEquals("", v.numberText(ServerSetting.MaxConcurrentTurns))
     }
 
+    @Test fun autoArchiveIdleDaysIsANumberSettingThatDefaultsToOffAndRoundTrips() {
+        val off = view("""{"autoArchiveIdleDays":0}""")
+        assertEquals("0", off.numberText(ServerSetting.AutoArchiveIdleDays))
+        assertEquals(0, off.autoArchiveIdleDays)
+        assertEquals(json("""{"autoArchiveIdleDays":14}"""), ServerSettingsPatch.number(off, ServerSetting.AutoArchiveIdleDays, "14"))
+        assertNull("unchanged writes nothing", ServerSettingsPatch.number(off, ServerSetting.AutoArchiveIdleDays, "0"))
+        val on = view("""{"autoArchiveIdleDays":30}""")
+        assertEquals(30, on.autoArchiveIdleDays)
+        assertEquals(json("""{"autoArchiveIdleDays":0}"""), ServerSettingsPatch.number(on, ServerSetting.AutoArchiveIdleDays, "0"))
+        assertEquals(json("""{"autoArchiveIdleDays":null}"""), ServerSettingsPatch.number(on, ServerSetting.AutoArchiveIdleDays, ""))
+        // A server that does not know the key yet (pre-v142): the row reads empty, never an error.
+        assertEquals("", view("""{"host":"x"}""").numberText(ServerSetting.AutoArchiveIdleDays))
+    }
+
     @Test fun aToggleSendsTheFlippedValue() {
         val v = view("""{"claudePersistent":true}""")
         assertEquals(json("""{"claudePersistent":false}"""), ServerSettingsPatch.toggle(v, ServerSetting.ClaudePersistent))

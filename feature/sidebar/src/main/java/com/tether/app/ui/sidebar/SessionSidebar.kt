@@ -112,6 +112,13 @@ data class SidebarActions(
     val onOpenGlobalSearch: (() -> Unit)? = null,
     /** Scheduled actions (T9.3). */
     val onOpenScheduledActions: (() -> Unit)? = null,
+    /**
+     * v141 `archive-stale` (use-tether.ts requestArchiveStale): (mode, days, the open session exempted, the server
+     * origin the dialog was opened for). True when the frame went out.
+     */
+    val onArchiveStale: (String, Int, String?, String?) -> Boolean = { _, _, _, _ -> false },
+    /** use-tether.ts `setArchiveStale(null)`: opening the dialog drops the last reply. */
+    val onClearArchiveStale: () -> Unit = {},
 )
 
 /** Transient UI state a screenshot or test can start from (the web's component state). */
@@ -123,6 +130,10 @@ data class SidebarUiSeed(
     val sortMenuOpen: Boolean = false,
     val archivedOpen: Boolean = false,
     val openChildren: Set<String> = emptySet(),
+    /** Blocks whose "Older" band starts expanded (the web's `olderOpen` state). */
+    val olderOpen: Set<String> = emptySet(),
+    /** The "Archive idle sessions" dialog starts open, in this state (a golden's starting point). */
+    val archiveStale: ArchiveStaleState? = null,
 )
 
 object SidebarTags {
@@ -139,6 +150,7 @@ object SidebarTags {
     fun end(key: String) = "sidebar-end:$key"
     fun archive(key: String) = "sidebar-archive:$key"
     fun block(workspace: String) = "sidebar-block:$workspace"
+    fun older(workspace: String) = "sidebar-older:$workspace"
 }
 
 /** How long an armed end control stays armed (session-sidebar.tsx:40). */
@@ -178,6 +190,13 @@ private fun SidebarContent(
     val phone = layout == TetherLayoutClass.Phone
 
     var visibleCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    // session-sidebar.tsx:609 — blocks whose "Older" band is expanded; collapsed by default, per block.
+    var olderOpen by remember { mutableStateOf(seed.olderOpen) }
+    // archive-stale-dialog.tsx:27-32 — the dialog's own state; it persists across opens like the web's mounted dialog.
+    var archiveOpen by remember { mutableStateOf(seed.archiveStale != null) }
+    var archiveState by remember { mutableStateOf(seed.archiveStale ?: ArchiveStaleState()) }
+    // The server the dialog was opened for: a run is never delivered to another one.
+    var archiveOrigin by remember { mutableStateOf(state.origin) }
     var armedKey by remember { mutableStateOf(seed.armedKey) }
     // T13.2 r3: the server the armed end control was armed for; its second tap ends on that server only.
     val latestOrigin by rememberUpdatedState(state.origin)
@@ -202,7 +221,7 @@ private fun SidebarContent(
     }
 
     val dragPreview = drag?.takeIf { it.engaged }?.let { DragPreview(it.key, it.order) }
-    val view = SidebarViewModel.view(state, visibleCounts, dragPreview)
+    val view = SidebarViewModel.view(state, visibleCounts, dragPreview, olderOpen)
 
     val latestState by rememberUpdatedState(state)
     val latestView by rememberUpdatedState(view)
@@ -298,6 +317,7 @@ private fun SidebarContent(
                         endBounds = endBounds,
                         onShowMore = { ws -> visibleCounts = visibleCounts + (ws to ((visibleCounts[ws] ?: Web.WORKSPACE_PAGE_SIZE) + Web.WORKSPACE_PAGE_SIZE)) },
                         onShowLess = { ws -> visibleCounts = visibleCounts - ws },
+                        onToggleOlder = { ws -> olderOpen = if (ws in olderOpen) olderOpen - ws else olderOpen + ws },
                     )
                 }
             }
@@ -308,6 +328,17 @@ private fun SidebarContent(
             }
             if (state.workspaces.isEmpty() && state.connected) {
                 item(key = "empty") { SidebarEmpty("Add a workspace to see its sessions here.") }
+            }
+            item(key = "archive-stale") {
+                // session-sidebar.tsx:1236 — opens the dialog and asks for a preview of the threshold chosen last.
+                SidebarAddRow(TetherIcons.Archive, 14.dp, ArchiveStaleCopy.ENTRY, ArchiveStaleTags.Entry) {
+                    val step = ArchiveStaleModel.open(archiveState)
+                    archiveState = step.state
+                    archiveOrigin = latestOrigin
+                    actions.onClearArchiveStale()
+                    archiveOpen = true
+                    step.request?.let { actions.onArchiveStale(it.mode, it.days, latestState.activeSessionId, latestOrigin) }
+                }
             }
             item(key = "add-workspace") { AddWorkspaceRow(actions.onBrowseWorkspace) }
         }
@@ -327,6 +358,16 @@ private fun SidebarContent(
             )
         }
         SidebarFooter(phone = phone, onOpenSettings = actions.onOpenSettings, onCollapse = actions.onCollapse)
+    }
+
+    if (archiveOpen) {
+        ArchiveStaleDialog(
+            state = archiveState,
+            reply = state.archiveStale,
+            onState = { archiveState = it },
+            onRequest = { actions.onArchiveStale(it.mode, it.days, latestState.activeSessionId, archiveOrigin) },
+            onClose = { archiveOpen = false },
+        )
     }
 }
 
@@ -748,6 +789,7 @@ private fun WorkspaceBlock(
     endBounds: MutableMap<String, Rect>,
     onShowMore: (String) -> Unit,
     onShowLess: (String) -> Unit,
+    onToggleOlder: (String) -> Unit,
 ) {
     val t = LocalTetherTokens.current
     Column(
@@ -817,6 +859,17 @@ private fun WorkspaceBlock(
                 }
                 if (block.remaining > 0) MoreRow(TetherIcons.ChevronDown, "Show more", count = block.remaining) { onShowMore(block.workspace) }
                 if (block.remaining == 0 && block.expanded) MoreRow(TetherIcons.ChevronUp, "Show less") { onShowLess(block.workspace) }
+                // session-sidebar.tsx:1193 — "Older" N / "Hide older": idle > 7 days, nothing is archived.
+                if (block.olderCount > 0) {
+                    MoreRow(
+                        if (block.olderOpen) TetherIcons.ChevronUp else TetherIcons.ChevronDown,
+                        if (block.olderOpen) "Hide older" else "Older",
+                        count = block.olderCount,
+                        modifier = Modifier.testTag(SidebarTags.older(block.workspace)),
+                        expanded = block.olderOpen,
+                        onClick = { onToggleOlder(block.workspace) },
+                    )
+                }
                 if (block.hiddenRuns > 0) {
                     MoreRow(
                         TetherIcons.Eye,
@@ -987,15 +1040,17 @@ private fun MoreRow(
     text: String,
     count: Int? = null,
     action: String? = null,
+    modifier: Modifier = Modifier,
+    expanded: Boolean? = null,
     onClick: () -> Unit,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .heightIn(min = 2.75f.rem)
-            .semantics(mergeDescendants = true) { }
+            .semantics(mergeDescendants = true) { if (expanded != null) stateDescription = if (expanded) "Expanded" else "Collapsed" }
             .clickable(role = Role.Button, onClick = onClick)
             .padding(start = 0.9f.rem, end = t.css.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
@@ -1030,7 +1085,12 @@ private fun ResetOrderRow(onClick: () -> Unit) {
 
 /** `.workspace-add-row` (globals.css 3232-3252; studio.css 343-344). */
 @Composable
-private fun AddWorkspaceRow(onClick: () -> Unit) {
+private fun AddWorkspaceRow(onClick: () -> Unit) =
+    SidebarAddRow(TetherIcons.FolderPlus, 15.dp, "Add workspace", SidebarTags.AddWorkspace, onClick)
+
+/** A `.workspace-add-row` key: the Add workspace row and the Archive idle sessions row share it. */
+@Composable
+private fun SidebarAddRow(icon: androidx.compose.ui.graphics.vector.ImageVector, iconSize: androidx.compose.ui.unit.Dp, label: String, tag: String, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusSm)
@@ -1046,13 +1106,13 @@ private fun AddWorkspaceRow(onClick: () -> Unit) {
             .semantics(mergeDescendants = true) { }
             .clickable(role = Role.Button, onClick = onClick)
             .padding(start = 0.8f.rem, end = t.css.spaceSm)
-            .testTag(SidebarTags.AddWorkspace),
+            .testTag(tag),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
         val ink = t.muted
-        SmallIcon(TetherIcons.FolderPlus, ink, 15.dp)
-        Text("Add workspace", style = css(type.ui, 0.75f, 600), color = ink)
+        SmallIcon(icon, ink, iconSize)
+        Text(label, style = css(type.ui, 0.75f, 600), color = ink)
     }
 }
 

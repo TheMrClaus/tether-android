@@ -39,7 +39,7 @@ object ServerFixtures {
             "claudePersistent" to true, "claudeTaskTelemetry" to true,
             "warmMaxSessions" to 8, "maxConcurrentTurns" to 0, "warmIdleEvictionMs" to 900000, "warmBgHardCapMs" to 1800000,
             "warmSweepMs" to 60000, "shutdownDrainMs" to 0,
-            "messageInterruptMode" to "interrupt", "claudeModelFallback" to "cli", "archiveOnMerge" to false,
+            "messageInterruptMode" to "interrupt", "claudeModelFallback" to "cli", "autoArchiveIdleDays" to 0, "archiveOnMerge" to false,
             "defaultPermissionMode" to "default", "defaultSandboxPolicy" to null, "defaultUseWorktree" to false,
             "allowedRoots" to listOf("/srv/work", "/srv/scratch"), "spawnExtraWritableRoots" to emptyList<String>(),
             "preferSpawnAgent" to "deny", "pinnedWorkspaces" to null,

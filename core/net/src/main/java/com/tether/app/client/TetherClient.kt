@@ -1004,6 +1004,19 @@ interface TetherClient {
     /** v50 `server-settings` request. */
     fun requestServerSettings(): Boolean = false
 
+    /** v141 (tether #244 part C): the latest `archive-stale-result` (null until one arrives, or after [clearArchiveStale]). */
+    val archiveStale: StateFlow<ArchiveStaleReply?> get() = NO_ARCHIVE_STALE
+
+    /**
+     * v141 `archive-stale {mode, days, exceptSessionId?}` (use-tether.ts requestArchiveStale): [mode] is
+     * "preview" (counts only) or "run" (one bounded batch). Sent only on a live socket opened for [origin],
+     * the server the dialog was opened against, so a run is never delivered to another server.
+     */
+    fun requestArchiveStale(mode: String, days: Int, exceptSessionId: String?, origin: String?): Boolean = false
+
+    /** use-tether.ts `setArchiveStale(null)`. */
+    fun clearArchiveStale() {}
+
     /** v128 `set-server-settings {pinnedWorkspaces}`: the owner-level kept sidebar workspaces. */
     fun setPinnedWorkspaces(pinned: List<String>): Boolean = false
 
@@ -1223,6 +1236,7 @@ private val NO_EVENT_LOG: StateFlow<EventLog> = MutableStateFlow(EventLog())
 private val NO_HISTORIES_BY_CWD: StateFlow<Map<String, List<HistorySession>>> = MutableStateFlow(emptyMap())
 private val NO_SESSION_ORDERS: StateFlow<Map<String, List<String>>> = MutableStateFlow(emptyMap())
 private val NO_REMOTE_SEEN: StateFlow<Map<String, Long>> = MutableStateFlow(emptyMap())
+private val NO_ARCHIVE_STALE: StateFlow<ArchiveStaleReply?> = MutableStateFlow(null)
 private val NO_SERVER_SETTINGS: StateFlow<ServerMessage.ServerSettings?> = MutableStateFlow(null)
 private val NO_ADVANCED_SETTINGS: StateFlow<ServerMessage.AdvancedSettings?> = MutableStateFlow(null)
 private val NO_PROVIDER_PROFILES: StateFlow<ProvidersList?> = MutableStateFlow(null)

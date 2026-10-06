@@ -27,7 +27,35 @@ enum class SidebarShot(val id: String) {
     HarnessMenu("harness-menu"),
     Drag("drag"),
     Unread("unread-lens"),
+
+    /** tether #244: idle > 7 days folded into the collapsed "Older" row (closed, then open). */
+    Older("older"),
+    OlderOpen("older-open"),
+
+    /** tether #244: the "Archive idle sessions" dialog, its preview and its settled summary. */
+    ArchiveStale("archive-stale"),
+    ArchiveStaleDone("archive-stale-done"),
 }
+
+private const val DAY_MIN = 24L * 60
+
+private fun olderSessions() = listOf(
+    SidebarFixtures.live("o1", "Fix the flaky retry test", ago = 20),
+    SidebarFixtures.live("o2", "Draft the release notes", ago = 3 * DAY_MIN),
+    SidebarFixtures.live("o3", "Spike the new importer", ago = 9 * DAY_MIN),
+    SidebarFixtures.live("o4", "Rework the settings tabs", ago = 21 * DAY_MIN),
+    SidebarFixtures.live("o5", "Old pairing session", ago = 45 * DAY_MIN),
+    SidebarFixtures.live("o6", "Keep: pinned long ago", ago = 60 * DAY_MIN).copy(pinned = true),
+)
+
+private fun archiveStalePreview() = com.tether.app.client.ArchiveStaleReply(
+    1,
+    com.tether.app.protocol.ServerMessage.ArchiveStaleResult(
+        mode = "preview", days = 30, eligible = 12, archived = 0, failed = 0, remaining = 12,
+        skipped = com.tether.app.protocol.ArchiveStaleSkipped(pinned = 2, inFlight = 1, viewing = 1),
+        retention = com.tether.app.protocol.ArchiveStaleRetention(cap = 100, retiredNow = 95, willBePruned = 7),
+    ),
+)
 
 private val F = SidebarFixtures
 
@@ -50,6 +78,9 @@ fun sidebarState(shot: SidebarShot): SidebarState = when (shot) {
     )
     SidebarShot.Drag -> F.state(F.drawerSessions.take(5))
     SidebarShot.Unread -> F.state(F.statusSessions, histories = F.statusHistories, unreadOnly = true)
+    SidebarShot.Older, SidebarShot.OlderOpen -> F.state(olderSessions())
+    SidebarShot.ArchiveStale -> F.state(F.drawerSessions.take(5), activeId = "s02").copy(archiveStale = archiveStalePreview())
+    SidebarShot.ArchiveStaleDone -> F.state(F.drawerSessions.take(5), activeId = "s02")
 }
 
 fun sidebarSeed(shot: SidebarShot): SidebarUiSeed = when (shot) {
@@ -59,6 +90,9 @@ fun sidebarSeed(shot: SidebarShot): SidebarUiSeed = when (shot) {
     SidebarShot.Drag -> SidebarUiSeed(drag = DragPreview("live:s04", listOf("live:s01", "live:s04", "live:s02", "live:s03", "live:s05")))
     SidebarShot.Groups -> SidebarUiSeed(openChildren = setOf("live:g3"))
     SidebarShot.Archived -> SidebarUiSeed(archivedOpen = true)
+    SidebarShot.OlderOpen -> SidebarUiSeed(olderOpen = setOf(F.ROOT))
+    SidebarShot.ArchiveStale -> SidebarUiSeed(archiveStale = ArchiveStaleState())
+    SidebarShot.ArchiveStaleDone -> SidebarUiSeed(archiveStale = ArchiveStaleState(days = 30, archived = 10, failed = 2, done = true))
     else -> SidebarUiSeed()
 }
 
@@ -104,7 +138,7 @@ class SidebarTabletScreenshotTest(private val shot: SidebarShot, private val ski
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(SidebarShot.Drawer, SidebarShot.Groups).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(SidebarShot.Drawer, SidebarShot.Groups, SidebarShot.Older, SidebarShot.ArchiveStale).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 

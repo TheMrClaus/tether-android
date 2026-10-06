@@ -9,6 +9,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 
+/** One `archive-stale-result`, numbered by arrival ([seq]) so a reply equal to the last still counts as a new one. */
+data class ArchiveStaleReply(val seq: Long, val result: ServerMessage.ArchiveStaleResult)
+
 /**
  * T5.1: the per-server sidebar state RealTetherClient publishes — kept apart from the connection
  * code so the client only routes frames here ([onFrame]) and clears it with the other server
@@ -33,6 +36,18 @@ internal class SidebarSync(now: () -> Long = { System.nanoTime() / 1_000_000 }) 
 
     /** ta-dh1: every `server-settings` frame counted, an unchanged one too ("Scan again" waits for the next). */
     val serverSettingsReplies = MutableStateFlow(0L)
+
+    /**
+     * v141 (tether #244 part C): the latest `archive-stale-result` (use-tether.ts `archiveStale`), numbered
+     * by arrival so two equal consecutive replies (a bounded run continuing) are still two replies.
+     */
+    val archiveStale = MutableStateFlow<ArchiveStaleReply?>(null)
+    private var archiveStaleSeq = 0L
+
+    /** use-tether.ts `setArchiveStale(null)`: the dialog opening (or closing) drops the last reply. */
+    fun clearArchiveStale() {
+        archiveStale.value = null
+    }
 
     /** ta-q6p: the last `providers` frame, the server's (null until one arrives on this server). */
     val serverProviderProfiles = MutableStateFlow<ProvidersList?>(null)
@@ -72,6 +87,7 @@ internal class SidebarSync(now: () -> Long = { System.nanoTime() / 1_000_000 }) 
                 serverSettingsReplies.update { it + 1 }
             }
             is ServerMessage.AdvancedSettings -> advancedSettings.value = message
+            is ServerMessage.ArchiveStaleResult -> archiveStale.value = ArchiveStaleReply(++archiveStaleSeq, message)
             is ServerMessage.Providers -> onProviders(message, epoch = 0L)
             else -> return false
         }
@@ -103,6 +119,7 @@ internal class SidebarSync(now: () -> Long = { System.nanoTime() / 1_000_000 }) 
         remoteSeen.value = emptyMap()
         serverSettings.value = null
         advancedSettings.value = null
+        archiveStale.value = null
         clearProviders()
     }
 

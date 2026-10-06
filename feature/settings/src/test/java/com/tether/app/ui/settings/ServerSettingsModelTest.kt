@@ -67,6 +67,22 @@ class ServerSettingsModelTest {
         assertEquals(web, AdvancedRows.defaultSandboxPolicy)
     }
 
+    /** settings-dialog.tsx 29537e0 :2351 (tether #244 part D): the web's words, verbatim, between the model fallback and Archive on merge. */
+    @Test fun autoArchiveIdleDaysHasTheWebsWordsAndSitsWhereTheWebPutsIt() {
+        val web = ServerRow(
+            ServerSetting.AutoArchiveIdleDays,
+            "Auto-archive idle sessions (days)",
+            "Archive sessions idle longer than this (0 = off)",
+            "Unattended version of Archive idle sessions. Skips pinned sessions and any with a turn in progress, a pending approval or question, " +
+                "or background work. Each archived session gets a journal notice and stays restorable. Archived sessions beyond the newest 100 are " +
+                "still pruned by retention.",
+            "0",
+        )
+        assertEquals(web, AdvancedRows.autoArchiveIdleDays)
+        assertEquals("autoArchiveIdleDays", ServerSetting.AutoArchiveIdleDays.key)
+        assertEquals(com.tether.app.client.SettingKind.Number, ServerSetting.AutoArchiveIdleDays.kind)
+    }
+
     @Test fun aBindingWithoutAServerSendsNothing() {
         val writer = RecordingWriter()
         assertFalse(ServerFixtures.binding(origin = null, writer = writer).send(ServerFixtures.json("""{"host":"x"}""")))
@@ -80,7 +96,7 @@ class ServerSettingsModelTest {
             AdvancedRows.host, AdvancedRows.port, AdvancedRows.password, AdvancedRows.proxyToken, AdvancedRows.stateDir, AdvancedRows.workspaceRoot,
             AdvancedRows.claudePersistent, AdvancedRows.claudeTaskTelemetry, AdvancedRows.warmMaxSessions, AdvancedRows.maxConcurrentTurns,
             AdvancedRows.warmIdleEvictionMs, AdvancedRows.warmBgHardCapMs, AdvancedRows.warmSweepMs, AdvancedRows.shutdownDrainMs,
-            AdvancedRows.messageInterruptMode, AdvancedRows.claudeModelFallback, AdvancedRows.archiveOnMerge, AdvancedRows.defaultPermissionMode,
+            AdvancedRows.messageInterruptMode, AdvancedRows.claudeModelFallback, AdvancedRows.autoArchiveIdleDays, AdvancedRows.archiveOnMerge, AdvancedRows.defaultPermissionMode,
             AdvancedRows.defaultSandboxPolicy, AdvancedRows.defaultUseWorktree, AdvancedRows.preferSpawnAgent, MetadataRows.enabled, MetadataRows.mode,
         ).map { it.setting } + listOf(AdvancedRows.allowedRoots.setting, AdvancedRows.spawnExtraWritableRoots.setting, ServerSetting.MetadataGenerationProvider, ServerSetting.MetadataGenerationProviders)
         // ta-dh1: the Engines tab's keys: each card's home, command and launch command, the switches'
