@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -47,6 +48,13 @@ enum class FilesShot(val id: String) {
     List("list"),
     Text("text"),
     Image("image"),
+    VideoLoading("video-loading"),
+    VideoReady("video-ready"),
+    VideoError("video-error"),
+    SvgWide("svg"),
+    SvgTall("svg-tall"),
+    SvgSmall("svg-small"),
+    SvgError("svg-error"),
     Loading("loading"),
     Empty("empty"),
     Error("error"),
@@ -60,6 +68,14 @@ enum class FilesShot(val id: String) {
 }
 
 private const val ShotTag = "files-shot"
+
+/** The L1 ruling's three SVG cases: a viewBox-only wide one (4:1), a viewBox-only tall one (1:2), a small width/height one. */
+private const val SVG_WIDE = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100"><rect width="400" height="100" fill="#5c6ee6"/><circle cx="50" cy="50" r="30" fill="#ecedf4"/><rect x="110" y="35" width="250" height="30" fill="#ecedf4"/></svg>"""
+private const val SVG_TALL = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200"><rect width="100" height="200" fill="#ecedf4"/><rect x="25" y="20" width="50" height="160" fill="#5c6ee6"/><circle cx="50" cy="40" r="14" fill="#ecedf4"/></svg>"""
+private const val SVG_SMALL = """<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#5c6ee6"/><rect x="4" y="4" width="32" height="12" fill="#ecedf4"/></svg>"""
+
+/** Shots whose picture is drawn off the main thread: the capture waits for it. */
+private val AwaitsSvg = setOf(FilesShot.SvgWide, FilesShot.SvgTall, FilesShot.SvgSmall)
 
 private fun checkerImage() = Bitmap.createBitmap(480, 320, Bitmap.Config.ARGB_8888).apply {
     // parity-seed.mjs fixturePng's tiles, scaled up: 80px squares of two tones.
@@ -82,7 +98,15 @@ private fun stateFor(shot: FilesShot): FileBrowserState {
             else -> Unit
         }
     }
-    val platform = FakePlatform().apply { image = ImageLoad.Ok(checkerImage()) }
+    val platform = FakePlatform().apply {
+        image = ImageLoad.Ok(checkerImage())
+        when (shot) {
+            FilesShot.SvgWide -> svg = SvgLoad.Ok(checkNotNull(SvgImages.parse(SVG_WIDE)))
+            FilesShot.SvgTall -> svg = SvgLoad.Ok(checkNotNull(SvgImages.parse(SVG_TALL)))
+            FilesShot.SvgSmall -> svg = SvgLoad.Ok(checkNotNull(SvgImages.parse(SVG_SMALL)))
+            else -> Unit
+        }
+    }
     return FileBrowserState(files, platform, CoroutineScope(Dispatchers.Unconfined)).apply {
         cwd = ROOT
         sessionName = FilesFixtures.SESSION
@@ -90,6 +114,19 @@ private fun stateFor(shot: FilesShot): FileBrowserState {
         when (shot) {
             FilesShot.Text -> selectFile(FilesFixtures.readme)
             FilesShot.Image -> selectFile(FilesFixtures.file("screenshot.png", 18_432))
+            FilesShot.VideoLoading -> selectFile(FilesFixtures.file("demo.mp4", 48_000_000))
+            FilesShot.VideoReady -> {
+                selectFile(FilesFixtures.file("demo.mp4", 48_000_000))
+                platform.players.single().phase = VideoPhase.Ready(1920, 1080)
+            }
+            FilesShot.VideoError -> {
+                selectFile(FilesFixtures.file("demo.mp4", 48_000_000))
+                platform.players.single().fail()
+            }
+            FilesShot.SvgWide -> selectFile(FilesFixtures.file("banner.svg", 412))
+            FilesShot.SvgTall -> selectFile(FilesFixtures.file("tower.svg", 388))
+            FilesShot.SvgSmall -> selectFile(FilesFixtures.file("badge.svg", 301))
+            FilesShot.SvgError -> selectFile(FilesFixtures.file("broken.svg", 12))
             FilesShot.Unsupported -> selectFile(FilesFixtures.file("release.zip", 5_347_738))
             FilesShot.TooLarge -> selectFile(FilesFixtures.file("server.log", WorkspaceFiles.MAX_TEXT_PREVIEW_BYTES * 3))
             FilesShot.UploadError -> upload(listOf(PickedUpload("photo.png", bytesSource(byteArrayOf(1)))))
@@ -132,7 +169,7 @@ fun ComposeContentTestRule.snapFiles(shot: FilesShot, skin: TetherSkin, name: St
     val state = stateFor(shot)
     setContent {
         TetherTheme(skin.mode) {
-            CompositionLocalProvider(LocalReducedMotion provides true) {
+            CompositionLocalProvider(LocalReducedMotion provides true, LocalVideoSurfaceEnabled provides false) {
                 // The console floor behind the scrim (the shell is there in the app, as on the web).
                 Box(Modifier.fillMaxSize().background(LocalTetherTokens.current.mineral).testTag(ShotTag)) {
                     FileBrowserFrame(state, onClose = {}, onUpload = {}, env = FilesFixtures.env)
@@ -142,6 +179,7 @@ fun ComposeContentTestRule.snapFiles(shot: FilesShot, skin: TetherSkin, name: St
         }
     }
     waitForIdle()
+    if (shot in AwaitsSvg) waitUntil(10_000) { onAllNodesWithTag("files-image").fetchSemanticsNodes().isNotEmpty() }
     onNodeWithTag(ShotTag).captureRoboImage(
         "src/test/screenshots/$name/${skin.id}-$size.png",
         roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),
@@ -174,7 +212,11 @@ class FilesTabletScreenshotTest(private val shot: FilesShot, private val skin: T
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(FilesShot.List, FilesShot.Text, FilesShot.Image, FilesShot.Destination).flatMap { s ->
+        fun params(): List<Array<Any>> = listOf(
+            FilesShot.List, FilesShot.Text, FilesShot.Image, FilesShot.Destination,
+            FilesShot.VideoLoading, FilesShot.VideoReady, FilesShot.VideoError,
+            FilesShot.SvgWide, FilesShot.SvgTall, FilesShot.SvgSmall, FilesShot.SvgError,
+        ).flatMap { s ->
             TetherSkin.entries.map { arrayOf<Any>(s, it) }
         }
     }

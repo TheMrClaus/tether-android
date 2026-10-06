@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +46,13 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+
+/**
+ * Whether a video draws its frame view and controller bar. Always on in the app; the screenshot
+ * goldens switch it off, because a Robolectric window has no real surface and puts the controller's
+ * own window at the bottom of the screen, which says nothing about the box the preview draws.
+ */
+internal val LocalVideoSurfaceEnabled = staticCompositionLocalOf { true }
 
 /**
  * The image preview, raster and SVG alike: `<img alt="Preview of {name}">` in a flex-centred pane
@@ -137,7 +145,7 @@ internal fun VideoPreview(player: VideoPlayer, name: String) {
                 .semantics { contentDescription = "Preview of ${SafeText.line(name)}" },
             contentAlignment = Alignment.Center,
         ) {
-            if (phase !is VideoPhase.Failed) VideoSurface(player, Modifier.size(box.videoWidth.dp, box.videoHeight.dp).align(Alignment.Center))
+            if (phase !is VideoPhase.Failed && LocalVideoSurfaceEnabled.current) VideoSurface(player, Modifier.size(box.videoWidth.dp, box.videoHeight.dp).align(Alignment.Center))
             if (phase is VideoPhase.Opening) {
                 Box(Modifier.align(Alignment.Center).semantics { contentDescription = "Loading video" }) { Spinner(22.dp, t.faint) }
             }
