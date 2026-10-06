@@ -126,7 +126,7 @@ class TetherViewModelAttachmentTest {
 
     @Test
     fun aSessionThatLocksDropsThem() = runTest(dispatcher) {
-        for (locked in listOf(session("s1").copy(readOnly = true), session("s1").copy(handedOffTo = "s9"), session("s1").copy(runtimeArchived = true))) {
+        for (locked in listOf(session("s1").copy(readOnly = true), session("s1").copy(handedOffTo = "s9"))) {
             val (vm, client) = vm()
             vm.stage()
             client.list.value = listOf(session("s1").copy(updatedAt = 2))
@@ -136,6 +136,20 @@ class TetherViewModelAttachmentTest {
             advanceUntilIdle()
             assertEquals("locked: $locked", null, vm.stagedAttachments.current.value)
         }
+    }
+
+    /** ta-coik.60: the web's composer does not lock on an archived runtime (chat-view.tsx 29537e0), nor does a pick. */
+    @Test
+    fun anArchivedRuntimeIsNotALock() = runTest(dispatcher) {
+        val (vm, client) = vm()
+        vm.selectSession("s1")
+        vm.stage()
+        advanceUntilIdle()
+        assertEquals(true, vm.attachmentsAllowed("s1"))
+        client.list.value = listOf(session("s1").copy(updatedAt = 2, runtimeArchived = true))
+        advanceUntilIdle()
+        assertEquals("an archived session still takes picks", true, vm.attachmentsAllowed("s1"))
+        assertEquals("and keeps what is staged", 1, vm.staged().size)
     }
 
     @Test
@@ -224,7 +238,7 @@ class TetherViewModelAttachmentTest {
 
     @Test
     fun theSelectedSessionLockingDropsAFirstPickStillBeingRead() = runTest(dispatcher) {
-        for (locked in listOf(session("s1").copy(readOnly = true), session("s1").copy(handedOffTo = "s9"), session("s1").copy(runtimeArchived = true))) {
+        for (locked in listOf(session("s1").copy(readOnly = true), session("s1").copy(handedOffTo = "s9"))) {
             val (vm, client) = vm()
             vm.selectSession("s1")
             advanceUntilIdle()

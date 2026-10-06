@@ -22,6 +22,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import com.tether.app.nav.DeepLinkIntents
 import com.tether.app.nav.NavContext
 import com.tether.app.nav.NavEffect
@@ -73,6 +74,7 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     )
 
     val configured by client.configured.collectAsStateWithLifecycle()
+    val settingsLoaded by client.storedSettingsLoaded.collectAsStateWithLifecycle()
     val connection by client.connection.collectAsStateWithLifecycle()
     val serverUrl by client.serverUrl.collectAsStateWithLifecycle()
 
@@ -234,10 +236,12 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     TetherTheme(mode = themeMode) {
         val tokens = LocalTetherTokens.current
         val phase = localNetwork.model.phase
-        val needsSetup = !configured || connection is ConnectionState.AuthRequired
+        // ta-coik.36: no sign-in screen (nor shell) before the stored settings are known.
+        val surface = rootSurfaceFor(settingsLoaded, configured, connection)
+        val needsSetup = surface == RootSurface.Setup
         // D5: an incompatible server does not lock the user out: the shell (and
         // what it last showed) stays, with a banner saying which side to update.
-        val mismatch = (connection as? ConnectionState.VersionMismatch)?.takeIf { !needsSetup }
+        val mismatch = (connection as? ConnectionState.VersionMismatch)?.takeIf { surface == RootSurface.Shell }
         val denied = phase is LocalNetworkPhase.Denied
         Column(Modifier.fillMaxSize().background(tokens.mineral)) {
             // Persistent notices, above whichever screen is showing. The first
@@ -292,6 +296,10 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                         initialBaseUrl = signInUrl,
                         autoOpenSetup = autoOpenSetup,
                     )
+                } else if (surface == RootSurface.Loading) {
+                    // Neutral: the shell's own background, nothing to read or press (the design lane
+                    // owns anything more).
+                    Box(Modifier.fillMaxSize().testTag(ROOT_LOADING_TAG))
                 } else {
                     CompositionLocalProvider(LocalLinkOpener provides linkOpener) {
                         MainShell(vm = vm, prefs = prefs)

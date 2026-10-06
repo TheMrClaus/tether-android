@@ -40,7 +40,9 @@ import org.robolectric.annotation.Config
 class ColdStartLinkViewTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
-    private val client = NavTestClient(loaded = false, connection = ConnectionState.Connecting)
+    // ta-coik.36: as the real client before its first read: signed out and unloaded (the shell is not
+    // composed until the settings are known, so nothing of it shows, nor flashes, before).
+    private val client = NavTestClient(configured = false, loaded = false, connection = ConnectionState.Connecting)
 
     private val vm: TetherViewModel get() = ViewModelProvider(rule.activity)[TetherViewModel::class.java]
 
@@ -65,11 +67,16 @@ class ColdStartLinkViewTest {
         client.sessionsFlow.value = emptyList()
         val link = Intent(Intent.ACTION_VIEW, Uri.parse("tether://session/$LISTED"))
         rule.setContent { UiRoot(client = client, launchIntent = link) }
-        onSessionsOnly()
+        rule.waitForIdle()
+        assertEquals("the boot link is waiting for the settings", true, vm.bootLinkPending.value)
 
         // The stored settings load: the link is offered, and waits for its session as the console's
         // pending target (ta-coik.42, dashboard.tsx 90fbb9f :292; nothing is picked behind it).
-        rule.runOnIdle { client.loadedFlow.value = true }
+        rule.runOnIdle {
+            client.configuredFlow.value = true
+            client.loadedFlow.value = true
+        }
+        rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasTestTag(ShellTags.nav(TopBarDestination.Sessions))).fetchSemanticsNodes().isNotEmpty() }
         onSessionsOnly()
         assertEquals(LISTED, vm.pendingSessionId.value)
         assertEquals(null, vm.activeId.value)
@@ -88,7 +95,10 @@ class ColdStartLinkViewTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         runBlocking { UiPrefs(context).setLastView(com.tether.app.client.serverOrigin(NavTestClient.PAIRED), "overview") }
         rule.setContent { UiRoot(client = client, launchIntent = null) }
-        rule.runOnIdle { client.loadedFlow.value = true }
+        rule.runOnIdle {
+            client.configuredFlow.value = true
+            client.loadedFlow.value = true
+        }
         rule.waitUntil(5_000) {
             rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Overview)).fetchSemanticsNode().config.getOrNull(SemanticsProperties.Selected) == true
         }

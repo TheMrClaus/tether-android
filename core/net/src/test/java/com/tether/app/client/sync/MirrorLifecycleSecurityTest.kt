@@ -426,8 +426,13 @@ class MirrorLifecycleSecurityTest {
         }
         var login: Thread? = null
         try {
+            // ta-coik.36: start()'s probe goes out while its bind is held; its verdict then waits at the
+            // socket gate, and the logout makes it stale (nothing is opened for it).
+            h.server.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
+            val before = h.server.requestCount
             h.bootStartOnly()
             assertTrue("start()'s bind is inside the Keystore", entered.await(20, TimeUnit.SECONDS))
+            awaitTrue("the probe went out while the bind is held") { h.server.requestCount > before }
             h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}")) // logout
             runBlocking { h.client.logout() }
             assertFalse(h.keyFile.exists())

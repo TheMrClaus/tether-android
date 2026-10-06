@@ -444,6 +444,15 @@ class RealTetherClient(
     private var baseUrlValue: HttpUrl? = null
     // start() has read the persisted server + credential at least once.
     private var settingsLoaded = false
+
+    /**
+     * ta-coik.36: start()'s local bind (the saved-copy database and the unsent input) that is still
+     * running. The connect's auth probe (a request and its answer: it writes nothing) goes out
+     * alongside it, but the socket is not opened until this is back to 0 ([awaitLocalBind]): the
+     * mirror must be bound, and its restored cursors seeded, before the first frame of the origin
+     * arrives. A count, not a flag: overlapping start() calls (an activity re-created) each hold it.
+     */
+    private val localBindsInFlight = MutableStateFlow(0)
     // ta-jt9 L-B: bumped by every sign-out (logout(), stop(), a credential the server rejected).
     // A start() adopts what it read from the store only if no sign-out happened since it began:
     // its snapshot may predate the sign-out and still hold the credential being forgotten.
@@ -2088,22 +2097,63 @@ class RealTetherClient(
                     baseUrlValue = base
                 }
                 settingsLoaded = true
+                // ta-coik.36: held in the SAME critical section that adopts the pair, so no connect
+                // (this one's, or a lifecycle signal's) can open a socket between the adoption and
+                // the local bind below without seeing it.
+                localBindsInFlight.value++
                 // The first start of a process binds the store (and whatever was
                 // filed before it) to the configured server; a server that
                 // changed under a bound store is an origin switch.
                 followServerLocked(fallbackOwner = null, adoptUnbound = true)
             }
-            switch?.let(::completeOriginSwitch)
-            // Restore before the first drain or write (an unreadable store is
-            // "nothing to redeliver", never a failed start).
-            bindPendingToCurrentServer()
-            trace.mark("saved-copy-bound")
+            // Kept ordering 1: an origin switch is completed (views cleared, the old origin's input
+            // set aside) before anything of the new origin is bound or connected.
+            // From here the hold is released in the finally, whatever happens.
+            var connectedEarly = false
+            try {
+                switch?.let(::completeOriginSwitch)
+                // ta-coik.36: the connect starts NOW, alongside the local bind below, instead of after
+                // it (before: settings -> saved-copy bind -> pending read -> probe; now: settings ->
+                // probe || saved-copy bind + pending read). Only a probe goes out here: the socket is
+                // held at the gate ([awaitLocalBind]). A signed-out store has nothing to connect with
+                // (and its bind is the purge): it keeps the old order.
+                // Kept ordering 2: the socket is not opened (so no frame of the origin arrives, none
+                // is written to the mirror, no cursor is asked for) before the mirror is bound to THIS
+                // origin and its cursors are seeded, or the ready's attach would be a full one and its
+                // frames would miss the saved copy.
+                // Kept ordering 3: nothing is resent (drain / re-attach of pending input) before the
+                // unsent input is restored: both run on a socket that only exists after the gate, and
+                // bindPendingToCurrentServer() itself attaches and drains once restored.
+                // Kept ordering 4: a credential the probe finds dead wipes the mirror
+                // (handleCredentialRejected), even while the bind runs: its generation check (L-2)
+                // keeps a late bind from publishing the dead sign-in's list, and the bind's own
+                // credential check wipes it again.
+                val canConnect = synchronized(lock) { baseUrlValue != null && credentialValue != null }
+                if (canConnect) {
+                    connectNow()
+                    connectedEarly = true
+                }
+                // Restore before the first drain or write (an unreadable store is
+                // "nothing to redeliver", never a failed start).
+                bindPendingToCurrentServer()
+                trace.mark("saved-copy-bound")
+            } finally {
+                synchronized(lock) { localBindsInFlight.value-- }
+            }
             if (baseUrlValue == null || credentialValue == null) {
                 enterAuthRequired()
-            } else {
+            } else if (!connectedEarly) {
                 connectNow()
             }
         }
+    }
+
+    /**
+     * ta-coik.36: the socket waits here for [localBindsInFlight] to drain (see there). No timeout
+     * of its own: the bind is bounded inside (M2), and every holder releases in a finally.
+     */
+    private suspend fun awaitLocalBind() {
+        if (localBindsInFlight.value > 0) localBindsInFlight.first { it == 0 }
     }
 
     override fun stop() {
@@ -2744,7 +2794,12 @@ class RealTetherClient(
             raceHook?.invoke(RacePoint.VerdictChecked, verdict)
             trace.mark("probe-answered")
             when (verdict) {
-                ProbeVerdict.Authenticated -> openSocket(base, credential, generation)
+                ProbeVerdict.Authenticated -> {
+                    // ta-coik.36: the probe may have been sent while start() was still binding the
+                    // saved copy and the unsent input; the socket is not opened before they are.
+                    awaitLocalBind()
+                    openSocket(base, credential, generation)
+                }
                 ProbeVerdict.Rejected -> handleCredentialRejected(
                     credential,
                     if (credential is Credential.Cookie) SignedOutReason.SessionExpired else SignedOutReason.DeviceUnpaired,

@@ -57,10 +57,18 @@ class TimingTraceTest {
     fun aColdStartLogsEveryStepOfTheConnectInOrder() {
         connected()
         awaitMilestone("connected")
+        val steps = milestones()
+        // ta-coik.36: the probe goes out alongside the saved-copy bind, so their order is not fixed;
+        // the socket is never opened before the bind is done, and every other step keeps its place.
         assertEquals(
-            listOf("begin", "settings-read", "saved-copy-bound", "probe-sent", "probe-answered", "upgrade-sent", "socket-open", "ready", "connected"),
-            milestones(),
+            listOf("begin", "settings-read", "probe-sent", "probe-answered", "saved-copy-bound", "upgrade-sent", "socket-open", "ready", "connected").sorted(),
+            steps.sorted(),
         )
+        assertEquals(listOf("begin", "settings-read"), steps.take(2))
+        assertTrue("the probe is sent before the bind is reported: $steps", steps.indexOf("probe-sent") < steps.indexOf("saved-copy-bound"))
+        assertTrue("probe-answered precedes the upgrade: $steps", steps.indexOf("probe-answered") < steps.indexOf("upgrade-sent"))
+        assertTrue("the socket waits for the bind: $steps", steps.indexOf("saved-copy-bound") < steps.indexOf("upgrade-sent"))
+        assertEquals(listOf("upgrade-sent", "socket-open", "ready", "connected"), steps.takeLast(4))
         assertTrue(h.timing.first().startsWith("start +"))
         assertTrue("fixed words only: ${h.timing}", h.timing.all { shape.matches(it) })
     }

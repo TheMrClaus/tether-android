@@ -299,7 +299,8 @@ class TetherViewModel(
 
     /**
      * T7.4 r2: may a pick for [sessionId] be staged now? Only for the selected session, while it is
-     * listed and not locked (read-only, handed off, archived).
+     * listed and not locked (read-only, handed off). An archived runtime is not a lock: the web's
+     * composer does not lock on it either (chat-view.tsx 29537e0, only the mention candidates skip it).
      */
     fun attachmentsAllowed(sessionId: String): Boolean {
         if (_selectedSessionId.value != sessionId) return false
@@ -307,7 +308,7 @@ class TetherViewModel(
         return !attachmentsLocked(session)
     }
 
-    private fun attachmentsLocked(s: AgentSession): Boolean = s.readOnly || !s.handedOffTo.isNullOrEmpty() || s.runtimeArchived
+    private fun attachmentsLocked(s: AgentSession): Boolean = s.readOnly || !s.handedOffTo.isNullOrEmpty()
 
     /** Another server is configured: its drafts are its own (read on demand from its namespace). */
     private fun onServerUrl(url: String?) {
