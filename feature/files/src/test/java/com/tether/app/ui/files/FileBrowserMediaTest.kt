@@ -5,23 +5,17 @@ import com.tether.app.ui.files.FilesFixtures.ROOT
 import com.tether.app.ui.files.FilesFixtures.file
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -33,17 +27,12 @@ import org.robolectric.RobolectricTestRunner
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class FileBrowserMediaTest {
-    private val main = StandardTestDispatcher()
     private val files = FakeFiles().apply {
         listings[ROOT] = FilesResult.Ok(FilesFixtures.listing(entries = listOf(FilesFixtures.docs, file("clip.mp4", 700), file("logo.svg", 90))))
         listings["${ROOT}/docs"] = FilesResult.Ok(FilesFixtures.listing("${ROOT}/docs", emptyList()))
     }
     private val platform = FakePlatform()
     private val clip = file("clip.mp4", 700)
-
-    @Before fun setUp() = Dispatchers.setMain(main)
-
-    @After fun tearDown() = Dispatchers.resetMain()
 
     private fun TestScope.browser(): FileBrowserState =
         FileBrowserState(files, platform, CoroutineScope(StandardTestDispatcher(testScheduler))).apply {
@@ -174,30 +163,6 @@ class FileBrowserMediaTest {
         assertEquals(0, player.releases)
         assertEquals(1, platform.players.size)
         assertSame(player, s.video)
-    }
-
-    @Test fun signOutAndAServerSwitchReleaseThePlayer() = runTest(main) {
-        val identity = MutableStateFlow<String?>("https://server-a")
-        val vm = FileBrowserViewModel(files, platform, identity)
-        advanceUntilIdle()
-        vm.state.apply { cwd = ROOT }.open()
-        advanceUntilIdle()
-        vm.state.selectFile(clip)
-        val first = platform.players.single()
-        identity.value = null
-        advanceUntilIdle()
-        assertEquals("sign-out", 1, first.releases)
-        // Signed in again, to another server: a fresh browser, a fresh video, released by the switch.
-        identity.value = "https://server-b"
-        advanceUntilIdle()
-        vm.state.apply { cwd = ROOT }.open()
-        advanceUntilIdle()
-        vm.state.selectFile(clip)
-        val second = platform.players.last()
-        identity.value = "https://server-c"
-        advanceUntilIdle()
-        assertEquals("server switch", 1, second.releases)
-        assertEquals(1, first.releases)
     }
 
     // --- svg ----------------------------------------------------------------------------------

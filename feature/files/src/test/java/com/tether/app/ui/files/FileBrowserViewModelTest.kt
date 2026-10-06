@@ -70,4 +70,29 @@ class FileBrowserViewModelTest {
         assertNotSame(old, vm.state)
         assertTrue(platform.calls.contains("sweep All"))
     }
+
+    /** ta-1u4: the selected video's player does not outlive the session (sign-out) or the server (a switch). */
+    @Test fun signOutAndAServerSwitchReleaseThePlayer() = runTest(main) {
+        val clip = FilesFixtures.file("clip.mp4", 700)
+        val vm = FileBrowserViewModel(files, platform, identity)
+        advanceUntilIdle()
+        vm.state.apply { cwd = ROOT }.open()
+        advanceUntilIdle()
+        vm.state.selectFile(clip)
+        val first = platform.players.single()
+        identity.value = null
+        advanceUntilIdle()
+        assertEquals("sign-out", 1, first.releases)
+        // Signed in again, to another server: a fresh browser, a fresh video, released by the switch.
+        identity.value = "https://server-b"
+        advanceUntilIdle()
+        vm.state.apply { cwd = ROOT }.open()
+        advanceUntilIdle()
+        vm.state.selectFile(clip)
+        val second = platform.players.last()
+        identity.value = "https://server-c"
+        advanceUntilIdle()
+        assertEquals("server switch", 1, second.releases)
+        assertEquals(1, first.releases)
+    }
 }
