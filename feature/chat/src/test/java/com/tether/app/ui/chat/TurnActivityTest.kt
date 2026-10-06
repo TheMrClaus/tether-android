@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import com.tether.app.protocol.model.ApiRetryState
 import com.tether.app.protocol.model.SessionProjection
@@ -89,6 +90,8 @@ class TurnActivityTest {
         val done = TurnProjection("t1", status = Vocab.TURN_DONE, activeMs = 125_000, liveTokens = 12, usage = TurnUsage(perTurnTokens = 3_400))
         show(state(done), now = 999_999, part = TurnActivityPart.Both)
         rule.onNodeWithText("SESSION TOTAL").assertIsDisplayed()
+        // T14.2: CSS uppercase keeps the original words as the name a screen reader gets.
+        rule.onNodeWithContentDescription("Session total").assertExists()
         rule.onNodeWithText("2m 5s").assertIsDisplayed()
         rule.onNodeWithText("3.4K tokens").assertIsDisplayed()
         rule.onAllNodesWithText("…", substring = true).assertCountEquals(0)

@@ -94,6 +94,7 @@ import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSeam
+import com.tether.app.ui.components.originalWords
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.JetBrainsMono
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -1584,6 +1585,7 @@ fun TurnActivity(
                 fontWeight = TetherWeights.strong,
                 fontSize = 9.9.sp,
                 letterSpacing = 0.06.em,
+                modifier = Modifier.originalWords("Session total"),
             )
             Text(
                 elapsedLabel(totalActiveMs / 1000).ifEmpty { "0s" },

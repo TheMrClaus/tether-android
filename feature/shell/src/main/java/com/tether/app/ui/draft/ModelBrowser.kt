@@ -91,6 +91,7 @@ import com.tether.app.ui.components.LocalKeyboardInset
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.cssSurface
+import com.tether.app.ui.components.originalWords
 import com.tether.app.ui.icons.ProviderLogoDefaults
 import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.icons.TetherIcons
@@ -476,7 +477,7 @@ private fun Title(text: String, modifier: Modifier = Modifier) {
         style = LocalTetherTypography.current.body.copy(fontSize = 11.52.sp, fontWeight = FontWeight(700), letterSpacing = 0.04.em),
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = modifier.semantics { heading() },
+        modifier = modifier.semantics { heading() }.originalWords(text),
     )
 }
 
@@ -819,7 +820,7 @@ private fun SectionHead(title: String, count: Int) {
         Modifier.fillMaxWidth().padding(top = t.css.spaceXs).padding(horizontal = t.css.spaceMd, vertical = t.css.spaceXs).semantics(mergeDescendants = true) { heading() },
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(title.uppercase(), color = t.faint, style = style)
+        Text(title.uppercase(), color = t.faint, style = style, modifier = Modifier.originalWords(title))
         Text(count.toString(), color = t.faint, style = style)
     }
 }

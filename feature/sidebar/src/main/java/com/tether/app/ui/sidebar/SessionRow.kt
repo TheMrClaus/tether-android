@@ -57,6 +57,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import com.tether.app.client.LabelText
+import com.tether.app.ui.components.originalWords
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.text.proseDirection
@@ -507,7 +508,7 @@ private fun ModeTag(mode: String) {
             .cssSurface(RoundedCornerShape(999.dp), if (headless) t.violetWash else t.slate, CssBorder(1.dp, if (headless) t.violetStrong else t.line))
             .padding(horizontal = 0.3f.rem, vertical = 0.06f.rem),
     ) {
-        Text(if (headless) "CHAT" else "TERM", style = css(type.ui, 0.5f, 700, trackingEm = 0.03f, lineHeight = 1.15f), color = if (headless) t.violet else t.faint)
+        Text(if (headless) "CHAT" else "TERM", style = css(type.ui, 0.5f, 700, trackingEm = 0.03f, lineHeight = 1.15f), color = if (headless) t.violet else t.faint, modifier = Modifier.originalWords(if (headless) "Chat" else "Terminal"))
     }
 }
 

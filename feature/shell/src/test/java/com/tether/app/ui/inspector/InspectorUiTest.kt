@@ -17,6 +17,7 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.getAlignmentLinePosition
 import androidx.compose.ui.layout.FirstBaseline
 import com.tether.app.protocol.model.UsageWindow
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -132,6 +133,16 @@ open class InspectorUiTest {
         val header = rule.onNodeWithTag(InspectorTags.Header).getUnclippedBoundsInRoot()
         val context = rule.onNodeWithTag(InspectorTags.Context).getUnclippedBoundsInRoot()
         assertTrue(header.bottom <= context.top)
+    }
+
+    /** T14.2: the drawn capitals keep the original words as the accessible name (the web's CSS text-transform). */
+    @Test
+    fun capitalisedLabelsKeepTheirOriginalWordsAsTheAccessibleName() {
+        show(InspectorBoards.Reference.model(InspectorBoards.Reference.Variant.Full), InspectorBoards.Reference.state)
+        for (words in listOf("Model", "Effort", "Account", "Now")) {
+            rule.onAllNodesWithContentDescription(words, useUnmergedTree = true)[0].assertExists()
+        }
+        rule.onAllNodesWithText("MODEL", useUnmergedTree = true)[0].assertExists()
     }
 
     @Test

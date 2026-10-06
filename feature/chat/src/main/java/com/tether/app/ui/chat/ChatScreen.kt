@@ -60,6 +60,7 @@ import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.components.TetherDialog
 import com.tether.app.ui.components.TetherStatusPill
+import com.tether.app.ui.components.originalWords
 import com.tether.app.ui.components.statusToneOf
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.icons.TetherIcons
@@ -396,7 +397,7 @@ fun ChatScreen(
 
                 projection.turnOrder.isEmpty() -> WithSendBubbles(sends) {
                     EmptyCentered(
-                        label = "HEADLESS AGENT",
+                        label = "Headless agent",
                         title = "Send a message to start the conversation.",
                         hint = "Tools that need permission will surface an approval here before they run.",
                     )
@@ -641,12 +642,13 @@ private fun EmptyCentered(
     ) {
         if (label != null) {
             Text(
-                label,
+                label.uppercase(),
                 color = t.faint,
                 fontFamily = Manrope,
                 fontWeight = TetherWeights.heading,
                 fontSize = 10.7.sp,
                 letterSpacing = 0.08.em,
+                modifier = Modifier.originalWords(label),
             )
             Spacer(Modifier.height(10.dp))
         }
@@ -799,7 +801,7 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
                         fontWeight = TetherWeights.strong,
                         fontSize = 9.9.sp,
                         letterSpacing = 0.06.em,
-                        modifier = Modifier.weight(0.4f),
+                        modifier = Modifier.weight(0.4f).originalWords(label),
                     )
                     Text(
                         value,

@@ -73,6 +73,7 @@ import com.tether.app.ui.components.TetherStatusPill
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.components.statusToneOf
+import com.tether.app.ui.components.swallowTaps
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.CssShadow
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -380,7 +381,7 @@ fun SessionLinksPopover(
                 .width(width)
                 .heightIn(max = maxCardHeight)
                 .cssSurface(RoundedCornerShape(t.radiusMd), t.graphite, CssBorder(1.dp, t.lineStrong), t.css.shadowFloating)
-                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})
+                .swallowTaps() // T14.2: pointer-only, so the menu items stay separate nodes
                 .semantics { paneTitle = "Session links" }
                 .testTag(ShellTags.LinksPopover)
                 .padding(1.dp) // the border

@@ -48,6 +48,7 @@ import com.tether.app.ui.components.TetherDialogSurface
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.dialogScrim
+import com.tether.app.ui.components.originalWords
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeText
 import com.tether.app.ui.text.putOnClipboard
@@ -234,7 +235,7 @@ private fun Field(heading: String, key: String, text: String, label: String, cop
                 heading.uppercase(),
                 color = t.muted,
                 style = TextStyle(fontFamily = type.ui, fontSize = 10.56.sp, fontWeight = FontWeight(720), letterSpacing = 0.07.em),
-                modifier = Modifier.weight(1f).semantics { heading() },
+                modifier = Modifier.weight(1f).semantics { heading() }.originalWords(heading),
             )
             CopyKey(key, text, MetadataDraftCopy.COPY, MetadataDraftCopy.COPY_FAILED, label, copy, copyTag)
         }

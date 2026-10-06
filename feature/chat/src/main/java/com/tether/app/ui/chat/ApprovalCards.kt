@@ -64,6 +64,7 @@ import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.components.maxWidthFraction
+import com.tether.app.ui.components.originalWords
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -714,7 +715,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                             proseText(cut4k(it).uppercase()),
                             style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
                             color = t.muted,
-                            modifier = Modifier.padding(vertical = pMargin(0.72f)),
+                            modifier = Modifier.padding(vertical = pMargin(0.72f)).originalWords(proseText(cut4k(it)).text), // server text: the SafeText-drawn words, never the raw string
                         )
                     }
                     Text(
@@ -906,7 +907,7 @@ internal fun AnsweredQuestionCard(view: AnsweredView, modifier: Modifier = Modif
                             proseText(it.uppercase()),
                             style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
                             color = t.muted,
-                            modifier = Modifier.padding(vertical = pMargin(0.72f)),
+                            modifier = Modifier.padding(vertical = pMargin(0.72f)).originalWords(proseText(it).text), // server text: the SafeText-drawn words, never the raw string
                         )
                     }
                     Text(proseText(item.question), style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)), color = t.ink, modifier = Modifier.padding(vertical = pMargin(0.9f)))
@@ -969,7 +970,7 @@ internal fun PermissionDenialCard(denial: DenialView, target: DenialTarget?, run
                     color = t.ink,
                     modifier = Modifier.weight(1f),
                 )
-                Text("DENIED", style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f), letterSpacing = 0.04.em), color = t.danger)
+                Text("DENIED", style = TextStyle(fontFamily = type.mono, fontSize = rem(0.72f), letterSpacing = 0.04.em), color = t.danger, modifier = Modifier.originalWords("denied"))
             }
             Box(Modifier.padding(start = indent, top = t.css.spaceXs)) {
                 when {
@@ -1019,7 +1020,7 @@ internal fun PermissionDenialCard(denial: DenialView, target: DenialTarget?, run
                         target.label.uppercase(),
                         style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.68f), letterSpacing = 0.04.em),
                         color = t.faint,
-                        modifier = Modifier.padding(top = 2.dp),
+                        modifier = Modifier.padding(top = 2.dp).originalWords(target.label),
                     )
                     Text(
                         codeText(target.value, breakAnywhere = true),

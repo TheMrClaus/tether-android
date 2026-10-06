@@ -3,8 +3,7 @@ package com.tether.app.ui.components
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -29,8 +28,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -84,7 +85,9 @@ fun TetherDialogSurface(
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    BoxWithConstraints(modifier) {
+    // ta-5tb: the dialog's title is its pane title, so a screen reader announces the window by name.
+    val paneName = styledTitle?.text ?: title
+    BoxWithConstraints(if (paneName != null) modifier.semantics { paneTitle = paneName } else modifier) {
         val width = minOf(440.dp, maxWidth - 32.dp)
         val shape = RoundedCornerShape(StudioDialog.radius)
         Column(
@@ -172,7 +175,8 @@ fun TetherDialog(
                 footer = footer,
                 content = content,
                 modifier = Modifier
-                    .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})
+                    // ta-5tb: a pointer-only tap swallower, not `clickable` (which merged the whole dialog into one button).
+                    .swallowTaps()
                     .graphicsLayer {
                         val p = progress.value
                         alpha = p
@@ -198,7 +202,9 @@ internal fun ModalScrim(onDismiss: () -> Unit, color: Color, alignment: Alignmen
         Modifier
             .fillMaxSize()
             .background(color)
-            .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+            // ta-5tb/ta-6gw: a pointer-only tap-to-dismiss, not `clickable` (its mergeDescendants would fold the
+            // whole dialog or sheet above the scrim back into one node). The window's back press still dismisses.
+            .pointerInput(onDismiss) { detectTapGestures { onDismiss() } },
         contentAlignment = alignment,
     ) { content() }
 }

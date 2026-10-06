@@ -37,6 +37,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,7 +77,8 @@ fun TetherSheetSurface(
     val r = t.radiusLg
     val shape = if (docked) RoundedCornerShape(topStart = r, topEnd = r) else RoundedCornerShape(r)
     val shadows: List<CssShadow> = t.css.shadowModal
-    BoxWithConstraints(modifier) {
+    // ta-6gw: the sheet's title is its pane title.
+    BoxWithConstraints(modifier.semantics { paneTitle = title }) {
         val boxWidth = if (docked) maxWidth else minOf(352.dp, maxWidth - 24.dp)
         Column(
             Modifier
@@ -202,7 +204,8 @@ fun TetherSheet(
                 backLabel = backLabel,
                 content = content,
                 modifier = Modifier
-                    .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})
+                    // ta-6gw: a pointer-only tap swallower, not `clickable` (which merged title, hints and keys into one node).
+                    .swallowTaps()
                     .graphicsLayer {
                         val p = progress.value
                         if (docked) {

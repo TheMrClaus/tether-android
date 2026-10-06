@@ -77,6 +77,7 @@ import androidx.compose.ui.zIndex
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyState
 import com.tether.app.ui.components.cssSurface
+import com.tether.app.ui.components.swallowTaps
 import com.tether.app.ui.components.focusRing
 import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.components.softShadow
@@ -358,7 +359,7 @@ fun TopbarMenu(
                 .widthIn(min = 240.dp, max = (maxWidth - 24.dp).coerceAtLeast(0.dp))
                 .width(androidx.compose.foundation.layout.IntrinsicSize.Max)
                 .cssSurface(RoundedCornerShape(t.radiusMd), t.graphite, CssBorder(1.dp, t.line), t.css.shadowMenu)
-                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = {})
+                .swallowTaps() // T14.2: pointer-only, so the menu items stay separate nodes
                 .semantics { paneTitle = if (wide) "Tools" else "Navigation and tools" }
                 .testTag(ShellTags.ToolsMenu)
                 .heightIn(max = (maxHeight - (if (wide) WideTopbarHeight else TopbarHeight) - 16.dp).coerceAtLeast(120.dp))

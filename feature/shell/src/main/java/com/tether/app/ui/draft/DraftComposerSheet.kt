@@ -115,6 +115,7 @@ import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.currentLayoutClass
 import com.tether.app.ui.components.dialogScrim
+import com.tether.app.ui.components.originalWords
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
@@ -731,7 +732,7 @@ private fun SectionLabel(text: String) {
         text.uppercase(),
         color = t.faint,
         style = type.mono.let { androidx.compose.ui.text.TextStyle(fontFamily = it, fontSize = 9.92.sp, fontWeight = androidx.compose.ui.text.font.FontWeight(650), letterSpacing = 0.06.em) },
-        modifier = Modifier.padding(bottom = t.css.spaceXs).semantics { heading() },
+        modifier = Modifier.padding(bottom = t.css.spaceXs).semantics { heading() }.originalWords(text),
     )
 }
 

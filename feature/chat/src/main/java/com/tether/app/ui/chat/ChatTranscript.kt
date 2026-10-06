@@ -216,11 +216,31 @@ private fun ChatTranscriptBody(
             }
         }
     }
+    // ta-coik.35: a scroll that is not a hand drag (TalkBack moving its focus to a row that is off screen
+    // or partly cut, a switch control, a bring-into-view) never reaches the guard above, which sees only
+    // pointer input. A reader moving up through the transcript leaves follow mode exactly as a hand drag
+    // does. The follow code's own pins are exempt: the flag stays up for one frame after a pin, so the
+    // collector below (which runs on the next snapshot apply) cannot read a pin as the reader's move.
+    val ownScroll = remember { booleanArrayOf(false) }
+    suspend fun pinToEnd(index: Int) {
+        ownScroll[0] = true
+        try {
+            listState.scrollToItem(index, scrollOffset = Int.MAX_VALUE / 2)
+            withFrameNanos { }
+        } finally {
+            ownScroll[0] = false
+        }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.lastScrolledBackward }
+            .distinctUntilChanged()
+            .collect { backward -> if (backward && !ownScroll[0]) sticky = false }
+    }
     // ta-coik.19: the send bubbles are the list's last rows; following the newest content follows them.
     val sendRows = sends.pending.size + sends.failed.size
     val lastIndex = items.size + leading + sendRows - 1
     LaunchedEffect(items, sticky, sendRows) {
-        if (sticky && lastIndex >= 0) listState.scrollToItem(lastIndex, scrollOffset = Int.MAX_VALUE / 2)
+        if (sticky && lastIndex >= 0) pinToEnd(lastIndex)
     }
     // ta-coik.33: the newest row can grow after the rows were built (a card, an image or a long reply
     // laid out late), and the well can shrink under it (the keyboard, a banner): while following, the
@@ -246,7 +266,7 @@ private fun ChatTranscriptBody(
                 withFrameNanos { }
                 if (sticky && listState.canScrollForward && !listState.isScrollInProgress) {
                     val end = listState.layoutInfo.totalItemsCount - 1
-                    if (end >= 0) listState.scrollToItem(end, scrollOffset = Int.MAX_VALUE / 2)
+                    if (end >= 0) pinToEnd(end)
                 }
             }
     }
@@ -356,7 +376,7 @@ private fun ChatTranscriptBody(
             TetherKey(
                 onClick = {
                     sticky = true
-                    scope.launch { if (lastIndex >= 0) listState.scrollToItem(lastIndex, scrollOffset = Int.MAX_VALUE / 2) }
+                    scope.launch { if (lastIndex >= 0) pinToEnd(lastIndex) }
                 },
                 classes = KeyClasses.ChatJump,
                 icon = TetherIcons.ArrowDown,

@@ -83,6 +83,7 @@ import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.WaitingPingDot
 import com.tether.app.ui.components.cssSurface
+import com.tether.app.ui.components.originalWords
 import com.tether.app.ui.components.statusColor
 import com.tether.app.ui.components.statusToneOf
 import com.tether.app.ui.icons.ProviderTile
@@ -404,7 +405,7 @@ private fun IdentityCell(label: String, modifier: Modifier, end: Boolean = false
         modifier.padding(start = 12.dp, end = 12.dp, top = 8.8.dp, bottom = 9.6.dp).semantics(mergeDescendants = true) {},
         horizontalAlignment = if (end) Alignment.End else Alignment.Start,
     ) {
-        Text(label.uppercase(), style = capsStyle(0.6f), color = t.muted, modifier = Modifier.padding(bottom = 3.2.dp))
+        Text(label.uppercase(), style = capsStyle(0.6f), color = t.muted, modifier = Modifier.padding(bottom = 3.2.dp).originalWords(label))
         content()
     }
 }
@@ -415,7 +416,7 @@ private fun NowRow(task: Seg, progress: String?) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("NOW", style = capsStyle(0.6f), color = t.muted, modifier = Modifier.padding(top = 2.dp))
+        Text("NOW", style = capsStyle(0.6f), color = t.muted, modifier = Modifier.padding(top = 2.dp).originalWords("Now"))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.4.dp)) {
             RuledText(listOf(task), cssText(type.ui, 0.76f, 400, lineHeight = 1.4f), t.white)
             progress?.let { Text(it, style = cssText(type.mono, 0.66f, 400), color = t.muted) }
@@ -504,7 +505,7 @@ private fun Band(title: String, aside: String?, modifier: Modifier = Modifier, d
             .semantics { contentDescription = description },
     ) {
         Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title.uppercase(), style = capsStyle(0.66f), color = t.muted, modifier = Modifier.weight(1f).semantics { heading() })
+            Text(title.uppercase(), style = capsStyle(0.66f), color = t.muted, modifier = Modifier.weight(1f).semantics { heading() }.originalWords(title))
             aside?.let { Text(it, style = cssText(type.mono, 0.7f, 400), color = t.faint, maxLines = 1, softWrap = false) }
         }
         content()
@@ -987,7 +988,7 @@ private fun TiDisclosure(
                 if (caps) summary.uppercase() else summary,
                 style = if (caps) capsStyle(0.66f) else cssText(type.ui, summarySize, 650),
                 color = summaryColor,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).originalWords(summary),
             )
             count?.let { Text(it, style = cssText(type.mono, 0.64f, 500), color = t.faint, maxLines = 1, softWrap = false) }
         }
@@ -1016,7 +1017,7 @@ private fun RepositoryPanel(
             .semantics { contentDescription = "Repository" }
             .testTag(InspectorTags.Repository),
     ) {
-        Text("REPOSITORY", style = capsStyle(0.66f), color = t.muted, modifier = Modifier.padding(bottom = 10.dp).semantics { heading() })
+        Text("REPOSITORY", style = capsStyle(0.66f), color = t.muted, modifier = Modifier.padding(bottom = 10.dp).semantics { heading() }.originalWords("Repository"))
         repo.branch?.let { branch ->
             RepoLine(TetherIcons.GitBranch, listOf(branch), repo.divergence, code = true)
         }
@@ -1208,7 +1209,7 @@ private fun ServicesCard(
         ) {
             Icon(TetherIcons.Terminal, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
             Text("Services", style = cssText(type.mono, 0.78f, 650), color = t.ink, modifier = Modifier.weight(1f))
-            Text(services.count.uppercase(), style = cssText(type.mono, 0.68f, 650, trackingEm = 0.04f), color = t.muted, textAlign = TextAlign.End)
+            Text(services.count.uppercase(), style = cssText(type.mono, 0.68f, 650, trackingEm = 0.04f), color = t.muted, textAlign = TextAlign.End, modifier = Modifier.originalWords(services.count))
         }
         val setupStyle = cssText(type.ui, 0.76f, 400, lineHeight = 1.45f)
         services.setup?.let { setup ->

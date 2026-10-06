@@ -48,7 +48,7 @@ fun Wordmark(modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     Text(
         text = "TETHER",
-        modifier = modifier,
+        modifier = modifier.originalWords("Tether"),
         color = t.white,
         fontFamily = Manrope,
         fontWeight = TetherWeights.wordmark,

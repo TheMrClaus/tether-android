@@ -22,7 +22,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.testTag
 import com.tether.app.nav.DeepLinkIntents
 import com.tether.app.nav.NavContext
 import com.tether.app.nav.NavEffect
@@ -297,9 +296,8 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
                         autoOpenSetup = autoOpenSetup,
                     )
                 } else if (surface == RootSurface.Loading) {
-                    // Neutral: the shell's own background, nothing to read or press (the design lane
-                    // owns anything more).
-                    Box(Modifier.fillMaxSize().testTag(ROOT_LOADING_TAG))
+                    // Neutral to look at (the design lane owns anything more), named and busy to a reader.
+                    RootLoadingSurface()
                 } else {
                     CompositionLocalProvider(LocalLinkOpener provides linkOpener) {
                         MainShell(vm = vm, prefs = prefs)

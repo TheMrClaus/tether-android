@@ -1,5 +1,14 @@
 package com.tether.app.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import com.tether.app.client.ConnectionState
 
 /** What [UiRoot] shows in place of the shell (ta-coik.36). */
@@ -15,6 +24,27 @@ internal enum class RootSurface {
 }
 
 internal const val ROOT_LOADING_TAG = "root-loading"
+
+/** The web's accessible name for its boot surface (dashboard.tsx: `aria-label="Loading Tether"`). */
+internal const val ROOT_LOADING_LABEL = "Loading Tether"
+
+/**
+ * The cold-start surface: neutral to the eye, a named busy region to a screen reader. The web's
+ * `<section aria-busy="true" aria-label="Loading Tether">`; Compose has no aria-busy, and the nearest
+ * semantic is an indeterminate progress range, which TalkBack announces as "in progress".
+ */
+@Composable
+internal fun RootLoadingSurface() {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .semantics {
+                contentDescription = ROOT_LOADING_LABEL
+                progressBarRangeInfo = ProgressBarRangeInfo.Indeterminate
+            }
+            .testTag(ROOT_LOADING_TAG),
+    )
+}
 
 /**
  * Before the store's first read the client says "signed out, no server" ([configured] false), which

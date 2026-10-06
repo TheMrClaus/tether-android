@@ -2,7 +2,12 @@ package com.tether.app.ui
 
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.assertIsDisplayed
 import com.tether.app.client.ConnectionState
@@ -89,5 +94,20 @@ class RootSurfaceTest {
         rule.waitUntil(5_000) { loginShown() }
         assertFalse(loadingShown())
         assertFalse(shellShown())
+    }
+
+    /** T14.2: the web's `<section aria-busy="true" aria-label="Loading Tether">`. */
+    @Test fun theColdStartSurfaceIsNamedLoadingTetherAndBusy() {
+        val client = NavTestClient(configured = false, connection = ConnectionState.Disconnected, loaded = false)
+        rule.setContent { UiRoot(client = client) }
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Loading Tether", useUnmergedTree = true).assertExists()
+        rule.onNodeWithTag(ROOT_LOADING_TAG, useUnmergedTree = true).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo.Indeterminate),
+        )
+        // Once the shell replaces it, the busy region is gone (nothing says "loading" over a loaded console).
+        rule.runOnIdle { client.configuredFlow.value = true; client.connectionFlow.value = ConnectionState.Connecting; client.loadedFlow.value = true }
+        rule.waitUntil(5_000) { shellShown() }
+        rule.onNodeWithContentDescription("Loading Tether", useUnmergedTree = true).assertDoesNotExist()
     }
 }

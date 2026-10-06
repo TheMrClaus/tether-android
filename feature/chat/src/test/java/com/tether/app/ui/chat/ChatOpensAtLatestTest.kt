@@ -1,13 +1,17 @@
 package com.tether.app.ui.chat
 
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.unit.dp
@@ -19,6 +23,8 @@ import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -140,5 +146,61 @@ class ChatOpensAtLatestTest {
         assertTrue("left where the reader is", rule.runOnIdle { list.canScrollForward })
         assertTrue(rule.runOnIdle { list.firstVisibleItemIndex } <= before + 1)
         assertFalse(shown("d reply 40"))
+    }
+
+    /**
+     * ta-coik.35: TalkBack's scrolls are not hand drags (the scroll-backward action, and the bring-into-view
+     * that follows its focus to a row that is off screen). Each leaves follow mode all the same, and the
+     * reader is then not pulled back by a viewport change.
+     */
+    private fun scrollingWithoutAHandLeavesFollowMode(scroll: (CoroutineScope, LazyListState) -> Unit) {
+        val folded = conversation("e", 40)
+        val list = LazyListState()
+        var height by mutableStateOf(WellHeightPhone)
+        lateinit var scope: CoroutineScope
+        rule.setContent {
+            scope = rememberCoroutineScope()
+            ChatHost(TetherSkin.StudioDark, wellHeight = height) {
+                ChatTranscript(
+                    projection = folded.projection,
+                    tree = folded.tree,
+                    showThinking = false,
+                    onFetchTurns = { _, _ -> },
+                    zone = ChatFixtures.zone,
+                    listState = list,
+                    showTimeline = false,
+                )
+            }
+        }
+        settle()
+        assertFalse("opens at the bottom", rule.runOnIdle { list.canScrollForward })
+        rule.onNodeWithContentDescription("Jump to latest").assertDoesNotExist()
+
+        rule.runOnIdle { scroll(scope, list) }
+        settle()
+        assertTrue("scrolled up", rule.runOnIdle { list.canScrollForward })
+        rule.onNodeWithContentDescription("Jump to latest").assertExists()
+
+        // Not followed any more: a viewport change leaves the reader where they are.
+        val before = rule.runOnIdle { list.firstVisibleItemIndex }
+        rule.runOnIdle { height = 300.dp }
+        settle()
+        assertTrue("left where the reader is", rule.runOnIdle { list.canScrollForward })
+        assertTrue(rule.runOnIdle { list.firstVisibleItemIndex } <= before + 1)
+        assertFalse(shown("e reply 40"))
+    }
+
+    @Test fun aScrollTheListSemanticsPerformLeavesFollowMode() {
+        // Not a drag: no pointer input at all (the action TalkBack's scroll-backward gesture performs).
+        var done = false
+        scrollingWithoutAHandLeavesFollowMode { _, _ ->
+            rule.onNodeWithTag("chat-transcript").performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, -1_500f) }
+            done = true
+        }
+        assertTrue(done)
+    }
+
+    @Test fun aProgrammaticBackwardScrollSuchAsTalkBacksFocusFollowingLeavesFollowMode() {
+        scrollingWithoutAHandLeavesFollowMode { scope, list -> scope.launch { list.scrollBy(-1_500f) } }
     }
 }
