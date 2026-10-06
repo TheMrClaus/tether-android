@@ -209,7 +209,8 @@ fun ChatHost(
     content: @Composable () -> Unit,
 ) {
     TetherTheme(choiceFor(skin)) {
-        CompositionLocalProvider(LocalReducedMotion provides reducedMotion) {
+        // ta-coik.37: the derivation runs inline (no wall-clock waits); the off-main behaviour has its own test.
+        CompositionLocalProvider(LocalReducedMotion provides reducedMotion, LocalChatDerivationDispatcher provides kotlinx.coroutines.Dispatchers.Unconfined) {
             Box(
                 (if (wellWidth != null) Modifier.width(wellWidth) else Modifier.fillMaxWidth())
                     .height(wellHeight)

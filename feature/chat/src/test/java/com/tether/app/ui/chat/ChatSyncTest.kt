@@ -59,10 +59,10 @@ class ChatSyncTest {
     private fun host(client: ChatTestClient, shown: AgentSession = session, header: Boolean = false, prefs: UiPrefs = UiPrefs(ApplicationProvider.getApplicationContext())) {
         val vm = TetherViewModel(client)
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
+            androidx.compose.runtime.CompositionLocalProvider(LocalChatDerivationDispatcher provides kotlinx.coroutines.Dispatchers.Unconfined) { TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 ChatScreen(vm = vm, session = shown, projection = projections[shown.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = header)
-            }
+            } }
         }
         arm()
     }

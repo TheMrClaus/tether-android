@@ -61,12 +61,12 @@ class SubagentRunBehaviourTest {
         val vm = TetherViewModel(client)
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
         rule.setContent {
-            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
+            androidx.compose.runtime.CompositionLocalProvider(LocalChatDerivationDispatcher provides kotlinx.coroutines.Dispatchers.Unconfined) { TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 val sessions by client.sessions.collectAsStateWithLifecycle()
                 val s = sessions.firstOrNull { it.id == shown.id } ?: shown
                 ChatScreen(vm = vm, session = s, projection = projections[s.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
-            }
+            } }
         }
         rule.waitForIdle()
         arm()

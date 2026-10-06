@@ -69,10 +69,10 @@ class ChatFindBehaviourTest {
         var shown by mutableStateOf(initial)
         current = { shown = it }
         val content: @androidx.compose.runtime.Composable () -> Unit = {
-            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
+            androidx.compose.runtime.CompositionLocalProvider(LocalChatDerivationDispatcher provides kotlinx.coroutines.Dispatchers.Unconfined) { TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 val projections by client.projections.collectAsStateWithLifecycle()
                 ChatScreen(vm = vm, session = shown, projection = projections[shown.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
-            }
+            } }
         }
         if (restoration != null) restoration.setContent(content) else rule.setContent(content)
         rule.waitForIdle()

@@ -59,10 +59,10 @@ private fun ComposeContentTestRule.hostChat(client: ChatTestClient, shown: Agent
     val vm = TetherViewModel(client)
     val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
     setContent {
-        TetherTheme(choiceFor(TetherSkin.StudioDark)) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalChatDerivationDispatcher provides kotlinx.coroutines.Dispatchers.Unconfined) { TetherTheme(choiceFor(TetherSkin.StudioDark)) {
             val projections by client.projections.collectAsStateWithLifecycle()
             ChatScreen(vm = vm, session = shown, projection = projections[shown.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
-        }
+        } }
     }
     armChat()
 }

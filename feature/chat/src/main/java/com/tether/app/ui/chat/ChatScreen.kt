@@ -106,7 +106,10 @@ fun ChatScreen(
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
     val tree = session?.let { trees[it.id] }
     // T6.4: the runs read the TREE (background tasks and spawned runs are not in the typed projection).
-    val runs = remember(projection, tree) { projection?.let { collectSubagentRuns(cardTree(it, tree)) } ?: emptyList() }
+    // ta-coik.37: built off the main thread after the first build for a session (ChatDerivation.kt).
+    val derivationObserver = LocalChatDerivationObserver.current
+    val runsInputs = remember(projection, tree, derivationObserver) { RunsInputs(projection, tree) }
+    val runs = rememberDerived(sessionKey = session?.id, inputs = runsInputs, capture = {}) { _ -> deriveRuns(runsInputs.projection, runsInputs.tree, derivationObserver) }
     // Resolve by lookup, never by trusting the stored id: a run that vanished
     // from a re-snapshot degrades to the Session tab on its own.
     val activeRun = session?.let { selectedRunIds[it.id] }?.let { id -> runs.firstOrNull { it.runId == id } }

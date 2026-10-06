@@ -164,12 +164,26 @@ private fun ChatTranscriptBody(
     val spacing = transcriptSpacing(t, phone)
     // T6.2: the reader's activity-group toggles, each remembered with the default it overrode
     // (a `<details open={default}>` resets when its default changes, as React drives it). The
-    // reset is applied where the default is READ (GroupToggles.resolve, while the rows are built),
-    // so a toggle whose default changed is gone before any later build can see the default flip back.
+    // reset is applied where the default is READ: the build reads a snapshot and reports each stale read,
+    // and GroupToggles.resolve replays it on the main thread right after that build (builds run one at a
+    // time, each from a fresh snapshot), so a toggle whose default changed is gone before any later build.
     val groupToggles = rememberSaveable(saver = GroupToggles.Saver) { GroupToggles() }
-    val items = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentSessionId) {
-        buildChatItems(projection, tree, showThinking, zone, richCodex, groupToggles::resolve, showApprovals, consentSessionId)
+    // ta-coik.37: the rows, the timeline's prompts and every other per-change derivation are built OFF
+    // the main thread (the last result shows meanwhile); the first build for a session is synchronous.
+    // Everything the build reads is captured here, on the main thread, as immutable values: the toggles
+    // as a snapshot of the map, never `groupToggles::resolve`.
+    val observer = LocalChatDerivationObserver.current
+    val rowInputs = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentSessionId, observer) {
+        ChatRowsInputs(projection, tree, showThinking, zone, richCodex, showApprovals, consentSessionId, observer)
     }
+    val rows = rememberDerived(
+        sessionKey = consentSessionId ?: projection.tetherSessionId,
+        inputs = rowInputs,
+        capture = { groupToggles.snapshot() },
+        // A stale toggle is dropped where its default was read (the replay on the main thread).
+        onPublish = { built -> built.toggleReads.forEach { groupToggles.resolve(it.key, it.default) } },
+    ) { toggles -> deriveChatRows(rowInputs, toggles) }
+    val items = rows.items
     // L2: lazy keys must be unique or Compose throws; a repeated block id, run id or a command id
     // that spells another row's key gets an ordinal (the first keeps its own key).
     val lazyKeys = remember(items) { uniqueLazyKeys(items.map { it.key }) }
@@ -179,7 +193,7 @@ private fun ChatTranscriptBody(
 
     // Story points: the conversation timeline rail (T6.5) indexes operator prompts. They come from
     // the tree (T2.2's faithful port of lib/conversation-story-points.ts) at the owner's limits.
-    val storyPoints = remember(tree) { TimelineModel.points(tree) }
+    val storyPoints = rows.storyPoints
     val storyPointIndex = remember(storyPoints) {
         storyPoints.withIndex().associate { (i, sp) -> "${sp.turnId}:${sp.blockId}" to i }
     }
