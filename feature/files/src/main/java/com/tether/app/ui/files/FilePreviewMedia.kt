@@ -1,9 +1,12 @@
 package com.tether.app.ui.files
 
 import android.content.Context
+import android.graphics.Outline
 import android.graphics.SurfaceTexture
 import android.view.Surface
 import android.view.TextureView
+import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.MediaController
@@ -158,11 +161,27 @@ internal fun VideoPreview(player: VideoPlayer, name: String) {
     }
 }
 
+/**
+ * The controller draws in its own window, so the box's clip never reaches it and its dark backing would
+ * square off the box's bottom corners. The controller view clips itself instead: only its two bottom
+ * corners are rounded, by the box's radius (the web rounds all four with controls, globals.css 2878-2879).
+ * The outline reaches [radiusPx] above the view so the top edge stays straight.
+ */
+internal fun roundBottomCorners(view: View, radiusPx: Float) {
+    view.outlineProvider = object : ViewOutlineProvider() {
+        override fun getOutline(view: View, outline: Outline) {
+            outline.setRoundRect(0, -radiusPx.roundToInt(), view.width, view.height, radiusPx)
+        }
+    }
+    view.clipToOutline = true
+}
+
 /** The frame view, the controller bar and the app-stop pause, for one [player]. */
 @Composable
 private fun VideoSurface(player: VideoPlayer, modifier: Modifier) {
     val context = LocalContext.current
-    val host = remember(player) { VideoHost(context, player) }
+    val radiusPx = with(LocalDensity.current) { LocalTetherTokens.current.radiusMd.toPx() }
+    val host = remember(player) { VideoHost(context, player, radiusPx) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(host, lifecycle) {
         // Out of sight (the app stopped): stop playing, keep the place.
@@ -184,7 +203,7 @@ private fun VideoSurface(player: VideoPlayer, modifier: Modifier) {
  * video is ready and not playing (no autoplay), hides on the platform timeout while it plays, and a
  * tap on the frame toggles it. The screen stays on while it plays.
  */
-private class VideoHost(context: Context, private val player: VideoPlayer) {
+private class VideoHost(context: Context, private val player: VideoPlayer, radiusPx: Float) {
     val frame = FrameLayout(context)
     private val texture = TextureView(context)
     private val controller = MediaController(context)
@@ -211,6 +230,7 @@ private class VideoHost(context: Context, private val player: VideoPlayer) {
             override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
         }
         controller.setMediaPlayer(player.control)
+        roundBottomCorners(controller, radiusPx)
         controller.setAnchorView(frame)
         controller.isEnabled = false
         frame.isClickable = true
