@@ -41,6 +41,11 @@ roborazzi = "1.75.0"
 # and supports AGP 9 built-in Kotlin. Latest stable on Maven Central / Google as of 2026-09.
 room = "2.8.5"
 ksp = "2.3.12"
+# ta-1u4: the workspace file browser's SVG preview. AndroidSVG is a pure-Java renderer (Apache-2.0): no
+# scripts, no WebView, no network of its own (an external reference is fetched only when an
+# SVGExternalFileResolver is registered, and the app never registers one). 1.4 is the latest release
+# on Maven Central as of 2026-10 (the artifact is the AAR build, minSdk 8).
+androidsvg = "1.4"
 
 [libraries]
 androidx-core = { group = "androidx.core", name = "core", version.ref = "androidxCore" }
@@ -67,6 +72,7 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 # ships it transitively; declared because app code imports it directly.
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "kotlinxCoroutines" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+androidsvg = { group = "com.caverock", name = "androidsvg-aar", version.ref = "androidsvg" }
 lucide-icons = { group = "com.composables", name = "icons-lucide", version.ref = "lucideIcons" }
 okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 okhttp-tls = { group = "com.squareup.okhttp3", name = "okhttp-tls", version.ref = "okhttp" }

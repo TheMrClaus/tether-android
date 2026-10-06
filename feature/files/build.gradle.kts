@@ -44,6 +44,10 @@ dependencies {
     implementation(libs.androidx.core)
     implementation(libs.lucide.icons)
     implementation(libs.kotlinx.coroutines.android)
+    // The player pauses when the app stops (ta-1u4).
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    // SVG preview (ta-1u4): script-free, no external fetch; see SvgImages.
+    implementation(libs.androidsvg)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

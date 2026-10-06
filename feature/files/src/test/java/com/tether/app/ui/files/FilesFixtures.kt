@@ -1,8 +1,14 @@
 package com.tether.app.ui.files
 
 import android.net.Uri
+import android.view.Surface
+import android.widget.MediaController
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.tether.app.client.FileHead
 import com.tether.app.client.FilesResult
+import com.tether.app.client.RangeRead
 import com.tether.app.client.UploadSource
 import com.tether.app.client.WorkspaceBreadcrumb
 import com.tether.app.client.WorkspaceFileEntry
@@ -102,6 +108,22 @@ class FakeFiles : WorkspaceFiles {
     val downloads = mutableMapOf<String, ByteArray>()
     var uploadThrows: RuntimeException? = null
 
+    /** Files [readRange] serves: path -> size. Their bytes are `position % 251`, so no body is ever held. */
+    val virtualFiles = mutableMapOf<String, Long>()
+
+    /** The origin [readRange] answers from; a pinned read for another one is refused, as the real client does. */
+    var rangeOrigin = "https://server-a:443"
+
+    override suspend fun readRange(path: String, offset: Long, length: Int, pinnedOrigin: String?): FilesResult<RangeRead> {
+        enter("readRange", path, offset.toString(), length.toString())
+        if (pinnedOrigin != null && pinnedOrigin != rangeOrigin) return FilesResult.Failed("This file could not be opened.")
+        failures["readRange"]?.let { return it }
+        val size = virtualFiles[path] ?: return FilesResult.Failed("This file could not be opened.", 404)
+        if (offset >= size) return FilesResult.Ok(RangeRead(ByteArray(0), size, rangeOrigin))
+        val count = minOf(length.toLong(), size - offset).toInt()
+        return FilesResult.Ok(RangeRead(ByteArray(count) { ((offset + it) % 251).toByte() }, size, rangeOrigin))
+    }
+
     override suspend fun download(path: String, maxBytes: Long, sink: OutputStream): FilesResult<Long> {
         enter("download", path)
         val body = downloads[path] ?: return FilesResult.Failed("This file could not be opened.", 404)
@@ -110,10 +132,59 @@ class FakeFiles : WorkspaceFiles {
     }
 }
 
+/** A [VideoPlayer] that only records: its phase is whatever a test sets, and it counts releases. */
+class FakeVideoPlayer(val entry: WorkspaceFileEntry, private val onFailed: () -> Unit) : VideoPlayer {
+    override var phase: VideoPhase by mutableStateOf(VideoPhase.Opening)
+    override var playing: Boolean by mutableStateOf(false)
+    var releases = 0
+    var pauses = 0
+    var attached: Surface? = null
+    val released: Boolean get() = releases > 0
+
+    override val control = object : MediaController.MediaPlayerControl {
+        override fun start() { playing = true }
+        override fun pause() { playing = false }
+        override fun getDuration() = 60_000
+        override fun getCurrentPosition() = 0
+        override fun seekTo(pos: Int) = Unit
+        override fun isPlaying() = playing
+        override fun getBufferPercentage() = 0
+        override fun canPause() = true
+        override fun canSeekBackward() = true
+        override fun canSeekForward() = true
+        override fun getAudioSessionId() = 0
+    }
+
+    override fun attachSurface(surface: Surface) { attached = surface }
+    override fun detachSurface(surface: Surface) { if (attached === surface) attached = null }
+    override fun pause() { pauses++; playing = false }
+    override fun release() { releases++ }
+
+    /** The player gives up, as the real one does: phase Failed, then the state's callback. */
+    fun fail() {
+        phase = VideoPhase.Failed
+        onFailed()
+    }
+}
+
 class FakePlatform : BrowserPlatform {
     val calls = mutableListOf<String>()
     var image: ImageLoad = ImageLoad.Failed("no image")
     var imageGate: CompletableDeferred<Unit>? = null
+    var svg: SvgLoad = SvgLoad.Failed("no svg")
+    var svgGate: CompletableDeferred<Unit>? = null
+    val players = mutableListOf<FakeVideoPlayer>()
+
+    override suspend fun loadSvg(files: WorkspaceFiles, entry: WorkspaceFileEntry): SvgLoad {
+        calls += "loadSvg ${entry.path}"
+        svgGate?.await()
+        return svg
+    }
+
+    override fun openVideo(files: WorkspaceFiles, entry: WorkspaceFileEntry, onFailed: () -> Unit): VideoPlayer {
+        calls += "openVideo ${entry.path}"
+        return FakeVideoPlayer(entry, onFailed).also { players += it }
+    }
 
     override suspend fun loadImage(files: WorkspaceFiles, entry: WorkspaceFileEntry): ImageLoad {
         calls += "loadImage ${entry.path}"

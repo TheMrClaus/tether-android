@@ -21,7 +21,10 @@ class FileFormatTest {
         assertEquals(PreviewKind.Unsupported, FileKinds.previewKind("NOTES"))
         assertEquals(PreviewKind.Unsupported, FileKinds.previewKind(".bashrc"))
         assertTrue(FileKinds.nativeImage("a.webp"))
-        assertFalse("no SVG renderer in the app", FileKinds.nativeImage("a.svg"))
+        assertTrue("an SVG is rasterised natively", FileKinds.nativeImage("a.svg"))
+        assertTrue(FileKinds.isSvg("A.SVG"))
+        assertFalse(FileKinds.isSvg("a.png"))
+        assertFalse(FileKinds.isSvg("svg"))
     }
 
     @Test fun sizeMatchesTheWebsFormatSize() {

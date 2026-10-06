@@ -16,7 +16,9 @@ import java.io.IOException
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 
 /**
@@ -89,6 +91,38 @@ class AndroidBrowserPlatform(
             scratch?.delete()
         }
     }
+
+    /**
+     * An SVG has no byte cap (the web's `<img>` has none): it streams into a scratch copy and is
+     * parsed from there, the copy deleted at once. A file too big to parse is an out-of-memory in the
+     * parser, which is "could not be displayed", never a crash.
+     */
+    override suspend fun loadSvg(files: WorkspaceFiles, entry: WorkspaceFileEntry): SvgLoad = withContext(Dispatchers.IO) {
+        var scratch: File? = null
+        try {
+            val file = cache.newScratch("svg").also { scratch = it }
+            val result = file.outputStream().use { out -> files.download(entry.path, Long.MAX_VALUE, out) }
+            when (result) {
+                is FilesResult.Failed -> SvgLoad.Failed(result.message)
+                is FilesResult.Ok -> SvgImages.parse(file)?.let { SvgLoad.Ok(it) } ?: SvgLoad.Failed(FileBrowserState.IMAGE_ERROR)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: IOException) {
+            SvgLoad.Failed(FileBrowserState.IMAGE_ERROR)
+        } catch (_: RuntimeException) {
+            SvgLoad.Failed(FileBrowserState.IMAGE_ERROR)
+        } finally {
+            scratch?.delete()
+        }
+    }
+
+    override fun openVideo(files: WorkspaceFiles, entry: WorkspaceFileEntry, onFailed: () -> Unit): VideoPlayer =
+        MediaVideoPlayer(
+            WorkspaceMediaDataSource(files, entry.path),
+            CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+            onFailed,
+        )
 
     /**
      * Download to a scratch copy first; only a complete file is written to [target], so a failed

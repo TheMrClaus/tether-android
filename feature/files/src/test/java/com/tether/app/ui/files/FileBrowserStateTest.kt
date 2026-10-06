@@ -148,11 +148,12 @@ class FileBrowserStateTest {
     }
 
     @Test fun anOversizedTextFileAndAnUnsupportedFileFetchNothing() = runTest {
+        // (SVG and video are previewed now: see FileBrowserMediaTest.)
         val s = browser()
         s.open()
         advanceUntilIdle()
         val before = files.calls.size
-        for (name in listOf("huge.log", "archive.zip", "diagram.svg", "clip.mp4")) {
+        for (name in listOf("huge.log", "archive.zip")) {
             val size = if (name == "huge.log") WorkspaceFiles.MAX_TEXT_PREVIEW_BYTES + 1 else 10
             s.selectFile(FilesFixtures.file(name, size))
             advanceUntilIdle() // each one settles before the next replaces it

@@ -71,6 +71,12 @@ sealed interface ImageLoad {
     data class Failed(val message: String) : ImageLoad
 }
 
+/** What loading an SVG for the preview came to. There is no size limit: the web's `<img>` has none. */
+sealed interface SvgLoad {
+    data class Ok(val svg: ParsedSvg) : SvgLoad
+    data class Failed(val message: String) : SvgLoad
+}
+
 /**
  * The platform side of the browser, behind a seam so the state machine runs on the JVM:
  * decoding a preview image, saving to a document the user picked, making a shareable copy, and
@@ -78,6 +84,16 @@ sealed interface ImageLoad {
  */
 interface BrowserPlatform {
     suspend fun loadImage(files: WorkspaceFiles, entry: WorkspaceFileEntry): ImageLoad
+
+    /** An SVG file, parsed script-free with nothing fetched ([SvgImages]); drawn later at the size it is shown at. */
+    suspend fun loadSvg(files: WorkspaceFiles, entry: WorkspaceFileEntry): SvgLoad
+
+    /**
+     * A video, opened for playback at once ([VideoPlayer.phase] says how far it got): it streams by
+     * Range reads, plays nothing until asked, and has no size cap. [onFailed] is called (on the
+     * main thread) when it cannot be played.
+     */
+    fun openVideo(files: WorkspaceFiles, entry: WorkspaceFileEntry, onFailed: () -> Unit): VideoPlayer
     suspend fun saveTo(files: WorkspaceFiles, entry: WorkspaceFileEntry, target: Uri): FilesResult<Long>
     suspend fun shareCopy(files: WorkspaceFiles, entry: WorkspaceFileEntry): FilesResult<ShareReady>
 
@@ -148,6 +164,14 @@ class FileBrowserState(
     var image by mutableStateOf<ImageBitmap?>(null)
         private set
     var imageTooLarge by mutableStateOf(false)
+        private set
+
+    /** The selected SVG, parsed; the preview draws it at the size it is shown at. */
+    var svg by mutableStateOf<ParsedSvg?>(null)
+        private set
+
+    /** The selected video's player: owned here, released on every way out of the selection. */
+    var video by mutableStateOf<VideoPlayer?>(null)
         private set
     var previewLoading by mutableStateOf(false)
         private set
@@ -251,6 +275,8 @@ class FileBrowserState(
         selected = null
         text = null
         image = null
+        svg = null
+        releaseVideo()
         imageTooLarge = false
         previewError = ""
         previewLoading = false
@@ -305,12 +331,25 @@ class FileBrowserState(
     /** web `selectFile(entry)`, plus the native image fetch (the web's <img> loads itself). */
     fun selectFile(entry: WorkspaceFileEntry) {
         previewJob?.cancel()
+        releaseVideo()
         selected = entry
         text = null
         image = null
+        svg = null
         imageTooLarge = false
         previewError = ""
         val kind = FileKinds.previewKind(entry)
+        if (kind == PreviewKind.Video) {
+            // The web's <video preload="metadata">: opened, never started. No size check (it has none).
+            previewLoading = false
+            val token = Any()
+            videoToken = token
+            video = platform.openVideo(files, entry) {
+                // Only the video still on screen speaks (a late failure of a replaced one is nothing).
+                if (videoToken === token) previewError = VIDEO_ERROR
+            }
+            return
+        }
         val nativeImage = FileKinds.nativeImage(entry.name)
         val textFits = kind == PreviewKind.Text && entry.size <= WorkspaceFiles.MAX_TEXT_PREVIEW_BYTES
         if (!textFits && !nativeImage) {
@@ -326,6 +365,14 @@ class FileBrowserState(
                     is FilesResult.Ok -> text = result.value
                     is FilesResult.Failed -> previewError = result.message
                 }
+            } else if (FileKinds.isSvg(entry.name)) {
+                val result = platform.loadSvg(files, entry)
+                if (previewJob !== self) return@launchLatest
+                when (result) {
+                    is SvgLoad.Ok -> svg = result.svg
+                    // The web's <img onError> copy.
+                    is SvgLoad.Failed -> previewError = IMAGE_ERROR
+                }
             } else {
                 val result = platform.loadImage(files, entry)
                 if (previewJob !== self) return@launchLatest
@@ -340,11 +387,28 @@ class FileBrowserState(
         }
     }
 
+    /** The SVG [shown] could not be drawn (memory, a hostile file): the web's <img onError> copy, if it is still the one on screen. */
+    fun svgDrawFailed(shown: ParsedSvg) {
+        if (svg === shown) previewError = IMAGE_ERROR
+    }
+
+    private var videoToken: Any? = null
+
+    /** Stops and frees the selected video's player (and its connection), whatever way the selection ends. */
+    private fun releaseVideo() {
+        videoToken = null
+        val player = video ?: return
+        video = null
+        player.release()
+    }
+
     fun clearSelection() {
         previewJob?.cancel()
+        releaseVideo()
         selected = null
         text = null
         image = null
+        svg = null
         imageTooLarge = false
         previewError = ""
         previewLoading = false
@@ -580,6 +644,9 @@ class FileBrowserState(
 
     companion object {
         const val IMAGE_ERROR = "This image could not be displayed."
+
+        /** workspace-file-browser.tsx's `<video onError>` copy. */
+        const val VIDEO_ERROR = "This video could not be played."
         const val LOG_TAG = "TetherFiles"
         const val NAME_MAX_LENGTH = 200
         private val PARENT_TAIL = Regex("/+[^/]+/?$")

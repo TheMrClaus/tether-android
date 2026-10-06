@@ -41,12 +41,10 @@ object FileKinds {
 
     fun previewKind(entry: WorkspaceFileEntry): PreviewKind = previewKind(entry.name)
 
-    /**
-     * Native divergence: the app has no SVG renderer (web views are not allowed, and a script-free
-     * SVG rasteriser is a dependency this task does not add), so SVG shows the "no preview here"
-     * panel; every other image kind is decoded as a bitmap.
-     */
-    fun nativeImage(name: String): Boolean = previewKind(name) == PreviewKind.Image && extension(name) != "svg"
+    /** Every image kind the web previews has a native preview: bitmaps are decoded, an SVG is rasterised ([SvgImages]). */
+    fun nativeImage(name: String): Boolean = previewKind(name) == PreviewKind.Image
+
+    fun isSvg(name: String): Boolean = previewKind(name) == PreviewKind.Image && extension(name) == "svg"
 }
 
 /** The host's locale and time zone for [FileFormat.modified] (the web's `Intl` default). */

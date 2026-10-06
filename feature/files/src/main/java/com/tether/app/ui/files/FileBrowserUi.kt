@@ -115,6 +115,7 @@ object FileBrowserTags {
     const val Preview = "files-preview"
     const val Text = "files-text"
     const val Image = "files-image"
+    const val Video = "files-video"
     const val MutationBanner = "files-mutation-banner"
     const val PreviewError = "files-preview-error"
     const val Uploading = "files-uploading"
@@ -585,7 +586,7 @@ private fun Banner(message: AnnotatedString, danger: Boolean, modifier: Modifier
 
 /** `.file-browser-state` / `.file-browser-preview-empty`. */
 @Composable
-private fun StateBlock(
+internal fun StateBlock(
     icon: ImageVector?,
     message: String,
     modifier: Modifier = Modifier,
@@ -705,33 +706,9 @@ private fun PreviewContent(state: FileBrowserState, entry: WorkspaceFileEntry, n
     val kind = FileKinds.previewKind(entry)
     val tooLargeText = kind == PreviewKind.Text && entry.size > WorkspaceFiles.MAX_TEXT_PREVIEW_BYTES
     when {
-        kind == PreviewKind.Image && FileKinds.nativeImage(entry.name) -> {
-            val image = state.image
-            when {
-                image != null -> Image(
-                    image,
-                    contentDescription = "Preview of ${SafeText.line(entry.name)}",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .testTag(FileBrowserTags.Image)
-                        .cssSurface(RoundedCornerShape(t.radiusMd), t.graphite, null, t.css.shadowRaised)
-                        .clip(RoundedCornerShape(t.radiusMd)),
-                )
-                state.imageTooLarge -> StateBlock(
-                    TetherIcons.FileImage,
-                    "Image preview is limited to ${FileFormat.size(BrowserLimits.MAX_IMAGE_PREVIEW_BYTES)} and ${BrowserLimits.MAX_IMAGE_PIXELS / 1_000_000} megapixels in the app. The file remains unchanged.",
-                    title = "Image is too large to preview",
-                    iconSize = 30.dp,
-                )
-                state.previewLoading -> StateBlock(null, "Opening image preview…", spinner = true)
-            }
-        }
-        kind == PreviewKind.Image || kind == PreviewKind.Video -> StateBlock(
-            if (kind == PreviewKind.Video) TetherIcons.FileVideo2 else TetherIcons.FileImage,
-            "Use Save to device or Share from the file's actions to open it in another app. The file remains unchanged.",
-            title = if (kind == PreviewKind.Video) "Video preview is not available in the app yet" else "SVG preview is not available in the app",
-            iconSize = 30.dp,
-        )
+        kind == PreviewKind.Image -> ImagePreview(state, entry)
+        // The platform player over Range reads, no autoplay, no size cap (the web's <video controls>).
+        kind == PreviewKind.Video -> state.video?.let { VideoPreview(it, entry.name) }
         kind == PreviewKind.Text && tooLargeText -> StateBlock(
             TetherIcons.FileText,
             "Text preview is limited to 1 MB. The file remains unchanged.",
