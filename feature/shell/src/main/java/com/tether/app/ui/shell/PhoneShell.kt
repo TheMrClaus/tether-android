@@ -37,6 +37,7 @@ object ShellTags {
     const val RenameKey = "shell-rename"
     const val TelemetryHandle = "shell-telemetry-handle"
     const val LinksKey = "shell-links"
+    const val ResumeCommandKey = "shell-resume-command"
     const val LinksPopover = "shell-links-popover"
     const val PinKey = "shell-pin"
     const val EndSessionKey = "shell-end-session"
@@ -144,6 +145,7 @@ fun PhoneShell(
     unseenWarnings: Int = 0,
     copiedPath: Boolean = false,
     copiedTetherId: Boolean = false,
+    copiedResumeCommand: Boolean = false,
     onStartSession: () -> Unit = {},
     /** T15.4: the top bar's current destination (null while the console resolves its view). */
     current: TopBarDestination? = TopBarDestination.Sessions,
@@ -245,6 +247,7 @@ fun PhoneShell(
                 workspaceRoot = workspaceRoot,
                 copiedPath = copiedPath,
                 copiedTetherId = copiedTetherId,
+                copiedResumeCommand = copiedResumeCommand,
                 actions = header,
                 onDismiss = state::closeLinks,
                 statusline = slots.statusline,

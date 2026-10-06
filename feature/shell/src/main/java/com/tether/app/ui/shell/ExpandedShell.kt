@@ -89,6 +89,7 @@ fun ExpandedShell(
     unseenWarnings: Int = 0,
     copiedPath: Boolean = false,
     copiedTetherId: Boolean = false,
+    copiedResumeCommand: Boolean = false,
     onStartSession: () -> Unit = {},
     /** T15.4: the top bar's current destination (null while the console resolves its view). */
     current: TopBarDestination? = TopBarDestination.Sessions,
@@ -199,6 +200,7 @@ fun ExpandedShell(
                 workspaceRoot = workspaceRoot,
                 copiedPath = copiedPath,
                 copiedTetherId = copiedTetherId,
+                copiedResumeCommand = copiedResumeCommand,
                 actions = header,
                 onDismiss = state::closeLinks,
                 statusline = slots.statusline,

@@ -32,6 +32,12 @@ data class AgentSession(
     val model: String? = null,
     val sandboxPolicy: String? = null,
     val lastTurnOutcome: String? = null,
+    /**
+     * v52 (lib/protocol.ts:2135): the ready-to-paste shell command that continues this conversation in an
+     * external terminal, server-built per provider. Absent when the session cannot be resumed from one (the
+     * fake engine; a fresh chat with no native id yet): the header hides its copy control then.
+     */
+    val resumeCommand: String? = null,
     // T5.1: the sidebar fields (lib/protocol.ts AgentSession). v70 `lastMessageAt` keys the
     // "last-active" sort; `nameIsCustom` keeps an operator rename over the discovered title;
     // v101 `parentSessionId` groups delegate children, `handedOffTo` badges a handed-off source.

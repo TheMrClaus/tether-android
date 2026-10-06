@@ -31,7 +31,12 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -57,6 +62,7 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import com.tether.app.client.LabelText
+import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.text.proseDirection
 import androidx.compose.ui.unit.Dp
@@ -108,6 +114,8 @@ data class WorkspaceHeaderActions(
     val onTogglePinned: () -> Unit,
     val onCopyPath: () -> Unit,
     val onCopyTetherId: () -> Unit,
+    /** workspace-header.tsx `onCopyResumeCommand` (v52): copies [AgentSession.resumeCommand]. */
+    val onCopyResumeCommand: () -> Unit = {},
 )
 
 /**
@@ -335,14 +343,15 @@ fun TelemetryHandlePlaceholder(open: Boolean, onToggle: () -> Unit) {
  * `min(24rem, 100vw - 2rem)` wide and at most `calc(100dvh - 8rem)` tall, scrolling past that
  * (`overflow-y: auto`), a `--graphite` card with `1px --line-strong`, `--radius-md` and
  * `--shadow-floating` (globals.css 11861-11885). Light-dismiss: a tap outside closes it. Holds the
- * session's copy controls (the directory — shown because the app has no resume command to stand in
- * for it — and the Tether id), the statusline ([statusline], T4.3) and, on phones, the pin key.
+ * session's copy controls (the directory, the terminal resume command when the session carries one
+ * (v52, between the two as on the web) and the Tether id), the statusline ([statusline], T4.3) and, on phones, the pin key.
  *
  * Expanded (≥ 48rem): the Tether id reads "Copy Tether id" (4123-4131), the pin key stays in the
  * header (11880), and where the inspector column exists the card clears it
  * (`right: calc(var(--inspector-width) + var(--space-lg))`, 11886-11888: pass [endInset]) and the
  * statusline is left out, as the column shows the readings ([showStatusline]).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionLinksPopover(
     session: AgentSession,
@@ -356,6 +365,8 @@ fun SessionLinksPopover(
     expanded: Boolean = false,
     endInset: Dp? = null,
     showStatusline: Boolean = true,
+    /** The resume-command control's confirmation: "Copied resume command" for 1.5 s after a copy. */
+    copiedResumeCommand: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -402,6 +413,36 @@ fun SessionLinksPopover(
                     mono = true,
                     studioSize = true,
                 )
+                // workspace-header.tsx:56-70 (v52): the terminal resume command, only when the server built
+                // one (the fake engine and a fresh chat have none). Same keys at both widths; only the
+                // legend differs ("Tap to copy" on phones, "Copy" from 48rem). The web's `title` (the exact
+                // command and the end-the-session-first note) is a long-press tooltip here.
+                val resumeCommand = session.resumeCommand
+                if (resumeCommand != null) {
+                    TooltipBox(
+                        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                        tooltip = { PlainTooltip { Text(resumeCommandTitle(resumeCommand)) } },
+                        state = rememberTooltipState(),
+                        modifier = Modifier.testTag(ShellTags.ResumeCommandKey),
+                    ) {
+                        LinkRow(
+                            text = AnnotatedString(
+                                when {
+                                    copiedResumeCommand -> "Copied resume command"
+                                    expanded -> "Copy resume command"
+                                    else -> "Tap to copy resume command"
+                                },
+                            ),
+                            leading = TetherIcons.Terminal,
+                            trailing = if (copiedResumeCommand) TetherIcons.Check else TetherIcons.Copy,
+                            trailingSize = 13.dp,
+                            description = if (copiedResumeCommand) "Copied resume command" else "Copy the command to resume this session in a terminal",
+                            onClick = actions.onCopyResumeCommand,
+                            mono = true,
+                            studioSize = false,
+                        )
+                    }
+                }
                 LinkRow(
                     text = AnnotatedString(
                         when {
@@ -446,6 +487,14 @@ fun SessionLinksPopover(
         }
     }
 }
+
+/**
+ * workspace-header.tsx:66 `title`: the exact command (it differs per provider, so a paraphrase is the
+ * one thing not worth trusting) and why to end the session first. The command is drawn the confirm-
+ * before-run way ([SafeText.exact]: a lookalike space or a control character shows as a token).
+ */
+internal fun resumeCommandTitle(command: String): String =
+    "Copies:\n${SafeText.exact(command)}\n\nEnd this session first — two live turns would share one transcript and working directory."
 
 /**
  * One copy control of the popover's meta strip (`.workspace-path` / `.workspace-tether-id`):

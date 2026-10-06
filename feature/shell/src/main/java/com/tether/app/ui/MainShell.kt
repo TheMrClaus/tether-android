@@ -353,8 +353,10 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val copyNotices = remember { CopyNotices() }
     var copiedPath by remember { mutableStateOf(false) }
     var copiedTetherId by remember { mutableStateOf(false) }
+    var copiedResumeCommand by remember { mutableStateOf(false) }
     LaunchedEffect(copiedPath) { if (copiedPath) { delay(CopiedFeedbackMs); copiedPath = false } }
     LaunchedEffect(copiedTetherId) { if (copiedTetherId) { delay(CopiedFeedbackMs); copiedTetherId = false } }
+    LaunchedEffect(copiedResumeCommand) { if (copiedResumeCommand) { delay(CopiedFeedbackMs); copiedResumeCommand = false } }
     // T9.1 (dashboard.tsx:793-828): the inspector's reads for the opened session (ta-dl4: each on
     // the web's own dependency list).
     InspectorReads(vm.client, session, connected)
@@ -494,6 +496,14 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onCopyTetherId = {
                     session?.let {
                         if (copySafely(context, SafeText.line(it.id), copyNotices, raw = it.id, label = "Tether session id", strict = true)) copiedTetherId = true
+                    }
+                },
+                // dashboard.tsx copyResumeCommand: the server-built command, nothing when there is none. A
+                // command is pasted into a shell, so it is copied the confirm-before-run way (SafeText.exact:
+                // a lookalike space shows as a token) and "Copy raw" stays the way to the exact bytes.
+                onCopyResumeCommand = {
+                    session?.resumeCommand?.let { cmd ->
+                        if (copySafely(context, SafeText.exact(cmd), copyNotices, raw = cmd, label = "Resume command", strict = true)) copiedResumeCommand = true
                     }
                 },
             )
@@ -685,6 +695,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 unseenWarnings = unseenWarnings,
                 copiedPath = copiedPath,
                 copiedTetherId = copiedTetherId,
+                copiedResumeCommand = copiedResumeCommand,
                 onStartSession = vm::openDraft,
                 current = current,
                 showRail = showRail,
@@ -698,6 +709,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 unseenWarnings = unseenWarnings,
                 copiedPath = copiedPath,
                 copiedTetherId = copiedTetherId,
+                copiedResumeCommand = copiedResumeCommand,
                 onStartSession = vm::openDraft,
                 topbar = topbarActions,
                 header = headerActions,
