@@ -878,9 +878,14 @@ class TetherViewModel(
         if (staged == null && extra.isEmpty()) return AttachmentSendResult.Empty
         // [extra]: T8.6 part 2 — the element screenshots of the picks riding this send (chat-view.tsx
         // 90fbb9f :3199-3203: `[...attachments, ...pickAttachments]`); they are not staged files.
+        // ta-coik.69: a composer drawn with no server recorded (expectedOrigin null: offline) is no other server's:
+        // it sends once the link is up. What is refused is a composer drawn for a DIFFERENT server, or a staged
+        // set recorded for a server other than the live one (the client re-checks the socket's origin itself).
+        val liveOrigin = attachmentOrigin()
         if (staged != null) {
-            if (expectedOrigin == null || staged.origin != expectedOrigin) return AttachmentSendResult.NotLive
-        } else if (expectedOrigin == null || expectedOrigin != attachmentOrigin()) {
+            if (expectedOrigin != null && staged.origin != expectedOrigin) return AttachmentSendResult.NotLive
+            if (expectedOrigin == null && staged.origin != null && liveOrigin != null && staged.origin != liveOrigin) return AttachmentSendResult.NotLive
+        } else if (expectedOrigin != null && expectedOrigin != liveOrigin) {
             return AttachmentSendResult.NotLive
         }
         if (client.connection.value != ConnectionState.Connected) return AttachmentSendResult.NotConnected

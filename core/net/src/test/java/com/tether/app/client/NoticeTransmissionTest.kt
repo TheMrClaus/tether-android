@@ -124,7 +124,6 @@ class NoticeTransmissionTest {
         h.scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { client.errors.collect { errors += it } }
         val key = keys(client).first()
         assertEquals(NoticeResult.NotLive, client.dismissNotice("s1", key, "https://other.example"))
-        assertEquals(NoticeResult.NotLive, client.dismissNotice("s1", key, null))
         assertEquals(ControlResult.NotLive, client.sessionControl("s1", SessionControl.RateLimitResume(3_600_000, "schedule"), "https://other.example"))
         h.enqueueConnect()
         ws.close(1001, null)
@@ -158,6 +157,15 @@ class NoticeTransmissionTest {
         assertTrue("the snapshot sends nothing by itself", frames("dismiss-notice").isEmpty())
         assertEquals(NoticeResult.Sent, client.dismissNotice("s1", key, client.consentOrigin.value))
         assertEquals(1, frames("dismiss-notice").size)
+    }
+
+    /** ta-coik.69: an X drawn with no server recorded (offline), tapped after the handshake, sends as the web's does. */
+    @Test
+    fun aDismissDrawnWithNoServerRecordedSendsAfterTheHandshake() {
+        val (client, _) = connected()
+        val key = keys(client).first()
+        assertEquals(NoticeResult.Sent, client.dismissNotice("s1", key, null))
+        assertEquals(listOf(key), h.framesUntilBarrier().filter { it.type() == "dismiss-notice" }.map { it.str("dismissKey") })
     }
 
     @Test

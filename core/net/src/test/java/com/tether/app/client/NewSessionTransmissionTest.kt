@@ -188,11 +188,13 @@ class NewSessionTransmissionTest {
     }
 
     @Test
-    fun aRowDrawnForAnotherServerOrForNoneIsNotLive() {
+    fun aRowDrawnForAnotherServerIsNotLiveButOneDrawnWithNoServerRecordedSends() {
         val (client, _) = withCatalog()
         assertEquals(NewSessionResult.NotLive, client.createNewSession(workChoice, "/w", "https://other.example"))
-        assertEquals(NewSessionResult.NotLive, client.createNewSession(workChoice, "/w", null))
         assertTrue(creates().isEmpty())
+        // ta-coik.69: drawn offline (no server recorded), tapped after the handshake.
+        assertEquals(NewSessionResult.Sent, client.createNewSession(workChoice, "/w", null))
+        assertEquals(1, creates().size)
     }
 
     @Test

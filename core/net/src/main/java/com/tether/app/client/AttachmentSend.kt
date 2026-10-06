@@ -87,11 +87,13 @@ internal class AttachmentLink(
     val pendingOrigin: String?,
 )
 
-/** Why [link] may not carry a message with attachments drawn for [expectedOrigin] (null: it may). */
+/** Why [link] may not carry a message with attachments drawn for [expectedOrigin] (null: it may; a null origin is no other server's). */
 internal fun attachmentLinkRefusal(link: AttachmentLink, expectedOrigin: String?): AttachmentSendResult? = when {
     !link.socketBound || link.socketOrigin == null || !link.socketOpen || !link.handshakeDone || !link.pendingLoaded || link.halted ->
         AttachmentSendResult.NotConnected
-    expectedOrigin == null || expectedOrigin != link.socketOrigin || link.pendingOrigin != link.socketOrigin -> AttachmentSendResult.NotLive
+    // ta-coik.69: a message drawn with no server recorded (null: offline) sends once the link is up; only one drawn
+    // for a DIFFERENT server, or an outbox bound to another server, is refused.
+    (expectedOrigin != null && expectedOrigin != link.socketOrigin) || link.pendingOrigin != link.socketOrigin -> AttachmentSendResult.NotLive
     else -> null
 }
 

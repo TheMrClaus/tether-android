@@ -49,9 +49,12 @@ class AttachmentLinkGateTest {
     fun aHaltedClientIsNotConnected() = assertEquals(AttachmentSendResult.NotConnected, attachmentLinkRefusal(link(halted = true), a))
 
     @Test
-    fun drawnForAnotherServerOrNoneIsNotLive() {
+    fun drawnForAnotherServerIsNotLiveButDrawnForNoneIsNot() {
         assertEquals(AttachmentSendResult.NotLive, attachmentLinkRefusal(link(), b))
-        assertEquals(AttachmentSendResult.NotLive, attachmentLinkRefusal(link(), null))
+        // ta-coik.69: no server recorded is no other server's.
+        assertEquals(null, attachmentLinkRefusal(link(), null))
+        // ... but an outbox bound to another server than the socket still refuses it.
+        assertEquals(AttachmentSendResult.NotLive, attachmentLinkRefusal(link(pendingOrigin = b), null))
     }
 
     @Test

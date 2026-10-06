@@ -626,7 +626,7 @@ class DraftComposerModel(
 
     /**
      * use-draft-composer.ts submit: drawn for [expectedOrigin] (the server the composer was drawn
-     * for). One attempt, one fresh requestId; never retried.
+     * for; null: drawn with no server recorded, ta-coik.69: it goes to the live socket's server). One attempt, one fresh requestId; never retried.
      */
     fun submit(expectedOrigin: String?, requirePrompt: Boolean = true): DraftSubmitResult {
         if (_state.value.creating || submitting || setupCheck != null) return DraftSubmitResult.Busy
@@ -636,14 +636,19 @@ class DraftComposerModel(
             return DraftSubmitResult.NotReady
         }
         val entry = entryForKey(formKey()) ?: return DraftSubmitResult.NotReady
-        if (expectedOrigin == null) {
-            _state.update { it.copy(error = DRAFT_NOT_LIVE_COPY) }
-            return DraftSubmitResult.NotLive
+        // ta-coik.69: a composer drawn with no server recorded (expectedOrigin null: offline) is no other
+        // server's: the create goes to the server whose socket is live now (the web's `send` puts it on any
+        // open socket); with none live the create is the link's "reconnecting" refusal, not "the server
+        // changed". Only a composer drawn for a DIFFERENT server is refused, by the client's origin check.
+        val origin = expectedOrigin ?: client.consentOrigin.value
+        if (origin == null) {
+            _state.update { it.copy(error = DRAFT_NOT_CONNECTED_COPY) }
+            return DraftSubmitResult.NotConnected
         }
         // ta-m7ef (use-draft-composer.ts submit): an isolated create first asks what it would run.
         val intent = WorktreeDraft.request(_state.value.form)
-        if (_state.value.form["useWorktree"] == JsBool.TRUE && intent != null) return startSetupCheck(expectedOrigin, entry, CreateFrame.worktreeRequest(intent))
-        return send(expectedOrigin, entry, setupConsent = null)
+        if (_state.value.form["useWorktree"] == JsBool.TRUE && intent != null) return startSetupCheck(origin, entry, CreateFrame.worktreeRequest(intent))
+        return send(origin, entry, setupConsent = null)
     }
 
     /** The one send: the create built from the state as it is NOW, one fresh requestId, never retried. */

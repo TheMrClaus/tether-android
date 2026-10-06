@@ -140,11 +140,13 @@ class AttachmentTransmissionTest {
     // --- the gates ------------------------------------------------------------------------------
 
     @Test
-    fun drawnForAnotherServerOrForNoneSendsNothing() {
+    fun drawnForAnotherServerSendsNothingButOneDrawnWithNoServerRecordedSends() {
         val (client, _) = connected()
         assertEquals(AttachmentSendResult.NotLive, client.sendAttachments("s1", "x", listOf(picture), null, "https://other.example:443"))
-        assertEquals(AttachmentSendResult.NotLive, client.sendAttachments("s1", "x", listOf(picture), null, null))
         assertTrue(frames("send").isEmpty())
+        // ta-coik.69: drawn offline (no server recorded), tapped after the handshake.
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "x", listOf(picture), null, null))
+        assertEquals(1, frames("send").size)
     }
 
     /**

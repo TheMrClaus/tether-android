@@ -4076,7 +4076,10 @@ class RealTetherClient(
         var evicted = GivenUp.NONE
         val result = synchronized(lock) {
             val owner = pendingOrigin
-            if (expectedOrigin == null || owner != expectedOrigin || (socketOrigin != null && socketOrigin != expectedOrigin)) return@synchronized MentionResult.NotLive
+            // ta-coik.69: a delegation drawn with no server recorded (expectedOrigin null: offline) is recorded in
+            // the outbox that is bound to a server (the web's filePending queues on any socket state); only a
+            // key drawn for a DIFFERENT server, an unbound outbox, or a socket of another server refuses.
+            if (owner == null || (expectedOrigin != null && owner != expectedOrigin) || (socketOrigin != null && socketOrigin != owner)) return@synchronized MentionResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized MentionResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized MentionResult.Locked
             if (!CommandGuard.mentionOffered(session, mention, providerCatalogState.value)) return@synchronized MentionResult.NotOffered
@@ -4776,7 +4779,8 @@ class RealTetherClient(
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized InterruptResult.NotConnected
-            if (expectedOrigin != origin) return@synchronized InterruptResult.NotLive
+            // ta-coik.69: null = drawn with no server recorded: never "another server"; only a recorded DIFFERENT origin refuses.
+            if (expectedOrigin != null && expectedOrigin != origin) return@synchronized InterruptResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized InterruptResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized InterruptResult.Locked
             // T6.7: the frame names no turn, so the server would stop whichever one runs now.
@@ -4978,7 +4982,8 @@ class RealTetherClient(
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized StopCommandResult.NotConnected
             // Bound to the server that drew the row: a key composed for another origin never stops here.
-            if (expectedOrigin != origin) return@synchronized StopCommandResult.NotLive
+            // ta-coik.69: null = drawn with no server recorded: never "another server"; only a recorded DIFFERENT origin refuses.
+            if (expectedOrigin != null && expectedOrigin != origin) return@synchronized StopCommandResult.NotLive
             sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized StopCommandResult.Locked
             if (!isRunningCommand(sessionStore.tree(sessionId), commandId)) return@synchronized StopCommandResult.NotRunning
             if (!ws.send(ClientMessage.StopCommand(sessionId, commandId).encode())) return@synchronized StopCommandResult.NotConnected
@@ -5004,7 +5009,8 @@ class RealTetherClient(
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized RunCommandResult.NotConnected
-            if (expectedOrigin != origin) return@synchronized RunCommandResult.NotLive
+            // ta-coik.69: null = drawn with no server recorded: never "another server"; only a recorded DIFFERENT origin refuses.
+            if (expectedOrigin != null && expectedOrigin != origin) return@synchronized RunCommandResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized RunCommandResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized RunCommandResult.Locked
             CommandGuard.checkRun(session, providersState.value, sessionStore.tree(sessionId), command, background)?.let { return@synchronized it }
@@ -5028,7 +5034,8 @@ class RealTetherClient(
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized BackgroundCommandResult.NotConnected
-            if (expectedOrigin != origin) return@synchronized BackgroundCommandResult.NotLive
+            // ta-coik.69: null = drawn with no server recorded: never "another server"; only a recorded DIFFERENT origin refuses.
+            if (expectedOrigin != null && expectedOrigin != origin) return@synchronized BackgroundCommandResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized BackgroundCommandResult.Locked
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized BackgroundCommandResult.Locked
             CommandGuard.checkBackground(sessionStore.tree(sessionId), expectedTurnId)?.let { return@synchronized it }
@@ -5068,7 +5075,8 @@ class RealTetherClient(
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized NoticeResult.NotConnected
-            if (expectedOrigin != origin) return@synchronized NoticeResult.NotLive
+            // ta-coik.69: null = drawn with no server recorded: never "another server"; only a recorded DIFFERENT origin refuses.
+            if (expectedOrigin != null && expectedOrigin != origin) return@synchronized NoticeResult.NotLive
             sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized NoticeResult.Locked
             if (!projectionHasNoticeKey(sessionStore.tree(sessionId), dismissKey)) return@synchronized NoticeResult.NotShown
             if (!ws.send(ClientMessage.DismissNotice(sessionId, dismissKey).encode())) return@synchronized NoticeResult.NotConnected
@@ -5101,7 +5109,8 @@ class RealTetherClient(
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized NewSessionResult.NotConnected
             if (request.linkEpoch != epoch) return@synchronized NewSessionResult.NotConnected
-            if (expectedOrigin != origin) return@synchronized NewSessionResult.NotLive
+            // ta-coik.69: null = drawn with no server recorded: never "another server"; only a recorded DIFFERENT origin refuses.
+            if (expectedOrigin != null && expectedOrigin != origin) return@synchronized NewSessionResult.NotLive
             val frame = NewSessionGuard.resolve(request, liveCatalogLocked(), providersState.value) ?: return@synchronized NewSessionResult.NotOffered
             if (!ws.send(frame.encode())) return@synchronized NewSessionResult.NotConnected
             NewSessionResult.Sent
@@ -5359,7 +5368,8 @@ class RealTetherClient(
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
-            if (expectedOrigin != origin) return@synchronized false
+            // ta-coik.69: null = drawn with no server recorded: never "another server"; only a recorded DIFFERENT origin refuses.
+            if (expectedOrigin != null && expectedOrigin != origin) return@synchronized false
             ws.send(ClientMessage.Kill(sessionId, teardownConsent).encode())
         }
         if (sent == false) emitError("The secure link is reconnecting. The session was not ended.")
@@ -5375,7 +5385,8 @@ class RealTetherClient(
             val ws = socket
             val origin = socketOrigin
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized false
-            if (expectedOrigin != origin) return@synchronized false
+            // ta-coik.69: null = drawn with no server recorded: never "another server"; only a recorded DIFFERENT origin refuses.
+            if (expectedOrigin != null && expectedOrigin != origin) return@synchronized false
             ws.send(ClientMessage.ArchiveInspect(sessionId, requestId).encode())
         }
         if (!sent) emitError("The secure link is reconnecting. The session was not ended.")

@@ -180,13 +180,14 @@ class StopCommandTransmissionTest {
     }
 
     @Test
-    fun aStopDrawnForAnotherServerIsRefused() {
-        // L3: the key was composed for another origin (or for none): refused under the lock.
+    fun aStopDrawnForAnotherServerIsRefusedButOneDrawnWithNoServerRecordedSends() {
+        // L3: the key was composed for another origin: refused under the lock. ta-coik.69: a key drawn with
+        // no server recorded (offline) and tapped after the handshake is no other server's: it sends.
         val (client, _) = connected()
         assertEquals(StopCommandResult.NotLive, client.stopCommand("s1", "c-run", "https://other.example"))
-        assertEquals(StopCommandResult.NotLive, client.stopCommand("s1", "c-run", null))
         assertTrue(stopFrames().isEmpty())
-        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", client.consentOrigin.value))
+        assertEquals(StopCommandResult.Sent, client.stopCommand("s1", "c-run", null))
+        assertEquals(1, stopFrames().size)
     }
 
     @Test

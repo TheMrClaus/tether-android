@@ -113,11 +113,13 @@ class InterruptKillTransmissionTest {
     }
 
     @Test
-    fun anInterruptDrawnForAnotherServerIsRefused() {
+    fun anInterruptDrawnForAnotherServerIsRefusedButOneDrawnWithNoServerRecordedSends() {
         val (client, _) = connected()
         assertEquals(InterruptResult.NotLive, client.interrupt("s1", "https://other.example", T1))
-        assertEquals(InterruptResult.NotLive, client.interrupt("s1", null, T1))
         assertTrue(framesOf("interrupt").isEmpty())
+        // ta-coik.69: drawn offline (no server recorded), tapped after the handshake: sent, not "another server".
+        assertEquals(InterruptResult.Sent, client.interrupt("s1", null, T1))
+        assertEquals(1, framesOf("interrupt").size)
     }
 
     @Test
@@ -281,12 +283,19 @@ class InterruptKillTransmissionTest {
         val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
         h.scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { client.errors.collect { errors += it } }
         client.kill("s1", "https://other.example")
-        client.kill("s1", null)
         assertTrue(framesOf("kill").isEmpty())
-        // ta-coik.23: each refusal says so in the client's words, as a closed link does (never silent).
+        // ta-coik.23: the refusal says so in the client's words, as a closed link does (never silent).
         val deadline = System.currentTimeMillis() + 20_000
-        while (errors.size < 2 && System.currentTimeMillis() < deadline) Thread.sleep(10)
-        assertEquals(List(2) { "The secure link is reconnecting. The session was not ended." }, errors.toList())
+        while (errors.size < 1 && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        assertEquals(List(1) { "The secure link is reconnecting. The session was not ended." }, errors.toList())
+    }
+
+    /** ta-coik.69: an End drawn with no server recorded (offline) and tapped after the handshake sends. */
+    @Test
+    fun anEndDrawnWithNoServerRecordedSendsAfterTheHandshake() {
+        val (client, _) = connected()
+        client.kill("s1", null)
+        assertEquals(listOf("s1"), framesOf("kill").map { it.str("sessionId") })
     }
 
     /**
@@ -323,6 +332,33 @@ class InterruptKillTransmissionTest {
             // The control: drawn for B, the same End goes out on B.
             client.kill("s1", originB)
             assertEquals(listOf("s1"), b.framesUntilBarrier(client).filter { it.type() == "kill" }.map { it.str("sessionId") })
+        }
+    }
+
+    /**
+     * ta-coik.69: an End drawn with NO server recorded (null: offline), tapped after the client signed in to
+     * server B, is not refused as "another server" (nothing says which server drew it): it is bounded by what B
+     * holds, the session id looked up on B (the server answers an id it does not hold with a shown `error`,
+     * server.mjs 90fbb9f :9602-9603). It reaches B only, never A; B's own same-id session is the one ended.
+     */
+    @Test
+    fun anEndDrawnWithNoServerRecordedAfterASignInToAnotherServerGoesToThatServerOnly() {
+        val (client, _) = connected()
+        val originA = client.consentOrigin.value
+        assertNotNull(originA)
+        SecondServer().use { b ->
+            b.enqueueLoginAndConnect("parity-fake-cookie-b")
+            assertEquals(LoginResult.Success, runBlocking { client.login(b.url(), "parity-fake-password") })
+            val bws = b.nextSocket()
+            bws.send(readyWithSessions("s1", "s2"))
+            assertEquals("hello", b.frame().type())
+            h.await(client.connection) { it == ConnectionState.Connected }
+            h.await(client.consentOrigin) { it != null && it != originA }
+            assertTrue(b.framesUntilBarrier(client).isEmpty())
+
+            client.kill("s2", null)
+            assertEquals(listOf("s2"), b.framesUntilBarrier(client).filter { it.type() == "kill" }.map { it.str("sessionId") })
+            assertTrue("an End drawn for no server reached A", h.received.none { it.contains("\"type\":\"kill\"") })
         }
     }
 

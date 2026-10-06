@@ -943,9 +943,27 @@ class DraftComposerModelTest {
     }
 
     @Test
-    fun aDraftForNoServerIsNotLive() = runTest {
+    fun aDraftDrawnForAnotherServerIsNotLive() = runTest {
         val h = harness()
-        assertEquals(DraftSubmitResult.NotLive, h.model.submitChoice(claude, null))
+        assertEquals(DraftSubmitResult.NotLive, h.model.submitChoice(claude, "https://other.example"))
+        assertTrue(h.client.frames.isEmpty())
+    }
+
+    /** ta-coik.69: drawn with no server recorded (offline), tapped once the link is up: created on the live server. */
+    @Test
+    fun aDraftDrawnWithNoServerRecordedCreatesOnTheLiveServer() = runTest {
+        val h = harness()
+        assertEquals(DraftSubmitResult.Sent, h.model.submitChoice(claude, null))
+        assertEquals(1, h.client.frames.size)
+    }
+
+    /** ta-coik.69: with no live socket at all it is the link's "reconnecting" refusal, never "the server changed". */
+    @Test
+    fun aDraftWithNoServerRecordedAndNoLiveLinkIsNotConnected() = runTest {
+        val h = harness()
+        h.client.consentOrigin.value = null
+        assertEquals(DraftSubmitResult.NotConnected, h.model.submitChoice(claude, null))
+        assertEquals(DRAFT_NOT_CONNECTED_COPY, h.model.state.value.error)
         assertTrue(h.client.requests.isEmpty())
     }
 }

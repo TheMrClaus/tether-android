@@ -171,9 +171,18 @@ class TetherViewModelAttachmentTest {
         val (vm, client) = vm()
         vm.stage()
         assertEquals(AttachmentSendResult.NotLive, vm.sendAttachments("s1", "x", null, B))
-        assertEquals(AttachmentSendResult.NotLive, vm.sendAttachments("s1", "x", null, null))
         assertTrue("the client was asked", client.calls.isEmpty())
         assertEquals(1, vm.staged().size)
+    }
+
+    /** ta-coik.69: a composer drawn with no server recorded (offline) is no other server's: it goes to the client. */
+    @Test
+    fun aSendDrawnWithNoServerRecordedIsPassedToTheClient() = runTest(dispatcher) {
+        val (vm, client) = vm()
+        vm.stage()
+        assertEquals(AttachmentSendResult.Sent, vm.sendAttachments("s1", "x", null, null))
+        assertEquals(listOf<String?>(null), client.calls.map { it.origin })
+        assertEquals(0, vm.staged().size)
     }
 
     @Test

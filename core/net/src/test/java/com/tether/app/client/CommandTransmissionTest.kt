@@ -138,11 +138,13 @@ class CommandTransmissionTest {
     }
 
     @Test
-    fun aRunDrawnForAnotherServerIsRefused() {
+    fun aRunDrawnForAnotherServerIsRefusedButOneDrawnWithNoServerRecordedSends() {
         val (client, _) = connected()
         assertEquals(RunCommandResult.NotLive, client.runCommand("s1", "ls", false, "https://other.example"))
-        assertEquals(RunCommandResult.NotLive, client.runCommand("s1", "ls", false, null))
         assertTrue(frames("run-command").isEmpty())
+        // ta-coik.69: drawn offline (no server recorded), tapped after the handshake.
+        assertEquals(RunCommandResult.Sent, client.runCommand("s1", "ls", false, null))
+        assertEquals(1, frames("run-command").size)
     }
 
     @Test
@@ -262,11 +264,18 @@ class CommandTransmissionTest {
     fun backgroundDrawnForAnotherServerOrALockedSessionIsRefused() {
         val (client, ws) = connected(state = commandState())
         assertEquals(BackgroundCommandResult.NotLive, client.backgroundCommand("s1", "https://other.example", "t1"))
-        assertEquals(BackgroundCommandResult.NotLive, client.backgroundCommand("s1", null, "t1"))
         ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":2,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless","readOnly":true}}""")
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.readOnly } }
         assertEquals(BackgroundCommandResult.Locked, client.backgroundCommand("s1", client.consentOrigin.value, "t1"))
         assertTrue(frames("background-command").isEmpty())
+    }
+
+    /** ta-coik.69: a Background key drawn with no server recorded (offline), tapped after the handshake, sends. */
+    @Test
+    fun backgroundDrawnWithNoServerRecordedSendsAfterTheHandshake() {
+        val (client, _) = connected(state = commandState())
+        assertEquals(BackgroundCommandResult.Sent, client.backgroundCommand("s1", null, "t1"))
+        assertEquals(1, frames("background-command").size)
     }
 
     @Test
@@ -361,12 +370,14 @@ class CommandTransmissionTest {
     // --- r2 --------------------------------------------------------------------------------------
 
     @Test
-    fun aDelegationDrawnForAnotherServerOrForNoneIsNeverRecorded() {
+    fun aDelegationDrawnForAnotherServerIsNeverRecordedButOneDrawnWithNoServerRecordedIs() {
         val (client, _) = withCatalog()
         val m = DelegateMention("claude", "review")
         assertEquals(MentionResult.NotLive, client.sendDelegated("s1", "x", emptyList(), m, "https://other.example"))
-        assertEquals(MentionResult.NotLive, client.sendDelegated("s1", "x", emptyList(), m, null))
         assertTrue(frames("send").isEmpty())
+        // ta-coik.69: drawn offline (no server recorded), tapped after the handshake: recorded and sent.
+        assertEquals(MentionResult.Sent, client.sendDelegated("s1", "x", emptyList(), m, null))
+        assertEquals(1, frames("send").size)
     }
 
     @Test
