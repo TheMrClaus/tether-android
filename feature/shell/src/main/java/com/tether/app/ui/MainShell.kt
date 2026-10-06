@@ -702,10 +702,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         }
 
         toast?.let { message ->
-            LaunchedEffect(message) {
-                delay(10_000)
-                vm.dismissToast()
-            }
+            // ta-54j: no timer — the web's error toast stays until dismissed (dashboard.tsx:1980-1986,
+            // use-tether.ts dismissError); the close button is the only way out.
             ErrorToast(
                 message = message.text,
                 fromServer = message.fromServer,

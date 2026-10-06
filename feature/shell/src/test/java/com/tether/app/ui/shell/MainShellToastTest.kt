@@ -5,7 +5,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
@@ -98,5 +100,23 @@ class MainShellToastTest {
         // The toast went away: the next tap is the key's, at once (ta-coik.13, the web's toast too).
         tapRootAt(under.center)
         assertEquals(listOf("s1@$SHELL_TEST_ORIGIN#t1"), client.interruptCalls)
+    }
+
+    /** ta-54j: the web's error toast has no timer (dashboard.tsx:1980-1986, use-tether.ts dismissError). */
+    @Test
+    fun theToastStaysUntilItIsDismissed() {
+        val client = ShellConsentClient().also { it.show(session, tree) }
+        host(client)
+        rule.runOnIdle { vm.reportLocalError("Not connected — the setting was not changed.") }
+        arm()
+        rule.onNodeWithTag(ERROR_TOAST_TAG).assertExists()
+        // Well past the old 10 s auto-dismiss, and past a minute.
+        rule.mainClock.advanceTimeBy(65_000)
+        rule.waitForIdle()
+        rule.onNodeWithTag(ERROR_TOAST_TAG).assertExists()
+        rule.onNodeWithContentDescription("Dismiss error").performClick()
+        rule.mainClock.advanceTimeBy(48)
+        rule.waitForIdle()
+        rule.onNodeWithTag(ERROR_TOAST_TAG).assertDoesNotExist()
     }
 }
