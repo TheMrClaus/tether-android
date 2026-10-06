@@ -144,8 +144,10 @@ class WireConformanceTest {
         assertTrue("matrix missing at ${matrixFile.absolutePath}", matrixFile.isFile)
         val rows = TetherJson.parseToJsonElement(matrixFile.readText()).jsonObject["rows"]!!.jsonArray
         fun kind(k: String) = rows.map { it.jsonObject }.filter { it.str("kind") == k }.map { it.str("artifact")!! }.toSet()
-        assertEquals(kind("server-msg"), WireTypeLists.SERVER_TYPES - WireTypeLists.SINCE_PARITY_BASE_SERVER)
-        assertEquals(kind("client-msg"), WireTypeLists.CLIENT_TYPES - WireTypeLists.SINCE_PARITY_BASE_CLIENT)
+        // The matrix is re-baselined at tether 29537e0 (PROTOCOL 143) and so lists every type; the corpus
+        // (and SINCE_PARITY_BASE_*) stays at 887c222 — see TRACKER.md PARITY_BASE.
+        assertEquals(kind("server-msg"), WireTypeLists.SERVER_TYPES)
+        assertEquals(kind("client-msg"), WireTypeLists.CLIENT_TYPES)
     }
 
     /** Optional: parse the live TS unions when TETHER_PROTOCOL_TS names lib/protocol.ts. */
