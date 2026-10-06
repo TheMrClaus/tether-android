@@ -12,6 +12,8 @@ plugins {
     // T3.4: JVM screenshot tests of the debug-only Component Gallery (recordRoborazziDebug /
     // verifyRoborazziDebug); goldens in src/testDebug/screenshots.
     alias(libs.plugins.roborazzi)
+    // ta-gmyi: consumes the profile :baselineprofile generates (see the baselineProfile block below).
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 // Release signing comes from the environment (CI decodes the keystore from a
@@ -100,6 +102,17 @@ roborazzi {
 }
 tasks.named("check") { dependsOn("verifyRoborazziDebug") }
 
+// ta-gmyi: Baseline Profile. The checked-in profile lives in src/release/generated/baselineProfiles/
+// (the plugin's default; generated on a device, committed, packaged into the release APK as
+// assets/dexopt/baseline.prof + .profm). Generation is NEVER part of a build: the release workflow
+// builds on a runner with no emulator, so :app:assembleRelease only merges what is committed.
+// Regenerate with the commands in baselineprofile/README.md.
+baselineProfile {
+    automaticGenerationDuringBuild = false
+    saveInSrc = true
+    dexLayoutOptimization = true
+}
+
 /**
  * T3.4: proves the debug-only Component Gallery is absent from what release ships — no class of
  * the `com.tether.app.gallery` package among the release variant's compiled classes (dirs and
@@ -181,6 +194,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
+
+    // ta-gmyi: reads the baseline profile out of the APK and hands it to ART on install / first run.
+    implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":baselineprofile"))
 
     implementation(libs.lucide.icons)
 

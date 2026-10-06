@@ -23,6 +23,9 @@ dependencyResolutionManagement {
 rootProject.name = "Tether"
 include(":app")
 
+// ta-gmyi: Baseline Profile generator + startup macrobenchmark (com.android.test, targets :app).
+include(":baselineprofile")
+
 // PLAN D7 modules. Package names stay `com.tether.app.*` everywhere; each
 // Android module has its own `namespace` (and therefore its own R class).
 include(":core:protocol")

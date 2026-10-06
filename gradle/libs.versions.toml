@@ -46,6 +46,14 @@ ksp = "2.3.12"
 # SVGExternalFileResolver is registered, and the app never registers one). 1.4 is the latest release
 # on Maven Central as of 2026-10 (the artifact is the AAR build, minSdk 8).
 androidsvg = "1.4"
+# ta-gmyi: Baseline Profiles. The Gradle plugin and macrobenchmark share one release train (1.5.0 is
+# the latest stable on Google Maven as of 2026-09); profileinstaller 1.4.1 is what installs a shipped
+# profile (and makes the baseline.prof take effect on a sideloaded APK); uiautomator / androidx.test ext
+# drive the generator and benchmark journeys on a device (never run in unit tests).
+baselineprofile = "1.5.0"
+profileinstaller = "1.4.1"
+uiautomator = "2.4.0"
+androidxTestExtJunit = "1.3.0"
 
 [libraries]
 androidx-core = { group = "androidx.core", name = "core", version.ref = "androidxCore" }
@@ -90,12 +98,19 @@ roborazzi-compose = { group = "io.github.takahirom.roborazzi", name = "roborazzi
 roborazzi-junit-rule = { group = "io.github.takahirom.roborazzi", name = "roborazzi-junit-rule", version.ref = "roborazzi" }
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
+androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "baselineprofile" }
+androidx-test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
 
 [plugins]
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
+# ta-gmyi: the :baselineprofile module (generator + startup macrobenchmark) targets :app.
+android-test = { id = "com.android.test", version.ref = "agp" }
+androidx-baselineprofile = { id = "androidx.baselineprofile", version.ref = "baselineprofile" }
 # Lint for the pure Kotlin/JVM modules (:core:protocol, :core:reducer).
 android-lint = { id = "com.android.lint", version.ref = "agp" }
 # org.jetbrains.kotlin.android intentionally absent: AGP 9+ ships built-in Kotlin
