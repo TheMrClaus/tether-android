@@ -80,6 +80,56 @@ class AttachmentIntakeTest {
 
     private val mb = 1024L * 1024
 
+    // --- ta-d8oy F2: a camera capture the intake does not keep is deleted at once ------------------
+
+    private fun captureFile(size: Long): java.io.File =
+        java.io.File.createTempFile("capture", ".jpg").apply {
+            deleteOnExit()
+            java.io.RandomAccessFile(this, "rw").use { it.setLength(size) }
+        }
+
+    @Test
+    fun aCaptureOverThePerFileCapIsDeletedAtOnce() {
+        val file = captureFile(9 * mb + 1)
+        val r = intake(listOf(CapturedPhotoSource(file)))
+        assertTrue(r.added.isEmpty())
+        assertEquals(listOf(AttachmentCopy.tooLarge(CameraCaptures.PHOTO_NAME)), r.flashes)
+        assertFalse("the over-cap capture file must be gone", file.exists())
+    }
+
+    @Test
+    fun aCaptureOverTheTotalCapIsDeletedAtOnce() {
+        val file = captureFile(2 * mb)
+        val r = intake(listOf(CapturedPhotoSource(file)), existing = listOf(staged(17 * mb)))
+        assertTrue(r.added.isEmpty())
+        assertEquals(listOf(AttachmentCopy.TOTAL), r.flashes)
+        assertFalse(file.exists())
+    }
+
+    @Test
+    fun aCaptureTheStagingNeverReachedIsDeletedToo() {
+        val file = captureFile(10)
+        val r = intake(listOf(CapturedPhotoSource(file)), existing = (1..10).map { staged(1) })
+        assertEquals(listOf(AttachmentCopy.COUNT), r.flashes)
+        assertFalse(file.exists())
+    }
+
+    @Test
+    fun aCaptureWhoseStagingWasCancelledIsDeleted() {
+        val file = captureFile(10)
+        val r = AttachmentIntake.intake(listOf(CapturedPhotoSource(file)), emptyList(), { ids.getAndIncrement() }, { b, t -> ImageShrink.Prepared(b, t) }, active = { false })
+        assertTrue(r.added.isEmpty())
+        assertFalse(file.exists())
+    }
+
+    @Test
+    fun aCaptureTheIntakeKeepsIsStagedAndItsFileIsGoneOnceRead() {
+        val file = captureFile(10)
+        val r = intake(listOf(CapturedPhotoSource(file)))
+        assertEquals(1, r.added.size)
+        assertFalse(file.exists())
+    }
+
     // --- the web's limits and copy ---------------------------------------------------------------
 
     @Test

@@ -76,6 +76,13 @@ interface AttachmentSource {
 
     /** [open], ended early when [signal] is cancelled (a provider that honours it stops opening). */
     fun open(signal: CancellationSignal): InputStream? = open()
+
+    /**
+     * ta-d8oy F2: the intake did not keep this source (rejected by a cap, unreadable, never reached
+     * because the staging stopped or was cancelled). A source that owns a file of the app's (a camera
+     * capture) deletes it here; the default is nothing to clean up.
+     */
+    fun discard() {}
 }
 
 /** What a provider claims about one source ([AttachmentSource.describe]); all of it untrusted. */
@@ -550,6 +557,26 @@ object AttachmentIntake {
         active: () -> Boolean = { true },
         limits: ReadLimits = ReadLimits.DEFAULT,
     ): Result {
+        // ta-d8oy F2: whatever the staging does not keep (any rejection, a stop, a cancel) is discarded at once.
+        val kept = ArrayList<AttachmentSource>()
+        try {
+            return stage(sources, existing, newId, prepare, active, limits, kept)
+        } finally {
+            for (source in sources) {
+                if (kept.none { it === source }) runCatching { source.discard() }
+            }
+        }
+    }
+
+    private fun stage(
+        sources: List<AttachmentSource>,
+        existing: List<StagedAttachment>,
+        newId: () -> Long,
+        prepare: (ByteArray, String) -> ImageShrink.Prepared,
+        active: () -> Boolean,
+        limits: ReadLimits,
+        kept: MutableList<AttachmentSource>,
+    ): Result {
         val added = ArrayList<StagedAttachment>()
         val flashes = ArrayList<String>()
         var total = existing.sumOf { it.sizeBytes }
@@ -637,6 +664,7 @@ object AttachmentIntake {
                 break
             }
             added += StagedAttachment(newId(), attachment, size)
+            kept += source
             total += size
             wire += adds
         }

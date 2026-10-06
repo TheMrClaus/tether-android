@@ -33,7 +33,7 @@ import java.util.UUID
  * the type from its bytes, the web's image shrink with the EXIF rotation): its bytes came from
  * another app and are untrusted. It is read from the file the app made (never through a URI, so
  * [AttachmentUriPolicy]'s rule that the app never reads its own providers stands), and the file is
- * deleted once read, on a cancelled capture, and by any later capture once it is an hour old.
+ * deleted once read, on a cancelled capture, on any rejection by the intake ([AttachmentSource.discard]), and by any later capture once it is an hour old.
  */
 
 internal const val ATTACH_ROW_CAMERA = "Take photo"
@@ -82,6 +82,11 @@ class CapturedPhotoSource(private val file: File) : AttachmentSource {
     override val displayName: String get() = CameraCaptures.PHOTO_NAME
     override val reportedSize: Long? get() = file.length().takeIf { it > 0 }
     override val declaredType: String get() = "image/jpeg"
+
+    /** ta-d8oy F2: the intake rejected or never reached this capture (a cap, a stop, a cancel): the file goes at once. */
+    override fun discard() {
+        file.delete()
+    }
 
     override fun open(): InputStream? = try {
         object : FileInputStream(file) {

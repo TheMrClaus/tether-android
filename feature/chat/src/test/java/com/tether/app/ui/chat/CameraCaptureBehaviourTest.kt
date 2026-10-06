@@ -192,6 +192,8 @@ class CameraCaptureBehaviourTest {
         tapTakePhoto()
         rule.waitUntil(20_000) { rule.onAllNodesWithText(AttachmentCopy.tooLarge(CameraCaptures.PHOTO_NAME)).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(store.items(ORIGIN, ComposerFixtures.SESSION_ID).isEmpty())
+        // ta-d8oy F2 (was VerifyCameraScratchTest.overCapCaptureFileIsLeftBehind): the rejected capture's file is deleted at once.
+        assertTrue("the over-cap capture file must be deleted, left: ${captureFiles()}", captureFiles().isEmpty())
     }
 
     @Test

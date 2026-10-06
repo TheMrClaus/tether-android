@@ -778,8 +778,10 @@ fun Composer(
             // idle, so none are pending here.
             if (text.isNotEmpty() && onSend(text, emptyList())) setDraft("")
         } else if (hasAttachments) {
-            // T7.4: this tap is the send; nothing retries, queues or holds it. A refusal keeps the
-            // draft and the chips and says why (offline: "Not connected — … were not sent.").
+            // T7.4: this tap is the send. Like the web (use-tether.ts filePending), one that never reached
+            // the wire is rolled back and refused: the draft and the chips stay and the flash says why
+            // (offline: "Not connected — … were not sent."); one that went out is held in memory and
+            // resent after a reconnect (up to 5 tries / 10 min), never persisted (ta-coik.3 r2).
             val result = attachments.send(text, null)
             if (result == com.tether.app.client.AttachmentSendResult.Sent) setDraft("") else attachmentRefusalCopy(result)?.let(::flash)
         } else {
