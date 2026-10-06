@@ -91,6 +91,31 @@ class OverviewPresentationTest {
         assertEquals("Approve Bash: npm test", OverviewPresentation.shownExcerpt(adds)?.text)
     }
 
+    /**
+     * tether #244 part A (lib/overview-model.mjs ATTENTION_STALE_MS, 24h): a dead turn's failure, usage limit or
+     * resetsAt-less rate-limit rejection older than a day stops demanding action. That derivation is the SERVER's
+     * (the card's status and attention arrive already decided, overview-feed.mjs); the app draws what it is
+     * sent, so an expired card is a Ready one that still says the last turn failed, and a fresh failure stays
+     * Needs attention, with nothing app-side that could keep it standing.
+     */
+    @Test fun `a failure the server has expired reads as Ready with the failure in its excerpt, a fresh one keeps its attention`() {
+        val expired = card("ready", attention = null, excerpt = OverviewExcerpt("error", "Last turn failed: tsc exited 2"))
+        val status = OverviewPresentation.cardStatus(expired)
+        assertEquals(CardStatus("Ready", CardTone.Ready, StatusGlyph.Ready), status)
+        assertEquals("the failure is never hidden", "Last turn failed: tsc exited 2", OverviewPresentation.shownExcerpt(expired, status)?.text)
+        assertEquals("error", OverviewPresentation.shownExcerpt(expired, status)?.kind)
+
+        val fresh = card("attention", OverviewAttention("error", "Turn failed: tsc exited 2"), excerpt = OverviewExcerpt("error", "tsc exited 2"))
+        val freshStatus = OverviewPresentation.cardStatus(fresh)
+        assertEquals(CardTone.Danger, freshStatus.tone)
+        assertEquals("Turn failed", freshStatus.label)
+        assertEquals("tsc exited 2", OverviewPresentation.shownExcerpt(fresh, freshStatus)?.text)
+
+        // The same for a usage limit or a rate-limit rejection that aged out: an idle card, no rate-limit pill.
+        val limitExpired = card("ready", attention = null, excerpt = OverviewExcerpt("assistant", "Done."))
+        assertEquals(CardTone.Ready, OverviewPresentation.cardStatus(limitExpired).tone)
+    }
+
     @Test fun `tabs, subscription and counts follow overview-tsx`() {
         assertEquals(OverviewSubscription(OverviewFilters(), 0, 24), OverviewPresentation.subscriptionFor(OverviewChoice(), 0))
         assertEquals(
