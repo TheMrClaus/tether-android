@@ -213,6 +213,9 @@ object MediaMagic {
         return matches(head.copyOf(maxOf(n, 0)), mediaType)
     }
 
+    /** The image type [file]'s first bytes name (png, jpeg, gif, webp), or null. */
+    fun imageType(file: File): String? = MediaLimits.IMAGE_TYPES.firstOrNull { matches(file, it) }
+
     fun matches(head: ByteArray, mediaType: String): Boolean {
         fun at(offset: Int, vararg bytes: Int) = head.size >= offset + bytes.size && bytes.indices.all { head[offset + it] == bytes[it].toByte() }
         return when (mediaType) {
@@ -405,6 +408,10 @@ class ToolMediaRepository(
     private val source: ToolMediaSource,
     private val cacheDir: File,
     private val origin: String? = null,
+    // ta-coik.58: a prose image's other two sources (`/api/files?path=` over the paired credential,
+    // `http(s)` with none). The defaults reach nothing (previews and tests).
+    private val files: com.tether.app.client.WorkspaceFiles = com.tether.app.client.WorkspaceFiles.Unavailable,
+    private val remote: com.tether.app.client.PublicImageSource = com.tether.app.client.PublicImageSource.Unavailable,
     // L4: end-to-end timeouts (parameters only so tests need not wait a minute).
     private val imageTimeoutMs: Long = MediaLimits.IMAGE_TIMEOUT_MS,
     private val videoTimeoutMs: Long = MediaLimits.VIDEO_TIMEOUT_MS,
@@ -464,6 +471,18 @@ class ToolMediaRepository(
                 if (!MediaMagic.matches(file, type)) return MediaImage.Failed
                 return BoundedMediaDecoder.decode(file, side, bytes)
             }
+            if (src.startsWith("http://", ignoreCase = true) || src.startsWith("https://", ignoreCase = true)) {
+                return proseImage(file, side, bytes) { out -> remote.fetch(src, MediaLimits.MAX_IMAGE_BYTES, out) }
+            }
+            if (src.startsWith(FILES_ROUTE_PREFIX, ignoreCase = true)) {
+                val path = servedFilePath(src) ?: return MediaImage.Failed
+                return proseImage(file, side, bytes) { out ->
+                    when (val r = files.download(path, MediaLimits.MAX_IMAGE_BYTES, out)) {
+                        is com.tether.app.client.FilesResult.Ok -> ToolMediaResult.Ok(r.value, "")
+                        is com.tether.app.client.FilesResult.Failed -> if (r.tooLarge) ToolMediaResult.TooLarge else ToolMediaResult.Failed(r.status)
+                    }
+                }
+            }
             val ext = ToolMediaSource.extensionOf(src) ?: return MediaImage.Failed
             if (ext == "mp4") return MediaImage.Failed
             val digest = java.security.MessageDigest.getInstance("SHA-256")
@@ -487,6 +506,27 @@ class ToolMediaRepository(
             return MediaImage.Failed
         } finally {
             tmp?.delete()
+        }
+    }
+
+    /**
+     * ta-coik.58: one prose picture from a source that names no content hash (a served file, a public
+     * URL): streamed into [file] under the same byte cap, then it must BE a png / jpeg / gif / webp
+     * by its first bytes (the declared type is not trusted) before the bounded decode.
+     */
+    private suspend fun proseImage(
+        file: File,
+        side: Int,
+        bytes: Long,
+        fetch: suspend (java.io.OutputStream) -> ToolMediaResult,
+    ): MediaImage {
+        val result = FileOutputStream(file).use { out -> fetch(out) }
+        return when {
+            result == ToolMediaResult.TooLarge -> MediaImage.TooLarge
+            result is ToolMediaResult.Blocked -> MediaImage.Blocked
+            result !is ToolMediaResult.Ok -> MediaImage.Failed
+            MediaMagic.imageType(file) == null -> MediaImage.Failed
+            else -> BoundedMediaDecoder.decode(file, side, bytes)
         }
     }
 
@@ -701,7 +741,7 @@ private fun MediaUnavailable(text: String, clickable: Modifier, detail: String? 
 
 /** Null while loading; the loader's answer after. No loader (a preview) stays null. */
 @Composable
-private fun rememberMediaImage(item: ToolMediaItem, full: Boolean = false): MediaImage? {
+internal fun rememberMediaImage(item: ToolMediaItem, full: Boolean = false): MediaImage? {
     val loader = LocalToolMediaLoader.current
     val state by produceState<MediaImage?>(initialValue = null, item.src, loader, full) {
         value = loader?.image(item, full)

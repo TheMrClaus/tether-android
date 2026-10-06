@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.mapNotNull
 import com.composables.icons.lucide.Cpu
+import com.tether.app.client.HttpPublicImages
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.ui.TetherViewModel
@@ -99,7 +100,7 @@ fun ChatScreen(
     // T6.2: tool / attachment / spawned-run media over the paired, no-redirect HTTP path.
     val context = LocalContext.current
     val serverUrl by vm.client.serverUrl.collectAsStateWithLifecycle()
-    val mediaLoader = remember(vm.client, serverUrl) { ToolMediaRepository(vm.client.toolMedia, context.cacheDir, serverUrl) }
+    val mediaLoader = remember(vm.client, serverUrl) { ToolMediaRepository(vm.client.toolMedia, context.cacheDir, serverUrl, files = vm.client.files, remote = HttpPublicImages()) }
 
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
     val tree = session?.let { trees[it.id] }

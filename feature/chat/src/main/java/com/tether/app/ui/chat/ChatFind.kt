@@ -71,6 +71,8 @@ internal fun countInlineMatches(nodes: List<MdInline>, needle: String): Int = no
         is MdInline.Span -> countInlineMatches(node.children, needle)
         is MdInline.Strong -> countInlineMatches(node.children, needle)
         is MdInline.Em -> countInlineMatches(node.children, needle)
+        // markdown.tsx: the alt text is an attribute, never a text leaf: not marked.
+        is MdInline.Image -> 0
     }
 }
 

@@ -52,6 +52,14 @@ sealed interface MdInline {
 
     /** `<em>` (`*x*` / `_x_`). */
     data class Em(val children: List<MdInline>) : MdInline
+
+    /**
+     * ta-coik.58 (#242): `![alt](target)` whose target passed [resolveImageSrc] — the web's
+     * `<MarkdownImage src alt>`. [src] is the RESOLVED source (an absolute http(s) URL, a served
+     * `/api/tool-media/…` or `/api/files?path=…` URL); [alt] is the trimmed alt text, or the target's
+     * file name when it is empty. An unsafe target is a [Span] of its alt text instead.
+     */
+    data class Image(val src: String, val alt: String) : MdInline
 }
 
 /** A table column's alignment from the delimiter row (`null` = default, rendered left). */
@@ -116,6 +124,8 @@ private val INLINE_CODE = Regex("`([^`\\n]+)`")
 /** The JS whitespace class's members, for use inside a negated class (no nested classes). */
 private val JS_WS_MEMBERS = JS_WS.removeSurrounding("[", "]")
 private val INLINE_LINK = Regex("\\[([^\\]\\n]+)]\\(([^)$JS_WS_MEMBERS]+)\\)")
+/** markdown.tsx:243 `!\[([^\]\n]*)\]\(([^)\s]+)\)`: before the link rule, which would match one character later. */
+private val INLINE_IMAGE = Regex("!\\[([^\\]\\n]*)]\\(([^)$JS_WS_MEMBERS]+)\\)")
 private val INLINE_STRONG = Regex("\\*\\*([^\\n]+?)\\*\\*|__([^\\n]+?)__")
 private val INLINE_EM = Regex("\\*([^*\\n]+?)\\*|_([^_\\n]+?)_")
 
@@ -173,6 +183,15 @@ private fun firstInlineMatch(text: String): InlineMatch? {
         return false
     }
     if (offer(INLINE_CODE.find(text)) { MdInline.Code(it.groupValues[1]) }) return best
+    if (offer(INLINE_IMAGE.find(text)) { m ->
+            val alt = m.groupValues[1]
+            val target = m.groupValues[2]
+            val src = resolveImageSrc(target)
+            // An unsafe target degrades to its alt text (or, with no alt, the literal target: inert text).
+            if (src != null) MdInline.Image(src, jsTrim(alt).ifEmpty { imageBasename(target) })
+            else MdInline.Span(if (alt.isNotEmpty()) parseInline(alt) else listOf(MdInline.Text(target)))
+        }
+    ) return best
     if (offer(INLINE_LINK.find(text)) { m ->
             val label = parseInline(m.groupValues[1])
             if (isSafeHref(m.groupValues[2])) MdInline.Link(m.groupValues[2], label) else MdInline.Span(label)
@@ -351,5 +370,6 @@ private fun StringBuilder.appendPlain(nodes: List<MdInline>) {
         is MdInline.Span -> appendPlain(node.children)
         is MdInline.Strong -> appendPlain(node.children)
         is MdInline.Em -> appendPlain(node.children)
+        is MdInline.Image -> append(node.alt)
     }
 }

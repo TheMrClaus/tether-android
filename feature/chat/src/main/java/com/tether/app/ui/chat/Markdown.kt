@@ -222,6 +222,7 @@ internal fun linePlan(nodes: List<MdInline>): ProsePlan {
             is MdInline.Span -> walk(node.children)
             is MdInline.Strong -> walk(node.children)
             is MdInline.Em -> walk(node.children)
+            is MdInline.Image -> Unit // drawn as a picture ([MdInlines] cuts it out), not as text
         }
     }
     walk(nodes)
@@ -262,6 +263,8 @@ private fun AnnotatedString.Builder.appendInline(
             is MdInline.Em -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                 appendInline(node.children, t, type, weight, onLink, cursor, plan)
             }
+            // A picture is cut out before text is built ([MdInlines]); a caller that did not gets its alt text.
+            is MdInline.Image -> appendMarked(node.alt, null, t, plan = plan)
         }
     }
 }
@@ -446,11 +449,9 @@ fun MarkdownBody(
             val mark = if (find != null && starts != null && starts[index + 1] > starts[index]) BlockMarks(find, starts[index]) else null
             when (block) {
                 is MdBlock.Paragraph -> MdParagraph(block, style, color, t, type, baseWeight, onLink, mark)
-                is MdBlock.Heading -> MdText(
-                    remember(block, t, type, mark) { inlineAnnotated(block.inlines, t, type, headingStyle!!.fontWeight!!.weight, onLink, mark?.cursor()) },
-                    style = headingStyle!!,
-                    color = color,
-                    modifier = Modifier.fillMaxWidth(),
+                is MdBlock.Heading -> MdInlines(
+                    listOf(block.inlines), headingStyle!!, color, t, type, headingStyle.fontWeight!!.weight, onLink,
+                    cursorKey = mark, newCursor = { mark?.cursor() }, modifier = Modifier.fillMaxWidth(),
                 )
                 is MdBlock.OrderedList -> MdList(block.items, ordered = true, style, color, t, type, baseWeight, onLink, mark)
                 is MdBlock.BulletList -> MdList(block.items, ordered = false, style, color, t, type, baseWeight, onLink, mark)
@@ -491,16 +492,10 @@ private fun MdParagraph(
     onLink: (MdInline.Link) -> Unit,
     mark: BlockMarks? = null,
 ) {
-    val text = remember(block, t, type, mark) {
-        val cursor = mark?.cursor()
-        buildAnnotatedString {
-            block.lines.forEachIndexed { i, line ->
-                if (i > 0) append('\n') // <br/>
-                append(inlineAnnotated(line, t, type, weight, onLink, cursor))
-            }
-        }
-    }
-    MdText(text, style, color, Modifier.fillMaxWidth())
+    MdInlines(
+        block.lines, style, color, t, type, weight, onLink,
+        cursorKey = mark, newCursor = { mark?.cursor() }, modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /**
@@ -537,7 +532,10 @@ private fun MdList(
                     } else {
                         Box(Modifier.size(disc).background(color, CircleShape))
                     }
-                    MdText(inlineAnnotated(item, t, type, weight, onLink, itemStarts?.let { mark?.cursor(it[n]) }), style, color)
+                    MdInlines(
+                        listOf(item), style, color, t, type, weight, onLink,
+                        cursorKey = mark, newCursor = { itemStarts?.let { mark?.cursor(it[n]) } },
+                    )
                 },
                 modifier = Modifier.fillMaxWidth(),
                 measurePolicy = remember(ordered, indent) { ListItemPolicy(ordered, indent, em(1f), em(0.36f)) },
@@ -649,22 +647,20 @@ private fun MdTable(
     Layout(
         content = {
             block.headers.forEachIndexed { n, cell ->
-                MdText(
-                    inlineAnnotated(cell, t, type, 680, onLink, cellStarts?.let { mark?.cursor(it[n]) }),
-                    headStyle,
-                    t.ink,
-                    Modifier.padding(horizontal = padX, vertical = padY),
+                MdInlines(
+                    listOf(cell), headStyle, t.ink, t, type, 680, onLink,
+                    cursorKey = mark, newCursor = { cellStarts?.let { mark?.cursor(it[n]) } },
+                    modifier = Modifier.padding(horizontal = padX, vertical = padY),
                     textAlign = align(n),
                     softWrap = false,
                 )
             }
             block.rows.forEachIndexed { r, row ->
                 row.forEachIndexed { n, cell ->
-                    MdText(
-                        inlineAnnotated(cell, t, type, baseWeight, onLink, cellStarts?.let { mark?.cursor(it[block.headers.size + r * block.headers.size + n]) }),
-                        cellStyle,
-                        t.ink,
-                        Modifier.padding(horizontal = padX, vertical = padY),
+                    MdInlines(
+                        listOf(cell), cellStyle, t.ink, t, type, baseWeight, onLink,
+                        cursorKey = mark, newCursor = { cellStarts?.let { mark?.cursor(it[block.headers.size + r * block.headers.size + n]) } },
+                        modifier = Modifier.padding(horizontal = padX, vertical = padY),
                         textAlign = align(n),
                     )
                 }
