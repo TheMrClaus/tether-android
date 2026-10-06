@@ -13,7 +13,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -73,9 +72,6 @@ private const val ShotTag = "files-shot"
 private const val SVG_WIDE = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100"><rect width="400" height="100" fill="#5c6ee6"/><circle cx="50" cy="50" r="30" fill="#ecedf4"/><rect x="110" y="35" width="250" height="30" fill="#ecedf4"/></svg>"""
 private const val SVG_TALL = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200"><rect width="100" height="200" fill="#ecedf4"/><rect x="25" y="20" width="50" height="160" fill="#5c6ee6"/><circle cx="50" cy="40" r="14" fill="#ecedf4"/></svg>"""
 private const val SVG_SMALL = """<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#5c6ee6"/><rect x="4" y="4" width="32" height="12" fill="#ecedf4"/></svg>"""
-
-/** Shots whose picture is drawn off the main thread: the capture waits for it. */
-private val AwaitsSvg = setOf(FilesShot.SvgWide, FilesShot.SvgTall, FilesShot.SvgSmall)
 
 private fun checkerImage() = Bitmap.createBitmap(480, 320, Bitmap.Config.ARGB_8888).apply {
     // parity-seed.mjs fixturePng's tiles, scaled up: 80px squares of two tones.
@@ -169,7 +165,7 @@ fun ComposeContentTestRule.snapFiles(shot: FilesShot, skin: TetherSkin, name: St
     val state = stateFor(shot)
     setContent {
         TetherTheme(skin.mode) {
-            CompositionLocalProvider(LocalReducedMotion provides true, LocalVideoSurfaceEnabled provides false) {
+            CompositionLocalProvider(LocalReducedMotion provides true, LocalVideoSurfaceEnabled provides false, LocalSvgDispatcher provides Dispatchers.Unconfined) {
                 // The console floor behind the scrim (the shell is there in the app, as on the web).
                 Box(Modifier.fillMaxSize().background(LocalTetherTokens.current.mineral).testTag(ShotTag)) {
                     FileBrowserFrame(state, onClose = {}, onUpload = {}, env = FilesFixtures.env)
@@ -179,7 +175,6 @@ fun ComposeContentTestRule.snapFiles(shot: FilesShot, skin: TetherSkin, name: St
         }
     }
     waitForIdle()
-    if (shot in AwaitsSvg) waitUntil(10_000) { onAllNodesWithTag("files-image").fetchSemanticsNodes().isNotEmpty() }
     onNodeWithTag(ShotTag).captureRoboImage(
         "src/test/screenshots/$name/${skin.id}-$size.png",
         roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),

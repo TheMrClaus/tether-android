@@ -43,6 +43,7 @@ import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.theme.LocalTetherTokens
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -53,6 +54,9 @@ import kotlin.math.roundToInt
  * own window at the bottom of the screen, which says nothing about the box the preview draws.
  */
 internal val LocalVideoSurfaceEnabled = staticCompositionLocalOf { true }
+
+/** Where an SVG is drawn: off the main thread in the app; the screenshot goldens draw in line, so no thread outlives its test. */
+internal val LocalSvgDispatcher = staticCompositionLocalOf<CoroutineDispatcher> { Dispatchers.Default }
 
 /**
  * The image preview, raster and SVG alike: `<img alt="Preview of {name}">` in a flex-centred pane
@@ -107,9 +111,10 @@ private fun SvgPreview(state: FileBrowserState, svg: ParsedSvg, entry: Workspace
         val density = LocalDensity.current.density
         val widthPx = (size.width * density).roundToInt().coerceAtLeast(1)
         val heightPx = (size.height * density).roundToInt().coerceAtLeast(1)
+        val dispatcher = LocalSvgDispatcher.current
         var drawn by remember(svg) { mutableStateOf<ImageBitmap?>(null) }
         LaunchedEffect(svg, widthPx, heightPx) {
-            val bitmap = withContext(Dispatchers.Default) { SvgImages.render(svg, widthPx, heightPx)?.asImageBitmap() }
+            val bitmap = withContext(dispatcher) { SvgImages.render(svg, widthPx, heightPx)?.asImageBitmap() }
             if (bitmap == null) state.svgDrawFailed(svg) else drawn = bitmap
         }
         val shown = drawn

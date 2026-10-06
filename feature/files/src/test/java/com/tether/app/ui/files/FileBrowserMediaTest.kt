@@ -17,15 +17,12 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 
 /**
  * ta-1u4 in the browser's state: a video opens at once and plays nothing, has no size cap, and its
- * player is released on EVERY way out of the selection; an SVG has no byte cap either.
+ * player is released on EVERY way out of the selection. (SVG: FileBrowserSvgTest.)
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-@RunWith(RobolectricTestRunner::class)
 class FileBrowserMediaTest {
     private val files = FakeFiles().apply {
         listings[ROOT] = FilesResult.Ok(FilesFixtures.listing(entries = listOf(FilesFixtures.docs, file("clip.mp4", 700), file("logo.svg", 90))))
@@ -163,75 +160,5 @@ class FileBrowserMediaTest {
         assertEquals(0, player.releases)
         assertEquals(1, platform.players.size)
         assertSame(player, s.video)
-    }
-
-    // --- svg ----------------------------------------------------------------------------------
-
-    private val logo = file("logo.svg", 90)
-
-    @Test fun anSvgLoadsThroughThePlatformAndShows() = runTest {
-        platform.svg = SvgLoad.Ok(checkNotNull(SvgImages.parse("""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 1"/>""")))
-        val s = browser()
-        s.open()
-        advanceUntilIdle()
-        s.selectFile(logo)
-        assertTrue(s.previewLoading)
-        advanceUntilIdle()
-        assertEquals("loadSvg ${logo.path}", platform.calls.last { it.startsWith("loadSvg") })
-        assertNotNull(s.svg)
-        assertFalse(s.previewLoading)
-        assertFalse("not a bitmap load", platform.calls.any { it.startsWith("loadImage") })
-    }
-
-    @Test fun anSvgHasNoByteCap() = runTest {
-        platform.svg = SvgLoad.Ok(checkNotNull(SvgImages.parse("""<svg xmlns="http://www.w3.org/2000/svg"/>""")))
-        val s = browser()
-        s.open()
-        advanceUntilIdle()
-        s.selectFile(file("huge.svg", 5L * 1024 * 1024 * 1024))
-        advanceUntilIdle()
-        assertNotNull(s.svg)
-        assertFalse(s.imageTooLarge)
-        assertEquals("", s.previewError)
-    }
-
-    @Test fun anSvgThatCannotBeDisplayedUsesTheImageCopy() = runTest {
-        val s = browser()
-        s.open()
-        advanceUntilIdle()
-        s.selectFile(logo)
-        advanceUntilIdle()
-        assertEquals("This image could not be displayed.", s.previewError)
-        assertNull(s.svg)
-    }
-
-    @Test fun aDrawFailureOfTheShownSvgUsesTheImageCopyAndAStaleOneSaysNothing() = runTest {
-        val parsed = checkNotNull(SvgImages.parse("""<svg xmlns="http://www.w3.org/2000/svg"/>"""))
-        platform.svg = SvgLoad.Ok(parsed)
-        val s = browser()
-        s.open()
-        advanceUntilIdle()
-        s.selectFile(logo)
-        advanceUntilIdle()
-        s.svgDrawFailed(checkNotNull(SvgImages.parse("""<svg xmlns="http://www.w3.org/2000/svg"/>""")))
-        assertEquals("a different document is not the one on screen", "", s.previewError)
-        s.svgDrawFailed(parsed)
-        assertEquals("This image could not be displayed.", s.previewError)
-    }
-
-    @Test fun anSvgSelectionSupersededWhileLoadingNeverLands() = runTest {
-        platform.svg = SvgLoad.Ok(checkNotNull(SvgImages.parse("""<svg xmlns="http://www.w3.org/2000/svg"/>""")))
-        val gate = CompletableDeferred<Unit>()
-        platform.svgGate = gate
-        val s = browser()
-        s.open()
-        advanceUntilIdle()
-        s.selectFile(logo)
-        advanceUntilIdle()
-        s.clearSelection()
-        gate.complete(Unit)
-        advanceUntilIdle()
-        assertNull(s.svg)
-        assertNull(s.selected)
     }
 }
