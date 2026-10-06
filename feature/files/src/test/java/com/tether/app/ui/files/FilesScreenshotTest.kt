@@ -1,5 +1,7 @@
 package com.tether.app.ui.files
 
+import com.tether.app.ui.video.LocalVideoSurfaceEnabled
+import com.tether.app.ui.video.VideoPhase
 import android.graphics.Bitmap
 import android.graphics.Color as AColor
 import androidx.compose.foundation.background

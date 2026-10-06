@@ -210,7 +210,7 @@ class ToolSafetyTest {
             }
         }
         val other = ByteArray(2048).also { clip.copyInto(it) ; it[2047] = 1 }
-        val repo = ToolMediaRepository(source, cache, origin, imageTimeoutMs = 300, videoTimeoutMs = 300)
+        val repo = ToolMediaRepository(source, cache, origin, imageTimeoutMs = 300, videoStallMs = 300)
         // Cancelled by the caller.
         val job = launch(Dispatchers.Default) { repo.video(ToolMediaItem("video", "video/mp4", url(clip, "mp4"))) }
         withTimeout(20_000) { started.await() }

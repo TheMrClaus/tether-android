@@ -1,4 +1,4 @@
-package com.tether.app.ui.files
+package com.tether.app.ui.video
 
 import android.graphics.Outline
 import android.graphics.Rect

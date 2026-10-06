@@ -11,6 +11,8 @@ import com.tether.app.client.FilesCopy
 import com.tether.app.client.FilesResult
 import com.tether.app.client.WorkspaceFileEntry
 import com.tether.app.client.WorkspaceFiles
+import com.tether.app.ui.video.MediaVideoPlayer
+import com.tether.app.ui.video.VideoPlayer
 import java.io.File
 import java.io.IOException
 import java.io.OutputStream

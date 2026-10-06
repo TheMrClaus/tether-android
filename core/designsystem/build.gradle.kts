@@ -93,6 +93,9 @@ dependencies {
     implementation(libs.androidx.core)
     // ta-coik.20: state/RetainedSecret.kt rides the activity's ViewModel store.
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    // The shared video player (ui/video): MediaVideoPlayer's coroutines, the host's lifecycle observer.
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 
     designTokenGenerator(project(":tools:design-tokens"))
 

@@ -1,9 +1,9 @@
-package com.tether.app.ui.files
+package com.tether.app.ui.video
 
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.view.Surface
-import com.tether.app.client.FilesResult
+import androidx.compose.ui.test.junit4.createComposeRule
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -11,6 +11,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -18,16 +19,22 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowMediaPlayer
 import org.robolectric.shadows.util.DataSource
 
-/** ta-1u4: the platform player's life, on Robolectric's MediaPlayer: no autoplay, one failure path, released for good. */
+/**
+ * ta-1u4: the platform player's life, on Robolectric's MediaPlayer: no autoplay, one failure path,
+ * released for good. ta-8p4l: the player's phase / playing are Compose snapshot state, so the class
+ * runs under a compose rule (it applies the global snapshot) rather than writing it bare on the
+ * Robolectric main thread, which stalled the recomposition of later classes in the same JVM.
+ */
 @RunWith(RobolectricTestRunner::class)
 class MediaVideoPlayerTest {
-    private val files = FakeFiles().apply { virtualFiles["/w/clip.mp4"] = 5_000_000 }
+    @get:Rule val compose = createComposeRule()
+
     private val created = mutableListOf<MediaPlayer>()
     private var failures = 0
-    private lateinit var source: WorkspaceMediaDataSource
+    private lateinit var source: FakeSource
 
     @Before fun setUp() {
-        source = WorkspaceMediaDataSource(files, "/w/clip.mp4")
+        source = FakeSource()
     }
 
     private fun player(): MediaVideoPlayer = MediaVideoPlayer(
@@ -55,7 +62,6 @@ class MediaVideoPlayerTest {
         assertTrue(p.phase is VideoPhase.Ready)
         assertFalse("no autoplay", p.playing)
         assertFalse(created[0].isPlaying)
-        assertEquals("the player only streams: every read is a Range read", true, files.calls.all { it.startsWith("readRange") })
     }
 
     @Test fun thePlatformControllerStartsAndPauses() {
@@ -87,18 +93,14 @@ class MediaVideoPlayerTest {
         p.release()
         assertFalse(p.playing)
         assertEquals(ShadowMediaPlayer.State.END, shadowOf(created[0]).state)
-        try {
-            source.readAt(0, ByteArray(1), 0, 1)
-            throw AssertionError("the source is closed")
-        } catch (_: java.io.IOException) {
-        }
+        assertTrue("the source is closed with the player", source.closed)
         // Nothing a late callback does comes back to life.
         assertEquals(0, failures)
     }
 
     @Test fun releasedBeforeItOpenedNeverCreatesAPlayerOrCallsBack() {
         val gate = CompletableDeferred<Unit>()
-        files.gates["readRange"] = gate
+        source.gate = gate
         val p = player()
         assertEquals(0, created.size)
         p.release()
@@ -108,7 +110,7 @@ class MediaVideoPlayerTest {
     }
 
     @Test fun aFileThatCannotBeReadFailsOnceAndMakesNoPlayer() {
-        files.failures["readRange"] = FilesResult.Failed("This file could not be opened.", 401)
+        source.opens = false
         val p = player()
         assertEquals(VideoPhase.Failed, p.phase)
         assertEquals(1, failures)
@@ -264,5 +266,52 @@ class MediaVideoPlayerTest {
         p.pause()
         assertEquals(listOf("pause@STARTED"), calls.filter { it.startsWith("pause@") })
         assertFalse(p.playing)
+    }
+
+    // --- ta-coik.68: play on prepare, and a source that waits ----------------------------------------------
+
+    private fun autoPlayer(): MediaVideoPlayer = MediaVideoPlayer(
+        source,
+        CoroutineScope(Dispatchers.Unconfined),
+        onFailed = { failures++ },
+        playWhenReady = true,
+        newPlayer = {
+            MediaPlayer().also {
+                created += it
+                ShadowMediaPlayer.addMediaInfo(DataSource.toDataSource(source), ShadowMediaPlayer.MediaInfo(60_000, 0))
+            }
+        },
+    )
+
+    @Test fun playWhenReadyStartsAsSoonAsItIsPreparedAndNotBefore() {
+        val p = autoPlayer()
+        assertFalse("not before it is prepared", p.playing)
+        shadowOf(created[0]).invokePreparedListener()
+        assertTrue(p.phase is VideoPhase.Ready)
+        assertTrue(p.playing)
+        assertTrue(created[0].isPlaying)
+        assertEquals(0, failures)
+    }
+
+    @Test fun aReadThatWaitsShowsAsBufferingOnlyWhilePlaying() {
+        val p = autoPlayer()
+        shadowOf(created[0]).invokePreparedListener()
+        source.onWaiting?.invoke(true)
+        assertTrue(p.buffering)
+        source.onWaiting?.invoke(false)
+        assertFalse(p.buffering)
+        p.control.pause()
+        source.onWaiting?.invoke(true)
+        assertFalse("paused: nothing is buffering", p.buffering)
+    }
+
+    @Test fun releaseClearsBufferingAndLateWaitsChangeNothing() {
+        val p = autoPlayer()
+        shadowOf(created[0]).invokePreparedListener()
+        source.onWaiting?.invoke(true)
+        p.release()
+        assertFalse(p.buffering)
+        source.onWaiting?.invoke(true)
+        assertFalse(p.buffering)
     }
 }

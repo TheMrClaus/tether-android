@@ -21,6 +21,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -47,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filter
@@ -102,6 +104,18 @@ fun ChatScreen(
     val context = LocalContext.current
     val serverUrl by vm.client.serverUrl.collectAsStateWithLifecycle()
     val mediaLoader = remember(vm.client, serverUrl) { ToolMediaRepository(vm.client.toolMedia, context.cacheDir, serverUrl, files = vm.client.files, remote = HttpPublicImages()) }
+    // ta-coik.68: the session's playing clips live outside composition (a rotation keeps them; the transcript
+    // scrolls them away without stopping them) and are released on leaving the session, sign-out and a server switch.
+    val toolClips = viewModel(key = "tool-clips") {
+        ToolClipsViewModel(
+            create = { scope -> ToolClipRegistry(vm.client.toolMedia, context.applicationContext.cacheDir, { vm.client.serverUrl.value }, scope) },
+            identity = ToolClipsViewModel.identityOf(vm.client),
+        )
+    }
+    val activity = context.findChatActivity()
+    DisposableEffect(session?.id) {
+        onDispose { if (activity?.isChangingConfigurations != true) toolClips.releaseAll() }
+    }
 
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
     val tree = session?.let { trees[it.id] }
@@ -368,7 +382,7 @@ fun ChatScreen(
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            CompositionLocalProvider(LocalToolMediaLoader provides mediaLoader, LocalCardStates provides cardStates) {
+            CompositionLocalProvider(LocalToolMediaLoader provides mediaLoader, LocalToolClips provides toolClips.registry, LocalCardStates provides cardStates) {
             when {
                 session == null -> EmptyCentered(
                     title = "No session selected",
@@ -837,3 +851,9 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
 
 /** A picked element and the session it was picked for (dashboard.tsx :235 `BrowserPick & { sessionId }`). */
 private class SessionPick(val sessionId: String, val pick: com.tether.app.client.BrowserPick)
+
+private tailrec fun android.content.Context.findChatActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findChatActivity()
+    else -> null
+}

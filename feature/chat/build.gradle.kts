@@ -38,6 +38,8 @@ dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    // ta-coik.68: the playing tool clips outlive a rotation in a ViewModel (ToolClipsViewModel).
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.lucide.icons)
     implementation(libs.kotlinx.coroutines.android)
 

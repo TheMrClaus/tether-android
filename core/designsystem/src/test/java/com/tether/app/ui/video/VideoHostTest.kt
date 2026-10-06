@@ -1,4 +1,4 @@
-package com.tether.app.ui.files
+package com.tether.app.ui.video
 
 import android.app.Activity
 import android.content.Context
@@ -46,7 +46,7 @@ class VideoHostTest {
 
     @Before fun setUp() {
         activity = Robolectric.buildActivity(Activity::class.java).setup().get()
-        host = VideoHost(activity, FakeVideoPlayer(FilesFixtures.file("clip.mp4", 5)) {}, radiusPx = 12f) { RecordingController(it).also { c -> controller = c } }
+        host = VideoHost(activity, RecordingVideoPlayer(), radiusPx = 12f) { RecordingController(it).also { c -> controller = c } }
         activity.setContentView(host.frame, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 

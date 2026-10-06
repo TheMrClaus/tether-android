@@ -15,6 +15,7 @@ import com.tether.app.client.UploadSource
 import com.tether.app.client.WorkspaceFileEntry
 import com.tether.app.client.WorkspaceFileListing
 import com.tether.app.client.WorkspaceFiles
+import com.tether.app.ui.video.VideoPlayer
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart

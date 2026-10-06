@@ -1,5 +1,6 @@
 package com.tether.app.ui.files
 
+import com.tether.app.ui.video.VideoPhase
 import com.tether.app.client.FilesResult
 import com.tether.app.ui.files.FilesFixtures.ROOT
 import com.tether.app.ui.files.FilesFixtures.file

@@ -2,11 +2,8 @@ package com.tether.app.ui.chat
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.net.Uri
 import android.util.Base64
 import android.util.LruCache
-import android.widget.MediaController
-import android.widget.VideoView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,7 +24,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -85,8 +81,8 @@ import kotlinx.coroutines.withContext
  * T6.2: tool-result / attachment / spawned-run media (chat-tool-render.tsx `ToolMedia` +
  * `MediaLightbox`). The web hands the journaled URL to an <img>/<video>; natively the bytes come
  * over [ToolMediaSource] (the paired credential, the paired origin only, no redirects), images are
- * decoded under hard bounds, and a clip is downloaded (bounded) before it plays in a platform
- * VideoView. No WebView anywhere.
+ * decoded under hard bounds, and a clip plays in the platform MediaPlayer while its one download
+ * lands in a scratch file (ToolClips.kt). No WebView anywhere.
  */
 
 /** What loading one picture came to. */
@@ -172,7 +168,11 @@ object MediaLimits {
     /** A header claiming more pixels than this is refused outright (a decompression bomb). */
     const val MAX_IMAGE_PIXELS: Long = 100_000_000L
 
-    /** A clip is downloaded before it plays: the server's own cap. */
+    /**
+     * A clip's byte bound: 100 MiB, which is the SERVER's own cap, not an app limit
+     * (`MAX_MEDIA_BYTES`, tether lib/tool-media-store.mjs:31 at 29537e0): the server never stores or
+     * serves a larger one, so a clip that claims more is not one of its clips.
+     */
     const val MAX_VIDEO_BYTES: Long = ToolMediaSource.MAX_MEDIA_BYTES
 
     /** Decoded pictures kept in memory across scrolling, by the bitmaps' own allocation size. */
@@ -187,9 +187,14 @@ object MediaLimits {
      */
     const val MAX_TILES: Int = 12
 
-    /** One picture / one clip may take this long end to end, then it fails. */
+    /** One picture may take this long end to end, then it fails. */
     const val IMAGE_TIMEOUT_MS: Long = 60_000
-    const val VIDEO_TIMEOUT_MS: Long = 10 * 60_000
+
+    /**
+     * A clip has NO whole-download limit (the browser has none): it fails only when it STALLS, no byte
+     * arriving for this long (ta-coik.68).
+     */
+    const val VIDEO_STALL_MS: Long = 30_000
 
     /** The image types a `data:` URI may carry (lib/tool-media-store.mjs IMAGE_MEDIA_TYPES). */
     val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
@@ -430,9 +435,9 @@ class ToolMediaRepository(
     // `http(s)` with none). The defaults reach nothing (previews and tests).
     private val files: com.tether.app.client.WorkspaceFiles = com.tether.app.client.WorkspaceFiles.Unavailable,
     private val remote: com.tether.app.client.PublicImageSource = com.tether.app.client.PublicImageSource.Unavailable,
-    // L4: end-to-end timeouts (parameters only so tests need not wait a minute).
+    // L4: the picture's end-to-end timeout and the clip's stall timeout (parameters only so tests need not wait).
     private val imageTimeoutMs: Long = MediaLimits.IMAGE_TIMEOUT_MS,
-    private val videoTimeoutMs: Long = MediaLimits.VIDEO_TIMEOUT_MS,
+    private val videoStallMs: Long = MediaLimits.VIDEO_STALL_MS,
 ) : ToolMediaLoader {
     private val cache = object : LruCache<String, MediaImage.Ok>(MediaLimits.CACHE_BYTES) {
         override fun sizeOf(key: String, value: MediaImage.Ok): Int = value.bitmap.asAndroidBitmap().allocationByteCount
@@ -552,55 +557,29 @@ class ToolMediaRepository(
         }
     }
 
+    /**
+     * The whole clip, verified: one [ClipDownload] run to its end (the same engine the inline player
+     * reads while it downloads), then its cached file. Not a streaming path and not time-boxed: a
+     * stall is the only way it gives up.
+     */
     override suspend fun video(item: ToolMediaItem): MediaVideo {
         val ext = ToolMediaSource.extensionOf(item.src)
         if (ext != "mp4" || origin == null) return MediaVideo.Failed
         val expected = namedSha256(item.src) ?: return MediaVideo.Failed
         return try {
             MediaGates.clip(expected).withLock {
-                kotlinx.coroutines.withTimeoutOrNull(videoTimeoutMs) { withContext(Dispatchers.IO) { downloadClip(item.src, expected) } }
-            } ?: MediaVideo.Failed
+                withContext(Dispatchers.IO) {
+                    val download = ClipDownload(source, cacheDir, origin, item.src, expected, videoStallMs)
+                    download.run()
+                    download.outcome() ?: MediaVideo.Failed
+                }
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (_: OutOfMemoryError) {
             MediaVideo.TooLarge
         } catch (_: Exception) {
             MediaVideo.Failed
-        }
-    }
-
-    private suspend fun downloadClip(src: String, expected: String): MediaVideo {
-        val dir = ToolMediaCache.dirFor(cacheDir, origin!!).apply { mkdirs() }
-        ToolMediaCache.evict(dir)
-        val file = File(dir, "$expected.mp4")
-        if (file.isFile && file.length() > 0) {
-            file.setLastModified(System.currentTimeMillis())
-            return MediaVideo.Ok(file)
-        }
-        // L2: a temp file of its own (never a shared name), removed however this ends (cancellation
-        // included), and the CLOSED file re-hashed before it takes the content address.
-        var part: File? = null
-        try {
-            val temp = File.createTempFile(expected, ".part", dir).also { part = it }
-            val result = try {
-                FileOutputStream(temp).use { out -> source.fetch(src, MediaLimits.MAX_VIDEO_BYTES, out) }
-            } catch (_: java.io.IOException) {
-                ToolMediaResult.Failed()
-            }
-            return when {
-                result == ToolMediaResult.TooLarge -> MediaVideo.TooLarge
-                result is ToolMediaResult.Blocked -> MediaVideo.Blocked
-                result !is ToolMediaResult.Ok -> MediaVideo.Failed
-                sha256OfFile(temp) != expected -> MediaVideo.Failed
-                !MediaMagic.matches(temp, "video/mp4") -> MediaVideo.Failed
-                !temp.renameTo(file) -> MediaVideo.Failed
-                else -> MediaVideo.Ok(file).also { ToolMediaCache.evict(dir) }
-            }
-        } catch (_: java.io.IOException) {
-            // R3-L1: the folder swept by a sign-in change mid-download, a full disk: failed, not a crash.
-            return MediaVideo.Failed
-        } finally {
-            part?.let { if (it.exists()) it.delete() }
         }
     }
 
@@ -633,8 +612,8 @@ class ToolMediaRepository(
  * `.chat-tool-media` (globals.css:5108-5131): a wrapping row, `space-sm` gaps, padded `space-sm
  * space-md` under a `--line` rule ([bare]: the bubble-attachment variant, no padding or rule).
  * Each picture shows at its own size up to the row width and 320dp tall, `--radius-md` corners;
- * a tap opens the viewer. A clip shows a play tile (the web's inline <video controls> has no
- * native twin without a player per row); a tap opens the viewer, which plays it.
+ * a tap opens the viewer. A clip is the web's inline <video controls> (ToolMediaVideo.kt): a tap
+ * plays it in the row, its expand key opens the viewer.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -699,26 +678,14 @@ private fun MoreTile(count: Int, onOpen: () -> Unit) {
 private fun MediaTile(item: ToolMediaItem, onOpen: () -> Unit) {
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(t.radiusMd)
-    val label = if (item.isVideo) "View video full size" else "View image full size"
+    val label = "View image full size"
     val clickable = Modifier
         .clip(shape)
         .clickable(role = Role.Button, onClickLabel = label, onClick = onOpen)
         .semantics { contentDescription = label }
     if (item.isVideo) {
-        Box(
-            clickable.size(width = 240.dp, height = 135.dp).background(t.graphite),
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.size(44.dp).background(t.scrim, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(TetherIcons.Play, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(20.dp))
-            }
-            Icon(
-                TetherIcons.Maximize2,
-                contentDescription = null,
-                tint = androidx.compose.ui.graphics.Color.White,
-                modifier = Modifier.align(Alignment.TopEnd).padding(t.css.spaceXs).size(14.dp),
-            )
-        }
+        // ta-coik.68: the web's inline <video controls>, plus its expand key (ToolMediaVideo.kt).
+        InlineVideo(item, onOpen)
         return
     }
     val image = rememberMediaImage(item)
@@ -749,16 +716,23 @@ private fun ImageUnavailable(state: MediaImage, clickable: Modifier) = when (sta
     else -> MediaUnavailable(MediaCopy.IMAGE_UNAVAILABLE, clickable)
 }
 
+/** [plain]: no tint behind it (a clip's box draws its own surface); [icon]: the glyph for the kind of media. */
 @Composable
-private fun MediaUnavailable(text: String, clickable: Modifier, detail: String? = null) {
+internal fun MediaUnavailable(
+    text: String,
+    clickable: Modifier,
+    detail: String? = null,
+    icon: androidx.compose.ui.graphics.vector.ImageVector = TetherIcons.FileImage,
+    plain: Boolean = false,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Row(
-        clickable.background(t.tintXs).padding(horizontal = t.css.spaceSm, vertical = t.css.spaceXs),
+        clickable.then(if (plain) Modifier else Modifier.background(t.tintXs)).padding(horizontal = t.css.spaceSm, vertical = t.css.spaceXs),
         verticalAlignment = if (detail == null) Alignment.CenterVertically else Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
-        Icon(TetherIcons.FileImage, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
+        Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
         if (detail == null) {
             Text(text, style = TextStyle(fontFamily = type.ui, fontSize = 11.52.sp), color = t.muted)
         } else {
@@ -926,32 +900,6 @@ private fun NavKey(icon: androidx.compose.ui.graphics.vector.ImageVector, label:
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(22.dp))
-    }
-}
-
-/** A downloaded, bounded clip in a platform VideoView with its media controls; plays on open. */
-@Composable
-private fun ViewerVideo(item: ToolMediaItem) {
-    val t = LocalTetherTokens.current
-    val loader = LocalToolMediaLoader.current
-    val video by produceState<MediaVideo?>(initialValue = null, item.src, loader) { value = loader?.video(item) }
-    when (val v = video) {
-        is MediaVideo.Ok -> AndroidView(
-            factory = { context ->
-                VideoView(context).apply {
-                    setMediaController(MediaController(context).also { it.setAnchorView(this) })
-                    setVideoURI(Uri.fromFile(v.file))
-                    setOnPreparedListener { start() }
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
-        null -> SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 18.dp, contentDescription = "Loading video")
-        else -> when (v) {
-            MediaVideo.Blocked -> MediaUnavailable(MediaCopy.BLOCKED, Modifier, detail = MediaCopy.BLOCKED_DETAIL)
-            MediaVideo.TooLarge -> MediaUnavailable(MediaCopy.VIDEO_TOO_LARGE, Modifier)
-            else -> MediaUnavailable(MediaCopy.VIDEO_UNAVAILABLE, Modifier)
-        }
     }
 }
 

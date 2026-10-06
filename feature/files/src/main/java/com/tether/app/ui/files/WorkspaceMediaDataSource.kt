@@ -1,8 +1,8 @@
 package com.tether.app.ui.files
 
-import android.media.MediaDataSource
 import com.tether.app.client.FilesResult
 import com.tether.app.client.WorkspaceFiles
+import com.tether.app.ui.video.PlayableSource
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -30,7 +30,7 @@ class WorkspaceMediaDataSource(
     private val files: WorkspaceFiles,
     private val path: String,
     private val blockSize: Int = BLOCK_BYTES,
-) : MediaDataSource() {
+) : PlayableSource() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
 
@@ -53,7 +53,7 @@ class WorkspaceMediaDataSource(
      * The first read: learns the file's length and pins the server. False when the file cannot be
      * read (no such file, signed out, unreachable) or is empty: there is nothing to play.
      */
-    suspend fun open(): Boolean {
+    override suspend fun open(): Boolean {
         val result = files.readRange(path, 0, blockSize)
         if (closed || result !is FilesResult.Ok) return false
         val read = result.value

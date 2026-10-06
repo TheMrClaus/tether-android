@@ -83,6 +83,7 @@ import com.tether.app.ui.components.StudioDialog
 import com.tether.app.ui.components.TetherDialogSurface
 import com.tether.app.ui.components.TetherDialogText
 import com.tether.app.ui.components.TetherInputWell
+import com.tether.app.ui.components.Spinner
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.dialogScrim
@@ -195,19 +196,6 @@ internal fun IconKey(
     ) {
         Icon(icon, contentDescription = null, tint = if (pressed && enabled) t.white else tint, modifier = Modifier.size(iconSize))
     }
-}
-
-/** The web's `.spin` LoaderCircle (900ms a turn); still under reduced motion. */
-@Composable
-internal fun Spinner(size: Dp, tint: Color) {
-    val reduced = LocalReducedMotion.current
-    val angle = if (reduced) {
-        0f
-    } else {
-        val transition = rememberInfiniteTransition(label = "spin")
-        transition.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart), label = "spin").value
-    }
-    Icon(TetherIcons.LoaderCircle, contentDescription = null, tint = tint, modifier = Modifier.size(size).rotate(angle))
 }
 
 /**

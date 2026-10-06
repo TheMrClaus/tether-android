@@ -1,5 +1,6 @@
 package com.tether.app.ui.files
 
+import com.tether.app.ui.video.LocalVideoSurfaceEnabled
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed

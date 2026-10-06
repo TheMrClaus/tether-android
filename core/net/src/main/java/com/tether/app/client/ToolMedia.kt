@@ -42,6 +42,15 @@ sealed interface ToolMediaResult {
 }
 
 /**
+ * ta-coik.68: a sink that wants the response's declared `Content-Length` before the first byte
+ * ([HttpToolMedia] calls it once, after its own size check, when the header is there): a player
+ * reading the body as it arrives needs the clip's length to seek.
+ */
+interface DeclaredLengthSink {
+    fun declaredLength(bytes: Long)
+}
+
+/**
  * v94 / v112 / v122: the materialized tool-result, attachment and spawned-run pictures the server
  * serves at `GET /api/tool-media/<sha256>.<ext>` (server.mjs:7184, lib/tool-media-store.mjs), under
  * the same authentication as every other route. The web uses the journaled `url` as an `<img src>`
@@ -131,6 +140,7 @@ class HttpToolMedia(
         if (declaredType != expected) return ToolMediaResult.Failed(response.code)
         val declared = response.header("Content-Length")?.toLongOrNull()
         if (declared != null && declared > maxBytes) return ToolMediaResult.TooLarge
+        if (declared != null) (sink as? DeclaredLengthSink)?.declaredLength(declared)
         val input = response.body.byteStream()
         val chunk = ByteArray(COPY_CHUNK)
         var total = 0L

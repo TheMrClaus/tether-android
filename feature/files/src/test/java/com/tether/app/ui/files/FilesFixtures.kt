@@ -1,5 +1,7 @@
 package com.tether.app.ui.files
 
+import com.tether.app.ui.video.VideoPhase
+import com.tether.app.ui.video.VideoPlayer
 import android.net.Uri
 import android.view.Surface
 import android.widget.MediaController

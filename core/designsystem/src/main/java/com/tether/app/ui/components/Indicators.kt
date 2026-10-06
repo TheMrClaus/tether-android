@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -31,6 +32,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -77,6 +79,19 @@ fun SpinnerRing(color: Color, size: Dp = 10.4.dp, stroke: Dp = 1.5.dp, modifier:
             style = Stroke(width = strokePx),
         )
     }
+}
+
+/** The web's `.spin` LoaderCircle (900ms a turn); still under reduced motion. */
+@Composable
+fun Spinner(size: Dp, tint: Color) {
+    val reduced = LocalReducedMotion.current
+    val angle = if (reduced) {
+        0f
+    } else {
+        val transition = rememberInfiniteTransition(label = "spin")
+        transition.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart), label = "spin").value
+    }
+    Icon(TetherIcons.LoaderCircle, contentDescription = null, tint = tint, modifier = Modifier.size(size).rotate(angle))
 }
 
 /** A lucide icon spun 1s/turn (`.chat-spin`, globals.css:6852). */

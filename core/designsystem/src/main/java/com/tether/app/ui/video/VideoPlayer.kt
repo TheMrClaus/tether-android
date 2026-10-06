@@ -1,4 +1,4 @@
-package com.tether.app.ui.files
+package com.tether.app.ui.video
 
 import android.media.MediaPlayer
 import android.view.Surface
@@ -22,14 +22,17 @@ sealed interface VideoPhase {
 }
 
 /**
- * One open preview video, owned by the browser state (never by a composable: a rotation, the
- * fullscreen toggle or a layout change re-creates the view, not the playback). It is released by
- * the state on Back, another selection, a folder change, the dialog closing, sign-out and a
- * server switch. [phase] and [playing] are snapshot state the UI reads.
+ * One open video, owned by state outside composition (the file browser's state, chat's tool-clip
+ * registry: a rotation, the fullscreen toggle or a layout change re-creates the view, not the
+ * playback). Its owner releases it. [phase], [playing] and [buffering] are snapshot state the UI
+ * reads.
  */
 interface VideoPlayer {
     val phase: VideoPhase
     val playing: Boolean
+
+    /** Playing, but the source is waiting for bytes that have not arrived yet. */
+    val buffering: Boolean get() = false
 
     /** What the platform media-controller bar drives (play/pause, seek, times). */
     val control: MediaController.MediaPlayerControl
@@ -46,23 +49,27 @@ interface VideoPlayer {
 }
 
 /**
- * [VideoPlayer] on the platform [MediaPlayer] over a [WorkspaceMediaDataSource]: the same engine
- * chat's tool-media clips use, with no media library added. No autoplay: it stops prepared, on its
- * first frame, until the controller's play is pressed (the web's `<video controls preload=metadata>`).
+ * [VideoPlayer] on the platform [MediaPlayer] over a [PlayableSource], with no media library
+ * added. Without [playWhenReady] it stops prepared, on its first frame, until the controller's play
+ * is pressed (the file browser's `<video controls preload=metadata>`); with it, it starts as soon as
+ * it is prepared (a tap on an inline tool clip, the lightbox's `autoPlay`).
  *
  * Any failure (the data source cannot open, the server errors or changes, the decoder refuses) ends
  * as [VideoPhase.Failed] and one call of [onFailed]; nothing is thrown at the UI. All calls are
  * made on [main]'s thread (the [MediaPlayer] posts its callbacks to the thread that created it).
  */
 class MediaVideoPlayer(
-    private val source: WorkspaceMediaDataSource,
+    private val source: PlayableSource,
     private val main: CoroutineScope,
     private val onFailed: () -> Unit,
+    private val playWhenReady: Boolean = false,
     private val newPlayer: () -> MediaPlayer = { MediaPlayer() },
 ) : VideoPlayer {
     override var phase: VideoPhase by mutableStateOf(VideoPhase.Opening)
         private set
     override var playing: Boolean by mutableStateOf(false)
+        private set
+    override var buffering: Boolean by mutableStateOf(false)
         private set
 
     private var player: MediaPlayer? = null
@@ -79,6 +86,7 @@ class MediaVideoPlayer(
     private val opening: Job
 
     init {
+        source.onWaiting = { waiting -> main.launch { if (!released) buffering = waiting && playing } }
         opening = main.launch {
             val opened = source.open()
             if (released) return@launch
@@ -94,6 +102,7 @@ class MediaVideoPlayer(
                 mp.setOnCompletionListener {
                     if (engine == Engine.Started) engine = Engine.Completed
                     playing = false
+                    buffering = false
                 }
                 mp.setOnBufferingUpdateListener { _, percent -> buffered = percent }
                 mp.setOnErrorListener { _, what, _ ->
@@ -116,6 +125,10 @@ class MediaVideoPlayer(
         prepared = true
         engine = Engine.Prepared
         phase = VideoPhase.Ready(mp.videoWidth, mp.videoHeight)
+        if (playWhenReady) {
+            control.start()
+            return
+        }
         // No start(): a seek to the start draws the first frame on the surface and stays paused.
         showFrame()
     }
@@ -133,6 +146,7 @@ class MediaVideoPlayer(
         if (released || phase == VideoPhase.Failed) return
         phase = VideoPhase.Failed
         playing = false
+        buffering = false
         teardown()
         onFailed()
     }
@@ -165,6 +179,7 @@ class MediaVideoPlayer(
                 it.pause()
                 engine = Engine.Paused
                 playing = false
+                buffering = false
             }
         }
 
@@ -211,6 +226,7 @@ class MediaVideoPlayer(
         released = true
         opening.cancel()
         playing = false
+        buffering = false
         teardown()
     }
 
