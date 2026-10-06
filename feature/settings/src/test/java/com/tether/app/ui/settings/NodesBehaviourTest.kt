@@ -594,8 +594,9 @@ class NodesBehaviourTest {
 }
 
 /**
- * T10.3: a rotation (saved-instance-state restore) drops the credential: the form is plain
- * `remember`, and the restored state holds no credential.
+ * T10.3 / ta-coik.20: a saved-instance-state restore keeps the label and URL (saved) and never writes
+ * the credential into the saved state (it rides the activity's memory: see [NodesRecreationTest] for
+ * the real recreation that keeps it; a bare restore with no activity change does not).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -606,7 +607,7 @@ class NodesRotationTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    @Test fun aRotationDropsTheCredentialAndSendsNothing() {
+    @Test fun aRestoreKeepsTheLabelNeverSavesTheCredentialAndSendsNothing() {
         val writer = RecordingNodesWriter()
         val restoration = StateRestorationTester(compose)
         var saved: String? = null
@@ -620,19 +621,20 @@ class NodesRotationTest {
         fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
         compose.waitUntil(5_000) { compose.onAllNodesWithTag(NodeTags.Credential, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         tag(NodeTags.Credential).performScrollTo()
+        tag(NodeTags.Label).performTextReplacement("Workstation")
         tag(NodeTags.Credential).performTextReplacement(SENTINEL)
         compose.waitForIdle()
         restoration.emulateSavedInstanceStateRestore()
         compose.waitUntil(5_000) { compose.onAllNodesWithTag(NodeTags.Credential, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-        // The tab is restored (saved state); the credential is not.
+        // The tab and the label are restored (saved state); the credential is not in it.
         tag(SettingsDialogTags.panel(SettingsTab.Nodes)).assertExists()
-        assertEquals("", tag(NodeTags.Credential).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
+        assertEquals("Workstation", tag(NodeTags.Label).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
         assertFalse("the saved state holds the credential", saved.orEmpty().contains(SENTINEL))
         assertTrue(writer.calls.isEmpty())
     }
 }
 
-/** T10.3: a real activity recreation (a configuration change) sends nothing, the credential half typed or not. */
+/** T10.3 / ta-coik.20: a real activity recreation (a configuration change) sends nothing and keeps the form, the credential too (in memory). */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
 class NodesRecreationTest {
@@ -645,12 +647,14 @@ class NodesRecreationTest {
     /**
      * r2 (verifier L1): the recreated activity draws Settings again (its own content, set as it is
      * created, like an app's onCreate, with the dialog's saved state restored), so the test sees the
-     * tab after the recreation: the Nodes tab back (saved state), the form empty, the credential
-     * gone, nothing sent before, during or after.
+     * tab after the recreation: the Nodes tab back (saved state), the label back (saved), the
+     * credential back (retained in memory, never the Bundle), nothing sent before, during or after.
      */
-    @Test fun recreatingTheActivitySendsNothingAndStartsTheFormEmpty() {
+    @Test fun recreatingTheActivityKeepsTheTypedFormAndSendsNothing() {
         val writer = RecordingNodesWriter()
+        var registry: androidx.compose.runtime.saveable.SaveableStateRegistry? = null
         val content: @androidx.compose.runtime.Composable () -> Unit = {
+            registry = LocalSaveableStateRegistry.current
             val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Nodes) }
             val actions = rememberNodesActions(writer)
             SettingsUnderTest(store.prefs, state, nodes = NodesBinding(LIST, ORIGIN, actions, CONSOLE, now = { NOW }))
@@ -684,10 +688,13 @@ class NodesRecreationTest {
             tag(NodeTags.Credential).performTextReplacement(SENTINEL)
             compose.waitForIdle()
             assertTrue(writer.calls.isEmpty())
+            val saved = compose.runOnIdle { registry?.performSave()?.toString() }.orEmpty()
+            assertTrue("the label is saved (the check can see strings)", saved.contains("Workstation"))
+            assertFalse("the credential reached the saved state", saved.contains(SENTINEL))
             compose.activityRule.scenario.recreate()
             compose.waitUntil(5_000) { recreated.get() == 1 && one(NodeTags.Section) && one(NodeTags.Credential) }
-            assertEquals("", tag(NodeTags.Credential).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
-            assertEquals("", tag(NodeTags.Label).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
+            assertEquals(SENTINEL, tag(NodeTags.Credential).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
+            assertEquals("Workstation", tag(NodeTags.Label).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text)
             compose.waitForIdle()
             assertTrue(writer.calls.isEmpty())
         } finally {
@@ -695,3 +702,4 @@ class NodesRecreationTest {
         }
     }
 }
+

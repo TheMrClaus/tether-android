@@ -391,6 +391,19 @@ class ClaudeAccountsController(
         line = null
     }
 
+    /**
+     * ta-coik.20: what was typed before a rotation (the Add nickname and the rename in progress) put
+     * back into a fresh controller; the host mirrors these (saved, none is a secret). Sends nothing.
+     */
+    fun restoreTyped(adding: Boolean, addText: String, renaming: String?, renameText: String) {
+        if (adding) this.adding = true
+        if (addText.isNotEmpty()) this.addText = addText
+        if (renaming != null) {
+            this.renaming = renaming
+            this.renameText = renameText
+        }
+    }
+
     fun cancelAdd() {
         adding = false
         addText = ""

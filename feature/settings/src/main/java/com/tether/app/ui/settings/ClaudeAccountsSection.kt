@@ -76,6 +76,8 @@ import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 
 /** Tags of the Claude accounts section. */
 object ClaudeAccountsTags {
@@ -149,10 +151,26 @@ internal fun ClaudeAccountsHost(binding: ClaudeAccountsBinding, narrow: Boolean)
     // A seed counts only for the server it was built for.
     val seed = binding.initial?.takeIf { current != null && it.origin == current }
     val parent = rememberCoroutineScope()
+    // ta-coik.20: the Add nickname and the rename in progress survive a rotation (saved; neither is a
+    // secret): mirrored out of the controller and put back into the next one. The login's pasted code
+    // lives with the login poll, which a recreation ends (follow-up: needs the controller retained).
+    var typedAdding by rememberSaveable(current) { mutableStateOf(false) }
+    var typedAdd by rememberSaveable(current) { mutableStateOf("") }
+    var typedRenaming by rememberSaveable(current) { mutableStateOf<String?>(null) }
+    var typedRename by rememberSaveable(current) { mutableStateOf("") }
     val c = remember(source, actions, current) {
         ClaudeAccountsController(source, actions, current, parent, seed, binding.writeSeed?.takeIf { seed != null }, binding.pace)
+            .also { if (seed == null) it.restoreTyped(typedAdding, typedAdd, typedRenaming, typedRename) }
     }
     DisposableEffect(c) { onDispose { c.dispose() } }
+    LaunchedEffect(c) {
+        snapshotFlow { listOf(c.adding, c.addText, c.renaming, c.renameText) }.collect {
+            typedAdding = c.adding
+            typedAdd = c.addText
+            typedRenaming = c.renaming
+            typedRename = c.renameText
+        }
+    }
     var planRetried by remember(c) { mutableStateOf(false) }
 
     // r2 (verifier P2): each answer is folded into the state AS IT IS when the answer lands, never

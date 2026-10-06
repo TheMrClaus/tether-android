@@ -58,6 +58,8 @@ import com.tether.app.ui.util.relativeTime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.tether.app.ui.state.rememberRetained
 
 /*
  * T10.3: Settings -> Nodes (components/nodes-settings.tsx at 887c222, drawn by settings-dialog.tsx
@@ -68,7 +70,7 @@ import kotlinx.coroutines.launch
  * only on a socket opened for the server this screen was drawn from.
  *
  * The credential bundle carries the peer's node BEARER. ta-coik.5: as on the web it is a plain
- * textarea (no mask, copy and cut work; a copy is marked sensitive), held in plain `remember`
+ * textarea (no mask, copy and cut work; a copy is marked sensitive), held in `rememberRetained` (memory only, kept through a rotation)
  * (never saved state, never a preference, never logged), sent only by Add node.
  */
 
@@ -391,8 +393,9 @@ internal fun NodesSection(binding: NodesBinding, narrow: Boolean) {
 
 /**
  * `.settings-node-add`: the form. Label, base URL and the credential are plain fields, as on the
- * web. Every field is plain `remember` (the web's `useState`, gone on a page reload): a rotation, a
- * process death, a close, a tab change or another server starts it empty, and nothing in it is ever
+ * web. A browser keeps them across a resize and drops them on a reload (ta-coik.20): a rotation keeps
+ * them (label and URL saved, the credential in memory only, never the saved-instance Bundle); a process
+ * death, a close, a tab change or another server starts it empty, and nothing in it is ever
  * sent but by Add node. The credential is let go once the server holds the node
  * ([NodeNotice.heldByServer]); after any other answer (a refusal, nothing sent, no answer) the form
  * keeps it, so a deliberate second tap can send it again. Nothing is resent by itself. ta-coik.15:
@@ -402,9 +405,11 @@ internal fun NodesSection(binding: NodesBinding, narrow: Boolean) {
 private fun NodeAddForm(origin: String, actions: NodesActions?, busy: NodeBusy?, notice: NodeNotice?, narrow: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    var label by remember { mutableStateOf("") }
-    var baseUrl by remember { mutableStateOf("") }
-    var credential by remember { mutableStateOf("") }
+    // ta-coik.20: the label and URL survive a rotation (saved); the credential survives it in memory only
+    // (never the saved-instance Bundle).
+    var label by rememberSaveable { mutableStateOf("") }
+    var baseUrl by rememberSaveable { mutableStateOf("") }
+    var credential by rememberRetained { "" }
     // The answer that was already shown when this form appeared is not this form's.
     val shownBefore = remember { notice?.serial }
     LaunchedEffect(notice?.serial) {

@@ -738,3 +738,42 @@ class ServerSettingsRotationTest {
         assertTrue(compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Password), useUnmergedTree = true).fetchSemanticsNode().config.contains(SemanticsProperties.Password))
     }
 }
+
+/**
+ * ta-coik.20: a rotation keeps a server setting half typed (a plain one through the saved state) and
+ * never writes a half-typed secret into it. (A real recreation commits nothing; see the recreation tests
+ * above: this restore harness disposes the screen without a configuration change, so it is not asserted here.)
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class ServerSettingsTypedStateRotationTest {
+    private val tmp = TemporaryFolder()
+    private val store = PrefsStore(tmp)
+    private val compose = createComposeRule()
+
+    @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
+
+    @Test fun aRotationKeepsAHalfTypedPortAndSavesNoSecret() {
+        val restoration = StateRestorationTester(compose)
+        val binding = ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(password = SENTINEL)))
+        var saved: String? = null
+        restoration.setContent {
+            val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Advanced) }
+            SettingsUnderTest(store.prefs, state, serverSettings = binding)
+            val registry = androidx.compose.runtime.saveable.LocalSaveableStateRegistry.current
+            androidx.compose.runtime.SideEffect { saved = registry?.performSave()?.toString() }
+        }
+        compose.waitForIdle()
+        fun typed(setting: ServerSetting) = compose.onNodeWithTag(ServerSettingsTags.input(setting), useUnmergedTree = true).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text
+        compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Port), useUnmergedTree = true).performScrollTo()
+        compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Port), useUnmergedTree = true).performTextReplacement("41")
+        compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Password), useUnmergedTree = true).performScrollTo()
+        compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Password), useUnmergedTree = true).performTextReplacement("typed-secret-b7e4")
+        compose.waitForIdle()
+        restoration.emulateSavedInstanceStateRestore()
+        compose.waitForIdle()
+        assertEquals("41", typed(ServerSetting.Port))
+        assertFalse("the saved state holds a typed secret", saved.orEmpty().contains("typed-secret-b7e4") || saved.orEmpty().contains(SENTINEL))
+        assertTrue("the port is in the saved state (the check can see strings)", saved.orEmpty().contains("41"))
+    }
+}

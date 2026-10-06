@@ -168,6 +168,24 @@ class ModelBrowserState(
     var settingsOpen by mutableStateOf(settingsOpen)
     var addDraft by mutableStateOf(addDraft)
 
+    companion object {
+        /** ta-coik.20: the browser's typed search and Add field (and where it is) survive a rotation. */
+        val Saver: androidx.compose.runtime.saveable.Saver<ModelBrowserState, Any> = androidx.compose.runtime.saveable.listSaver(
+            save = { b ->
+                listOf(b.open, (b.view as? BrowserView.Provider)?.entryKey.orEmpty(), b.view is BrowserView.Provider, b.search, b.settingsOpen, b.addDraft)
+            },
+            restore = { v ->
+                ModelBrowserState(
+                    open = v[0] as Boolean,
+                    view = if (v[2] as Boolean) BrowserView.Provider(v[1] as String) else BrowserView.All,
+                    search = v[3] as String,
+                    settingsOpen = v[4] as Boolean,
+                    addDraft = v[5] as String,
+                )
+            },
+        )
+    }
+
     /** model-browser.tsx openBrowser: the initial view (sole provider → it; else the picked one; else all), search cleared. */
     fun openOn(entries: List<ProviderCatalogEntry>, selectedKey: String) {
         val initial = ModelBrowserView.resolveInitialModelBrowserView(entriesJs(entries), JsStr(selectedKey))

@@ -99,8 +99,9 @@ fun SessionDrawer(
     // pick or the pending target.
     val activeId by vm.activeId.collectAsStateWithLifecycle()
     val pendingSessionId by vm.pendingSessionId.collectAsStateWithLifecycle()
-    var query by remember { mutableStateOf("") }
-    var harness by remember { mutableStateOf<String?>(null) }
+    // ta-coik.20: the typed search and the harness filter survive a rotation.
+    var query by rememberSaveable { mutableStateOf("") }
+    var harness by rememberSaveable { mutableStateOf<String?>(null) }
     var folderPicker by remember { mutableStateOf(false) }
     // Saveable: a rotation recreates the activity, and an open Settings (its tab and draft) comes back.
     var settingsOpen by rememberSaveable { mutableStateOf(false) }

@@ -91,6 +91,8 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.core)
+    // ta-coik.20: state/RetainedSecret.kt rides the activity's ViewModel store.
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
 
     designTokenGenerator(project(":tools:design-tokens"))
 
@@ -101,6 +103,7 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.activity.compose)
     testImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)

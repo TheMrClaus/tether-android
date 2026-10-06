@@ -52,6 +52,7 @@ import com.tether.app.ui.components.TetherSelectOption
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
+import androidx.compose.runtime.saveable.rememberSaveable
 
 /**
  * components/codex-controls.tsx `CodexControlsPanel`: the Codex v2 session's one-shot actions
@@ -164,9 +165,9 @@ internal fun CodexControlsPanel(state: ProviderControlsState<CodexSnapshot>?, lo
 /** The review target + delivery form; "Start review" sends only a target the server's validator accepts. */
 @Composable
 private fun ReviewForm(snapshot: CodexSnapshot, enabled: Boolean, onControl: (SessionControl) -> Unit) {
-    var kind by remember { mutableStateOf("uncommittedChanges") }
-    var value by remember { mutableStateOf("") }
-    var delivery by remember { mutableStateOf("inline") }
+    var kind by rememberSaveable { mutableStateOf("uncommittedChanges") }
+    var value by rememberSaveable { mutableStateOf("") }
+    var delivery by rememberSaveable { mutableStateOf("inline") }
     val target: ReviewTarget = when (kind) {
         "baseBranch" -> ReviewTarget.BaseBranch(value.trim())
         "commit" -> ReviewTarget.Commit(value.trim())
@@ -238,9 +239,9 @@ internal fun OpencodeControlsPanel(
             return@Column
         }
         val seed = listOf(selectedModel, selectedVariant, selectedMode, snapshot.revision)
-        var modelDraft by remember(seed) { mutableStateOf(selectedModel) }
-        var variantDraft by remember(seed) { mutableStateOf(selectedVariant) }
-        var modeDraft by remember(seed) { mutableStateOf(selectedMode) }
+        var modelDraft by rememberSaveable(seed) { mutableStateOf(selectedModel) }
+        var variantDraft by rememberSaveable(seed) { mutableStateOf(selectedVariant) }
+        var modeDraft by rememberSaveable(seed) { mutableStateOf(selectedMode) }
         PanelSection("Model & reasoning effort", TetherIcons.Sparkles) {
             if (!snapshot.models.ready) {
                 OpencodeEmpty(snapshot.models, "No models reported.")

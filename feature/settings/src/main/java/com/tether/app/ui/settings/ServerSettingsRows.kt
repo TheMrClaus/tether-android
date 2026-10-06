@@ -86,6 +86,8 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.tether.app.ui.state.rememberFormState
 
 /** Tags of the server-settings rows (one per wire key). */
 object ServerSettingsTags {
@@ -153,13 +155,15 @@ internal fun CommitField(
     val focusManager = LocalFocusManager.current
     val activity = LocalContext.current.findActivity()
     val recreating = { activity?.isChangingConfigurations == true }
-    var text by remember(shown) { mutableStateOf(shown) }
+    // ta-coik.20: what is typed (and the refused/sent bookkeeping that holds the typed value) survives a
+    // rotation; a secret field's (masked or not) in memory only, never the saved-instance Bundle.
+    var text by rememberFormState(sensitive, shown) { shown }
     // The last value handed to [onCommit] for this server value: Done then the focus loss it
     // causes is one write, not two. r2: a refused value is not "sent", so Done can try again.
-    var sent by remember(shown) { mutableStateOf<String?>(null) }
-    var note by remember(shown) { mutableStateOf<String?>(null) }
+    var sent by rememberFormState<String?>(sensitive, shown) { null }
+    var note by rememberFormState<String?>(false, shown) { null }
     // The value last refused: a focus loss or leaving never retries it (only Done does).
-    var refused by remember(shown) { mutableStateOf<String?>(null) }
+    var refused by rememberFormState<String?>(sensitive, shown) { null }
     var focused by remember { mutableStateOf(false) }
     val commit: (Boolean) -> Unit = { retry ->
         if (text != shown && text != sent && (retry || text != refused)) {
@@ -517,7 +521,7 @@ internal fun ServerTextRow(row: ServerRow, view: ServerSettingsView, binding: Se
  * - committed as the web's text row does: Done, a focus loss, or leaving with an edit in it (never
  *   on a configuration change);
  * - forced by env: the field is disabled and masked, with no Reveal (the web hides its eye then).
- * The reveal flag is plain `remember` (the panel is keyed on the server: another server starts
+ * The reveal flag is plain `remember` (a rotation masks it again, ta-coik.20; the panel is keyed on the server: another server starts
  * masked); the dialog's window is FLAG_SECURE.
  */
 @Composable
@@ -707,7 +711,7 @@ internal fun ServerRootsRow(row: AdvancedRows.RootsRow, view: ServerSettingsView
                     }
                 }
                 if (!forced) {
-                    var typed by remember(roots) { mutableStateOf("") }
+                    var typed by rememberSaveable(roots) { mutableStateOf("") }
                     val add = {
                         binding.send(ServerSettingsPatch.addPath(view, s, typed))
                         typed = ""

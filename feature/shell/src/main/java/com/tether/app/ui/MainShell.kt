@@ -113,6 +113,14 @@ import com.tether.app.ui.statusline.TelemetryMetrics
 internal data class OverviewChoiceFor(val origin: String?, val choice: com.tether.app.ui.overview.OverviewChoice)
 
 /** T15.2: the Overview's filter choice survives a rotation and a return to the Overview (overview.tsx:42). */
+/** ta-coik.20: the Rename dialog's target (the session id and the name it had); saved so a rotation keeps the dialog and its typed name. */
+private data class RenameTarget(val id: String, val name: String)
+
+private val RenameTargetSaver = androidx.compose.runtime.saveable.listSaver<RenameTarget?, String>(
+    save = { t -> if (t == null) emptyList() else listOf(t.id, t.name) },
+    restore = { v -> if (v.size == 2) RenameTarget(v[0], v[1]) else null },
+)
+
 private val OverviewChoiceSaver = androidx.compose.runtime.saveable.listSaver<OverviewChoiceFor?, String?>(
     save = { listOf(it?.origin, it?.choice?.workspace, it?.choice?.provider, it?.choice?.status?.key) },
     restore = { saved -> saved[3]?.let { OverviewChoiceFor(saved[0], overviewChoiceOf(com.tether.app.ui.prefs.OverviewFilters(saved[1], saved[2], it))) } },
@@ -331,7 +339,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         fileBrowser.cwd = session?.cwd.orEmpty()
         fileBrowser.sessionName = session?.name.orEmpty()
     }
-    var renaming by remember { mutableStateOf<AgentSession?>(null) }
+    var renaming by rememberSaveable(stateSaver = RenameTargetSaver) { mutableStateOf<RenameTarget?>(null) }
     var confirmEnd by remember { mutableStateOf<EndTarget?>(null) }
     // T10.1 (dashboard.tsx:1170-1180 `endSession`): Settings → General's "Confirm before ending".
     // Off, the header's End session sends at once; on (and until the stored value is read), it asks.
@@ -462,7 +470,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                 onLogout = { vm.logout() },
             )
         val headerActions = WorkspaceHeaderActions(
-                onRename = { renaming = session },
+                onRename = { renaming = session?.let { RenameTarget(it.id, it.name) } },
                 // r3: the confirmation is bound to the session AND the server it was opened for.
                 onEndSession = {
                     session?.let {
@@ -779,7 +787,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     }
 
     renaming?.let { target ->
-        var name by remember(target.id) { mutableStateOf(target.name) }
+        var name by rememberSaveable(target.id) { mutableStateOf(target.name) }
         val submit = {
             val trimmed = name.trim()
             if (trimmed.isNotEmpty() && trimmed != target.name) vm.client.rename(target.id, trimmed)

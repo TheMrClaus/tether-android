@@ -57,6 +57,7 @@ import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.util.elapsedLabel
 import com.tether.app.ui.util.relativeTime
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.saveable.rememberSaveable
 
 /** Tags of the Devices panel's parts (below Notifications). */
 object DevicesTags {
@@ -153,7 +154,7 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
         val view = c.passkeys
         val now = binding.now()
         val busy = c.securityBusy != null || ownerNeeded
-        var renaming by remember(c) { mutableStateOf<String?>(null) }
+        var renaming by rememberSaveable(c) { mutableStateOf<String?>(null) }
         view?.passkeys?.forEach { passkey ->
             key(passkey.id) {
                 PasskeyRow(passkey, now, narrow, busy, renaming == passkey.id,
@@ -170,9 +171,9 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
         if (view == null && !ownerNeeded && c.securityLine == null) MutedLine(DevicesCopy.PASSKEYS_CHECKING, DevicesTags.PasskeysChecking, status = true)
         if (view != null && !view.passkeysUsable) MutedLine(DevicesCopy.PASSKEYS_NEED_HTTPS, DevicesTags.PasskeysHttps)
         // T10.5: sign-in-security.tsx's add row: a label and Add a passkey, which opens this phone's
-        // passkey prompt (Credential Manager). The label is plain `remember` (never saved) and clears
-        // once a passkey is added, as the web's does.
-        var label by remember(c) { mutableStateOf("") }
+        // passkey prompt (Credential Manager). The label is `rememberSaveable` (ta-coik.20: a rotation keeps it)
+        // and clears once a passkey is added, as the web's does.
+        var label by rememberSaveable(c) { mutableStateOf("") }
         LaunchedEffect(c.passkeysAdded) { if (c.passkeysAdded > 0) label = "" }
         val https = c.origin?.let(com.tether.app.client.PasskeyRules::ceremonyAllowed) == true
         val canAdd = view != null && view.passkeysUsable && c.authenticator.available && https && !busy
@@ -285,13 +286,13 @@ private fun PasskeyRow(
 /**
  * sign-in-security.tsx's rename input: filled with the label, focused, committed on Done or when the
  * focus leaves (the web's blur), never while the activity is being recreated (a rotation is not a
- * blur). An unchanged or blank label sends nothing. Plain `remember`: never saved.
+ * blur). An unchanged or blank label sends nothing. `rememberSaveable` (ta-coik.20): a rotation keeps the edit.
  */
 @Composable
 private fun PasskeyRenameField(passkey: Passkey, shown: String, narrow: Boolean, onDone: (String) -> Unit, onCancel: () -> Unit) {
     val t = LocalTetherTokens.current
     val activity = LocalContext.current.findActivity()
-    var text by remember(passkey.id) { mutableStateOf(com.tether.app.client.LabelText.withoutHidden(passkey.label)) }
+    var text by rememberSaveable(passkey.id) { mutableStateOf(com.tether.app.client.LabelText.withoutHidden(passkey.label)) }
     var focused by remember { mutableStateOf(false) }
     var done by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }

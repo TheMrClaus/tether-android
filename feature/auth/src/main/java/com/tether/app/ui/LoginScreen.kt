@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import com.tether.app.ui.state.rememberRetained
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -210,9 +211,10 @@ class LoginUi(
  * too: the server URL and the pairing-code path (servers behind an SSO proxy,
  * where the browser password page is unreachable from the app).
  *
- * The password and the pairing code are held with `remember`, NOT
+ * The password and the pairing code are held with `rememberRetained` (ta-coik.20), NOT
  * `rememberSaveable`: a secret must not be written into the saved-instance-state
- * bundle (which the system persists across process death).
+ * bundle (which the system persists across process death). They survive a rotation in
+ * the activity's memory only; a process death starts them empty, as a page reload.
  */
 @Composable
 fun LoginScreen(
@@ -261,8 +263,8 @@ fun LoginScreen(
     }
     var baseUrl by rememberSaveable { mutableStateOf(initialBaseUrl.orEmpty()) }
     var username by rememberSaveable { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
+    var password by rememberRetained { "" }
+    var code by rememberRetained { "" }
     var phase by remember { mutableStateOf(LoginPhase.Ready) }
     var error by remember { mutableStateOf<String?>(null) }
     var requirements by remember { mutableStateOf<SignInRequirements?>(null) }

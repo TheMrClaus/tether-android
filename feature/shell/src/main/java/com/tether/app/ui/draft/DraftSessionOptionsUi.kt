@@ -311,6 +311,23 @@ class DraftSettingsState(
     var entry by mutableStateOf(entry)
     var search by mutableStateOf(search)
 
+    companion object {
+        /** ta-coik.20: the sheet's view and hub search (and its embedded browser) survive a rotation. */
+        val Saver: androidx.compose.runtime.saveable.Saver<DraftSettingsState, Any> = androidx.compose.runtime.saveable.listSaver(
+            save = { d -> listOf(d.open, d.view.name, d.entry.name, d.search, with(ModelBrowserState.Saver) { save(d.browser) } ?: emptyList<Any>()) },
+            restore = { v ->
+                @Suppress("UNCHECKED_CAST")
+                DraftSettingsState(
+                    open = v[0] as Boolean,
+                    view = DraftSettingsView.valueOf(v[1] as String),
+                    entry = DraftSettingsView.valueOf(v[2] as String),
+                    search = v[3] as String,
+                    browser = ModelBrowserState.Saver.restore(v[4] as List<Any>) ?: ModelBrowserState(),
+                )
+            },
+        )
+    }
+
     /** open(at): the view and its entry, the search cleared, the browser on its initial view. */
     fun openAt(at: DraftSettingsView, entries: List<ProviderCatalogEntry>, selectedKey: String) {
         view = at

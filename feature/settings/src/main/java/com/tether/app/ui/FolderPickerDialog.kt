@@ -172,10 +172,19 @@ class FolderPickerState(newFolderOpen: Boolean = false, newFolderName: String = 
     var newFolderOpen by mutableStateOf(newFolderOpen)
     var newFolderName by mutableStateOf(newFolderName)
     var awaitingCwd by mutableStateOf(awaitingCwd)
+
+    companion object {
+        /** ta-coik.20: the typed new-folder name (and the form's openness) survive a rotation. */
+        val Saver: androidx.compose.runtime.saveable.Saver<FolderPickerState, Any> = androidx.compose.runtime.saveable.listSaver(
+            save = { s -> listOf(s.newFolderOpen, s.newFolderName, s.awaitingCwd.orEmpty(), s.awaitingCwd != null) },
+            restore = { v -> FolderPickerState(v[0] as Boolean, v[1] as String, if (v[3] as Boolean) v[2] as String else null) },
+        )
+    }
 }
 
 @Composable
-internal fun rememberFolderPickerState(): FolderPickerState = remember { FolderPickerState() }
+internal fun rememberFolderPickerState(): FolderPickerState =
+    androidx.compose.runtime.saveable.rememberSaveable(saver = FolderPickerState.Saver) { FolderPickerState() }
 
 private fun pickerCurrent(directories: DirectoryListing?, current: String?): String? =
     directories?.current?.takeIf { it.isNotEmpty() } ?: current

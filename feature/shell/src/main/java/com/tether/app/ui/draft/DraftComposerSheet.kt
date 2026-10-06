@@ -323,9 +323,9 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHu
     val isolated = draft.form["useWorktree"] == com.tether.app.protocol.tree.JsBool.TRUE
     LaunchedEffect(isolated, draft.cwd(), linkEpoch, connected) { if (isolated && connected) composer.inspectWorktree() }
     // ta-2uq: the browser belongs to one server: a switch closes it (the draft is dropped with it).
-    val browser = remember(origin) { ModelBrowserState() }
+    val browser = rememberSaveable(origin, saver = ModelBrowserState.Saver) { ModelBrowserState() }
     // ta-xki: so does the phone's settings sheet (which embeds its own browser).
-    val settings = remember(origin) { DraftSettingsState() }
+    val settings = rememberSaveable(origin, saver = DraftSettingsState.Saver) { DraftSettingsState() }
     val wideRow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= LIVE_ROW_MIN_WIDTH_DP
     val collator = remember { com.tether.app.ui.chat.IcuJsCollator.forLocale() }
 

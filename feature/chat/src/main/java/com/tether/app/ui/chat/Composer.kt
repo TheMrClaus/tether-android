@@ -109,6 +109,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.max
+import androidx.compose.runtime.saveable.rememberSaveable
 
 /** T13.2 r2: the composer's Interrupt key. */
 internal const val INTERRUPT_KEY_TAG = "composer-interrupt"
@@ -241,7 +242,8 @@ fun Composer(
 ) {
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
-    var field by remember(session?.id) {
+    // ta-coik.20: the typed draft (and its cursor) survives a rotation, as a browser resize keeps the textarea.
+    var field by rememberSaveable(session?.id, stateSaver = TextFieldValue.Saver) {
         val text = initialDraft ?: ""
         mutableStateOf(TextFieldValue(text, TextRange(text.length)))
     }
@@ -271,7 +273,7 @@ fun Composer(
     val hasQuestion = activeTurn?.pendingQuestions?.isNotEmpty() == true
 
     val claude = session?.provider == "claude"
-    var menuDismissed by remember(session?.id) { mutableStateOf(false) }
+    var menuDismissed by rememberSaveable(session?.id) { mutableStateOf(false) }
     var notice by remember(session?.id) { mutableStateOf<String?>(null) }
     var noticeSeq by remember(session?.id) { mutableStateOf(0) }
 
@@ -361,14 +363,14 @@ fun Composer(
 
     // T7.3 (chat-view.tsx:2712-2834): the `@` Agents picker and the pending delegate mention. The
     // mention belongs to the session and the server it was picked on (a switch drops it).
-    var atDismissed by remember(session?.id) { mutableStateOf(false) }
-    var delegateMention by remember(session?.id, runActions.origin) { mutableStateOf<DelegateMention?>(null) }
+    var atDismissed by rememberSaveable(session?.id) { mutableStateOf(false) }
+    var delegateMention by rememberSaveable(session?.id, runActions.origin, stateSaver = DelegateMentionSaver) { mutableStateOf<DelegateMention?>(null) }
     // T8.5 (chat-view.tsx 90fbb9f :1809-1828): the takeover being composed (its source), its editable
     // text and the summary's fold; per session, like the web's per-session ChatView.
-    var handoffSourceId by remember(session?.id) { mutableStateOf<String?>(null) }
-    var handoffText by remember(session?.id) { mutableStateOf("") }
-    var handoffSummaryCollapsed by remember(session?.id) { mutableStateOf(true) }
-    var handoffSeededFor by remember(session?.id) { mutableStateOf<String?>(null) }
+    var handoffSourceId by rememberSaveable(session?.id) { mutableStateOf<String?>(null) }
+    var handoffText by rememberSaveable(session?.id) { mutableStateOf("") }
+    var handoffSummaryCollapsed by rememberSaveable(session?.id) { mutableStateOf(true) }
+    var handoffSeededFor by rememberSaveable(session?.id) { mutableStateOf<String?>(null) }
     fun atQueryNow(text: String): String? =
         if (session != null && !readOnly && !handedOffNow && !(runActions.commandMode && text.startsWith("!")) && handoffSourceId == null) atQueryOf(text) else null
     val atQuery = atQueryNow(draft)
@@ -451,7 +453,7 @@ fun Composer(
     }
     // The web swaps the pill row for the sheet key below 64rem of VIEWPORT (globals.css:7347-7352).
     val wideRow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 1024
-    var sheetAt by remember(session?.id) { mutableStateOf<SheetView?>(null) }
+    var sheetAt by rememberSaveable(session?.id, stateSaver = SheetViewSaver) { mutableStateOf<SheetView?>(null) }
     // T7.3 (chat-view.tsx:2249-2273): Codex has no command catalog of its own; the one action Tether
     // can run from the palette is compaction, once the live catalog says it is dispatchable.
     val codexCompactReady = session?.provider == "codex" && session.engineGeneration == com.tether.app.client.CODEX_V2 &&
@@ -836,7 +838,7 @@ fun Composer(
     // T7.4 (attach-sheet.tsx, touch shell): the paperclip opens the sheet; its rows open the Photo
     // Picker (no storage permission), the clipboard's pictures, or the document picker. What comes
     // back is staged (never sent): only Send transmits it.
-    var attachSheetOpen by remember(session?.id) { mutableStateOf(false) }
+    var attachSheetOpen by rememberSaveable(session?.id) { mutableStateOf(false) }
     val currentAttachments by rememberUpdatedState(attachments)
     fun stageSources(sources: List<AttachmentSource>) {
         if (sources.isEmpty()) return

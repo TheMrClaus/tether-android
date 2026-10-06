@@ -86,6 +86,7 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.util.providerGlyph
+import androidx.compose.runtime.saveable.rememberSaveable
 
 /**
  * T7.2: what the composer's session controls may do for one session. [onControl] is the ONLY way a
@@ -854,8 +855,8 @@ internal fun SessionSettingsSheet(
     providerPanel: (@Composable () -> Unit)?,
     onDismiss: () -> Unit,
 ) {
-    var view by remember(entry) { mutableStateOf(entry) }
-    var search by remember(entry) { mutableStateOf("") }
+    var view by rememberSaveable(entry, stateSaver = SheetViewRequiredSaver) { mutableStateOf(entry) }
+    var search by rememberSaveable(entry) { mutableStateOf("") }
     val canStepBack = view != SheetView.Root && view != entry
     fun done() = if (view == entry) onDismiss() else { view = SheetView.Root }
     val title = when (view) {

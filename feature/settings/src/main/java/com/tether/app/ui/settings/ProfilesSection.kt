@@ -78,6 +78,8 @@ import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.tether.app.ui.state.rememberRetained
 
 /** Tags of the Custom providers editor's parts. */
 object ProfileTags {
@@ -568,9 +570,10 @@ private fun EnvAddRow(p: Profile, actions: ProfileActions, narrow: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val latest by rememberUpdatedState(actions)
-    var name by remember { mutableStateOf("") }
-    var value by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf<String?>(null) }
+    // ta-coik.20: the name survives a rotation (saved); the value, a secret, in memory only.
+    var name by rememberSaveable { mutableStateOf("") }
+    var value by rememberRetained { "" }
+    var note by rememberSaveable { mutableStateOf<String?>(null) }
     val add: () -> Unit = {
         if (jsTrim(name).isNotEmpty()) {
             when (val outcome = ProfileRows.outcome(latest.send(p.id, ProfileEdit.EnvAdd(p.id, name, SecretText(value)), quiet = true))) {
@@ -640,8 +643,17 @@ private fun DraftField(
 
 // ---- the model lists (:442-617, issue #107) ------------------------------------------------------
 
-/** The draft row the operator is naming: [initialId] is the placeholder it started at. Never saved state. */
-private data class ModelDraft(val initialId: String, val id: TextFieldValue, val label: String)
+/** The draft row the operator is naming: [initialId] is the placeholder it started at. Saved across a rotation (ta-coik.20). */
+private data class ModelDraft(val initialId: String, val id: TextFieldValue, val label: String) {
+    companion object {
+        val Saver: androidx.compose.runtime.saveable.Saver<ModelDraft?, Any> = androidx.compose.runtime.saveable.listSaver(
+            save = { d -> if (d == null) emptyList() else listOf(d.initialId, d.id.text, d.id.selection.start, d.id.selection.end, d.label) },
+            restore = { v ->
+                if (v.size != 5) null else ModelDraft(v[0] as String, TextFieldValue(v[1] as String, TextRange(v[2] as Int, v[3] as Int)), v[4] as String)
+            },
+        )
+    }
+}
 
 /**
  * ModelListEditor: one row per committed model (id, label, Default, remove), the single draft row,
@@ -654,7 +666,7 @@ private data class ModelDraft(val initialId: String, val id: TextFieldValue, val
 private fun ModelListEditor(p: Profile, list: ModelList, actions: ProfileActions, narrow: Boolean, modifier: Modifier) {
     val latest by rememberUpdatedState(actions)
     val rows = p.models(list)
-    var draft by remember { mutableStateOf<ModelDraft?>(null) }
+    var draft by rememberSaveable(stateSaver = ModelDraft.Saver) { mutableStateOf<ModelDraft?>(null) }
     val activity = LocalContext.current.findActivity()
     val finalize: () -> Unit = {
         val d = draft

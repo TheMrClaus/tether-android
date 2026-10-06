@@ -788,3 +788,43 @@ class ProfilesRotationTest {
         assertEquals(SENTINEL, compose.onNodeWithTag(ProfileTags.envInput("gemini", "GEMINI_API_KEY"), useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
     }
 }
+
+/**
+ * ta-coik.20: a rotation keeps what was typed in a profile: a label (saved) and the add-env row's name
+ * (saved); the add-env row's value, a secret, is in no saved state (it rides the activity's memory; see
+ * [NodesRecreationTest] for the recreation that keeps such a value).
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class ProfilesTypedStateRotationTest {
+    private val tmp = TemporaryFolder()
+    private val store = PrefsStore(tmp)
+    private val compose = createComposeRule()
+
+    @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
+
+    @Test fun aRotationKeepsTheTypedLabelAndEnvNameAndSavesNoSecret() {
+        val restoration = StateRestorationTester(compose)
+        val binding = ProfileFixtures.binding(ProfileFixtures.list(profiles(gemini(env = SENTINEL), WORK, zai())))
+        var saved: String? = null
+        restoration.setContent {
+            val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Engines) }
+            SettingsUnderTest(store.prefs, state, providers = binding)
+            val registry = LocalSaveableStateRegistry.current
+            androidx.compose.runtime.SideEffect { saved = registry?.performSave()?.toString() }
+        }
+        fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
+        fun typed(t: String) = tag(t).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag(ProfileTags.field("zai", ProfileTags.LABEL), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        tag(ProfileTags.field("zai", ProfileTags.LABEL)).performScrollTo().performTextReplacement("Hal-label")
+        tag(ProfileTags.envNewName("gemini")).performScrollTo().performTextReplacement("MY_ENV")
+        tag(ProfileTags.envNewInput("gemini")).performScrollTo().performTextReplacement("FAKE-new-secret-61f0")
+        compose.waitForIdle()
+        restoration.emulateSavedInstanceStateRestore()
+        compose.waitForIdle()
+        assertEquals("Hal-label", typed(ProfileTags.field("zai", ProfileTags.LABEL)))
+        assertEquals("MY_ENV", typed(ProfileTags.envNewName("gemini")))
+        assertTrue("the saved state holds a typed secret", !saved.orEmpty().contains("FAKE-new-secret-61f0") && !saved.orEmpty().contains(SENTINEL))
+        assertTrue("the label is in the saved state (the check can see strings)", saved.orEmpty().contains("Hal-label"))
+    }
+}
