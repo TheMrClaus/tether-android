@@ -262,7 +262,7 @@ fun FileBrowserFrame(
                 if (listShown) {
                     // grid-template-columns: minmax(20rem, 0.85fr) minmax(0, 1.35fr)
                     val listWidth = if (previewShown) maxOf(320.dp, width * (0.85f / 2.2f)) else width
-                    ListPane(state, narrow, studioPhone, onUpload, env, Modifier.width(listWidth).fillMaxHeight())
+                    ListPane(state, narrow, studioPhone, onUpload, env, listWidth, Modifier.width(listWidth).fillMaxHeight())
                     if (previewShown) Box(Modifier.width(1.dp).fillMaxHeight().background(t.line))
                 }
                 if (previewShown) PreviewPane(state, masterDetail, studioPhone, env, Modifier.weight(1f).fillMaxHeight())
@@ -362,6 +362,25 @@ private class Tracks(val size: Dp, val modified: Dp?, val actions: Dp = 40.dp)
 
 private fun tracksFor(narrow: Boolean) = if (narrow) Tracks(72.dp, null) else Tracks(88.dp, 168.dp)
 
+/** The least width the Name column keeps before the list takes the web's narrow template (Modified goes). */
+private val MinNameWidth = 96.dp
+
+/** Below this much toolbar width the Parent folder key is icon-only (its label would squeeze the item keys). */
+private val CompactToolbarWidth = 352.dp
+
+/**
+ * The web's row template is `minmax(0,1fr) 5.5rem 10.5rem 2.5rem` (globals.css:2808) and it drops Modified only
+ * by viewport (<= 35rem, 2931); in a list pane squeezed to its 20rem floor (viewport ~561-1013dp) that leaves the
+ * Name track at 0. The app picks the narrow template (Modified hidden, 4.5rem Size) by the pane's own width
+ * too, so Name never goes below [MinNameWidth] (it ellipsizes inside it).
+ */
+private fun tracksFor(narrow: Boolean, paneWidth: Dp, inline: Dp, gap: Dp): Tracks {
+    if (narrow) return tracksFor(true)
+    val full = tracksFor(false)
+    val name = paneWidth - inline * 2 - full.size - full.modified!! - full.actions - gap * 3
+    return if (name < MinNameWidth) tracksFor(true) else full
+}
+
 @Composable
 private fun ListPane(
     state: FileBrowserState,
@@ -369,12 +388,14 @@ private fun ListPane(
     studioPhone: Boolean,
     onUpload: () -> Unit,
     env: FileFormatEnv,
+    paneWidth: Dp,
     modifier: Modifier,
 ) {
     val t = LocalTetherTokens.current
     val listing = state.listing
-    val tracks = tracksFor(narrow)
     val inline = (if (studioPhone) 14.dp else 20.dp)
+    val tracks = tracksFor(narrow, paneWidth, inline, t.css.spaceMd)
+    val compactToolbar = paneWidth - inline * 2 < CompactToolbarWidth
     Column(modifier.testTag(FileBrowserTags.ListPane).semantics { contentDescription = "Files and folders" }) {
         // Toolbar: Parent folder | n items + New folder, New file, Upload.
         Row(
@@ -386,20 +407,28 @@ private fun ListPane(
             horizontalArrangement = Arrangement.spacedBy(if (studioPhone) 6.dp else t.css.spaceMd),
         ) {
             val upEnabled = listing?.parent != null && !state.loading
-            Row(
-                Modifier
-                    .heightIn(min = 44.dp)
-                    .graphicsLayer { alpha = if (upEnabled) 1f else 0.48f }
-                    .clip(RoundedCornerShape(t.radiusSm))
-                    .clickable(enabled = upEnabled, role = Role.Button) { state.openParent() }
-                    .padding(horizontal = t.css.spaceSm),
-                horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(TetherIcons.ArrowUp, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp))
-                Text("Parent folder", color = t.muted, style = ui(13f, 630), maxLines = 1)
+            // The slot takes what the item count and the three keys leave, so those are never pushed off.
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                Row(
+                    Modifier
+                        .heightIn(min = 44.dp)
+                        .widthIn(min = if (compactToolbar) 44.dp else 0.dp)
+                        .graphicsLayer { alpha = if (upEnabled) 1f else 0.48f }
+                        .clip(RoundedCornerShape(t.radiusSm))
+                        .clickable(enabled = upEnabled, role = Role.Button) { state.openParent() }
+                        .padding(horizontal = t.css.spaceSm),
+                    horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        TetherIcons.ArrowUp,
+                        contentDescription = if (compactToolbar) "Parent folder" else null,
+                        tint = t.muted,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    if (!compactToolbar) Text("Parent folder", color = t.muted, style = ui(13f, 630), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
-            Spacer(Modifier.weight(1f))
             Text("${listing?.entries?.size ?: 0} items", color = t.faint, style = ui(12f), maxLines = 1)
             Row(horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
                 val ready = listing != null

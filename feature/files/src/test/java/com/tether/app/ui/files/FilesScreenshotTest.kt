@@ -233,3 +233,33 @@ class FilesFontScaleScreenshotTest(private val shot: FilesShot, private val skin
         }
     }
 }
+
+/** ta-sk1o: the side-by-side list pane at its 20rem floor (800dp tablet): Name keeps room, Modified is dropped. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w800dp-h1280dp-mdpi")
+class FilesMidWidthScreenshotTest(private val shot: FilesShot, private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun files() = rule.snapFiles(shot, skin, "files-${shot.id}", "w800")
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun params(): List<Array<Any>> = listOf(FilesShot.List, FilesShot.Text).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+    }
+}
+
+/** ta-sk1o: a phone in landscape (914x412dp) is side by side too, with the same squeezed list pane. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w914dp-h412dp-mdpi")
+class FilesLandscapeScreenshotTest(private val shot: FilesShot, private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun files() = rule.snapFiles(shot, skin, "files-${shot.id}", "w914-landscape")
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun params(): List<Array<Any>> = listOf(FilesShot.List, FilesShot.Text).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+    }
+}
