@@ -137,4 +137,132 @@ class MediaVideoPlayerTest {
         p.detachSurface(first)
         p.release()
     }
+
+    // --- a rotation (ta-1u4 regression): the player outlives its view and is never called in a wrong state ----
+
+    /** Every call that matters, with the platform player's state at the moment of the call. */
+    private val calls = mutableListOf<String>()
+
+    private fun recordingPlayer(): MediaVideoPlayer = MediaVideoPlayer(
+        source,
+        CoroutineScope(Dispatchers.Unconfined),
+        onFailed = { failures++ },
+        newPlayer = {
+            object : MediaPlayer() {
+                private fun at() = shadowOf(this).state
+                override fun start() { calls += "start@${at()}"; super.start() }
+                override fun pause() { calls += "pause@${at()}"; super.pause() }
+                override fun seekTo(msec: Long, mode: Int) { calls += "seekTo@${at()}"; super.seekTo(msec, mode) }
+                override fun setSurface(surface: Surface?) { calls += "setSurface(${if (surface == null) "null" else "surface"})@${at()}"; super.setSurface(surface) }
+                override fun reset() { calls += "reset"; super.reset() }
+                override fun release() { calls += "release"; super.release() }
+            }.also {
+                created += it
+                ShadowMediaPlayer.addMediaInfo(DataSource.toDataSource(source), ShadowMediaPlayer.MediaInfo(60_000, 0))
+            }
+        },
+    )
+
+    /** What a configuration change does to the view: the old surface goes, a new one comes. */
+    private fun MediaVideoPlayer.rotate(old: Surface): Surface {
+        detachSurface(old)
+        return surface().also { attachSurface(it) }
+    }
+
+    private fun assertNeverInvalid() {
+        assertTrue("pause outside a started player: $calls", calls.none { it.startsWith("pause@") && it != "pause@STARTED" })
+        assertTrue("no reset / release: $calls", calls.none { it == "reset" || it == "release" })
+        assertEquals("no failure surfaced", 0, failures)
+    }
+
+    @Test fun rotatingWhilePreparedNeverPausesAndKeepsTheFirstFrame() {
+        val p = recordingPlayer()
+        val first = surface()
+        p.attachSurface(first)
+        shadowOf(created[0]).invokePreparedListener()
+        val second = p.rotate(first)
+        // The app-stop path ran too (the old activity stopped): nothing to pause, nothing happens.
+        p.pause()
+        p.rotate(second)
+        assertTrue(p.phase is VideoPhase.Ready)
+        assertFalse(p.playing)
+        assertEquals(ShadowMediaPlayer.State.PREPARED, shadowOf(created[0]).state)
+        assertTrue("the frame is painted again on the new surface: $calls", calls.any { it.startsWith("seekTo@") })
+        assertNeverInvalid()
+    }
+
+    @Test fun anInvalidOperationErrorIsNotAPlaybackFailure() {
+        val p = recordingPlayer()
+        shadowOf(created[0]).invokePreparedListener()
+        shadowOf(created[0]).invokeErrorListener(-38, 0)
+        assertTrue(p.phase is VideoPhase.Ready)
+        assertEquals(0, failures)
+        assertNeverInvalid()
+        // A real error still is one.
+        shadowOf(created[0]).invokeErrorListener(MediaPlayer.MEDIA_ERROR_UNKNOWN, MediaPlayer.MEDIA_ERROR_IO)
+        assertEquals(VideoPhase.Failed, p.phase)
+        assertEquals(1, failures)
+    }
+
+    @Test fun rotatingWhilePlayingKeepsPlayingWithoutAPauseOrAReset() {
+        val p = recordingPlayer()
+        val first = surface()
+        p.attachSurface(first)
+        shadowOf(created[0]).invokePreparedListener()
+        p.control.start()
+        val second = p.rotate(first)
+        p.rotate(second)
+        assertTrue(p.playing)
+        assertEquals(ShadowMediaPlayer.State.STARTED, shadowOf(created[0]).state)
+        assertTrue("no frame seek while it plays: $calls", calls.drop(calls.indexOf("start@PREPARED")).none { it.startsWith("seekTo@") })
+        assertNeverInvalid()
+    }
+
+    @Test fun rotatingWhilePausedStaysPausedAndRepaintsItsFrame() {
+        val p = recordingPlayer()
+        val first = surface()
+        p.attachSurface(first)
+        shadowOf(created[0]).invokePreparedListener()
+        p.control.start()
+        p.control.pause()
+        val before = calls.count { it.startsWith("seekTo@") }
+        val second = p.rotate(first)
+        p.pause() // the app-stop path: already paused, no second pause
+        p.rotate(second)
+        assertFalse(p.playing)
+        assertEquals(ShadowMediaPlayer.State.PAUSED, shadowOf(created[0]).state)
+        assertTrue("the paused frame is repainted: $calls", calls.count { it.startsWith("seekTo@") } > before)
+        assertEquals("one pause, the user's", 1, calls.count { it.startsWith("pause@") })
+        assertNeverInvalid()
+    }
+
+    @Test fun rotatingAfterCompletionNeverPausesAndCanPlayAgain() {
+        val p = recordingPlayer()
+        val first = surface()
+        p.attachSurface(first)
+        shadowOf(created[0]).invokePreparedListener()
+        p.control.start()
+        shadowOf(created[0]).invokeCompletionListener()
+        assertFalse(p.playing)
+        val second = p.rotate(first)
+        p.pause()
+        p.rotate(second)
+        assertFalse(p.playing)
+        assertTrue("no pause after the clip ended: $calls", calls.none { it.startsWith("pause@") })
+        p.control.start()
+        assertTrue(p.playing)
+        assertEquals(0, failures)
+    }
+
+    @Test fun stoppingTheAppPausesAPlayingVideoOnceAndAPreparedOneNever() {
+        val p = recordingPlayer()
+        shadowOf(created[0]).invokePreparedListener()
+        p.pause()
+        assertTrue(calls.none { it.startsWith("pause@") })
+        p.control.start()
+        p.pause()
+        p.pause()
+        assertEquals(listOf("pause@STARTED"), calls.filter { it.startsWith("pause@") })
+        assertFalse(p.playing)
+    }
 }

@@ -68,6 +68,12 @@ class MediaVideoPlayer(
     private var player: MediaPlayer? = null
     private var surface: Surface? = null
     private var prepared = false
+
+    /**
+     * Where the platform player is, tracked here because every call is only valid in some states
+     * (pause() in PREPARED is an invalid operation: error -38, and the player then reports an error).
+     */
+    private var engine = Engine.Idle
     private var released = false
     private var buffered by mutableIntStateOf(0)
     private val opening: Job
@@ -85,10 +91,15 @@ class MediaVideoPlayer(
                 player = mp
                 mp.setOnPreparedListener { onPrepared(it) }
                 mp.setOnVideoSizeChangedListener { _, w, h -> if (prepared && !released) phase = VideoPhase.Ready(w, h) }
-                mp.setOnCompletionListener { playing = false }
+                mp.setOnCompletionListener {
+                    if (engine == Engine.Started) engine = Engine.Completed
+                    playing = false
+                }
                 mp.setOnBufferingUpdateListener { _, percent -> buffered = percent }
-                mp.setOnErrorListener { _, _, _ ->
-                    fail()
+                mp.setOnErrorListener { _, what, _ ->
+                    // -38: the platform refusing a call made in the wrong state. Nothing is wrong with the
+                    // video; it is never a playback failure (and our own calls are guarded against it).
+                    if (what != MEDIA_ERROR_INVALID_OPERATION) fail()
                     true
                 }
                 mp.setDataSource(source)
@@ -103,6 +114,7 @@ class MediaVideoPlayer(
     private fun onPrepared(mp: MediaPlayer) {
         if (released) return
         prepared = true
+        engine = Engine.Prepared
         phase = VideoPhase.Ready(mp.videoWidth, mp.videoHeight)
         // No start(): a seek to the start draws the first frame on the surface and stays paused.
         showFrame()
@@ -110,7 +122,7 @@ class MediaVideoPlayer(
 
     private fun showFrame() {
         val mp = player ?: return
-        if (!prepared || released || playing || surface == null) return
+        if (!prepared || released || playing || surface == null || engine == Engine.Idle) return
         try {
             mp.seekTo(mp.currentPosition.toLong(), MediaPlayer.SEEK_CLOSEST)
         } catch (_: IllegalStateException) {
@@ -137,15 +149,21 @@ class MediaVideoPlayer(
         }
 
         override fun start() {
+            // Valid from prepared, paused and completed (a completed clip plays again from its start).
+            if (engine == Engine.Started) return
             mp(Unit) {
                 it.start()
+                engine = Engine.Started
                 playing = true
             }
         }
 
         override fun pause() {
+            // Only a playing player can pause: in PREPARED, PAUSED or COMPLETED it is an invalid operation.
+            if (engine != Engine.Started) return
             mp(Unit) {
                 it.pause()
+                engine = Engine.Paused
                 playing = false
             }
         }
@@ -176,6 +194,7 @@ class MediaVideoPlayer(
         // Only the surface in use: a replaced view's late teardown must not blank its successor's.
         if (this.surface !== surface) return
         this.surface = null
+        // The picture goes; the player, its place and its playing / paused state stay (a rotation re-attaches).
         try {
             player?.setSurface(null)
         } catch (_: IllegalStateException) {
@@ -202,6 +221,7 @@ class MediaVideoPlayer(
         player = null
         surface = null
         prepared = false
+        engine = Engine.Idle
         if (mp != null) {
             try {
                 mp.setOnPreparedListener(null)
@@ -217,3 +237,8 @@ class MediaVideoPlayer(
         }
     }
 }
+
+private enum class Engine { Idle, Prepared, Started, Paused, Completed }
+
+/** MediaPlayer's `MEDIA_ERROR_INVALID_OPERATION` is -38 (the native -ENOSYS), not in the SDK constants. */
+private const val MEDIA_ERROR_INVALID_OPERATION = -38

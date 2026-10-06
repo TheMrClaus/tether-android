@@ -1,6 +1,8 @@
 package com.tether.app.ui.files
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Outline
 import android.graphics.SurfaceTexture
 import android.view.Surface
@@ -183,9 +185,13 @@ private fun VideoSurface(player: VideoPlayer, modifier: Modifier) {
     val radiusPx = with(LocalDensity.current) { LocalTetherTokens.current.radiusMd.toPx() }
     val host = remember(player) { VideoHost(context, player, radiusPx) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val activity = context.findActivity()
     DisposableEffect(host, lifecycle) {
-        // Out of sight (the app stopped): stop playing, keep the place.
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) player.pause() }
+        // Out of sight (the app stopped): stop playing, keep the place. A rotation / resize stops the
+        // activity too, but the video stays where it is and keeps playing into the new one.
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && activity?.isChangingConfigurations != true) player.pause()
+        }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
@@ -195,6 +201,12 @@ private fun VideoSurface(player: VideoPlayer, modifier: Modifier) {
     val ready = player.phase is VideoPhase.Ready
     val playing = player.playing
     AndroidView(factory = { host.frame }, modifier = modifier, update = { host.sync(ready, playing) })
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 /**
