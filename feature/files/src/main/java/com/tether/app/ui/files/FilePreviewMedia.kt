@@ -6,9 +6,11 @@ import android.content.ContextWrapper
 import android.graphics.Outline
 import android.graphics.SurfaceTexture
 import android.view.Surface
+import android.view.Gravity
 import android.view.TextureView
 import android.view.View
 import android.view.ViewOutlineProvider
+import android.view.ViewTreeObserver
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.MediaController
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -155,7 +158,7 @@ internal fun VideoPreview(player: VideoPlayer, name: String) {
                 .semantics { contentDescription = "Preview of ${SafeText.line(name)}" },
             contentAlignment = Alignment.Center,
         ) {
-            if (phase !is VideoPhase.Failed && LocalVideoSurfaceEnabled.current) VideoSurface(player, Modifier.size(box.videoWidth.dp, box.videoHeight.dp).align(Alignment.Center))
+            if (phase !is VideoPhase.Failed && LocalVideoSurfaceEnabled.current) VideoSurface(player, SizeDp(box.videoWidth, box.videoHeight), Modifier.fillMaxSize())
             if (phase is VideoPhase.Opening) {
                 Box(Modifier.align(Alignment.Center).semantics { contentDescription = "Loading video" }) { Spinner(22.dp, t.faint) }
             }
@@ -180,7 +183,7 @@ internal fun roundBottomCorners(view: View, radiusPx: Float) {
 
 /** The frame view, the controller bar and the app-stop pause, for one [player]. */
 @Composable
-private fun VideoSurface(player: VideoPlayer, modifier: Modifier) {
+private fun VideoSurface(player: VideoPlayer, clip: SizeDp, modifier: Modifier) {
     val context = LocalContext.current
     val radiusPx = with(LocalDensity.current) { LocalTetherTokens.current.radiusMd.toPx() }
     val host = remember(player) { VideoHost(context, player, radiusPx) }
@@ -200,7 +203,12 @@ private fun VideoSurface(player: VideoPlayer, modifier: Modifier) {
     }
     val ready = player.phase is VideoPhase.Ready
     val playing = player.playing
-    AndroidView(factory = { host.frame }, modifier = modifier, update = { host.sync(ready, playing) })
+    val density = LocalDensity.current.density
+    val clipWidthPx = (clip.width * density).roundToInt()
+    val clipHeightPx = (clip.height * density).roundToInt()
+    // The host fills the WHOLE video box (the controller anchors to it, so its bar spans the box and
+    // meets the rounded corners); the picture is sized and centred inside it.
+    AndroidView(factory = { host.frame }, modifier = modifier, update = { host.sync(ready, playing, clipWidthPx, clipHeightPx) })
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -210,21 +218,31 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 }
 
 /**
- * The TextureView (not a SurfaceView: it follows the Compose clip, so the corners stay round)
- * inside a frame the [MediaController] is anchored to. The controller is shown and held while the
- * video is ready and not playing (no autoplay), hides on the platform timeout while it plays, and a
- * tap on the frame toggles it. The screen stays on while it plays.
+ * The video box's view: a frame that fills the whole box and is the [MediaController]'s anchor, with the
+ * TextureView (not a SurfaceView: it follows the Compose clip, so the corners stay round) sized and
+ * centred inside it for the clip's aspect. The controller is shown and held while the video is ready and
+ * not playing (no autoplay), hides on the platform timeout while it plays, and a tap on the frame toggles
+ * it. The screen stays on while it plays. After the anchor moves or resizes (a rotation, a resize) a
+ * showing controller is hidden and shown again, so it takes the anchor's new place.
  */
-private class VideoHost(context: Context, private val player: VideoPlayer, radiusPx: Float) {
+internal class VideoHost(
+    context: Context,
+    private val player: VideoPlayer,
+    radiusPx: Float,
+    makeController: (Context) -> MediaController = { MediaController(it) },
+) {
     val frame = FrameLayout(context)
-    private val texture = TextureView(context)
-    private val controller = MediaController(context)
+    internal val texture = TextureView(context)
+    private val controller = makeController(context)
     private var surface: Surface? = null
     private var ready = false
     private var playing = false
+    private var shownAt: List<Int>? = null
+    private val relayout = ViewTreeObserver.OnGlobalLayoutListener { frame.post { repositionIfMoved() } }
 
     init {
-        frame.addView(texture, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(texture, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER))
+        frame.viewTreeObserver.addOnGlobalLayoutListener(relayout)
         texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
                 val mine = Surface(texture)
@@ -252,23 +270,51 @@ private class VideoHost(context: Context, private val player: VideoPlayer, radiu
         }
     }
 
-    /** Called with the player's state on every change. */
-    fun sync(ready: Boolean, playing: Boolean) {
+    /** Called with the player's state and the clip's size (px) on every change. */
+    fun sync(ready: Boolean, playing: Boolean, clipWidthPx: Int, clipHeightPx: Int) {
         this.ready = ready
         this.playing = playing
+        sizeClip(clipWidthPx, clipHeightPx)
         frame.keepScreenOn = playing
         controller.isEnabled = ready
         if (!ready) {
             controller.hide()
+            shownAt = null
             return
         }
         // Held while paused / ended; the platform's own timeout while playing.
         frame.post { if (this.ready && frame.isAttachedToWindow) showFor(this.playing) }
     }
 
+    private fun sizeClip(widthPx: Int, heightPx: Int) {
+        val params = texture.layoutParams as FrameLayout.LayoutParams
+        val width = if (widthPx > 0) widthPx else ViewGroup.LayoutParams.MATCH_PARENT
+        val height = if (heightPx > 0) heightPx else ViewGroup.LayoutParams.MATCH_PARENT
+        if (params.width == width && params.height == height) return
+        params.width = width
+        params.height = height
+        texture.layoutParams = params
+    }
+
     private fun showFor(playing: Boolean) {
         if (!frame.isAttachedToWindow) return
         if (playing) controller.show() else controller.show(0)
+        shownAt = anchorBounds()
+    }
+
+    /** Where the anchor is on screen and how big: what the controller was positioned from. */
+    private fun anchorBounds(): List<Int> {
+        val at = IntArray(2)
+        if (frame.isAttachedToWindow) frame.getLocationOnScreen(at)
+        return listOf(at[0], at[1], frame.width, frame.height)
+    }
+
+    /** The anchor is laid out somewhere else than the controller was shown for: hide it and show it again there. */
+    internal fun repositionIfMoved() {
+        if (!ready || !frame.isAttachedToWindow || !controller.isShowing) return
+        if (anchorBounds() == shownAt) return
+        controller.hide()
+        showFor(playing)
     }
 
     private fun releaseSurface() {
@@ -282,6 +328,7 @@ private class VideoHost(context: Context, private val player: VideoPlayer, radiu
     fun dispose() {
         ready = false
         controller.hide()
+        if (frame.viewTreeObserver.isAlive) frame.viewTreeObserver.removeOnGlobalLayoutListener(relayout)
         texture.surfaceTextureListener = null
         releaseSurface()
         frame.keepScreenOn = false
