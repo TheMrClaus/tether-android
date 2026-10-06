@@ -77,6 +77,8 @@ COMPONENTS = {
     "global-search": ("Global search across sessions (v71)", "MISSING", "T5.3"),
     "workspace-file-browser": ("Workspace file browser over /api/files", "MISSING", "T11.1"),
     "browser-pane": ("In-console browser pane: frames as images over /ws-browser; full-screen sheet on phones", "MISSING", "T8.6"),
+    "archive-stale-dialog": ("Bulk archive of long-idle sessions: preview then bounded batches (#244, v142)", "MISSING", "ta-06yt"),
+    "setup-commands": ("Repo-controlled commands for approval: numbered, hidden characters made visible (v143)", "MISSING", "ta-m7ef"),
     "log-dialog": ("Server log dialog (log messages)", "MISSING", "T4.5"),
     "scheduled-actions-view": ("Scheduled actions list/create/control (v87)", "MISSING", "T9.3"),
     "provider-logo": ("Provider logos", "MISSING", "T3.5"),
@@ -190,6 +192,19 @@ NEW_ROW_STATUS = {
     ("client-msg", "overview-unsubscribe"): "DONE",
     ("server-msg", "overview-snapshot"): "DONE",
     ("server-msg", "overview-delta"): "DONE",
+    # re-baseline at tether 29537e0 (protocol 143); evidence in each task's bead
+    # ta-06yt (#244): feature/sidebar/.../ArchiveStaleDialog.kt:75 (dialog)
+    ("component", "components/archive-stale-dialog.tsx"): "DONE",
+    # ta-m7ef (#241): core/designsystem/.../ConsentViews.kt:155 CommandList, core/data/.../HiddenCharacters.kt:12
+    ("component", "components/setup-commands.tsx"): "DONE",
+    # ta-m7ef: ClientMessage.kt:340 ArchiveInspect (wire 1081); RealTetherClient.kt:773 sendArchiveInspect
+    ("client-msg", "archive-inspect"): "DONE",
+    # ta-06yt: ClientMessage.kt:359 ArchiveStale (wire 1084); RealTetherClient.kt:5248 requestArchiveStale
+    ("client-msg", "archive-stale"): "DONE",
+    # ta-m7ef: ServerMessage.kt:304 ArchivePreview (decode 893); RealTetherClient.kt:3263 -> EndSessionFlow.kt:99
+    ("server-msg", "archive-preview"): "DONE",
+    # ta-06yt: ServerMessage.kt:315 ArchiveStaleResult (decode 903); SidebarSync.kt:90 -> ArchiveStaleDialog
+    ("server-msg", "archive-stale-result"): "DONE",
 }
 
 # ---- protocol type -> task -----------------------------------------------------------------

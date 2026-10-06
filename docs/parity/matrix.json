@@ -1,7 +1,14 @@
 {
- "parityBase": "887c222",
- "protocolVersion": 137,
+ "parityBase": "29537e0",
+ "protocolVersion": 143,
  "rows": [
+  {
+   "kind": "component",
+   "artifact": "components/archive-stale-dialog.tsx",
+   "behavior": "Bulk archive of long-idle sessions: preview then bounded batches (#244, v142)",
+   "android": "DONE",
+   "task": "ta-06yt"
+  },
   {
    "kind": "component",
    "artifact": "components/attach-sheet.tsx",
@@ -323,6 +330,13 @@
    "behavior": "Settings: all tabs (appearance, providers, ACP, advanced, server, accounts)",
    "android": "MISSING",
    "task": "T10.1"
+  },
+  {
+   "kind": "component",
+   "artifact": "components/setup-commands.tsx",
+   "behavior": "Repo-controlled commands for approval: numbered, hidden characters made visible (v143)",
+   "android": "DONE",
+   "task": "ta-m7ef"
   },
   {
    "kind": "component",
@@ -1068,6 +1082,13 @@
   },
   {
    "kind": "client-msg",
+   "artifact": "archive-inspect",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "DONE",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
    "artifact": "kill",
    "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
    "android": "PARTIAL",
@@ -1288,6 +1309,13 @@
    "artifact": "detect-engines",
    "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
    "android": "MISSING",
+   "task": "T10.1"
+  },
+  {
+   "kind": "client-msg",
+   "artifact": "archive-stale",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "DONE",
    "task": "T10.1"
   },
   {
@@ -1558,6 +1586,13 @@
   },
   {
    "kind": "server-msg",
+   "artifact": "archive-stale-result",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "DONE",
+   "task": "T10.1"
+  },
+  {
+   "kind": "server-msg",
    "artifact": "server-settings",
    "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
    "android": "MISSING",
@@ -1604,6 +1639,13 @@
    "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
    "android": "MISSING",
    "task": "T8.3"
+  },
+  {
+   "kind": "server-msg",
+   "artifact": "archive-preview",
+   "behavior": "ServerMessage (lib/protocol.ts); tolerant decode + UI",
+   "android": "DONE",
+   "task": "T10.1"
   },
   {
    "kind": "server-msg",
