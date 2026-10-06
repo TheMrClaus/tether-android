@@ -2,9 +2,12 @@ package com.tether.app.ui.prefs
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import java.io.IOException
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -14,6 +17,7 @@ import java.util.WeakHashMap
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -23,7 +27,18 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 
-private val Context.tetherUiDataStore: DataStore<Preferences> by preferencesDataStore(name = "tether_ui_prefs")
+/**
+ * ta-341b: a preferences file that cannot be decoded is replaced by the defaults, as the web's
+ * `readStored` (hooks/use-preferences.ts) reads an unreadable `localStorage` value as none and falls
+ * back to its defaults instead of failing the render.
+ */
+internal val uiPrefsCorruptionHandler: ReplaceFileCorruptionHandler<Preferences> =
+    ReplaceFileCorruptionHandler { emptyPreferences() }
+
+private val Context.tetherUiDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "tether_ui_prefs",
+    corruptionHandler = uiPrefsCorruptionHandler,
+)
 
 /**
  * DataStore-backed UI preferences: the web's `tether.preferences.v1` fields as one
@@ -42,7 +57,7 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     }
 
     /** The stored preferences, or what a refused write kept in memory. */
-    private val data: Flow<Preferences> = combine(store.data, kept) { stored, memory -> memory ?: stored }
+    private val data: Flow<Preferences> = combine(readable(store), kept) { stored, memory -> memory ?: stored }
 
     /**
      * Every write: an atomic edit on top of what [data] shows. A write the disk refuses still
@@ -208,6 +223,14 @@ class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
     companion object {
         /** T15.4: preferences on a store of the caller's own (a shell test's, so its boot view's inputs are its own). */
         fun on(store: DataStore<Preferences>): UiPrefs = UiPrefs(store)
+
+        /**
+         * ta-341b: the web's `readStored` returns null when the storage throws, so the read falls to
+         * its defaults; here a disk read that fails with an [IOException] (the corrupt file included,
+         * if the handler did not take it) is the defaults too, never a failure of every preference flow.
+         */
+        internal fun readable(store: DataStore<Preferences>): Flow<Preferences> =
+            store.data.catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
 
         private val keptByStore = WeakHashMap<DataStore<Preferences>, MutableStateFlow<Preferences?>>()
 
