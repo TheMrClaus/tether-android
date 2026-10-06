@@ -26,7 +26,7 @@ enum class RunCommandResult {
     /** Connected, but the session is not confirmed live on this connection, or the key was drawn for another server. */
     NotLive,
 
-    /** The session is read-only, handed off, archived, or not listed (fail closed). */
+    /** The session is read-only, handed off, or not listed (fail closed); archived is the server's call, as the web's. */
     Locked,
 
     /** The server does not offer command mode for this session's provider (`capabilities.commandRunner`). */
@@ -58,7 +58,7 @@ enum class MentionResult {
     /** Drawn for another server than the one the outbox (and any socket) belongs to, or for none. */
     NotLive,
 
-    /** The session is read-only, handed off, archived, or not listed (fail closed). */
+    /** The session is read-only, handed off, or not listed (fail closed); archived is the server's call, as the web's. */
     Locked,
 
     /** The mention names an agent, model, effort or mode the current catalog does not offer. */
@@ -136,7 +136,6 @@ object CommandGuard {
      * shape (non-empty, the server's size limit), never rewritten.
      */
     fun checkRun(session: AgentSession, providers: List<ProviderInfo>, tree: JsObj?, command: String, background: Boolean): RunCommandResult? {
-        if (session.runtimeArchived) return RunCommandResult.Locked
         if (!commandModeOffered(session, providers)) return RunCommandResult.NotOffered
         if (command.isBlank() || command.toByteArray(Charsets.UTF_8).size > COMMAND_MAX_BYTES) return RunCommandResult.Invalid
         // chat-view.tsx:3093: foreground needs the turn slot; background does not.

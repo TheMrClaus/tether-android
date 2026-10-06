@@ -146,16 +146,30 @@ class CommandTransmissionTest {
     }
 
     @Test
-    fun readOnlyHandedOffArchivedOrUnlistedSessionsRunNothing() {
+    fun readOnlyHandedOffOrUnlistedSessionsRunNothingButAnArchivedOneRunsAsOnTheWeb() {
         val (client, ws) = connected(ready(extra = ""","readOnly":true"""))
         assertEquals(RunCommandResult.Locked, client.runCommand("s1", "ls", false, client.consentOrigin.value))
         ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":2,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless","handedOffTo":"s2"}}""")
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.handedOffTo == "s2" } }
         assertEquals(RunCommandResult.Locked, client.runCommand("s1", "ls", false, client.consentOrigin.value))
+        assertTrue(frames("run-command").isEmpty())
+        // ta-coik.56: the web's command mode never locks on runtimeArchived; the server refuses.
         ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":3,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":true,"mode":"headless"}}""")
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.runtimeArchived } }
-        assertEquals(RunCommandResult.Locked, client.runCommand("s1", "ls", false, client.consentOrigin.value))
-        assertTrue(frames("run-command").isEmpty())
+        assertEquals(RunCommandResult.Sent, client.runCommand("s1", "ls", false, client.consentOrigin.value))
+        assertEquals("ls", frames("run-command").single().str("command"))
+    }
+
+    @Test
+    fun anArchivedSessionsFirstMessageAndBackgroundCommandGoOutAsTheWebs() {
+        val (client, ws) = connected(state = commandState())
+        ws.send("""{"type":"session","session":{"id":"s1","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":3,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":true,"mode":"headless"}}""")
+        h.await(client.sessions) { list -> list.any { it.id == "s1" && it.runtimeArchived } }
+        val origin = client.consentOrigin.value
+        assertEquals(BackgroundCommandResult.Sent, client.backgroundCommand("s1", origin, "t1"))
+        assertEquals("s1", frames("background-command").single().str("sessionId"))
+        assertTrue(client.sendFirst("s1", "first words", origin!!, client.linkEpoch.value))
+        assertEquals("first words", frames("send").single().str("text"))
     }
 
     @Test
@@ -356,7 +370,7 @@ class CommandTransmissionTest {
     }
 
     @Test
-    fun aReadOnlyHandedOffArchivedOrUnlistedSessionIsNeverDelegatedFrom() {
+    fun aReadOnlyHandedOffOrUnlistedSessionIsNeverDelegatedFromButAnArchivedOneIsAsOnTheWeb() {
         val (client, ws) = withCatalog()
         val m = DelegateMention("claude", "review")
         val origin = client.consentOrigin.value
@@ -369,10 +383,13 @@ class CommandTransmissionTest {
         ws.send(row(""","runtimeArchived":false,"handedOffTo":"s2"""", 3))
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.handedOffTo == "s2" } }
         assertEquals(MentionResult.Locked, client.sendDelegated("s1", "x", emptyList(), m, origin))
+        assertTrue(frames("send").isEmpty())
+        // ta-coik.56: the web's mention path never locks on runtimeArchived (chat-view.tsx:2799 only
+        // filters the handoff candidates); the server refuses.
         ws.send(row(""","runtimeArchived":true""", 4))
         h.await(client.sessions) { list -> list.any { it.id == "s1" && it.runtimeArchived } }
-        assertEquals(MentionResult.Locked, client.sendDelegated("s1", "x", emptyList(), m, origin))
-        assertTrue(frames("send").isEmpty())
+        assertEquals(MentionResult.Sent, client.sendDelegated("s1", "x", emptyList(), m, origin))
+        assertEquals("x", frames("send").single().str("text"))
     }
 
     private fun outputBlock(client: RealTetherClient): com.tether.app.protocol.tree.JsObj {

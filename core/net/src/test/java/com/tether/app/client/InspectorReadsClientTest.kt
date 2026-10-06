@@ -211,6 +211,21 @@ class InspectorReadsClientTest {
         }
     }
 
+    /** ta-fg73: the diff and scripts reads go through the web's `send` (use-tether.ts:1520, :1530), so one not sent says so. */
+    @Test fun theDiffAndScriptsReadsNotSentSaySo() {
+        h.newClient()
+        val errors = CopyOnWriteArrayList<String>()
+        val job = h.scope.launch(start = CoroutineStart.UNDISPATCHED) { h.client.errors.collect { errors += it } }
+        try {
+            assertEquals(false, h.client.requestWorktreeDiff("s1"))
+            assertEquals(false, h.client.requestWorktreeScripts("s1"))
+            runBlocking { withTimeout(20_000) { while (errors.size < 2) kotlinx.coroutines.delay(10) } }
+            assertEquals(List(2) { "The secure link is reconnecting. Your input was not sent." }, errors.toList())
+        } finally {
+            job.cancel()
+        }
+    }
+
     /** ta-coik.18: the automatic read (dashboard.tsx:827) goes through the web's `send` too, so one not sent says so. */
     @Test fun theAutomaticPullRequestReadNotSentSaysSo() {
         h.newClient()

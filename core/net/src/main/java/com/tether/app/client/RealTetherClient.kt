@@ -3836,7 +3836,7 @@ class RealTetherClient(
             if (pendingOrigin != expectedOrigin || socketOrigin != expectedOrigin || socket == null) return@synchronized false
             if (epoch != expectedEpoch || haltedLocked()) return@synchronized false
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized false
-            if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized false
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized false
             evicted = recordLocked(PendingInput.KIND_SEND, sessionId, text, null, null)
             true
         }
@@ -3849,7 +3849,7 @@ class RealTetherClient(
      * mention is the same durable path). r2: in ONE step under the lock, the same one that records it:
      * drawn for the server the outbox belongs to ([expectedOrigin] = [pendingOrigin], and the socket's,
      * when there is one: a switch can never slip between the check and the record); the session listed
-     * and neither read-only, handed off nor archived; the mention one the catalog that server pushed
+     * and neither read-only nor handed off (the web's composer locks; an archived session is the server's call); the mention one the catalog that server pushed
      * offers it. Otherwise nothing is recorded.
      */
     override fun sendDelegated(sessionId: String, text: String, attachments: List<Attachment>, mention: com.tether.app.protocol.DelegateMention, expectedOrigin: String?): MentionResult {
@@ -3863,7 +3863,7 @@ class RealTetherClient(
             val owner = pendingOrigin
             if (expectedOrigin == null || owner != expectedOrigin || (socketOrigin != null && socketOrigin != expectedOrigin)) return@synchronized MentionResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized MentionResult.Locked
-            if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized MentionResult.Locked
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized MentionResult.Locked
             if (!CommandGuard.mentionOffered(session, mention, providerCatalogState.value)) return@synchronized MentionResult.NotOffered
             evicted = recordLocked(PendingInput.KIND_SEND, sessionId, text, null, mention)
             MentionResult.Sent
@@ -4778,7 +4778,7 @@ class RealTetherClient(
      * handshaken socket of a running (not halted) client; the composer drawn for THIS server
      * ([expectedOrigin] = the socket's origin); ta-coik.22: not the session's liveness (the web's
      * `sendDirect` sends whenever its socket is open; a refusal comes back as a shown `error`); listed,
-     * and neither read-only, handed off nor archived (fail closed); the provider offered command mode by the
+     * and neither read-only nor handed off (the web's composer locks; an archived session is the server's call); the provider offered command mode by the
      * server, a command of the right shape, and no running turn for a foreground run
      * ([CommandGuard.checkRun]); then enqueued on that socket with a fresh idempotency key. Nothing is
      * retried, held or persisted (use-tether.ts runCommand is a direct send too).
@@ -4815,7 +4815,7 @@ class RealTetherClient(
             if (ws == null || origin == null || !socketOpen || !handshakeDone || haltedLocked()) return@synchronized BackgroundCommandResult.NotConnected
             if (expectedOrigin != origin) return@synchronized BackgroundCommandResult.NotLive
             val session = sessionsState.value.firstOrNull { it.id == sessionId } ?: return@synchronized BackgroundCommandResult.Locked
-            if (session.readOnly || !session.handedOffTo.isNullOrEmpty() || session.runtimeArchived) return@synchronized BackgroundCommandResult.Locked
+            if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized BackgroundCommandResult.Locked
             CommandGuard.checkBackground(sessionStore.tree(sessionId), expectedTurnId)?.let { return@synchronized it }
             if (!ws.send(ClientMessage.BackgroundCommand(sessionId).encode())) return@synchronized BackgroundCommandResult.NotConnected
             BackgroundCommandResult.Sent
@@ -5055,11 +5055,12 @@ class RealTetherClient(
         }
     }
 
+    // ta-fg73: use-tether.ts:1520, :1530 go through the web's `send`, so a read not sent says so (337-341).
     override fun requestWorktreeDiff(sessionId: String): Boolean =
-        sendFrame(ClientMessage.WorktreeDiffRequest(sessionId))
+        sendFrame(ClientMessage.WorktreeDiffRequest(sessionId)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
 
     override fun requestWorktreeScripts(sessionId: String): Boolean =
-        sendFrame(ClientMessage.WorktreeScriptsRequest(sessionId))
+        sendFrame(ClientMessage.WorktreeScriptsRequest(sessionId)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
 
     // ta-coik.18: the automatic read (dashboard.tsx:827) goes through the web's `send` too, so a
     // read not sent says so as the refresh does (use-tether.ts:337-341).

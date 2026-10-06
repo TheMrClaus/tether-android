@@ -39,7 +39,8 @@ class CommandGuardTest {
         assertEquals(RunCommandResult.Invalid, CommandGuard.checkRun(session, p, freshTree(), " \n\t", false))
         assertEquals(RunCommandResult.Invalid, CommandGuard.checkRun(session, p, freshTree(), "x".repeat(CommandGuard.COMMAND_MAX_BYTES + 1), true))
         assertNull(CommandGuard.checkRun(session, p, freshTree(), "x".repeat(CommandGuard.COMMAND_MAX_BYTES), true))
-        assertEquals(RunCommandResult.Locked, CommandGuard.checkRun(session.copy(runtimeArchived = true), p, freshTree(), "ls", true))
+        // ta-coik.56: the web's command mode never locks on runtimeArchived (chat-view.tsx); the server decides.
+        assertNull(CommandGuard.checkRun(session.copy(runtimeArchived = true), p, freshTree(), "ls", true))
     }
 
     @Test
