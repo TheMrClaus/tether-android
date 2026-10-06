@@ -61,6 +61,22 @@ interface WorkspaceFiles {
      */
     suspend fun download(path: String, maxBytes: Long, sink: OutputStream): FilesResult<Long>
 
+    /**
+     * One ranged read of `GET /api/files?path=` (`Range: bytes=offset-(offset+length-1)`, the single
+     * byte range the server answers with 206; the web's `<video>` seeks with the same requests): at
+     * most [length] bytes from [offset], however large the file is, never the whole file. The
+     * paired server and its credential are read afresh for every call, like every read here.
+     *
+     * [pinnedOrigin] (a previous result's [RangeRead.origin]) keeps a long read sequence on ONE
+     * server: when the paired server is no longer that origin (another server, or a sign-in to
+     * one), the call fails before anything is sent, so a player never mixes two servers' bytes
+     * and the credential never goes to an origin the read did not start on.
+     *
+     * Default body: an implementation that cannot read ranges (a fake in a test) fails the call.
+     */
+    suspend fun readRange(path: String, offset: Long, length: Int, pinnedOrigin: String? = null): FilesResult<RangeRead> =
+        FilesResult.Failed(FilesCopy.FILE_FALLBACK)
+
     /** No server / not signed in: every call fails without touching the network. */
     object Unavailable : WorkspaceFiles {
         private fun <T> no(fallback: String): FilesResult<T> = FilesResult.Failed(fallback)
@@ -115,6 +131,13 @@ data class WorkspaceFileListing(
 
 /** lib/protocol.ts WorkspaceMutationResult: `parent` is the folder to re-list. */
 data class WorkspaceMutation(val parent: String?, val path: String? = null, val size: Long? = null)
+
+/**
+ * What a ranged read got: [bytes] from the requested offset (shorter than asked at the end of the
+ * file, empty past it), the file's [total] length when the server said (Content-Range / Content-Length),
+ * and the [origin] it came from (scheme://host:port), to pin the next read to.
+ */
+class RangeRead(val bytes: ByteArray, val total: Long?, val origin: String)
 
 /** What `HEAD /api/files` reports. [length] is null when the server sent no usable Content-Length. */
 data class FileHead(val length: Long?, val contentType: String?)

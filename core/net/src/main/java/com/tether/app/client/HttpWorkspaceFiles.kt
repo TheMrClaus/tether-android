@@ -165,6 +165,44 @@ class HttpWorkspaceFiles(
         }
     }
 
+    override suspend fun readRange(path: String, offset: Long, length: Int, pinnedOrigin: String?): FilesResult<RangeRead> {
+        val fallback = FilesCopy.FILE_FALLBACK
+        if (offset < 0 || length <= 0) return FilesResult.Failed(fallback)
+        return call(fallback, {
+            route("/api/files", "path" to path)
+                .header("Range", "bytes=$offset-${offset + length - 1}")
+                // A compressed answer would not be the bytes of the range.
+                .header("Accept-Encoding", "identity")
+        }, pinnedOrigin) { response ->
+            val origin = originKey(response.request.url)
+            when (response.code) {
+                206 -> {
+                    val range = parseContentRange(response.header("Content-Range")) ?: return@call FilesResult.Failed(fallback, response.code)
+                    // The server must answer the range asked for, never some other part of the file.
+                    if (range.start != offset) return@call FilesResult.Failed(fallback, response.code)
+                    val want = minOf(length.toLong(), range.end - range.start + 1)
+                    FilesResult.Ok(RangeRead(readPrefix(response, want).readByteArray(), range.total, origin))
+                }
+                // The server ignored the Range header: the body is the whole file from byte 0. Only
+                // its first [length] bytes are read (the call is cancelled with the response); a
+                // read from further in cannot be served without downloading the file, so it fails.
+                200 -> {
+                    if (offset != 0L) return@call FilesResult.Failed(fallback, response.code)
+                    val total = response.header("Content-Length")?.toLongOrNull()?.takeIf { it >= 0 }
+                    FilesResult.Ok(RangeRead(readPrefix(response, length.toLong()).readByteArray(), total, origin))
+                }
+                // Past the end (or an empty file): nothing to read, and the length says where the end is.
+                416 -> {
+                    val total = UNSATISFIED_RANGE.matchEntire(response.header("Content-Range")?.trim().orEmpty())
+                        ?.groupValues?.get(1)?.toLongOrNull()
+                        ?: return@call FilesResult.Failed(fallback, response.code)
+                    FilesResult.Ok(RangeRead(ByteArray(0), total, origin))
+                }
+                else -> FilesResult.Failed(fallback, response.code)
+            }
+        }
+    }
+
     // ------------------------------------------------------------------
 
     private suspend fun postJson(route: String, fallback: String, vararg fields: Pair<String, String>): FilesResult<WorkspaceMutation> {
@@ -205,6 +243,7 @@ class HttpWorkspaceFiles(
     private suspend fun <T> call(
         fallback: String,
         build: RouteBuilder.() -> Request.Builder,
+        pinnedOrigin: String? = null,
         handle: (Response) -> FilesResult<T>,
     ): FilesResult<T> {
         val paired = when (val a = authority()) {
@@ -212,6 +251,8 @@ class HttpWorkspaceFiles(
             FilesAuthority.LocalNetworkBlocked -> return FilesResult.Failed(FilesCopy.LOCAL_NETWORK_BLOCKED)
             is FilesAuthority.Paired -> a
         }
+        // A read pinned to the server it started on never goes (or carries a credential) anywhere else.
+        if (pinnedOrigin != null && originKey(paired.origin) != pinnedOrigin) return FilesResult.Failed(fallback)
         val unsigned = RouteBuilder(paired.origin).build()
         val request = paired.sign(unsigned).build()
         // Defence in depth: the credential only ever travels to the origin it belongs to. A request
@@ -317,6 +358,23 @@ class HttpWorkspaceFiles(
         private const val ERROR_BODY_CAP = 16L * 1024L
 
         private fun sameOrigin(a: HttpUrl, b: HttpUrl) = a.scheme == b.scheme && a.host == b.host && a.port == b.port
+
+        /** scheme://host:port, what [RangeRead.origin] is and what a pinned read is compared with. */
+        internal fun originKey(url: HttpUrl) = "${url.scheme}://${url.host}:${url.port}"
+
+        private val UNSATISFIED_RANGE = Regex("""bytes \*/(\d+)""")
+        private val CONTENT_RANGE = Regex("""bytes (\d+)-(\d+)/(\d+|\*)""")
+
+        private class ContentRange(val start: Long, val end: Long, val total: Long?)
+
+        /** `bytes 0-99/1234` (the total may be `*`); null when it is anything else. */
+        private fun parseContentRange(header: String?): ContentRange? {
+            val match = CONTENT_RANGE.matchEntire(header?.trim().orEmpty()) ?: return null
+            val start = match.groupValues[1].toLongOrNull() ?: return null
+            val end = match.groupValues[2].toLongOrNull() ?: return null
+            if (end < start) return null
+            return ContentRange(start, end, match.groupValues[3].toLongOrNull())
+        }
 
         private const val UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
 
