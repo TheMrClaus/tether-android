@@ -282,9 +282,9 @@ class ServerSettingsBehaviourTest {
         tag(ServerSettingsTags.row(ServerSetting.MetadataGenerationEnabled)).assertDoesNotExist()
     }
 
-    /** r2: the dialog's window is FLAG_SECURE. */
-    @Test fun theDialogWindowIsSecure() {
-        assertEquals(androidx.compose.ui.window.SecureFlagPolicy.SecureOn, SettingsDialogProperties.securePolicy)
+    /** ta-coik.65: the dialog's window is not FLAG_SECURE (the web does not block screenshots of Settings). */
+    @Test fun theDialogWindowIsNotSecure() {
+        assertEquals(androidx.compose.ui.window.SecureFlagPolicy.Inherit, SettingsDialogProperties.securePolicy)
     }
 
     @Test fun anUneditedFieldSendsNothingWhenItLosesFocusOrLeaves() {

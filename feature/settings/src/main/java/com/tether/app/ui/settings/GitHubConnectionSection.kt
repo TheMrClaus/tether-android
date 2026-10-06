@@ -301,7 +301,7 @@ private fun CodeRow(poll: GitHubDevicePoll, narrow: Boolean, opener: LoginLinkOp
  * masked, typed (and pasted) into directly; as a browser does for a password field, no copy or cut
  * ([NoCopyScope], ta-coik.5's rule), and no reveal (the web's input has none). The keyboard learns and
  * corrects nothing. Enter does nothing more than close the keyboard (the web's input is in no form).
- * The text is the controller's, in memory only; the dialog's window is FLAG_SECURE.
+ * The text is the controller's, in memory only (the window is not secure, as the web's page is not, ta-coik.65).
  */
 @Composable
 private fun TokenField(value: String, onChange: (String) -> Unit, narrow: Boolean, modifier: Modifier) {

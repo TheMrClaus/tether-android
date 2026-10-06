@@ -60,7 +60,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
-import androidx.compose.ui.window.SecureFlagPolicy
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.ProvidersList
@@ -578,14 +577,15 @@ private fun rememberDialogIn(): Animatable<Float, *> {
 }
 
 /**
- * The dialog's window. r2: FLAG_SECURE (SecureOn) for the whole dialog, since its Advanced tab can
- * reveal the server's password and proxy token: no screenshot, screen recording or Recents
- * snapshot holds them.
+ * The dialog's window. ta-coik.65: no FLAG_SECURE (the platform default, [SecureFlagPolicy.Inherit]),
+ * as the browser does not block a screenshot or a recording of the web's Settings: the app is as
+ * capable as the web console. What keeps a secret off the screen is the field, not the window: the
+ * masked fields stay masked until Reveal (a password input's rule), and a secret is never in saved
+ * state (ta-coik.20).
  */
 internal val SettingsDialogProperties = DialogProperties(
     usePlatformDefaultWidth = false,
     decorFitsSystemWindows = false,
-    securePolicy = SecureFlagPolicy.SecureOn,
 )
 
 /** ta-coik.21: the GitHub connection's ViewModel in the activity's store. */

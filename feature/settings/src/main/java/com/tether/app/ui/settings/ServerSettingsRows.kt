@@ -522,7 +522,7 @@ internal fun ServerTextRow(row: ServerRow, view: ServerSettingsView, binding: Se
  *   on a configuration change);
  * - forced by env: the field is disabled and masked, with no Reveal (the web hides its eye then).
  * The reveal flag is plain `remember` (a rotation masks it again, ta-coik.20; the panel is keyed on the server: another server starts
- * masked); the dialog's window is FLAG_SECURE.
+ * masked); the window is not secure, as the web's page is not (ta-coik.65).
  */
 @Composable
 internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: ServerSettingsBinding, narrow: Boolean) {
