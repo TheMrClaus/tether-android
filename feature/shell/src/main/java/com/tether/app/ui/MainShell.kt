@@ -167,8 +167,8 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     val configuredServer by vm.client.serverUrl.collectAsStateWithLifecycle()
     cardStates.bindTo(configuredServer)
     // ta-jyj0: and ONE transcript scroll position, above the same switch: a rotation that swaps PhoneShell
-    // for ExpandedShell keeps the reader's place (the activity handles the configuration change itself).
-    val transcriptScroll = remember { TranscriptScrollStore() }
+    // for ExpandedShell keeps the reader's place (and saved across the activity's recreation: MainActivity handles no configuration change itself).
+    val transcriptScroll = rememberSaveable(saver = TranscriptScrollStore.Saver) { TranscriptScrollStore() }
     val windowWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
     val layout = shellLayoutFor(windowWidthDp)
     val persisted = rememberPersistedPanels(prefs, vm.client.serverUrl)

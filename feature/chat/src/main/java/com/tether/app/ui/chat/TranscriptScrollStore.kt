@@ -7,23 +7,50 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /** The follow-the-bottom mode of one transcript: true until the reader scrolls up by hand. */
 class FollowState {
     var sticky by mutableStateOf(true)
 }
 
+/** Where a transcript was: its first visible row by key (not index: rows come and go) and how far into it. */
+class TranscriptAnchor(val key: String, val offset: Int)
+
 /** Where one session's transcript is: its list position (first visible row by key) and its follow mode. */
-class TranscriptScroll internal constructor() {
+class TranscriptScroll internal constructor(sticky: Boolean = true, private var restore: TranscriptAnchor? = null) {
     val listState: LazyListState = LazyListState()
-    val follow: FollowState = FollowState()
+    val follow: FollowState = FollowState().also { it.sticky = sticky }
+
+    /** The place a recreated activity left, to be put back once rows exist; handed out once. */
+    internal fun takeRestore(): TranscriptAnchor? = restore.also { restore = null }
+
+    /** Still waiting to be put back (the activity is recreated again before its rows existed). */
+    internal fun pendingRestore(): TranscriptAnchor? = restore
+
+    /** The reader's place as plain data: the first visible row's key and offset into it (null: none to name). */
+    internal fun anchor(): TranscriptAnchor? {
+        val info = listState.layoutInfo
+        val first = info.visibleItemsInfo.firstOrNull { it.index == listState.firstVisibleItemIndex } ?: return null
+        val key = first.key as? String ?: return null
+        return TranscriptAnchor(key, listState.firstVisibleItemScrollOffset)
+    }
 }
 
 /**
- * ta-jyj0: the transcript's scroll position outlives the shell that composed it. A phone turned sideways
- * switches PhoneShell <-> ExpandedShell, and each composes its own ChatScreen, so a list state remembered
- * inside the transcript started at the bottom every time. MainShell provides ONE store above that switch
- * (as it does the card store); the browser keeps the reader's place across a resize and so does this.
+ * ta-jyj0: the transcript's scroll position outlives the shell that composed it AND the activity. A phone
+ * turned sideways recreates the activity (MainActivity declares no configChanges; only ShareActivity does)
+ * and switches PhoneShell <-> ExpandedShell, each composing its own ChatScreen, so a list state remembered
+ * inside the transcript started at the bottom every time. MainShell holds ONE store above that switch (as it
+ * does the card store) and saves it across the recreation as plain data ([Saver]: the session, the follow
+ * mode, the first visible row's key and offset). The browser keeps the reader's place across a resize and
+ * so does this.
  *
  * It holds the ONE open session's position: another session replaces it (the web remounts its ChatView per
  * session, ta-coik.33: a chat opens at its latest message), and [retainOnly] drops it when no session is
@@ -46,6 +73,39 @@ class TranscriptScrollStore {
             held = null
             heldId = null
         }
+    }
+
+    /** One JSON string (a plain value any saved-state bundle takes); "" when nothing is held. */
+    internal fun encode(): String {
+        val id = heldId ?: return ""
+        val scroll = held ?: return ""
+        val sticky = scroll.follow.sticky
+        val place = if (sticky) null else scroll.anchor() ?: scroll.pendingRestore()
+        return buildJsonObject {
+            put("id", id)
+            put("sticky", sticky)
+            if (place != null) {
+                put("key", place.key)
+                put("offset", place.offset)
+            }
+        }.toString()
+    }
+
+    companion object {
+        internal fun decode(raw: String): TranscriptScrollStore = TranscriptScrollStore().also { store ->
+            runCatching {
+                val o = Json.parseToJsonElement(raw).jsonObject
+                val id = o["id"]!!.jsonPrimitive.content
+                val sticky = o["sticky"]?.jsonPrimitive?.boolean ?: true
+                val key = o["key"]?.jsonPrimitive?.content
+                val offset = o["offset"]?.jsonPrimitive?.int ?: 0
+                store.heldId = id
+                store.held = TranscriptScroll(sticky, key?.let { TranscriptAnchor(it, offset) })
+            } // an unreadable record is no record: the chat opens at its latest message
+        }
+
+        val Saver: androidx.compose.runtime.saveable.Saver<TranscriptScrollStore, String> =
+            androidx.compose.runtime.saveable.Saver(save = { it.encode() }, restore = { decode(it) })
     }
 }
 

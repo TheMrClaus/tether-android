@@ -111,6 +111,8 @@ internal fun ChatTranscript(
     listState: LazyListState = rememberLazyListState(),
     /** ta-jyj0: the follow mode, hoisted with [listState] so a shell switch keeps both. */
     follow: FollowState = remember { FollowState() },
+    /** ta-jyj0: where a recreated activity left the reader; put back once rows exist. */
+    restore: TranscriptAnchor? = null,
     showTimeline: Boolean = true,
     /** T5.3: the in-chat find over this transcript (null: the bar is closed). */
     find: TranscriptFind? = null,
@@ -138,7 +140,7 @@ internal fun ChatTranscript(
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends)
     }
 }
 
@@ -153,6 +155,7 @@ private fun ChatTranscriptBody(
     zone: ZoneId,
     listState: LazyListState,
     follow: FollowState,
+    restore: TranscriptAnchor?,
     showTimeline: Boolean,
     find: TranscriptFind?,
     richCodex: Boolean,
@@ -225,6 +228,14 @@ private fun ChatTranscriptBody(
     val timelineSide = if (phone) TimelineSide.Right else TimelineSide.Left
 
     var sticky by follow::sticky
+    // ta-jyj0: the reader's place from before the activity was recreated, by row key, put back before the
+    // first measure that has rows (a reader who was following has none: the pin takes them to the end).
+    val restored = remember { booleanArrayOf(restore == null) }
+    if (!restored[0] && restore != null && items.isNotEmpty()) {
+        restored[0] = true
+        val at = if (restore.key == "subagent-roster") 0 else lazyKeys.indexOf(restore.key).takeIf { it >= 0 }?.plus(leading)
+        if (at != null) listState.requestScrollToItem(at, restore.offset)
+    }
     val followGuard = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
