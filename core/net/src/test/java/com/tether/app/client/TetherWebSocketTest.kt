@@ -12,6 +12,8 @@ import java.net.Socket
 import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.security.cert.CertPathValidatorException
+import java.security.cert.CertificateException
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
@@ -19,6 +21,7 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLPeerUnverifiedException
 import okhttp3.CertificatePinner
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -862,8 +865,21 @@ class TetherWebSocketTest {
             server.useHttps(serverCerts.sslSocketFactory(), false)
         }
 
+        // "localhost" can resolve to 127.0.0.1 and ::1 (it does on the CI runner) while the server listens on one of
+        // them; OkHttp tries the next address after a failure and would then throw that address's ConnectException
+        // instead of the handshake failure. Resolve to exactly the address the server bound.
+        private val address: InetAddress = InetAddress.getByName(server.hostName)
+        private val onlyTheServersAddress = Dns { listOf(address) }
+
         fun client(pinner: CertificatePinner = CertificatePinner.DEFAULT): OkHttpClient =
-            OkHttpClient.Builder().sslSocketFactory(trusting.sslSocketFactory(), trusting.trustManager).certificatePinner(pinner).build()
+            OkHttpClient.Builder().dns(onlyTheServersAddress).sslSocketFactory(trusting.sslSocketFactory(), trusting.trustManager).certificatePinner(pinner).build()
+
+        /** A client whose trust is a different, test-made CA: hermetic (never the JDK's cacerts), and it must reject [leaf]. */
+        fun clientTrustingAnotherCa(): OkHttpClient {
+            val elsewhere = HeldCertificate.Builder().certificateAuthority(0).build()
+            val certs = HandshakeCertificates.Builder().addTrustedCertificate(elsewhere.certificate).build()
+            return OkHttpClient.Builder().dns(onlyTheServersAddress).sslSocketFactory(certs.sslSocketFactory(), certs.trustManager).build()
+        }
     }
 
     @Test
@@ -888,9 +904,13 @@ class TetherWebSocketTest {
         // A client that does not trust the server's CA never upgrades.
         server.enqueue(MockResponse().withWebSocketUpgrade(side))
         val untrusted = Recorder()
-        connect(url, untrusted)
+        connect(url, untrusted, client = tls.clientTrustingAnotherCa())
         assertTrue(untrusted.next().startsWith("failure:"))
         assertTrue("${untrusted.failure}", untrusted.failure is SSLHandshakeException)
+        assertTrue(
+            "the handshake failed on the server's certificate, not for another reason: ${untrusted.failure}",
+            generateSequence(untrusted.failure) { it.cause }.any { it is CertificateException || it is CertPathValidatorException },
+        )
 
         // Trusted but pinned to another key: refused by the caller's pinner.
         server.enqueue(MockResponse().withWebSocketUpgrade(side))
