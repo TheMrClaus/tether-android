@@ -33,9 +33,10 @@ import org.junit.rules.TemporaryFolder
 /**
  * ta-coik.68: the clip download and what plays from it, as plain JUnit (no Robolectric: the compose
  * state these classes hold is written without a rule here, and nothing needs the platform; the
- * decoder is a fake). One GET, never a Range; `readAt` waits for the bytes; a stall (and only a
- * stall) ends it; a finished, verified clip is cached and the next play makes no request; every
- * other exit deletes the partial file.
+ * decoder is a fake). One GET, never a Range; `readAt` waits for the bytes, however long, as the web's
+ * `<video>` does (no stall rule); a finished, verified clip is cached and the next play makes no request; the
+ * sha256 / MP4 checks decide only that cache rename, never whether a playing clip plays; a failed clip plays
+ * again with a fresh download; every exit that is not the rename deletes the partial file.
  */
 class ToolClipsTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -84,7 +85,7 @@ class ToolClipsTest {
         }
     }
 
-    private fun download(source: ToolMediaSource, stallMs: Long = 20_000) = ClipDownload(source, cache, origin, src, sha, stallMs)
+    private fun download(source: ToolMediaSource) = ClipDownload(source, cache, origin, src, sha)
 
     private fun ClipReader.read(position: Long, size: Int): ByteArray {
         val out = ByteArray(size)
@@ -229,29 +230,50 @@ class ToolClipsTest {
         assertEquals("the next play makes no request", 0, again.calls.get())
     }
 
-    @Test fun bytesThatDoNotHashToTheirNameAreNeverCachedAndStopThePlay() = runBlocking {
+    @Test fun bytesThatDoNotHashToTheirNameAreNeverCachedButStillPlay() = runBlocking {
         val impostor = clip.copyOf().also { it[100] = (it[100] + 1).toByte() }
-        val d = download(Server(body = impostor))
+        val d = download(Server(body = impostor, chunks = 2))
+        d.start()
+        val reader = ClipReader(d)
+        assertTrue(reader.open())
+        eventually("settled") { d.outcome() }
+        // The one-shot answer (a whole, verified clip) is no; the cache is untouched.
+        assertEquals(MediaVideo.Failed, d.outcome())
+        assertTrue("nothing is cached", dir.list()!!.none { it.endsWith(".mp4") })
+        // But the clip the player is reading plays: every byte, to the end, and the download is not a failure.
+        assertNull("not a download failure", d.failure())
+        assertTrue(reader.open())
+        assertTrue(reader.read(0, 64).contentEquals(impostor.copyOf(64)))
+        assertTrue(reader.read(100, 1).contentEquals(impostor.copyOfRange(100, 101)))
+        assertTrue(reader.read(4000, 96).contentEquals(impostor.copyOfRange(4000, 4096)))
+        assertEquals("the end of the clip", 0, reader.read(impostor.size.toLong(), 10).size)
+        reader.close()
+        // The partial is deleted with the download, as every exit that is not the cache rename.
+        d.close()
+        assertTrue("nothing is left", dir.list().isNullOrEmpty())
+    }
+
+    @Test fun notAnMp4IsNeverCachedEvenUnderItsOwnHashButStillPlays() = runBlocking {
+        val notMp4 = ByteArray(2048) { 5 }
+        val d = ClipDownload(Server(body = notMp4), cache, origin, "/api/tool-media/${sha256Hex(notMp4)}.mp4", sha256Hex(notMp4))
         d.start()
         val reader = ClipReader(d)
         eventually("settled") { d.outcome() }
         assertEquals(MediaVideo.Failed, d.outcome())
-        assertTrue("nothing is cached, nothing is left", dir.list().isNullOrEmpty())
-        try {
-            reader.read(0, 10)
-            fail("a clip that is not the named one stops playing")
-        } catch (_: IOException) {
-        }
+        assertTrue(dir.list()!!.none { it.endsWith(".mp4") })
+        assertTrue(reader.open())
+        assertTrue(reader.read(0, 16).contentEquals(notMp4.copyOf(16)))
         reader.close()
+        d.close()
+        assertTrue(dir.list().isNullOrEmpty())
     }
 
-    @Test fun notAnMp4IsNeverCachedEvenUnderItsOwnHash() = runBlocking {
-        val notMp4 = ByteArray(2048) { 5 }
-        val d = ClipDownload(Server(body = notMp4), cache, origin, "/api/tool-media/${sha256Hex(notMp4)}.mp4", sha256Hex(notMp4))
-        d.start()
-        eventually("settled") { d.outcome() }
+    @Test fun aClipTheOneShotUseFindsUnverifiedLeavesNoPartialBehind() = runBlocking {
+        val impostor = clip.copyOf().also { it[100] = (it[100] + 1).toByte() }
+        val d = download(Server(body = impostor))
+        d.run()
         assertEquals(MediaVideo.Failed, d.outcome())
-        assertTrue(dir.list().isNullOrEmpty())
+        assertTrue("no player reads it: nothing is kept", dir.list().isNullOrEmpty())
     }
 
     // --- failures, stall, stop ------------------------------------------------------------------------
@@ -272,32 +294,39 @@ class ToolClipsTest {
         assertTrue(dir.list().isNullOrEmpty())
     }
 
-    @Test fun aStallEndsItAndDeletesThePartial() = runBlocking {
-        val gates = listOf(CompletableDeferred(Unit), CompletableDeferred<Unit>()) // the second chunk never comes
+    @Test fun aStalledClipKeepsWaitingLikeTheBrowserAndPlaysOnWhenBytesComeAgain() = runBlocking {
+        val gates = listOf(CompletableDeferred(Unit), CompletableDeferred<Unit>()) // the second chunk is late
         val server = Server(chunks = 2, gates = gates)
-        val d = download(server, stallMs = 300)
+        val d = download(server)
         d.start()
         val reader = ClipReader(d)
         assertTrue(reader.open())
-        val blocked = AtomicReference<Throwable?>()
+        val got = AtomicReference<ByteArray>()
+        val failed = AtomicReference<Throwable?>()
         val done = CountDownLatch(1)
         Thread {
-            try { reader.read(4000, 10) } catch (e: IOException) { blocked.set(e) }
+            try { got.set(reader.read(4000, 10)) } catch (e: IOException) { failed.set(e) }
             done.countDown()
         }.start()
-        assertTrue("the stall ended the blocked read", done.await(20, TimeUnit.SECONDS))
-        assertTrue(blocked.get() is IOException)
-        assertEquals(MediaVideo.Failed, d.failure())
-        withTimeout(20_000) { server.cancelled.await() }
-        eventually("part deleted") { if (partFiles().isEmpty()) true else null }
+        // No byte arrives for far longer than the old stall rule's limit would have been in a test: it only waits.
+        assertFalse("the read waits, it is not ended by a timer", done.await(1500, TimeUnit.MILLISECONDS))
+        assertNull("no failure", d.failure())
+        assertNull("no verdict", d.outcome())
+        assertFalse("the GET is still going", server.cancelled.isCompleted)
+        assertEquals("the part is kept", 1, partFiles().size)
+        gates[1].complete(Unit)
+        assertTrue(done.await(20, TimeUnit.SECONDS))
+        assertNull(failed.get())
+        assertTrue(got.get().contentEquals(clip.copyOfRange(4000, 4010)))
+        assertTrue("it finished and was cached", eventually("verified") { d.outcome() as? MediaVideo.Ok } is MediaVideo.Ok)
         reader.close()
     }
 
-    @Test fun aSlowClipThatKeepsProgressingNeverTimesOut() = runBlocking {
-        // 6 chunks, 150 ms apart (~0.9 s in all) against a 400 ms STALL: no whole-clip limit, only silence.
+    @Test fun aSlowClipThatKeepsProgressingFinishes() = runBlocking {
+        // 6 chunks, 150 ms apart (~0.9 s in all): no whole-clip limit either.
         val gates = List(6) { CompletableDeferred<Unit>() }
         val server = Server(chunks = 6, gates = gates)
-        val d = download(server, stallMs = 400)
+        val d = download(server)
         d.start()
         for (g in gates) {
             delay(150)
@@ -305,6 +334,38 @@ class ToolClipsTest {
         }
         val final = eventually("whole") { d.outcome() }
         assertTrue("it finished: $final", final is MediaVideo.Ok)
+    }
+
+    @Test fun aPartHeldByALiveDownloadSurvivesAnotherClipsStartEvenPastTheSixtySecondMark() = runBlocking {
+        val gates = listOf(CompletableDeferred(Unit), CompletableDeferred<Unit>())
+        val first = download(Server(chunks = 2, gates = gates))
+        first.start()
+        val reader = ClipReader(first)
+        assertTrue(reader.open())
+        val held = first.partFile!!
+        // It has been quiet for more than the sweep's 60 s by mtime: a stalled download, not a dead one.
+        assertTrue(held.setLastModified(System.currentTimeMillis() - 5 * 60_000L))
+        // Another clip starts in the same server directory (every start sweeps it).
+        val otherBytes = ByteArray(2048) { 9 }.also { "\u0000\u0000\u0000\u0018ftypmp42".forEachIndexed { i, c -> it[i] = c.code.toByte() } }
+        val otherSha = sha256Hex(otherBytes)
+        val second = ClipDownload(Server(body = otherBytes), cache, origin, "/api/tool-media/$otherSha.mp4", otherSha)
+        second.start()
+        eventually("the other clip finished") { second.outcome() as? MediaVideo.Ok }
+        assertTrue("the held part is still there", held.isFile)
+        // And it completes into the cache once its bytes come.
+        gates[1].complete(Unit)
+        eventually("the first finished") { first.outcome() as? MediaVideo.Ok }
+        assertTrue(File(dir, "$sha.mp4").isFile)
+        reader.close()
+    }
+
+    @Test fun aPartNoDownloadHoldsIsStillSweptAfterSixtySeconds() = runBlocking {
+        val orphan = File(dir.apply { mkdirs() }, "${sha}123.part").apply { writeBytes(ByteArray(10)) }
+        assertTrue(orphan.setLastModified(System.currentTimeMillis() - 5 * 60_000L))
+        val second = download(Server())
+        second.start()
+        eventually("done") { second.outcome() as? MediaVideo.Ok }
+        assertFalse("an old part nobody holds is swept", orphan.exists())
     }
 
     @Test fun closeStopsTheGetAndDeletesThePartial() = runBlocking {
@@ -349,9 +410,9 @@ class ToolClipsTest {
         }
     }
 
-    private fun registry(source: ToolMediaSource, players: MutableList<FakePlayer>, stallMs: Long = 20_000) =
+    private fun registry(source: ToolMediaSource, players: MutableList<FakePlayer>) =
         ToolClipRegistry(
-            source, cache, { origin }, CoroutineScope(Dispatchers.Unconfined), stallMs,
+            source, cache, { origin }, CoroutineScope(Dispatchers.Unconfined),
             makePlayer = { reader, failed -> FakePlayer(reader, failed).also { players += it } },
         )
 
@@ -432,11 +493,79 @@ class ToolClipsTest {
         eventually("settled") { clip.currentDownload?.outcome() }
         players.single().let { it.phase = VideoPhase.Failed; it.onFailed() }
         assertEquals(ClipState.Error(MediaVideo.Blocked), clip.inline.state)
-        // No retry: playing again does nothing until it is released.
-        clip.inline.play()
-        assertEquals(1, players.size)
         blocked.releaseAll()
         assertEquals(ClipState.Idle, clip.inline.state)
+    }
+
+    /** A source whose first [failures] answers are a failed fetch, then the clip. */
+    private fun flaky(failures: Int): Server {
+        val answered = AtomicInteger()
+        return Server(result = { if (answered.incrementAndGet() <= failures) ToolMediaResult.Failed() else ToolMediaResult.Ok(clip.size.toLong(), "video/mp4") })
+    }
+
+    private fun failFirst(players: List<FakePlayer>, index: Int = 0) =
+        players[index].let { it.phase = VideoPhase.Failed; it.onFailed() }
+
+    @Test fun aFailedClipIsPlayedAgainWithAFreshDownloadFromTheInlineBox() = runBlocking {
+        val players = mutableListOf<FakePlayer>()
+        val server = flaky(failures = 1)
+        val registry = registry(server, players)
+        val clip = registry.clip(src)!!
+        clip.inline.play()
+        eventually("failed") { clip.currentDownload?.failure() }
+        failFirst(players)
+        assertTrue(clip.inline.state is ClipState.Error)
+        // The browser's native controls replay a failed clip: a play after a failure starts again.
+        clip.inline.play()
+        assertEquals("a new player", 2, players.size)
+        eventually("a second GET") { if (server.calls.get() == 2) true else null }
+        eventually("it finished") { clip.currentDownload?.outcome() as? MediaVideo.Ok }
+        assertFalse("not the old failed state", clip.inline.state is ClipState.Error)
+        assertTrue("the failed player is gone", players[0].released)
+        assertTrue(File(dir, "$sha.mp4").isFile)
+        registry.releaseAll()
+    }
+
+    @Test fun aFailedClipIsPlayedAgainFromTheViewerAndWhenTheViewerIsReopened() = runBlocking {
+        val players = mutableListOf<FakePlayer>()
+        val server = flaky(failures = 2)
+        val registry = registry(server, players)
+        val clip = registry.clip(src)!!
+        clip.inline.play()
+        eventually("failed") { clip.currentDownload?.failure() }
+        failFirst(players)
+        // The viewer opens on the failed clip: it does not inherit the old failure, it downloads again (and fails once more here).
+        clip.viewer.play()
+        eventually("a second GET") { if (server.calls.get() == 2) true else null }
+        eventually("failed again") { clip.currentDownload?.failure() }
+        failFirst(players, 1)
+        assertTrue(clip.viewer.state is ClipState.Error)
+        // Closed and reopened: a third, fresh one, which now succeeds.
+        clip.viewer.release()
+        assertEquals(ClipState.Idle, clip.viewer.state)
+        clip.viewer.play()
+        eventually("a third GET") { if (server.calls.get() == 3) true else null }
+        eventually("it finished") { clip.currentDownload?.outcome() as? MediaVideo.Ok }
+        assertFalse(clip.viewer.state is ClipState.Error)
+        registry.releaseAll()
+    }
+
+    @Test fun aPlayWhileTheClipIsLoadingOrPlayingStartsNothingNew() = runBlocking {
+        val players = mutableListOf<FakePlayer>()
+        val gate = CompletableDeferred<Unit>()
+        val server = Server(chunks = 2, gates = listOf(gate, gate))
+        val registry = registry(server, players)
+        val clip = registry.clip(src)!!
+        clip.inline.play()
+        clip.inline.play()
+        clip.inline.play()
+        assertEquals(1, players.size)
+        gate.complete(Unit)
+        eventually("whole") { clip.currentDownload?.outcome() as? MediaVideo.Ok }
+        clip.inline.play()
+        assertEquals("a playing clip is not restarted", 1, players.size)
+        assertEquals(1, server.calls.get())
+        registry.releaseAll()
     }
 
     @Test fun aClipWithNoServerIsNotPlayable() {

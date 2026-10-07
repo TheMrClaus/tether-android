@@ -193,12 +193,6 @@ object MediaLimits {
     /** One picture may take this long end to end, then it fails. */
     const val IMAGE_TIMEOUT_MS: Long = 60_000
 
-    /**
-     * A clip has NO whole-download limit (the browser has none): it fails only when it STALLS, no byte
-     * arriving for this long (ta-coik.68).
-     */
-    const val VIDEO_STALL_MS: Long = 30_000
-
     /** The image types a `data:` URI may carry (lib/tool-media-store.mjs IMAGE_MEDIA_TYPES). */
     val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
 }
@@ -374,8 +368,31 @@ object ToolMediaCache {
         root.listFiles()?.forEach { if (it.name != keep) it.deleteRecursively() }
     }
 
+    /**
+     * The part files running downloads hold (absolute paths). [evict] never touches one: a download that has been
+     * quiet for over a minute is slow, not dead (the web's `<video>` waits), and its part is still being played from.
+     */
+    private val held: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    internal fun hold(part: File) {
+        held += part.absolutePath
+    }
+
+    internal fun release(part: File) {
+        held -= part.absolutePath
+    }
+
+    /** Deletes [part] and lets go of it. */
+    internal fun deletePart(part: File) {
+        try {
+            if (part.exists()) part.delete()
+        } finally {
+            release(part)
+        }
+    }
+
     fun evict(dir: File, now: Long = System.currentTimeMillis(), maxBytes: Long = MAX_BYTES, maxAgeMs: Long = MAX_AGE_MS) {
-        val files = dir.listFiles()?.filter { it.isFile }?.sortedBy { it.lastModified() } ?: return
+        val files = dir.listFiles()?.filter { it.isFile && it.absolutePath !in held }?.sortedBy { it.lastModified() } ?: return
         var total = files.sumOf { it.length() }
         for (file in files) {
             val stale = now - file.lastModified() > maxAgeMs || file.name.endsWith(".part") && now - file.lastModified() > 60_000
@@ -438,9 +455,8 @@ class ToolMediaRepository(
     // `http(s)` with none). The defaults reach nothing (previews and tests).
     private val files: com.tether.app.client.WorkspaceFiles = com.tether.app.client.WorkspaceFiles.Unavailable,
     private val remote: com.tether.app.client.PublicImageSource = com.tether.app.client.PublicImageSource.Unavailable,
-    // L4: the picture's end-to-end timeout and the clip's stall timeout (parameters only so tests need not wait).
+    // L4: the picture's end-to-end timeout (a parameter only so tests need not wait). A clip has none: the web's <video> waits.
     private val imageTimeoutMs: Long = MediaLimits.IMAGE_TIMEOUT_MS,
-    private val videoStallMs: Long = MediaLimits.VIDEO_STALL_MS,
 ) : ToolMediaLoader {
     private val cache = object : LruCache<String, MediaImage.Ok>(MediaLimits.CACHE_BYTES) {
         override fun sizeOf(key: String, value: MediaImage.Ok): Int = value.bitmap.asAndroidBitmap().allocationByteCount
@@ -562,8 +578,9 @@ class ToolMediaRepository(
 
     /**
      * The whole clip, verified: one [ClipDownload] run to its end (the same engine the inline player
-     * reads while it downloads), then its cached file. Not a streaming path and not time-boxed: a
-     * stall is the only way it gives up.
+     * reads while it downloads), then its cached file. Not a streaming path and not time-boxed: like the
+     * web's `<video>`, a slow clip waits, and only a real error (or a clip that fails the hash / MP4 check) is a
+     * failure here.
      */
     override suspend fun video(item: ToolMediaItem): MediaVideo {
         val ext = ToolMediaSource.extensionOf(item.src)
@@ -572,7 +589,7 @@ class ToolMediaRepository(
         return try {
             MediaGates.clip(expected).withLock {
                 withContext(Dispatchers.IO) {
-                    val download = ClipDownload(source, cacheDir, origin, item.src, expected, videoStallMs)
+                    val download = ClipDownload(source, cacheDir, origin, item.src, expected)
                     download.run()
                     download.outcome() ?: MediaVideo.Failed
                 }

@@ -50,10 +50,10 @@ class ToolMediaVideoBehaviourTest {
         registry?.releaseAll()
     }
 
-    private fun show(server: ClipServer, items: List<ToolMediaItem> = listOf(item), loader: ToolMediaLoader = ToolFixtures.FakeLoader()) {
+    private fun show(server: com.tether.app.client.ToolMediaSource, items: List<ToolMediaItem> = listOf(item), loader: ToolMediaLoader = ToolFixtures.FakeLoader()) {
         val r = ToolClipRegistry(
             server, rule.activity.cacheDir, { ClipFixtures.ORIGIN }, CoroutineScope(Dispatchers.Unconfined),
-            stallMs = 20_000, makePlayer = { reader, failed -> StubVideoPlayer(reader, failed).also { players += it } },
+            makePlayer = { reader, failed -> StubVideoPlayer(reader, failed).also { players += it } },
         )
         registry = r
         rule.setContent {
@@ -146,6 +146,48 @@ class ToolMediaVideoBehaviourTest {
         rule.waitForIdle()
         rule.onNodeWithText(copy).assertIsDisplayed()
         assertEquals("one line, no detail", 0, rule.onAllNodesWithText(MediaCopy.BLOCKED_DETAIL).fetchSemanticsNodes().size)
+    }
+
+    /** A source whose first answer is a failed fetch, then the clip. */
+    private fun failsOnce(calls: java.util.concurrent.atomic.AtomicInteger) = object : com.tether.app.client.ToolMediaSource {
+        override suspend fun fetch(url: String, maxBytes: Long, sink: java.io.OutputStream): ToolMediaResult {
+            if (calls.incrementAndGet() == 1) return ToolMediaResult.Failed(500)
+            sink.write(ClipFixtures.bytes)
+            return ToolMediaResult.Ok(ClipFixtures.bytes.size.toLong(), "video/mp4")
+        }
+    }
+
+    @Test fun aTapOnTheFailedInlineBoxPlaysTheClipAgainWithAFreshDownload() {
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        show(failsOnce(calls))
+        rule.onNodeWithContentDescription("Play video").performClick()
+        val clip = registry!!.clip(item.src)!!
+        waitFor("settled") { clip.currentDownload?.outcome() != null }
+        rule.runOnIdle { players.single().onFailed() }
+        rule.waitForIdle()
+        rule.onNodeWithText(MediaCopy.VIDEO_UNAVAILABLE).assertIsDisplayed()
+        // The web's failed <video> is played again from its own controls: a tap on the error does the same here.
+        rule.onNodeWithText(MediaCopy.VIDEO_UNAVAILABLE).performClick()
+        rule.waitForIdle()
+        waitFor("a second request") { calls.get() == 2 }
+        assertEquals("a new player", 2, players.size)
+        assertEquals("the error is gone", 0, rule.onAllNodesWithText(MediaCopy.VIDEO_UNAVAILABLE).fetchSemanticsNodes().size)
+    }
+
+    @Test fun aTapOnTheFailedViewerPlaysTheClipAgain() {
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        show(failsOnce(calls))
+        rule.onNodeWithContentDescription("View video full size").performClick()
+        rule.waitForIdle()
+        val clip = registry!!.clip(item.src)!!
+        waitFor("settled") { clip.currentDownload?.outcome() != null }
+        rule.runOnIdle { players.single().onFailed() }
+        rule.waitForIdle()
+        rule.onNodeWithText(MediaCopy.VIDEO_UNAVAILABLE).performClick()
+        rule.waitForIdle()
+        waitFor("a second request") { calls.get() == 2 }
+        assertEquals("a new player", 2, players.size)
+        assertEquals("the error is gone", 0, rule.onAllNodesWithText(MediaCopy.VIDEO_UNAVAILABLE).fetchSemanticsNodes().size)
     }
 
     @Test fun aFailedClipUsesItsOneLine() = failedClipSays(ToolMediaResult.Failed(500), MediaCopy.VIDEO_UNAVAILABLE)

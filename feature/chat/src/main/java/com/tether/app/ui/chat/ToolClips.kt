@@ -33,31 +33,34 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /*
  * ta-coik.68: a tool-media clip plays inline as the web's `<video controls>` does
  * (chat-tool-render.tsx:129), while it downloads. The server answers /api/tool-media with 200 and
  * the whole body, never a Range (lib/tool-media-store.mjs:250-264), so a clip is ONE GET into a
  * scratch file that the player reads as it grows; a read of bytes that are not there yet waits for
- * them. The web has no whole-download limit either: only a stall (no bytes for a while) ends it.
+ * them. The web has no whole-download limit and no stall timer either (a plain `<video src controls>`):
+ * a slow or stalled clip just waits; only a real error (a connect failure, an HTTP error, a dropped socket)
+ * ends it, and a failed clip is played again with a fresh download.
  */
 
 /**
  * One clip's download: a single GET of its `/api/tool-media/<sha>.mp4` path (the paired credential,
  * no redirect, today's [HttpToolMedia] rules) into a part file under the server's clip-cache
  * directory, readable while it is written. A cached clip is not fetched again. What the sha256 and
- * MP4 checks decide is only whether the FINISHED file takes its content address (the cache); a
- * player may already be reading the part file before then. The part file is deleted on every exit
- * that is not that rename (a failure, a stall, [close], a cancelled [run]).
+ * MP4 checks decide is only whether the FINISHED file takes its content address (the cache): a clip
+ * that fails them is not cached, but it is never stopped or failed for it, a player keeps reading the
+ * part file to its end (the web plays whatever the server sends). The part file is deleted on every
+ * exit that is not that rename (a failure, [close], a cancelled [run]); a file that failed the checks
+ * but is being played from is deleted by [close].
  *
  * [run] does the work in the caller's coroutine (one-shot whole-file use, [ToolMediaRepository.video]);
  * [start] does it on a scope of its own that [close] cancels (the player's use).
@@ -68,9 +71,7 @@ internal class ClipDownload(
     private val origin: String,
     private val src: String,
     private val expected: String,
-    private val stallMs: Long = MediaLimits.VIDEO_STALL_MS,
     private val maxBytes: Long = MediaLimits.MAX_VIDEO_BYTES,
-    private val pollMs: Long = (stallMs / 10).coerceIn(10L, 1_000L),
 ) {
     private val lock = ReentrantLock()
     private val changed = lock.newCondition()
@@ -99,7 +100,13 @@ internal class ClipDownload(
     private var verdict: MediaVideo? = null
     private var readable: File? = null
     private var part: File? = null
-    private var lastProgressNs = System.nanoTime()
+
+    /**
+     * The whole body is in the part file but the checks (sha256, MP4 magic) or the rename into the cache said no: the
+     * clip is not cached and is no "verified clip" for the one-shot [outcome], but a player reading it plays it to
+     * the end. Under [lock].
+     */
+    private var unverified = false
 
     private var scope: CoroutineScope? = null
     private val first = CompletableDeferred<Unit>()
@@ -126,10 +133,11 @@ internal class ClipDownload(
             if (closed) return
             closed = true
             changed.signalAll()
-            scope to (if (wholeBody() != null) null else part.also { part = null })
+            // A whole body whose check and cache rename are still to come is not thrown away (see [fetchedOk]).
+            scope to (if (verdict == null && wholeBody() != null) null else part.also { part = null })
         }
         s?.cancel()
-        p?.delete()
+        p?.let { ToolMediaCache.deletePart(it) }
         first.complete(Unit)
     }
 
@@ -138,7 +146,7 @@ internal class ClipDownload(
     /** Suspends until a byte is there (or the download ended); false when there is nothing to play. */
     suspend fun awaitReadable(): Boolean {
         first.await()
-        return lock.withLock { !closed && (verdict == null || verdict is MediaVideo.Ok) && written > 0 }
+        return lock.withLock { !closed && (verdict == null || verdict is MediaVideo.Ok || unverified) && written > 0 }
     }
 
     /** The clip's length: the file's once it is whole, the server's declared one before, else unknown (-1). */
@@ -148,11 +156,14 @@ internal class ClipDownload(
 
     fun wake() = lock.withLock { changed.signalAll() }
 
-    /** Why it did not finish, null while it is going well or when it is whole and verified. */
-    fun failure(): MediaVideo? = lock.withLock { verdict?.takeIf { it !is MediaVideo.Ok } }
+    /**
+     * Why it did not finish, null while it is going well or when every byte is there (a clip that is not cached
+     * for failing a check is not a failure: it plays).
+     */
+    fun failure(): MediaVideo? = lock.withLock { verdict?.takeIf { it !is MediaVideo.Ok && !unverified } }
 
-    /** Every byte is in a verified file (a retriever can read it whole). */
-    fun isWhole(): Boolean = lock.withLock { verdict is MediaVideo.Ok }
+    /** Every byte is in a file a retriever can read whole (verified and cached, or whole but not cached). */
+    fun isWhole(): Boolean = lock.withLock { verdict is MediaVideo.Ok || unverified }
 
     /** The final answer, null while it is still going. */
     fun outcome(): MediaVideo? = lock.withLock { verdict }
@@ -172,7 +183,8 @@ internal class ClipDownload(
             while (true) {
                 if (closed || readerClosed()) throw IOException("the video was closed")
                 val v = verdict
-                if (v != null && v !is MediaVideo.Ok) throw IOException("the video could not be downloaded")
+                // A transport failure ends the read; a clip that only failed the cache's checks is read to its end.
+                if (v != null && v !is MediaVideo.Ok && !unverified) throw IOException("the video could not be downloaded")
                 if (position < written) return written - position
                 if (streamEnded) return -1
                 if (!waited) {
@@ -219,13 +231,15 @@ internal class ClipDownload(
             }
             // L2: a temp file of its own (never a shared name).
             val file = File.createTempFile(expected, ".part", dir).also { temp = it }
+            // Held while this download runs: another clip's start sweeps the folder and must not take it (a stalled
+            // clip's part is old by its mtime and is still being played).
+            ToolMediaCache.hold(file)
             val go = lock.withLock {
                 if (closed) {
                     false
                 } else {
                     part = file
                     readable = file
-                    lastProgressNs = System.nanoTime()
                     true
                 }
             }
@@ -252,47 +266,30 @@ internal class ClipDownload(
         } catch (_: RuntimeException) {
             settle(MediaVideo.Failed)
         } finally {
-            temp?.let { if (it.exists()) it.delete() }
-            lock.withLock { if (part === temp) part = null }
+            // A whole file that failed the cache's checks and is being played from stays until [close]; any other
+            // part is deleted here.
+            val kept = lock.withLock { (unverified && !closed && scope != null && part === temp).also { if (!it && part === temp) part = null } }
+            if (!kept) temp?.let { ToolMediaCache.deletePart(it) }
             settle(MediaVideo.Failed)
             first.complete(Unit)
         }
     }
 
-    /** The one GET into [file]; null when it stalled (no bytes for [stallMs]). */
-    private suspend fun fetch(file: File): ToolMediaResult? = coroutineScope {
-        val stalled = java.util.concurrent.atomic.AtomicBoolean(false)
-        val fetching = async(Dispatchers.IO) {
-            try {
-                FileOutputStream(file).use { out -> source.fetch(src, maxBytes, ProgressSink(out)) }
-                    .also { if (it is ToolMediaResult.Ok) lock.withLock { fetchedOk = it } }
-            } catch (_: IOException) {
-                ToolMediaResult.Failed()
-            }
-        }
-        val watchdog = launch {
-            while (true) {
-                delay(pollMs)
-                val quiet = lock.withLock { (System.nanoTime() - lastProgressNs) / 1_000_000L }
-                if (quiet > stallMs) {
-                    stalled.set(true)
-                    fetching.cancel()
-                    break
-                }
-            }
-        }
+    /**
+     * The one GET into [file]. No stall rule: like the web's `<video>`, a slow or stalled body waits (the source
+     * has no read timeout); a connect failure, an HTTP error or a dropped socket is its answer.
+     */
+    private suspend fun fetch(file: File): ToolMediaResult = withContext(Dispatchers.IO) {
         try {
-            fetching.await()
-        } catch (e: CancellationException) {
-            if (stalled.get()) null else throw e
-        } finally {
-            watchdog.cancel()
+            FileOutputStream(file).use { out -> source.fetch(src, maxBytes, ProgressSink(out)) }
+                .also { if (it is ToolMediaResult.Ok) lock.withLock { fetchedOk = it } }
+        } catch (_: IOException) {
+            ToolMediaResult.Failed()
         }
     }
 
-    /** What the finished (or failed) fetch comes to; a whole file is hashed, checked and takes its content address. */
-    private fun conclude(file: File, cached: File, result: ToolMediaResult?): MediaVideo = when {
-        result == null -> MediaVideo.Failed
+    /** What the finished (or failed) fetch comes to; a whole file is hashed, checked and, when it passes, takes its content address. */
+    private fun conclude(file: File, cached: File, result: ToolMediaResult): MediaVideo = when {
         result == ToolMediaResult.TooLarge -> MediaVideo.TooLarge
         result is ToolMediaResult.Blocked -> MediaVideo.Blocked
         result !is ToolMediaResult.Ok -> MediaVideo.Failed
@@ -301,15 +298,19 @@ internal class ClipDownload(
                 streamEnded = true
                 changed.signalAll()
             }
+            // These checks decide only whether the finished file takes its content address (the cache): a file that
+            // fails them is not cached and is never stopped, a player reading it plays it to its end.
             when {
                 // The CLOSED file re-hashed: a server cannot swap content under a name the transcript holds.
-                sha256OfFile(file) != expected -> MediaVideo.Failed
-                !MediaMagic.matches(file, "video/mp4") -> MediaVideo.Failed
+                sha256OfFile(file) != expected -> notCached()
+                !MediaMagic.matches(file, "video/mp4") -> notCached()
                 // Closed or not: a finished, verified clip takes its content address (see [fetchedOk]).
                 else -> lock.withLock {
                     if (!file.renameTo(cached)) {
+                        unverified = true
                         MediaVideo.Failed
                     } else {
+                        ToolMediaCache.release(file)
                         readable = cached
                         part = null
                         MediaVideo.Ok(cached)
@@ -317,6 +318,15 @@ internal class ClipDownload(
                 }
             }
         }
+    }
+
+    /** The whole body is in the part file but is not what the cache keeps: not cached, still playable. */
+    private fun notCached(): MediaVideo {
+        lock.withLock {
+            unverified = true
+            changed.signalAll()
+        }
+        return MediaVideo.Failed
     }
 
     /** The part file's writer: publishes how far it got to the readers, and learns the declared length. */
@@ -328,7 +338,6 @@ internal class ClipDownload(
             out.write(b, off, len)
             lock.withLock {
                 written += len
-                lastProgressNs = System.nanoTime()
                 changed.signalAll()
             }
             first.complete(Unit)
@@ -339,10 +348,7 @@ internal class ClipDownload(
         override fun close() = out.close()
 
         override fun declaredLength(bytes: Long) {
-            lock.withLock {
-                declared = bytes
-                lastProgressNs = System.nanoTime()
-            }
+            lock.withLock { declared = bytes }
         }
     }
 }
@@ -459,8 +465,17 @@ class ToolClip internal constructor(
         if (width > 0 && height > 0) knownSize = width to height
     }
 
-    /** A new view's bytes: the download is made and started on the first one. */
+    /**
+     * A new view's bytes: the download is made and started on the first one. A download that failed is not reused:
+     * the web plays a failed `<video>` again (its native controls, or a re-mount), so a play after a failure
+     * starts a fresh GET, from the inline box, the viewer, or a reopened viewer alike.
+     */
     internal fun reader(): ClipReader? {
+        val failed = download?.takeIf { it.failure() != null }
+        if (failed != null) {
+            failed.close()
+            download = null
+        }
         val d = download ?: newDownload()?.also { download = it } ?: return null
         d.start()
         return ClipReader(d)
@@ -499,9 +514,19 @@ class ClipView internal constructor(private val clip: ToolClip) {
             }
         }
 
-    /** The first play: the decoder is made here (never on render), the one GET starts, it plays when prepared. */
+    /**
+     * A play: the decoder is made here (never on render), the one GET starts, it plays when prepared. A play while
+     * the clip loads or plays does nothing; a play after a failure (the box's error, the viewer's) starts again
+     * with a fresh download, as the web's `<video>` can be played again.
+     */
     fun play() {
-        if (player != null || failure != null) return
+        val current = player
+        if (current != null && failure == null && current.phase != VideoPhase.Failed) return
+        if (current != null || failure != null) {
+            current?.release()
+            player = null
+            failure = null
+        }
         val reader = clip.reader()
         if (reader == null) {
             failure = MediaVideo.Failed
@@ -527,7 +552,6 @@ class ToolClipRegistry(
     private val cacheDir: File,
     private val origin: () -> String?,
     private val main: CoroutineScope,
-    private val stallMs: Long = MediaLimits.VIDEO_STALL_MS,
     private val newPlayer: () -> MediaPlayer = { MediaPlayer() },
     private val makePlayer: ((PlayableSource, () -> Unit) -> VideoPlayer)? = null,
     /** Where each clip's platform player is called (a seam for tests: inline); null is a thread of its own. */
@@ -577,7 +601,7 @@ class ToolClipRegistry(
         val sha = namedSha256(src) ?: return null
         return synchronized(clips) {
             clips.getOrPut(src) {
-                ToolClip(src, { origin()?.let { ClipDownload(source, cacheDir, it, src, sha, stallMs) } }, players)
+                ToolClip(src, { origin()?.let { ClipDownload(source, cacheDir, it, src, sha) } }, players)
             }
         }
     }

@@ -210,18 +210,23 @@ class ToolSafetyTest {
             }
         }
         val other = ByteArray(2048).also { clip.copyInto(it) ; it[2047] = 1 }
-        val repo = ToolMediaRepository(source, cache, origin, imageTimeoutMs = 300, videoStallMs = 300)
+        val repo = ToolMediaRepository(source, cache, origin, imageTimeoutMs = 300)
         // Cancelled by the caller.
         val job = launch(Dispatchers.Default) { repo.video(ToolMediaItem("video", "video/mp4", url(clip, "mp4"))) }
         withTimeout(20_000) { started.await() }
         job.cancelAndJoin()
         val dir = ToolMediaCache.dirFor(cache, origin)
         assertTrue("no .part after a cancellation: ${dir.list()?.toList()}", dir.list().isNullOrEmpty())
-        // Timed out (L4): a picture and a clip that never finish fail on their own.
+        // Timed out (L4): a picture that never finishes fails on its own.
         withTimeout(20_000) {
             assertEquals(MediaImage.Failed, repo.image(ToolMediaItem("image", "image/png", url(png, "png"))))
-            assertEquals(MediaVideo.Failed, repo.video(ToolMediaItem("video", "video/mp4", url(other, "mp4"))))
         }
+        // A clip has no timer, like the web's <video>: one that never finishes keeps waiting (well past the
+        // picture's 300 ms) until the caller walks away, and then leaves nothing behind.
+        val waiting = launch(Dispatchers.Default) { repo.video(ToolMediaItem("video", "video/mp4", url(other, "mp4"))) }
+        kotlinx.coroutines.delay(1_200)
+        assertTrue("the clip is still being waited for", waiting.isActive)
+        waiting.cancelAndJoin()
         assertTrue(dir.list().isNullOrEmpty())
         assertTrue(File(cache, ToolMediaRepository.TMP_DIR).list().isNullOrEmpty())
     }

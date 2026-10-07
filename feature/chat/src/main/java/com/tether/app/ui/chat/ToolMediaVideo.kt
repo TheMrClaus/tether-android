@@ -151,6 +151,9 @@ internal fun InlineVideo(item: ToolMediaItem, onOpen: () -> Unit) {
                             Modifier
                                 .clickable(role = Role.Button, onClickLabel = "Play video") { view.play() }
                                 .semantics { contentDescription = "Play video" }
+                        } else if (state is ClipState.Error && view != null) {
+                            // A failed clip is played again, as the web's <video> can be (ta-coik.68): a fresh download.
+                            Modifier.clickable(role = Role.Button, onClickLabel = "Play video again") { view.play() }
                         } else {
                             Modifier
                         },
@@ -230,7 +233,8 @@ internal fun ViewerVideo(item: ToolMediaItem) {
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val state = view.state
         if (state is ClipState.Error) {
-            VideoUnavailable(state.kind, Modifier, plain = false)
+            // Tapping it plays the clip again with a fresh download (the web's failed <video> can be played again).
+            VideoUnavailable(state.kind, Modifier.clickable(role = Role.Button, onClickLabel = "Play video again") { view.play() }, plain = false)
             return@BoxWithConstraints
         }
         val ready = state as? ClipState.Ready
