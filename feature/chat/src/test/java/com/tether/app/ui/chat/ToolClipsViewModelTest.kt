@@ -138,7 +138,7 @@ class ToolClipsViewModelTest {
         idle()
         vm.registry.clip(src)!!.inline.play()
         waitForPart()
-        vm.registry.openViewer(src)
+        vm.registry.openViewer(listOf(ToolMediaItem("video", "video/mp4", src)), 0)
         vm.chatLeft()
         shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
         assertFalse("not yet", players.single().released)
@@ -164,7 +164,7 @@ class ToolClipsViewModelTest {
     @Test fun theOpenViewerSurvivesTheRegistryNotTheRowsComposition() {
         val vm = viewModel()
         idle()
-        vm.registry.openViewer(src)
+        vm.registry.openViewer(listOf(ToolMediaItem("video", "video/mp4", src)), 0)
         vm.chatLeft()
         vm.chatEntered()
         assertEquals(src, vm.registry.openViewerSrc)

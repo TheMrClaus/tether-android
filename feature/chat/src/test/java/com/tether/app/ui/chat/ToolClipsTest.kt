@@ -427,26 +427,30 @@ class ToolClipsTest {
         val players = mutableListOf<FakePlayer>()
         val registry = registry(Server(chunks = 2, gates = listOf(CompletableDeferred(), CompletableDeferred())), players)
         val other = "/api/tool-media/${"b".repeat(64)}.mp4"
+        val items = listOf(ToolMediaItem("video", "video/mp4", src), ToolMediaItem("video", "video/mp4", other))
         val a = registry.clip(src)!!
         val b = registry.clip(other)!!
         assertNull(registry.openViewerSrc)
-        registry.openViewer(src)
+        registry.openViewer(items, 0)
         a.viewer.play()
         // A rotation that rebuilds every row changes nothing here: the state is the registry's.
         assertEquals(src, registry.openViewerSrc)
+        assertEquals(items, registry.viewerItems)
         assertFalse(players.single().released)
         // Moving to another item releases the one it leaves.
-        registry.openViewer(other)
+        registry.moveViewer(1)
         b.viewer.play()
+        assertEquals(other, registry.openViewerSrc)
         assertTrue(players[0].released)
         assertFalse(players[1].released)
-        registry.openViewer(null)
+        registry.closeViewer()
         assertNull(registry.openViewerSrc)
         assertTrue(players[1].released)
         // releaseAll closes it too.
-        registry.openViewer(src)
+        registry.openViewer(items, 0)
         registry.releaseAll()
         assertNull(registry.openViewerSrc)
+        assertTrue(registry.viewerItems.isEmpty())
     }
 
     @Test fun theControllerIsOnlyShownWhileItsPartOfTheBoxIsOnScreen() {

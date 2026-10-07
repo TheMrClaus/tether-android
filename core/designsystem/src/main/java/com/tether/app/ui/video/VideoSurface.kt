@@ -14,11 +14,21 @@ import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.MediaController
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -93,14 +103,35 @@ fun VideoSurface(
     val ready = player.phase is VideoPhase.Ready
     val playing = player.playing
     val density = LocalDensity.current.density
+    var framed by remember(player) { mutableStateOf(false) }
+    val still = player.still
     val clipWidthPx = (clipWidth.value * density).roundToInt()
     val clipHeightPx = (clipHeight.value * density).roundToInt()
     // The host fills the WHOLE video box (the controller anchors to it, so its bar spans the box and
-    // meets the rounded corners); the picture is sized and centred inside it.
-    AndroidView(factory = { host.frame }, modifier = modifier, update = {
-        host.onFrame = onFrame
-        host.sync(ready, playing, clipWidthPx, clipHeightPx, controllerAllowed)
-    })
+    // meets the rounded corners); the picture is sized and centred inside it. The last picture the previous
+    // surface showed is drawn under it until the new surface draws its own.
+    Box(modifier, contentAlignment = Alignment.Center) {
+        if (still != null && !framed) {
+            val image = remember(still) { still.asImageBitmap() }
+            Image(
+                image,
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                modifier = if (clipWidthPx > 0 && clipHeightPx > 0) Modifier.size(clipWidth, clipHeight) else Modifier.fillMaxSize(),
+            )
+        }
+        AndroidView(
+            factory = { host.frame },
+            modifier = Modifier.fillMaxSize(),
+            update = {
+                host.onFrame = { drawn ->
+                    framed = drawn
+                    onFrame?.invoke(drawn)
+                }
+                host.sync(ready, playing, clipWidthPx, clipHeightPx, controllerAllowed)
+            },
+        )
+    }
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -155,6 +186,7 @@ class VideoHost(
             override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) = Unit
 
             override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
+                captureStill()
                 releaseSurface()
                 return true
             }
@@ -221,9 +253,19 @@ class VideoHost(
         showFor(playing)
     }
 
+    /** The picture on screen, kept with the player before its surface goes (see [VideoPlayer.still]). */
+    private fun captureStill() {
+        if (!framed || !texture.isAvailable) return
+        try {
+            texture.bitmap?.let(player::keepStill)
+        } catch (_: RuntimeException) {
+        }
+    }
+
     private fun setFramed(value: Boolean) {
         if (framed == value) return
         framed = value
+        if (value) player.keepStill(null)
         onFrame?.invoke(value)
     }
 
@@ -237,6 +279,7 @@ class VideoHost(
     }
 
     fun dispose() {
+        captureStill()
         onFrame = null
         ready = false
         controller.hide()

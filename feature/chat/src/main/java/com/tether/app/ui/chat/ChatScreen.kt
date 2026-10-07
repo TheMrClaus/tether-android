@@ -464,6 +464,9 @@ fun ChatScreen(
                     sends = sends,
                 ) } }
             }
+            // ta-coik.68: the full-size viewer is hosted here, not in the tool card's row: a lazy transcript may
+            // not compose that row at all after a shell switch, and the viewer must still be there.
+            ToolViewerHost()
             }
         }
 

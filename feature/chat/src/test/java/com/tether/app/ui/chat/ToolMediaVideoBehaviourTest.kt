@@ -57,6 +57,7 @@ class ToolMediaVideoBehaviourTest {
             ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalToolMediaLoader provides loader, LocalToolClips provides r, LocalVideoSurfaceEnabled provides false) {
                     ToolMediaRow(items)
+                    ToolViewerHost()
                 }
             }
         }
@@ -150,7 +151,7 @@ class ToolMediaVideoBehaviourTest {
 
     // --- the phone <-> expanded shell switch rebuilds every row (no activity recreation) ----------------
 
-    @Test fun theOpenViewerSurvivesTheRowBeingRebuiltAsTheOtherShellDoes() {
+    @Test fun theOpenViewerSurvivesTheTranscriptNotComposingItsRowAtAllAfterTheShellSwitch() {
         val server = ClipServer(park = true)
         val r = ToolClipRegistry(
             server, rule.activity.cacheDir, { ClipFixtures.ORIGIN }, CoroutineScope(Dispatchers.Unconfined),
@@ -161,8 +162,12 @@ class ToolMediaVideoBehaviourTest {
         rule.setContent {
             ChatHost(TetherSkin.StudioDark) {
                 CompositionLocalProvider(LocalToolMediaLoader provides ToolFixtures.FakeLoader(), LocalToolClips provides r, LocalVideoSurfaceEnabled provides false) {
-                    // Each shell's transcript is its own composition: a new key = a new ToolMediaRow with no state of its own.
-                    androidx.compose.runtime.key(shell) { ToolMediaRow(listOf(item)) }
+                    // Each shell's chat screen is its own composition (here: the key). The other shell's lazy
+                    // transcript is at its bottom: the row that opened the viewer is not composed at all.
+                    androidx.compose.runtime.key(shell) {
+                        if (shell % 2 == 0) ToolMediaRow(listOf(item))
+                        ToolViewerHost()
+                    }
                 }
             }
         }
@@ -173,10 +178,11 @@ class ToolMediaVideoBehaviourTest {
         assertEquals(2, players.size)
         rule.runOnIdle { shell = 1 }
         rule.waitForIdle()
+        assertEquals("the row is gone", 0, rule.onAllNodesWithContentDescription("Play video").fetchSemanticsNodes().size)
         rule.onNodeWithContentDescription("Video viewer").assertIsDisplayed()
         assertEquals("no player was made or released by the switch", 2, players.size)
         assertTrue(players.none { it.released })
-        rule.runOnIdle { shell = 0 }
+        rule.runOnIdle { shell = 2 }
         rule.waitForIdle()
         rule.onNodeWithContentDescription("Video viewer").assertIsDisplayed()
         assertTrue(players.none { it.released })

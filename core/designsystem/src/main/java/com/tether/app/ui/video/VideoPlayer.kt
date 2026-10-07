@@ -1,5 +1,6 @@
 package com.tether.app.ui.video
 
+import android.graphics.Bitmap
 import android.media.MediaPlayer
 import android.view.Surface
 import android.widget.MediaController
@@ -33,6 +34,14 @@ interface VideoPlayer {
 
     /** Playing, but the source is waiting for bytes that have not arrived yet. */
     val buffering: Boolean get() = false
+
+    /**
+     * The last picture a surface showed, kept for the moment after that surface is gone (a rotation,
+     * scrolled away) until the next one draws its own: a paused or ended platform player does not always
+     * paint a frame onto a fresh surface. Set by [keepStill]; the view draws it under the surface.
+     */
+    val still: Bitmap? get() = null
+    fun keepStill(bitmap: Bitmap?) {}
 
     /** What the platform media-controller bar drives (play/pause, seek, times). */
     val control: MediaController.MediaPlayerControl
@@ -71,6 +80,12 @@ class MediaVideoPlayer(
         private set
     override var buffering: Boolean by mutableStateOf(false)
         private set
+    override var still: Bitmap? by mutableStateOf(null)
+        private set
+
+    override fun keepStill(bitmap: Bitmap?) {
+        if (!released) still = bitmap
+    }
 
     private var player: MediaPlayer? = null
     private var surface: Surface? = null
@@ -232,6 +247,7 @@ class MediaVideoPlayer(
         opening.cancel()
         playing = false
         buffering = false
+        still = null
         teardown()
     }
 

@@ -36,6 +36,8 @@ class RecordingVideoPlayer : VideoPlayer {
     override var phase: VideoPhase by mutableStateOf(VideoPhase.Opening)
     override var playing: Boolean by mutableStateOf(false)
     var releases = 0
+    val stills = mutableListOf<android.graphics.Bitmap?>()
+    override fun keepStill(bitmap: android.graphics.Bitmap?) { stills += bitmap }
     var attached: Surface? = null
 
     override val control = object : MediaController.MediaPlayerControl {

@@ -1,6 +1,7 @@
 package com.tether.app.ui.chat
 
 import android.media.MediaPlayer
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -481,18 +482,35 @@ class ToolClipRegistry(
     private val clips = HashMap<String, ToolClip>()
 
     /**
-     * The `src` the full-size viewer shows, or null. Here, not in a row's composition: the phone and
-     * expanded shells compose separate transcripts, so a rotation that switches shell rebuilds every
-     * row, and the open viewer (and its player) must come through it.
+     * What the full-size viewer shows: the items of the row it was opened from and the one on screen. Here,
+     * not in a row's composition: the phone and expanded shells compose separate transcripts, a lazy
+     * transcript may not compose the opening row at all after a switch, so the viewer is hosted by the
+     * chat screen ([ToolViewerHost]) from this state, and its player comes through the switch.
      */
-    var openViewerSrc: String? by mutableStateOf(null)
+    var viewerItems: List<ToolMediaItem> by mutableStateOf(emptyList())
+        private set
+    var viewerIndex: Int? by mutableStateOf(null)
         private set
 
-    /** Shows [src] in the viewer (null closes it); the viewer player of the item it leaves is released. */
-    fun openViewer(src: String?) {
+    /** The `src` the viewer shows, or null. */
+    val openViewerSrc: String? get() = viewerIndex?.let { viewerItems.getOrNull(it)?.src }
+
+    /** Opens the viewer on [items] at [index]. */
+    fun openViewer(items: List<ToolMediaItem>, index: Int) {
         val previous = openViewerSrc
-        if (previous != null && previous != src) clip(previous)?.viewer?.release()
-        openViewerSrc = src
+        viewerItems = items
+        viewerIndex = index.takeIf { it in items.indices }
+        if (previous != null && previous != openViewerSrc) clip(previous)?.viewer?.release()
+    }
+
+    /** Moves the viewer to another item of the same row; the player of the item it leaves is released. */
+    fun moveViewer(index: Int) = openViewer(viewerItems, index)
+
+    fun closeViewer() {
+        val previous = openViewerSrc
+        viewerIndex = null
+        viewerItems = emptyList()
+        if (previous != null) clip(previous)?.viewer?.release()
     }
 
     private val players: ClipPlayerFactory = makePlayer ?: { src, failed ->
@@ -512,7 +530,8 @@ class ToolClipRegistry(
 
     /** Every clip idle, every download stopped, every part file deleted. */
     fun releaseAll() {
-        openViewerSrc = null
+        viewerIndex = null
+        viewerItems = emptyList()
         val all = synchronized(clips) { clips.values.toList() }
         all.forEach { it.release() }
     }
@@ -601,4 +620,16 @@ class ToolClipsViewModel(
         fun identity(configured: Boolean, connection: ConnectionState, serverUrl: String?): String? =
             if (configured && connection !is ConnectionState.AuthRequired) serverUrl else null
     }
+}
+
+/**
+ * Shows the registry's viewer ([ToolClipRegistry.viewerIndex]) over whatever the chat screen draws.
+ * Nothing without a registry (previews, tests): [ToolMediaRow] then hosts its own.
+ */
+@Composable
+internal fun ToolViewerHost() {
+    val registry = LocalToolClips.current ?: return
+    val index = registry.viewerIndex ?: return
+    val items = registry.viewerItems
+    if (index in items.indices) MediaLightbox(items, index, onIndexChange = registry::moveViewer, onClose = registry::closeViewer)
 }

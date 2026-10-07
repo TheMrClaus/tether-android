@@ -43,10 +43,12 @@ class VideoHostTest {
     private lateinit var activity: Activity
     private lateinit var controller: RecordingController
     private lateinit var host: VideoHost
+    private lateinit var fake: RecordingVideoPlayer
 
     @Before fun setUp() {
         activity = Robolectric.buildActivity(Activity::class.java).setup().get()
-        host = VideoHost(activity, RecordingVideoPlayer(), radiusPx = 12f) { RecordingController(it).also { c -> controller = c } }
+        fake = RecordingVideoPlayer()
+        host = VideoHost(activity, fake, radiusPx = 12f) { RecordingController(it).also { c -> controller = c } }
         activity.setContentView(host.frame, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
@@ -153,5 +155,16 @@ class VideoHostTest {
         assertEquals("the new surface is blank", listOf(true, false), told)
         host.texture.surfaceTextureListener!!.onSurfaceTextureUpdated(texture)
         assertEquals(listOf(true, false, true), told)
+    }
+
+    @Test fun aNewFrameClearsTheKeptStillAndAFrameIsNotRecapturedWhenThereIsNone() {
+        val texture = android.graphics.SurfaceTexture(0)
+        host.texture.surfaceTextureListener!!.onSurfaceTextureAvailable(texture, 10, 10)
+        // Destroyed before any frame: nothing was drawn, so nothing is kept.
+        host.texture.surfaceTextureListener!!.onSurfaceTextureDestroyed(texture)
+        assertTrue(fake.stills.isEmpty())
+        host.texture.surfaceTextureListener!!.onSurfaceTextureAvailable(android.graphics.SurfaceTexture(2), 10, 10)
+        host.texture.surfaceTextureListener!!.onSurfaceTextureUpdated(texture)
+        assertEquals("the first frame on a surface clears the still kept for it", listOf<android.graphics.Bitmap?>(null), fake.stills)
     }
 }

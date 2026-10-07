@@ -355,4 +355,20 @@ class MediaVideoPlayerTest {
         p.rotate(first)
         assertTrue("the paused frame is redrawn: $calls", calls.any { it.startsWith("seekTo@") })
     }
+
+    @Test fun theKeptStillIsTheViewsUntilANewFrameOrRelease() {
+        val p = autoPlayer()
+        shadowOf(created[0]).invokePreparedListener()
+        val bitmap = android.graphics.Bitmap.createBitmap(4, 4, android.graphics.Bitmap.Config.ARGB_8888)
+        assertEquals(null, p.still)
+        p.keepStill(bitmap)
+        assertTrue(p.still === bitmap)
+        p.keepStill(null)
+        assertEquals(null, p.still)
+        p.keepStill(bitmap)
+        p.release()
+        assertEquals("released: no picture is held", null, p.still)
+        p.keepStill(bitmap)
+        assertEquals(null, p.still)
+    }
 }

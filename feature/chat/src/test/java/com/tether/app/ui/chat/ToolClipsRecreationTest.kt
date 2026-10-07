@@ -3,6 +3,8 @@ package com.tether.app.ui.chat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -53,10 +55,14 @@ class ToolClipsRecreationTest {
         scenario.close()
     }
 
+    private var shell by androidx.compose.runtime.mutableStateOf(0)
+
     private fun host() {
         scenario.onActivity { activity ->
             activity.setContent {
                 ChatHost(TetherSkin.StudioDark) {
+                  // Each shell's chat screen is a composition of its own: the key stands for PhoneShell / ExpandedShell.
+                  androidx.compose.runtime.key(shell) {
                     val vm = viewModel<ToolClipsViewModel>(key = "tool-clips") {
                         ToolClipsViewModel(
                             create = { scope ->
@@ -73,7 +79,11 @@ class ToolClipsRecreationTest {
                         LocalToolMediaLoader provides ToolFixtures.FakeLoader(),
                         LocalToolClips provides vm.registry,
                         LocalVideoSurfaceEnabled provides false,
-                    ) { ToolMediaRow(listOf(item)) }
+                    ) {
+                        if (shell % 2 == 0) ToolMediaRow(listOf(item))
+                        ToolViewerHost()
+                    }
+                  }
                 }
             }
         }
@@ -110,5 +120,23 @@ class ToolClipsRecreationTest {
         // The activity going away for good releases the rest and stops the download.
         scenario.close()
         assertTrue("released with the activity", players[0].released)
+    }
+
+    @Test fun theOwnerLookupIsTheActivitysSoTheOtherShellsChatScreenFindsTheSameRegistryAndViewer() {
+        compose.onNodeWithContentDescription("Play video").performClick()
+        compose.onNodeWithContentDescription("View video full size").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Video viewer").assertIsDisplayed()
+        val before = registry
+        compose.runOnIdle { shell = 1 }
+        compose.waitForIdle()
+        assertSame("the same ViewModel in the other shell's chat screen", before, registry)
+        compose.onNodeWithContentDescription("Video viewer").assertIsDisplayed()
+        assertEquals("no player was made or released", 2, players.size)
+        assertTrue(players.none { it.released })
+        compose.runOnIdle { shell = 0 }
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Video viewer").assertIsDisplayed()
+        assertTrue(players.none { it.released })
     }
 }

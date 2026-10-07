@@ -620,15 +620,14 @@ class ToolMediaRepository(
 fun ToolMediaRow(items: List<ToolMediaItem>, modifier: Modifier = Modifier, bare: Boolean = false, limit: Int = MediaLimits.MAX_TILES) {
     if (items.isEmpty()) return
     val t = LocalTetherTokens.current
-    // ta-coik.68: which item the viewer shows lives in the clip registry (keyed by src), not in this row: the
-    // phone and expanded shells each compose their own transcript, so a rotation that switches shell builds
-    // this row anew, and its own state would be gone. No registry (previews, tests): the row's own saved index.
+    // ta-coik.68: with a clip registry the viewer is the registry's, hosted by the chat screen (ToolViewerHost):
+    // the phone and expanded shells each compose their own transcript, and a lazy one may not compose this row
+    // at all after a switch. No registry (previews, tests): this row's own saved index and viewer.
     val registry = LocalToolClips.current
     var localIndex by rememberSaveable { mutableStateOf<Int?>(null) }
-    val openSrc = registry?.openViewerSrc
-    val openIndex: Int? = if (registry != null) openSrc?.let { src -> items.indexOfFirst { it.src == src }.takeIf { it >= 0 } } else localIndex
+    val openIndex: Int? = localIndex
     fun setOpen(index: Int?) {
-        if (registry != null) registry.openViewer(index?.let { items[it].src }) else localIndex = index
+        if (registry != null && index != null) registry.openViewer(items, index) else localIndex = index
     }
     val line = t.line
     FlowRow(
