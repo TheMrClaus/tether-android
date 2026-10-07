@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.benchmark.macro.MacrobenchmarkScope
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
@@ -97,12 +98,14 @@ private fun MacrobenchmarkScope.signIn(sign: SignInArgs) {
     server.click()
     server.text = sign.serverUrl
     device.waitForIdle()
-    val password = device.wait(Until.findObject(By.desc("Dashboard password")), WAIT_MS)
-        ?: error("no password field: the server offers no password sign-in")
+    // The soft keyboard now covers the lower form, and the screen fetches the server's sign-in methods
+    // (debounced) before the password field exists: close the keyboard, then search with scrolling.
+    val password = findScrolling(By.desc("Dashboard password"), WAIT_MS)
+        ?: error("no password field: the server offers no password sign-in (or the form never scrolled to it)")
     password.click()
     password.text = sign.password
     device.waitForIdle()
-    val unlock = device.wait(Until.findObject(By.desc("Unlock Tether")), WAIT_MS)
+    val unlock = findScrolling(By.desc("Unlock Tether"), WAIT_MS)
         ?: error("no 'Unlock Tether' button")
     unlock.click()
     // Signed in once the shell's top bar shows. Its brand link ("Tether — Overview", Topbar.kt BrandLink) is
@@ -118,6 +121,33 @@ private fun MacrobenchmarkScope.signIn(sign: SignInArgs) {
     }
     check(landed) { "sign-in did not reach the shell within ${WAIT_MS * 2} ms" }
     Log.i(TAG, "signed in")
+}
+
+/** True while the soft keyboard is up (`pressBack` with it down would leave the activity, so it is checked first). */
+private fun MacrobenchmarkScope.imeShown(): Boolean =
+    device.executeShellCommand("dumpsys input_method").contains("mInputShown=true")
+
+/**
+ * Finds [selector], polling up to [timeoutMs]: between polls the soft keyboard is closed (Back, only if shown)
+ * and the form is swiped up, since a control below the fold (or under the keyboard) is not in the
+ * accessibility tree. Null when it never appears, so the caller fails loudly.
+ */
+private fun MacrobenchmarkScope.findScrolling(selector: BySelector, timeoutMs: Long): UiObject2? {
+    val deadline = System.currentTimeMillis() + timeoutMs
+    while (System.currentTimeMillis() < deadline) {
+        device.findObject(selector)?.let { return it }
+        if (imeShown()) {
+            device.pressBack()
+            device.waitForIdle()
+            continue
+        }
+        val w = device.displayWidth
+        val h = device.displayHeight
+        device.swipe(w / 2, h * 7 / 10, w / 2, h * 3 / 10, 20)
+        device.waitForIdle()
+        device.wait(Until.hasObject(selector), 500L)
+    }
+    return device.findObject(selector)
 }
 
 private fun MacrobenchmarkScope.openSession() {
