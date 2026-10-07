@@ -220,15 +220,18 @@ class MainShellSelectionModelTest {
 
     @Test
     fun anotherServerSettlesItsOwnCurrentWorkspace() {
+        // Each server's default workspace is its own record. A device-wide default (the older app's) is
+        // migrated to the server current at that moment by an effect of its own: a default written for B
+        // while A is still current would be A's to migrate (and A's own record wins), not B's (ta-2pda).
         storedState("sessions", remembered = null, origin = "https://a.example:443")
-        runPrefsWrite { prefs.updatePreferences { it.copy(defaultWorkspace = "/w/default-a") } }
+        runPrefsWrite { prefs.updatePreferencesFor("https://a.example:443") { it.copy(defaultWorkspace = "/w/default-a") } }
         val client = Client()
         client.base.server.value = "https://a.example"
         val vm = TetherViewModel(client)
         compose(vm)
         rule.waitUntil(5_000) { vm.currentWorkspace.value != null }
         assertEquals("/w/default-a", vm.currentWorkspace.value)
-        runPrefsWrite { prefs.updatePreferences { it.copy(defaultWorkspace = "/w/default-b") } }
+        runPrefsWrite { prefs.updatePreferencesFor("https://b.example:443") { it.copy(defaultWorkspace = "/w/default-b") } }
         rule.runOnIdle { client.base.server.value = "https://b.example" }
         rule.waitUntil(5_000) { vm.currentWorkspace.value == "/w/default-b" }
     }
