@@ -371,4 +371,42 @@ class MediaVideoPlayerTest {
         p.keepStill(bitmap)
         assertEquals(null, p.still)
     }
+
+    // --- ta-coik.68 round 4: a picture from the bytes when the platform player paints nothing ----------------
+
+    private fun awaitStill(p: MediaVideoPlayer): android.graphics.Bitmap? {
+        val until = System.nanoTime() + 5_000_000_000L
+        while (p.still == null && System.nanoTime() < until) Thread.sleep(10)
+        return p.still
+    }
+
+    @Test fun aPausedClipOnANewSurfaceGetsItsPictureDecodedFromItsBytes() {
+        val marker = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888)
+        source.still = marker
+        val p = player()
+        shadowOf(created[0]).invokePreparedListener()
+        p.attachSurface(surface())
+        assertTrue("decoded from the source, no surface involved", awaitStill(p) === marker)
+        // The first frame the surface paints (the host's clear) takes it away.
+        p.keepStill(null)
+        assertEquals(null, p.still)
+    }
+
+    @Test fun aPlayingClipNeedsNoDecodedPictureAndALateDecodeAfterAFrameIsDropped() {
+        val marker = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888)
+        source.still = marker
+        val p = autoPlayer()
+        shadowOf(created[0]).invokePreparedListener()
+        p.attachSurface(surface())
+        assertEquals(0, source.stillCalls)
+        // Paused with a surface: decode requested; a frame drawn meanwhile (the epoch moves) makes the result stale.
+        p.control.pause()
+        val gate = java.util.concurrent.CountDownLatch(1)
+        source.stillGate = gate
+        p.attachSurface(surface())
+        p.keepStill(null)
+        gate.countDown()
+        Thread.sleep(300)
+        assertEquals("stale: a frame was drawn first", null, p.still)
+    }
 }

@@ -11,6 +11,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -778,7 +781,14 @@ internal fun zoomLabel(scale: Float): String = "${(scale * 100).roundToInt()}%"
  * tap on the empty stage or Back closes. Changing item resets the zoom.
  */
 @Composable
-internal fun MediaLightbox(items: List<ToolMediaItem>, index: Int, onIndexChange: (Int) -> Unit, onClose: () -> Unit) {
+internal fun MediaLightbox(
+    items: List<ToolMediaItem>,
+    index: Int,
+    onIndexChange: (Int) -> Unit,
+    onClose: () -> Unit,
+    /** The window's system bars and cutout: the viewer draws edge to edge, so its toolbar must stay clear of them. */
+    insets: WindowInsets = WindowInsets.safeDrawing,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val item = items[index]
@@ -795,6 +805,9 @@ internal fun MediaLightbox(items: List<ToolMediaItem>, index: Int, onIndexChange
             Modifier
                 .fillMaxSize()
                 .background(t.graphite)
+                // The dialog is edge to edge (decorFitsSystemWindows = false): without this the Close key sat UNDER the
+                // status bar, which takes the touches there, and a tap on Close never reached it (device finding).
+                .windowInsetsPadding(insets)
                 .semantics { contentDescription = if (item.isVideo) "Video viewer" else "Image viewer" }
                 .testTag("media-lightbox"),
         ) {

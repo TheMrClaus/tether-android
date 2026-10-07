@@ -9,8 +9,10 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Where a preview video is: opening (no frame size yet), ready (prepared, at its first frame), or failed. */
 sealed interface VideoPhase {
@@ -83,8 +85,34 @@ class MediaVideoPlayer(
     override var still: Bitmap? by mutableStateOf(null)
         private set
 
+    /** Bumped whenever a frame was drawn or a surface came: a decode started before that is stale. */
+    private var stillEpoch = 0
+
     override fun keepStill(bitmap: Bitmap?) {
-        if (!released) still = bitmap
+        if (released) return
+        if (bitmap == null) stillEpoch++
+        still = bitmap
+    }
+
+    /** Decodes the picture the clip is at from its own bytes, for a surface the platform player will not paint onto. */
+    private fun loadStill() {
+        val mp = player ?: return
+        val at = try {
+            if (engine == Engine.Completed) (mp.duration - 1).coerceAtLeast(0) else mp.currentPosition
+        } catch (_: IllegalStateException) {
+            return
+        }
+        val epoch = ++stillEpoch
+        main.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                try {
+                    source.stillAt(at, STILL_MAX_SIDE)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (bitmap != null && !released && !playing && still == null && epoch == stillEpoch) still = bitmap
+        }
     }
 
     private var player: MediaPlayer? = null
@@ -221,8 +249,10 @@ class MediaVideoPlayer(
             player?.setSurface(surface)
         } catch (_: IllegalStateException) {
         }
-        // A new surface is blank: paint the frame the video is paused on.
+        // A new surface is blank: paint the frame the video is paused on, and (a paused or ended platform
+        // player does not always paint onto it) have its picture ready from the bytes until one is drawn.
         showFrame()
+        if (prepared && !playing && still == null) loadStill()
     }
 
     override fun detachSurface(surface: Surface) {
@@ -274,6 +304,9 @@ class MediaVideoPlayer(
         }
     }
 }
+
+/** The longest side of a decoded still (px): a box is at most 569 dp wide. */
+private const val STILL_MAX_SIDE = 1280
 
 private enum class Engine { Idle, Prepared, Started, Paused, Completed }
 

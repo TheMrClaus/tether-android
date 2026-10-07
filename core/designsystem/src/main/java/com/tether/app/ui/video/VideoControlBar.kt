@@ -57,7 +57,10 @@ fun VideoControlBar(player: VideoPlayer, modifier: Modifier = Modifier) {
     val playing = player.playing
     // The place only moves while it plays: one read when it stops, a few a second while it goes.
     LaunchedEffect(player, playing) {
-        position = control.currentPosition
+        // An ended clip reads a place of 0 for an instant: right after play stopped, a 0 over a place we had
+        // just seen is that, not a seek to the start, so the last place stays.
+        val now = control.currentPosition
+        position = if (!playing && now == 0 && position > 0) position else now
         duration = control.duration
         while (playing) {
             delay(250)

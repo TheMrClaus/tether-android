@@ -23,6 +23,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Rule
@@ -465,6 +466,19 @@ class ToolClipsTest {
         val short = androidx.compose.ui.geometry.Rect(0f, 100f, 300f, 160f) // shorter than the bar: the whole box must show
         assertTrue(VideoSizing.controllerVisible(short, short, reserve))
         assertFalse(VideoSizing.controllerVisible(short, visible(100f, 140f), reserve))
+    }
+
+    @Test fun theKnownSizeSurvivesReleaseSoTheIdleBoxIsNotBackToTwoToOne() {
+        val players = mutableListOf<FakePlayer>()
+        val registry = registry(Server(chunks = 2, gates = listOf(CompletableDeferred(), CompletableDeferred())), players)
+        val clip = registry.clip(src)!!
+        clip.noteSize(1280, 720)
+        clip.inline.play()
+        registry.releaseAll()
+        assertEquals(1280 to 720, clip.knownSize)
+        assertSame("the same clip object (and its size) comes back", clip, registry.clip(src))
+        assertEquals(ClipState.Idle, clip.inline.state)
+        assertBox(300f, 168.75f, VideoSizing.inline(clip.knownSize, 300f))
     }
 
     private fun assertBox(w: Float, h: Float, actual: VideoSizing.Box) {

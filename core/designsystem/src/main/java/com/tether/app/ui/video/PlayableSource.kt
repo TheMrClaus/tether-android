@@ -1,5 +1,6 @@
 package com.tether.app.ui.video
 
+import android.graphics.Bitmap
 import android.media.MediaDataSource
 
 /**
@@ -20,6 +21,14 @@ abstract class PlayableSource : MediaDataSource() {
     var onWaiting: ((Boolean) -> Unit)? = null
 
     abstract suspend fun open(): Boolean
+
+    /**
+     * The picture at [positionMs], at most [maxSide] px on its longer side, decoded WITHOUT the player or a
+     * surface (a local file and a metadata retriever), or null when this source cannot. Blocking: call it off
+     * the main thread. It is what a paused or ended clip shows on a fresh surface that the platform player
+     * will not paint onto.
+     */
+    open fun stillAt(positionMs: Int, maxSide: Int): Bitmap? = null
 
     abstract override fun close()
 }

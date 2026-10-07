@@ -273,7 +273,8 @@ class VideoHost(
         if (!framed || stillTaken) return
         stillTaken = true
         try {
-            grab(texture)?.let(player::keepStill)
+            // A texture whose layer is already gone yields a transparent bitmap: not a picture, not kept.
+            grab(texture)?.takeIf { !isBlank(it) }?.let(player::keepStill)
         } catch (_: RuntimeException) {
         }
     }
@@ -307,4 +308,17 @@ class VideoHost(
         releaseSurface()
         frame.keepScreenOn = false
     }
+}
+
+/** True when a handful of sampled pixels are all fully transparent (nothing was drawn into it). */
+internal fun isBlank(bitmap: Bitmap): Boolean {
+    if (bitmap.width <= 0 || bitmap.height <= 0) return true
+    for (iy in 0..4) {
+        for (ix in 0..4) {
+            val x = (bitmap.width - 1) * ix / 4
+            val y = (bitmap.height - 1) * iy / 4
+            if (android.graphics.Color.alpha(bitmap.getPixel(x, y)) != 0) return false
+        }
+    }
+    return true
 }

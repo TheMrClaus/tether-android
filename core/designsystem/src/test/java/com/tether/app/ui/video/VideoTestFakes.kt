@@ -13,6 +13,16 @@ class FakeSource : PlayableSource() {
     var opens = true
     var gate: CompletableDeferred<Unit>? = null
     @Volatile var closed = false
+    var still: android.graphics.Bitmap? = null
+    var stillCalls = 0
+
+    @Volatile var stillGate: java.util.concurrent.CountDownLatch? = null
+
+    override fun stillAt(positionMs: Int, maxSide: Int): android.graphics.Bitmap? {
+        stillCalls++
+        stillGate?.await()
+        return still
+    }
 
     override suspend fun open(): Boolean {
         gate?.await()

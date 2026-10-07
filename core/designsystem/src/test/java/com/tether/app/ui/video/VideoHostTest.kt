@@ -171,7 +171,7 @@ class VideoHostTest {
     // --- device findings round 3 ---------------------------------------------------------------------
 
     @Test fun theStillIsTakenWhenTheTextureDetachesNotAfterItsLayerIsGone() {
-        val marker = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888)
+        val marker = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888).also { it.eraseColor(android.graphics.Color.RED) }
         var grabs = 0
         val player = RecordingVideoPlayer()
         val h = VideoHost(activity, player, radiusPx = 12f, makeController = { RecordingController(it) }, grab = { grabs++; marker })
@@ -190,5 +190,20 @@ class VideoHostTest {
         assertTrue(player.stills.last() === marker)
         // A frame on a new surface clears it and re-arms the capture.
         h.texture.surfaceTextureListener = null
+    }
+
+    @Test fun aBlankBitmapFromADeadLayerIsNotKeptAsTheStill() {
+        val blank = android.graphics.Bitmap.createBitmap(4, 4, android.graphics.Bitmap.Config.ARGB_8888)
+        assertTrue(isBlank(blank))
+        val drawn = android.graphics.Bitmap.createBitmap(4, 4, android.graphics.Bitmap.Config.ARGB_8888).also { it.eraseColor(android.graphics.Color.BLUE) }
+        assertTrue(!isBlank(drawn))
+        val player = RecordingVideoPlayer()
+        val h = VideoHost(activity, player, radiusPx = 12f, grab = { blank }, makeController = { RecordingController(it) })
+        activity.setContentView(h.frame, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val texture = android.graphics.SurfaceTexture(0)
+        h.texture.surfaceTextureListener!!.onSurfaceTextureAvailable(texture, 10, 10)
+        h.texture.surfaceTextureListener!!.onSurfaceTextureUpdated(texture)
+        h.texture.surfaceTextureListener!!.onSurfaceTextureDestroyed(texture)
+        assertEquals("only the clearing at the first frame; the blank was not kept", listOf<android.graphics.Bitmap?>(null), player.stills)
     }
 }

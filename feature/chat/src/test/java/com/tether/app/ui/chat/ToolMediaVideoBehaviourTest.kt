@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import com.tether.app.client.ToolMediaResult
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.video.LocalVideoSurfaceEnabled
@@ -248,6 +249,47 @@ class ToolMediaVideoBehaviourTest {
         rule.mainClock.advanceTimeBy(100)
         rule.onNodeWithContentDescription("Pause").assertIsDisplayed()
         rule.mainClock.autoAdvance = true
+    }
+
+    @Test fun closeWithTheClipEndedClosesForGoodAndNothingReopensItAcrossRecompositions() {
+        val viewer = openViewerWithPlayerReady()
+        // Ended: not playing, the bar held (the platform reports a place of 0 for an instant: nothing may depend on it).
+        rule.onNodeWithContentDescription("Play").assertIsDisplayed()
+        val made = players.size
+        rule.onNodeWithContentDescription("Close").performClick()
+        rule.waitForIdle()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Video viewer").fetchSemanticsNodes().size)
+        assertTrue(viewer.released)
+        assertEquals(null, registry!!.openViewerSrc)
+        // Recompose over and over (state churn on the inline clip, time passing): the viewer stays closed and no
+        // new player is made for it.
+        rule.mainClock.autoAdvance = false
+        repeat(5) {
+            rule.runOnIdle { players.first().playing = !players.first().playing }
+            rule.mainClock.advanceTimeBy(1_000)
+        }
+        rule.waitForIdle()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Video viewer").fetchSemanticsNodes().size)
+        assertEquals("no player was made again", made, players.size)
+        assertEquals(null, registry!!.openViewerSrc)
+        rule.mainClock.autoAdvance = true
+    }
+
+    // --- the viewer's toolbar clears the system bars (device finding: Close sat under the status bar) --------
+
+    @Test fun theViewersCloseKeyClearsTheStatusBarSoATouchOnItIsNotTheStatusBars() {
+        val image = ToolMediaItem("image", "image/png", "/api/tool-media/${"a".repeat(64)}.png")
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) {
+                CompositionLocalProvider(LocalToolMediaLoader provides ToolFixtures.FakeLoader()) {
+                    MediaLightbox(listOf(image), 0, onIndexChange = {}, onClose = {}, insets = androidx.compose.foundation.layout.WindowInsets(top = 48.dp, bottom = 24.dp))
+                }
+            }
+        }
+        rule.waitForIdle()
+        val close = rule.onNodeWithContentDescription("Close").fetchSemanticsNode().boundsInRoot
+        val density = rule.activity.resources.displayMetrics.density
+        assertTrue("Close starts below the 48 dp status bar: top=${close.top / density} dp", close.top >= 48f * density - 1f)
     }
 
     // --- ta-2hv: the lightbox's Blocked copy, for a picture ------------------------------------------

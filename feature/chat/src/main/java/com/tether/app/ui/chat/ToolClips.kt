@@ -1,5 +1,7 @@
 package com.tether.app.ui.chat
 
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
@@ -137,6 +139,9 @@ internal class ClipDownload(
 
     /** Why it did not finish, null while it is going well or when it is whole and verified. */
     fun failure(): MediaVideo? = lock.withLock { verdict?.takeIf { it !is MediaVideo.Ok } }
+
+    /** Every byte is in a verified file (a retriever can read it whole). */
+    fun isWhole(): Boolean = lock.withLock { verdict is MediaVideo.Ok }
 
     /** The final answer, null while it is still going. */
     fun outcome(): MediaVideo? = lock.withLock { verdict }
@@ -334,6 +339,33 @@ internal class ClipReader(private val download: ClipDownload) : PlayableSource()
     override suspend fun open(): Boolean = download.awaitReadable()
 
     override fun getSize(): Long = download.size()
+
+    override fun stillAt(positionMs: Int, maxSide: Int): Bitmap? {
+        // Only a whole, verified file: a partial one may have its moov atom still to come.
+        if (!download.isWhole()) return null
+        val file = download.readableFile() ?: return null
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.path)
+            val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: return null
+            val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: return null
+            if (w <= 0 || h <= 0) return null
+            val scale = minOf(1f, maxSide.toFloat() / maxOf(w, h))
+            retriever.getScaledFrameAtTime(
+                positionMs * 1000L,
+                MediaMetadataRetriever.OPTION_CLOSEST,
+                (w * scale).toInt().coerceAtLeast(1),
+                (h * scale).toInt().coerceAtLeast(1),
+            )
+        } catch (_: RuntimeException) {
+            null
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
         if (closed) throw IOException("the video was closed")
