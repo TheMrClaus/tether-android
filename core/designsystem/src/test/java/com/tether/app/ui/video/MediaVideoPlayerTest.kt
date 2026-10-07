@@ -41,6 +41,7 @@ class MediaVideoPlayerTest {
         source,
         CoroutineScope(Dispatchers.Unconfined),
         onFailed = { failures++ },
+        playerThread = inlinePlayerThread,
         newPlayer = {
             MediaPlayer().also {
                 created += it
@@ -149,6 +150,7 @@ class MediaVideoPlayerTest {
         source,
         CoroutineScope(Dispatchers.Unconfined),
         onFailed = { failures++ },
+        playerThread = inlinePlayerThread,
         newPlayer = {
             object : MediaPlayer() {
                 private fun at() = shadowOf(this).state
@@ -275,6 +277,7 @@ class MediaVideoPlayerTest {
         source,
         CoroutineScope(Dispatchers.Unconfined),
         onFailed = { failures++ },
+        playerThread = inlinePlayerThread,
         playWhenReady = true,
         newPlayer = {
             MediaPlayer().also {
@@ -460,7 +463,7 @@ class MediaVideoPlayerTest {
     private fun modelled(): MediaVideoPlayer {
         val p = MediaVideoPlayer(
             source, CoroutineScope(Dispatchers.Unconfined), onFailed = { failures++ }, playWhenReady = false,
-            newPlayer = { Platform().also { platforms += it } }, settleStepMs = 10,
+            newPlayer = { Platform().also { platforms += it } }, settleStepMs = 10, playerThread = inlinePlayerThread,
         )
         platforms[0].prepared?.onPrepared(platforms[0])
         return p

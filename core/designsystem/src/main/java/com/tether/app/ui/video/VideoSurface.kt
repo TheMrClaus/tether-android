@@ -162,6 +162,13 @@ class VideoHost(
     val texture = TextureView(context)
     private val controller = makeController(context)
     private var surface: Surface? = null
+
+    /**
+     * The texture the surface was made from. The view is told not to release it ([TextureView.SurfaceTextureListener]
+     * answers false): the player may still be drawing into it, and it is released once the player let go ([releaseSurface]).
+     */
+    private var ownedTexture: SurfaceTexture? = null
+    private var disposed = false
     private var framed = false
 
     /** The still of the surface now (or last) in use has been taken: a later capture would read a dead layer. */
@@ -191,6 +198,8 @@ class VideoHost(
         })
         texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
+                ownedTexture = texture
+                if (disposed) return
                 val mine = Surface(texture)
                 surface = mine
                 stillTaken = false
@@ -203,7 +212,8 @@ class VideoHost(
             override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
                 captureStill()
                 releaseSurface()
-                return true
+                // The texture is ours to release, later: the player lets go of it first, which can wait on its source.
+                return false
             }
 
             override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = setFramed(true)
@@ -291,11 +301,20 @@ class VideoHost(
 
     private fun releaseSurface() {
         setFramed(false)
-        surface?.let {
-            player.detachSurface(it)
-            it.release()
-        }
+        val mine = surface
+        val texture = ownedTexture
         surface = null
+        ownedTexture = null
+        if (mine == null) {
+            texture?.release()
+            return
+        }
+        // The player lets go of the surface when it can (it may be waiting on its source: the main thread does not),
+        // and only then are the surface and its texture released.
+        player.detachSurface(mine) {
+            mine.release()
+            texture?.release()
+        }
     }
 
     fun dispose() {
@@ -304,7 +323,8 @@ class VideoHost(
         ready = false
         controller.hide()
         if (frame.viewTreeObserver.isAlive) frame.viewTreeObserver.removeOnGlobalLayoutListener(relayout)
-        texture.surfaceTextureListener = null
+        // The listener stays: a texture that is destroyed later is released through it (a disposed host attaches nothing).
+        disposed = true
         releaseSurface()
         frame.keepScreenOn = false
     }

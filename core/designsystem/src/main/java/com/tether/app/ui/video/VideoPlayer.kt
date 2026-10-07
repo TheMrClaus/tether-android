@@ -8,11 +8,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.util.concurrent.Executor
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /** Where a preview video is: opening (no frame size yet), ready (prepared, at its first frame), or failed. */
@@ -53,6 +60,16 @@ interface VideoPlayer {
     fun attachSurface(surface: Surface)
     fun detachSurface(surface: Surface)
 
+    /**
+     * As [detachSurface], and [onDetached] is called (on any thread) once the player no longer uses [surface]: that
+     * can be later, when the player has to wait for something first. A view releases the surface's texture there,
+     * not before: a player still drawing into a released texture fails.
+     */
+    fun detachSurface(surface: Surface, onDetached: () -> Unit) {
+        detachSurface(surface)
+        onDetached()
+    }
+
     /** The app stopped: stop playing but keep the place. */
     fun pause()
 
@@ -67,8 +84,17 @@ interface VideoPlayer {
  * it is prepared (a tap on an inline tool clip, the lightbox's `autoPlay`).
  *
  * Any failure (the data source cannot open, the server errors or changes, the decoder refuses) ends
- * as [VideoPhase.Failed] and one call of [onFailed]; nothing is thrown at the UI. All calls are
- * made on [main]'s thread (the [MediaPlayer] posts its callbacks to the thread that created it).
+ * as [VideoPhase.Failed] and one call of [onFailed]; nothing is thrown at the UI.
+ *
+ * The main thread never calls the platform player after making it (ta-coik.68 round 6, F-4). Every call into a
+ * [MediaPlayer] takes the native player's one lock, and a call that is waiting on the data source (a seek past the
+ * download, a slow link: [PlayableSource.readAt] waits for bytes) holds it until the bytes arrive, so a call made on
+ * the main thread meanwhile (the surface destroyed by a rotation, a seek, a release) hangs the app. So every call goes
+ * to one thread of the player's own ([playerThread]), in the order it was asked; what the UI needs to read (place,
+ * length) is kept here as a snapshot the player's thread refreshes, and what a call's outcome decides is decided back
+ * on [main]. The [MediaPlayer] is made on [main]'s thread (it posts its callbacks to the thread that created it).
+ * [release] closes the source first, which returns the read that holds the lock; the reset and release of the
+ * platform player then follow on its own thread.
  */
 class MediaVideoPlayer(
     private val source: PlayableSource,
@@ -78,6 +104,8 @@ class MediaVideoPlayer(
     private val newPlayer: () -> MediaPlayer = { MediaPlayer() },
     /** How often the place is checked for [SETTLE_MS] after a surface change while it plays (a seam for tests). */
     private val settleStepMs: Long = 200,
+    /** Where the platform player is called (a seam for tests: an inline executor); null is a thread of its own. */
+    playerThread: Executor? = null,
 ) : VideoPlayer {
     override var phase: VideoPhase by mutableStateOf(VideoPhase.Opening)
         private set
@@ -87,6 +115,41 @@ class MediaVideoPlayer(
         private set
     override var still: Bitmap? by mutableStateOf(null)
         private set
+
+    private val ownThread: ExecutorService? =
+        if (playerThread == null) Executors.newSingleThreadExecutor { Thread(it, "tether-video-player").apply { isDaemon = true } } else null
+    private val exec: Executor = playerThread ?: ownThread!!
+
+    /** Runs [job] on the player's thread, after everything asked before it; dropped once that thread is gone. */
+    private fun onPlayer(job: () -> Unit) {
+        try {
+            exec.execute {
+                try {
+                    job()
+                } catch (_: Exception) {
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+        }
+    }
+
+    /** As [onPlayer], but [job] (a hand-over, not a call into the platform player) runs here when the thread is gone. */
+    private fun onPlayerAlways(job: () -> Unit) {
+        try {
+            exec.execute(job)
+        } catch (_: RejectedExecutionException) {
+            job()
+        }
+    }
+
+    /** Asks the player's thread for [block]'s answer without blocking this one; null when it cannot answer. */
+    private suspend fun <T : Any> askPlayer(block: () -> T?): T? = suspendCancellableCoroutine { cont ->
+        try {
+            exec.execute { cont.resume(try { block() } catch (_: Exception) { null }) }
+        } catch (_: RejectedExecutionException) {
+            cont.resume(null)
+        }
+    }
 
     /** Bumped whenever a frame was drawn or a surface came: a decode started before that is stale. */
     private var stillEpoch = 0
@@ -99,12 +162,20 @@ class MediaVideoPlayer(
     private var restingStill: Bitmap? = null
 
     /** Where the clip played to when its surface went away, -1 when it was not playing then (see [watchPlace]). */
-    private var placeAtDetach = -1
+    @Volatile private var placeAtDetach = -1
     private var placeWatch: Job? = null
 
     /** When [control] last started the clip (nanoTime): an end reported right after is the platform's stale one. */
     private var startedAtNs = 0L
     private var recoveries = 0
+
+    /** The place (ms) as the player's thread last read it, and when (nanoTime): what the controller's bar shows. */
+    private class Place(val ms: Int, val atNs: Long)
+
+    @Volatile private var place = Place(0, 0)
+    @Volatile private var durationMs = 0
+    @Volatile private var audioSession = 0
+    private val refreshing = AtomicBoolean(false)
 
     override fun keepStill(bitmap: Bitmap?) {
         if (released) return
@@ -112,7 +183,7 @@ class MediaVideoPlayer(
         still = bitmap
     }
 
-    /** Where the picture of a clip that is not playing is: its last frame when it ended, else where it is. */
+    /** Where the picture of a clip that is not playing is: its last frame when it ended, else where it is. On the player's thread. */
     private fun restingPlace(mp: MediaPlayer): Int {
         val position = mp.currentPosition
         if (engine != Engine.Completed) return position
@@ -128,13 +199,9 @@ class MediaVideoPlayer(
      */
     private fun loadStill(show: Boolean) {
         val mp = player ?: return
-        val at = try {
-            restingPlace(mp)
-        } catch (_: IllegalStateException) {
-            return
-        }
         val epoch = if (show) ++stillEpoch else stillEpoch
         main.launch {
+            val at = askPlayer { restingPlace(mp) } ?: return@launch
             val bitmap = withContext(Dispatchers.IO) {
                 try {
                     source.stillAt(at, STILL_MAX_SIDE)
@@ -148,16 +215,38 @@ class MediaVideoPlayer(
         }
     }
 
-    private var player: MediaPlayer? = null
-    private var surface: Surface? = null
-    private var prepared = false
+    /** Reads where the platform player is into [place] (on its thread); at most one read is asked for at a time. */
+    private fun refreshPlace() {
+        val mp = player ?: return
+        if (!refreshing.compareAndSet(false, true)) return
+        onPlayer {
+            try {
+                place = Place(mp.currentPosition, System.nanoTime())
+            } finally {
+                refreshing.set(false)
+            }
+        }
+    }
+
+    /** Where the clip is now: the last read place, carried on by the clock while it plays and is not waiting for bytes. */
+    private fun placeNow(): Int {
+        val last = place
+        if (engine != Engine.Started || buffering) return last.ms
+        val ahead = ((System.nanoTime() - last.atNs) / 1_000_000L).toInt().coerceAtLeast(0)
+        val end = durationMs
+        return if (end > 0) minOf(last.ms + ahead, end) else last.ms + ahead
+    }
+
+    @Volatile private var player: MediaPlayer? = null
+    @Volatile private var surface: Surface? = null
+    @Volatile private var prepared = false
 
     /**
      * Where the platform player is, tracked here because every call is only valid in some states
      * (pause() in PREPARED is an invalid operation: error -38, and the player then reports an error).
      */
-    private var engine = Engine.Idle
-    private var released = false
+    @Volatile private var engine = Engine.Idle
+    @Volatile private var released = false
     private var buffered by mutableIntStateOf(0)
     private val opening: Job
 
@@ -183,9 +272,15 @@ class MediaVideoPlayer(
                     if (what != MEDIA_ERROR_INVALID_OPERATION) fail()
                     true
                 }
-                mp.setDataSource(source)
-                surface?.let(mp::setSurface)
-                mp.prepareAsync()
+                onPlayer {
+                    try {
+                        mp.setDataSource(source)
+                        surface?.let(mp::setSurface)
+                        mp.prepareAsync()
+                    } catch (_: Exception) {
+                        main.launch { fail() }
+                    }
+                }
             } catch (_: Exception) {
                 fail()
             }
@@ -196,22 +291,43 @@ class MediaVideoPlayer(
         if (released) return
         prepared = true
         engine = Engine.Prepared
-        phase = VideoPhase.Ready(mp.videoWidth, mp.videoHeight)
-        if (playWhenReady) {
-            control.start()
-            return
+        onPlayer {
+            val width = mp.videoWidth
+            val height = mp.videoHeight
+            durationMs = mp.duration
+            audioSession = try {
+                mp.audioSessionId
+            } catch (_: Exception) {
+                0
+            }
+            place = Place(
+                try {
+                    mp.currentPosition
+                } catch (_: Exception) {
+                    0
+                },
+                System.nanoTime(),
+            )
+            main.launch {
+                if (released) return@launch
+                phase = VideoPhase.Ready(width, height)
+                if (playWhenReady) {
+                    control.start()
+                    return@launch
+                }
+                // No start(): a seek to the start draws the first frame on the surface and stays paused.
+                showFrame()
+            }
         }
-        // No start(): a seek to the start draws the first frame on the surface and stays paused.
-        showFrame()
     }
 
     private fun showFrame() {
         val mp = player ?: return
         if (!prepared || released || playing || surface == null || engine == Engine.Idle) return
-        try {
-            // An ended clip's position is its duration, where there is no frame to draw: its last one.
-            mp.seekTo(restingPlace(mp).toLong(), MediaPlayer.SEEK_CLOSEST)
-        } catch (_: IllegalStateException) {
+        onPlayer {
+            // A clip started since is not frozen on a frame. An ended clip's position is its duration, where there
+            // is no frame to draw: its last one.
+            if (!released && engine != Engine.Started) mp.seekTo(restingPlace(mp).toLong(), MediaPlayer.SEEK_CLOSEST)
         }
     }
 
@@ -220,51 +336,48 @@ class MediaVideoPlayer(
      * on a new surface, delivered after a replay began) must not leave this player believing it is ended while
      * it plays, which a later surface would then answer by seeking the playing clip to its end.
      */
-    private fun syncWithPlatform(mp: MediaPlayer) {
+    private fun syncWithPlatform(running: Boolean) {
         if (released || !prepared || engine == Engine.Started) return
-        val running = try {
-            mp.isPlaying
-        } catch (_: IllegalStateException) {
-            false
-        }
         if (running) {
             engine = Engine.Started
             playing = true
         }
     }
 
+    private class Ending(val end: Int, val position: Int, val running: Boolean)
+
     private fun onCompleted(mp: MediaPlayer) {
         if (released) return
-        if (engine == Engine.Started && staleEnd(mp)) {
-            // The platform says "ended" for a clip that was started a moment ago and is nowhere near its end.
-            // If it stopped, it plays on from where it is; if it plays, the event is ignored.
-            val running = try {
-                mp.isPlaying
-            } catch (_: IllegalStateException) {
-                false
-            }
-            if (running || recoveries >= MAX_RECOVERIES) return
-            recoveries++
-            try {
-                mp.start()
-            } catch (_: IllegalStateException) {
-            }
+        if (engine != Engine.Started) {
+            endPlayback()
             return
         }
+        main.launch {
+            val facts = askPlayer { Ending(mp.duration, mp.currentPosition, mp.isPlaying) }
+            if (released) return@launch
+            val sinceStartMs = (System.nanoTime() - startedAtNs) / 1_000_000L
+            // The platform says "ended" for a clip that was started a moment ago and is nowhere near its end.
+            // If it stopped, it plays on from where it is; if it plays, the event is ignored.
+            val stale = facts != null && engine == Engine.Started &&
+                facts.end > 2 * END_SLACK_MS && facts.position < facts.end - END_SLACK_MS && sinceStartMs < STALE_END_MS
+            if (stale) {
+                if (facts!!.running || recoveries >= MAX_RECOVERIES) return@launch
+                recoveries++
+                onPlayer { mp.start() }
+                return@launch
+            }
+            endPlayback()
+        }
+    }
+
+    private fun endPlayback() {
         if (engine == Engine.Started) engine = Engine.Completed
         playing = false
         buffering = false
         placeWatch?.cancel()
         placeAtDetach = -1
+        refreshPlace()
         loadStill(show = false)
-    }
-
-    private fun staleEnd(mp: MediaPlayer): Boolean = try {
-        val end = mp.duration
-        val sinceStartMs = (System.nanoTime() - startedAtNs) / 1_000_000L
-        end > 2 * END_SLACK_MS && mp.currentPosition < end - END_SLACK_MS && sinceStartMs < STALE_END_MS
-    } catch (_: IllegalStateException) {
-        false
     }
 
     /**
@@ -283,18 +396,11 @@ class MediaVideoPlayer(
                 delay(settleStepMs)
                 waited += settleStepMs
                 val mp = player ?: return@launch
-                val position = try {
-                    mp.currentPosition
-                } catch (_: IllegalStateException) {
-                    return@launch
-                }
+                val position = askPlayer { mp.currentPosition } ?: return@launch
+                if (released || engine != Engine.Started) return@launch
                 if (position < at - PLACE_SLACK_MS && corrections < MAX_PLACE_CORRECTIONS) {
                     corrections++
-                    try {
-                        mp.seekTo(at.toLong(), MediaPlayer.SEEK_CLOSEST)
-                    } catch (_: IllegalStateException) {
-                        return@launch
-                    }
+                    onPlayer { mp.seekTo(at.toLong(), MediaPlayer.SEEK_CLOSEST) }
                 }
             }
         }
@@ -310,24 +416,19 @@ class MediaVideoPlayer(
     }
 
     override val control = object : MediaController.MediaPlayerControl {
-        private fun <T> mp(fallback: T, block: (MediaPlayer) -> T): T {
+        private fun <T> live(fallback: T, block: (MediaPlayer) -> T): T {
             val mp = player ?: return fallback
             if (!prepared || released) return fallback
-            return try {
-                block(mp)
-            } catch (_: IllegalStateException) {
-                fallback
-            }
+            return block(mp)
         }
 
         override fun start() {
             // Valid from prepared, paused and completed (a completed clip plays again from its start).
             if (engine == Engine.Started) return
-            mp(Unit) {
+            live(Unit) { mp ->
                 // An ended clip plays again from its start; said outright, since a frame seek made on a new
                 // surface (showFrame) may have moved its place.
-                if (engine == Engine.Completed) it.seekTo(0L, MediaPlayer.SEEK_CLOSEST)
-                it.start()
+                val ended = engine == Engine.Completed
                 engine = Engine.Started
                 playing = true
                 startedAtNs = System.nanoTime()
@@ -335,47 +436,80 @@ class MediaVideoPlayer(
                 restingStill = null
                 placeAtDetach = -1
                 placeWatch?.cancel()
+                place = Place(if (ended) 0 else place.ms, startedAtNs)
+                onPlayer {
+                    if (ended) mp.seekTo(0L, MediaPlayer.SEEK_CLOSEST)
+                    mp.start()
+                }
             }
         }
 
         override fun pause() {
             // Only a playing player can pause: in PREPARED, PAUSED or COMPLETED it is an invalid operation.
             if (engine != Engine.Started) return
-            mp(Unit) {
-                it.pause()
+            live(Unit) { mp ->
+                val at = placeNow()
                 engine = Engine.Paused
                 playing = false
                 buffering = false
                 placeWatch?.cancel()
                 placeAtDetach = -1
+                place = Place(at, System.nanoTime())
+                onPlayer { mp.pause() }
+                refreshPlace()
                 loadStill(show = false)
             }
         }
 
-        override fun getDuration(): Int = mp(0) { it.duration }
-        override fun getCurrentPosition(): Int = mp(0) { it.currentPosition }
-        override fun seekTo(pos: Int) = mp(Unit) {
+        override fun getDuration(): Int = live(0) { durationMs }
+        override fun getCurrentPosition(): Int = live(0) {
+            refreshPlace()
+            placeNow()
+        }
+        override fun seekTo(pos: Int) = live(Unit) { mp ->
             placeWatch?.cancel()
             placeAtDetach = -1
             restingStill = null
-            it.seekTo(pos.toLong(), MediaPlayer.SEEK_CLOSEST)
+            place = Place(pos, System.nanoTime())
+            onPlayer { mp.seekTo(pos.toLong(), MediaPlayer.SEEK_CLOSEST) }
         }
         override fun isPlaying(): Boolean = playing
         override fun getBufferPercentage(): Int = buffered
         override fun canPause(): Boolean = true
         override fun canSeekBackward(): Boolean = true
         override fun canSeekForward(): Boolean = true
-        override fun getAudioSessionId(): Int = mp(0) { it.audioSessionId }
+        override fun getAudioSessionId(): Int = live(0) { audioSession }
     }
 
     override fun attachSurface(surface: Surface) {
         if (released) return
         this.surface = surface
-        try {
-            player?.setSurface(surface)
-        } catch (_: IllegalStateException) {
+        val mp = player
+        if (mp == null) {
+            settleAttach(surface, running = false)
+            return
         }
-        player?.let(::syncWithPlatform)
+        onPlayer {
+            // A surface that went away (or was replaced) while this waited is not given to the player.
+            if (this.surface === surface) {
+                try {
+                    mp.setSurface(surface)
+                } catch (_: IllegalStateException) {
+                }
+            }
+            val running = try {
+                mp.isPlaying
+            } catch (_: IllegalStateException) {
+                false
+            }
+            main.launch { settleAttach(surface, running) }
+        }
+    }
+
+    /** What follows a surface being in the platform player, back on [main]: [running] is whether the platform plays. */
+    private fun settleAttach(surface: Surface, running: Boolean) {
+        if (released || this.surface !== surface) return
+        syncWithPlatform(running)
         if (playing) {
             watchPlace()
             return
@@ -390,24 +524,34 @@ class MediaVideoPlayer(
         }
     }
 
-    override fun detachSurface(surface: Surface) {
+    override fun detachSurface(surface: Surface) = detachSurface(surface) {}
+
+    override fun detachSurface(surface: Surface, onDetached: () -> Unit) {
+        val mp = player
         // Only the surface in use: a replaced view's late teardown must not blank its successor's.
-        if (this.surface !== surface) return
+        if (this.surface !== surface || mp == null) {
+            // Nothing of this surface is in the platform player, once what was asked of it before has been done.
+            onPlayerAlways(onDetached)
+            return
+        }
         this.surface = null
-        // Where a playing clip is when its picture goes: a surface change may take the platform back from here.
         placeAtDetach = -1
-        if (engine == Engine.Started) {
-            placeAtDetach = try {
-                player?.currentPosition ?: -1
+        onPlayer {
+            // Where a playing clip is when its picture goes: a surface change may take the platform back from here.
+            if (engine == Engine.Started) {
+                placeAtDetach = try {
+                    mp.currentPosition
+                } catch (_: IllegalStateException) {
+                    -1
+                }
+            }
+            // The picture goes; the player, its place and its playing / paused state stay (a rotation re-attaches).
+            try {
+                mp.setSurface(null)
             } catch (_: IllegalStateException) {
-                -1
             }
         }
-        // The picture goes; the player, its place and its playing / paused state stay (a rotation re-attaches).
-        try {
-            player?.setSurface(null)
-        } catch (_: IllegalStateException) {
-        }
+        onPlayerAlways(onDetached)
     }
 
     override fun pause() {
@@ -427,7 +571,10 @@ class MediaVideoPlayer(
         teardown()
     }
 
-    /** The source first: a reader blocked on the network returns at once instead of holding [MediaPlayer.release]. */
+    /**
+     * The source first: a reader blocked on the network returns at once, which frees the platform player's lock. The
+     * platform player's reset and release then run on its own thread, after whatever was asked of it before.
+     */
     private fun teardown() {
         source.close()
         val mp = player
@@ -442,12 +589,22 @@ class MediaVideoPlayer(
                 mp.setOnCompletionListener(null)
                 mp.setOnVideoSizeChangedListener(null)
                 mp.setOnBufferingUpdateListener(null)
-                mp.reset()
             } catch (_: Exception) {
-            } finally {
-                mp.release()
+            }
+            onPlayerAlways {
+                try {
+                    mp.reset()
+                } catch (_: Exception) {
+                } finally {
+                    try {
+                        mp.release()
+                    } catch (_: Exception) {
+                    }
+                }
             }
         }
+        // Lets what is queued finish (the release above, a surface's hand-over), then the thread ends.
+        ownThread?.shutdown()
     }
 }
 

@@ -8,6 +8,9 @@ import androidx.compose.runtime.setValue
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 
+/** The platform player's thread, run inline: the player's calls happen where they are asked (VideoPlayerBlockingTest uses a real one). */
+val inlinePlayerThread = java.util.concurrent.Executor { it.run() }
+
 /** A [PlayableSource] with no bytes: [open] answers [opens] (after [gate]); reads fail once it is closed. */
 class FakeSource : PlayableSource() {
     var opens = true
