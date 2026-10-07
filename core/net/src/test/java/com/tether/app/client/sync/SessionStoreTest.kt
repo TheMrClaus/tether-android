@@ -37,17 +37,27 @@ class SessionStoreTest {
     }
 
     @Test
+    fun theEventIsNotConvertedWhenNothingHydrates() {
+        var converted = 0
+        assertFalse(store.bufferIfHydrating("s1") { converted++; obj("""{"type":"x"}""") })
+        assertEquals(0, converted)
+        assertTrue(store.beginHydration("s1"))
+        assertTrue(store.bufferIfHydrating("s1") { converted++; obj("""{"type":"x","seq":4}""") })
+        assertEquals(1, converted)
+    }
+
+    @Test
     fun aHydrationFoldsTheEventsBufferedWhileItRead() {
         assertTrue(store.beginHydration("s1"))
         assertFalse("at most once per binding", store.beginHydration("s1"))
         val event = obj("""{"type":"turn_started","turnId":"t2","seq":4,"ts":4}""")
-        assertTrue(store.bufferIfHydrating("s1", event))
-        assertFalse(store.bufferIfHydrating("s2", event))
+        assertTrue(store.bufferIfHydrating("s1") { event })
+        assertFalse(store.bufferIfHydrating("s2") { event })
         val rebuilt = MirrorLink.rebuild(hydrated())
         val outcome = store.completeHydration("s1", hydrated(), rebuilt) as SessionStore.HydrationOutcome.Ready
         assertEquals(com.tether.app.protocol.tree.JsStr("t2"), outcome.tree["activeTurnId"])
         // Nothing is buffered any more: the next event folds live.
-        assertFalse(store.bufferIfHydrating("s1", event))
+        assertFalse(store.bufferIfHydrating("s1") { event })
     }
 
     @Test

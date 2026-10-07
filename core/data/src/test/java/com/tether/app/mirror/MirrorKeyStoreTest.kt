@@ -95,5 +95,76 @@ class MirrorKeyStoreTest {
         assertEquals(0, kekKeys.destroyed)
     }
 
+    // ---- ta-705 (5): a Suspect Keystore answer rotates after N launches (DataStoreSettings.SUSPECT_ROTATE_AFTER) ----
+
+    /** A new process over the same files: a fresh store (it counts a Suspect once per launch). */
+    private fun launch() = MirrorKeyStore(file, AesGcmCredentialCipher(kekKeys))
+
+    @Test
+    fun aKeystoreThatStaysSuspectIsRotatedAfterNLaunchesNotUnavailableForever() {
+        store.create()
+        kekKeys.failure = java.security.InvalidKeyException("keystore says no, every time")
+        for (n in 1 until MirrorKeyStore.SUSPECT_ROTATE_AFTER) {
+            val process = launch()
+            assertEquals("launch $n", MirrorKeyStore.Loaded.Unavailable, process.load())
+            // The same process asking again is not another launch.
+            assertEquals(MirrorKeyStore.Loaded.Unavailable, process.load())
+        }
+        assertEquals("the Nth consecutive launch rotates", MirrorKeyStore.Loaded.Lost, launch().load())
+        // The caller's reaction to Lost (JournalMirror.bindNow): destroy, and a new key works.
+        kekKeys.failure = null
+        val fresh = launch()
+        fresh.destroy()
+        assertEquals(MirrorKeyStore.Loaded.Absent, fresh.load())
+        assertTrue(fresh.create().bytes.isNotEmpty())
+        assertTrue(launch().load() is MirrorKeyStore.Loaded.Present)
+    }
+
+    @Test
+    fun aGoodLaunchResetsTheSuspectCount() {
+        store.create()
+        for (round in 1..2) {
+            kekKeys.failure = java.security.InvalidKeyException("flaky")
+            assertEquals(MirrorKeyStore.Loaded.Unavailable, launch().load())
+            assertEquals(MirrorKeyStore.Loaded.Unavailable, launch().load())
+            kekKeys.failure = null
+            assertTrue("round $round", launch().load() is MirrorKeyStore.Loaded.Present)
+        }
+        kekKeys.failure = java.security.InvalidKeyException("flaky")
+        assertEquals(MirrorKeyStore.Loaded.Unavailable, launch().load())
+    }
+
+    @Test
+    fun aTransientKeystoreAnswerNeverCountsTowardRotation() {
+        store.create()
+        kekKeys.failure = java.security.KeyStoreException("busy")
+        repeat(MirrorKeyStore.SUSPECT_ROTATE_AFTER + 2) {
+            assertEquals(MirrorKeyStore.Loaded.Unavailable, launch().load())
+        }
+        kekKeys.failure = null
+        assertTrue(launch().load() is MirrorKeyStore.Loaded.Present)
+    }
+
+    // ---- ta-705 (1): the write counter lives beside the key ----
+
+    @Test
+    fun theWriteCounterIsPerKeyAndLeavesTheKeyFileAsItWas() {
+        val key = store.create()
+        val keyFileBefore = file.readBytes()
+        assertEquals(0L, store.writesFor(key.id))
+        store.recordWrites(key.id, 7)
+        assertEquals(7L, store.writesFor(key.id))
+        assertEquals("another key has its own count", 0L, store.writesFor("00".repeat(16)))
+        store.recordWrites(key.id, 5) // never lowers
+        assertEquals(7L, store.writesFor(key.id))
+        assertArrayEquals(keyFileBefore, file.readBytes())
+        // A new key starts at zero; deleting the key takes the count with it.
+        val next = store.create()
+        assertEquals(0L, store.writesFor(next.id))
+        store.recordWrites(next.id, 3)
+        store.deleteDataKey()
+        assertEquals(0L, store.writesFor(next.id))
+    }
+
     private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
 }

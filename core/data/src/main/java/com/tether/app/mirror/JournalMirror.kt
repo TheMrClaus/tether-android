@@ -150,6 +150,7 @@ class JournalMirror(
     private var boundOrigin: String? = null
     private var originKey: String = ""
     private var writes = 0L
+    private var keyId: String? = null // the data key [writes] counts blobs of
 
     /** [wipeEpoch] when the op in hand was dequeued (set under [queue] by the actor). */
     private var opEpoch = 0L
@@ -162,6 +163,17 @@ class JournalMirror(
     @VisibleForTesting
     @Volatile
     var beforeHydrateRead: (() -> Unit)? = null
+
+    /**
+     * Test seam (ta-705 / ta-epo): runs on the actor INSIDE a batch, while an event's row is being
+     * persisted, at the stage "sealed" (the blob exists, nothing is written for it yet) and
+     * "inserted" (the event row is written, its cursor is not). A test that throws an Error here
+     * is a process death mid-commit: whatever the DB then shows to the next process must still
+     * have `cursor == last tail seq`. Null in production.
+     */
+    @VisibleForTesting
+    @Volatile
+    var duringEventCommit: ((stage: String) -> Unit)? = null
 
     init {
         job = scope.launch(dispatcher) { loop() }
@@ -618,14 +630,19 @@ class JournalMirror(
             }
             d.putMeta(MetaEntity(META_KEY_ID, dataKey.id))
             d.putMeta(MetaEntity(META_BLOB_VERSION, MirrorCipher.VERSION.toString()))
-            d.putMeta(MetaEntity(META_WRITES, "0"))
+            // ta-705 (1): the rotation budget belongs to the KEY, not to this file: a fresh DB
+            // under the same key (an origin switch deleted the old one) continues the count.
+            d.putMeta(MetaEntity(META_WRITES, keyStore.writesFor(dataKey.id).toString()))
             d.putMeta(MetaEntity(META_SCHEMA, SCHEMA_VERSION.toString()))
         }
         db = database
         dao = d
         cipher = MirrorCipher(dataKey.bytes)
         originKey = key
-        writes = d.meta(META_WRITES)?.toLongOrNull() ?: 0L
+        // Seeded from the larger of the DB's own count (an install from before the per-key
+        // counter has only this) and the one kept with the key.
+        writes = maxOf(d.meta(META_WRITES)?.toLongOrNull() ?: 0L, keyStore.writesFor(dataKey.id))
+        keyId = dataKey.id
     }
 
     private fun readIndex(): MirrorIndex {
@@ -740,6 +757,7 @@ class JournalMirror(
                 if (sealed > 0) d.putMeta(MetaEntity(META_WRITES, (writes + sealed).toString()))
             }
             writes += sealed
+            if (sealed > 0) keyId?.let { keyStore.recordWrites(it, writes) }
         } catch (e: Exception) {
             // A cache that cannot be written (disk full, corrupt file): start it over.
             log("mirror batch failed (${e.javaClass.simpleName})")
@@ -873,7 +891,9 @@ class JournalMirror(
             d.clearCursor(op.sessionId)
             return 0
         }
+        duringEventCommit?.invoke("sealed")
         if (d.insertEvent(JournalEventEntity(op.sessionId, op.seq, op.type, op.ts, payload)) == -1L) return 0
+        duringEventCommit?.invoke("inserted")
         d.upsertSyncState(SyncStateEntity(op.sessionId, op.seq, state.lastVerifiedAt, state.level, state.bytes + payload.size))
         return 1
     }

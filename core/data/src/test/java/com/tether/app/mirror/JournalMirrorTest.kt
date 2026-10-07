@@ -7,6 +7,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -377,4 +378,83 @@ class JournalMirrorTest {
 
     @Suppress("unused")
     private fun JsObj.text() = JsCodec.canonical(this)
+
+    private fun keyId() = (fx.keyStore().load() as MirrorKeyStore.Loaded.Present).key.id
+
+    // ta-705 (1): the 2^28 budget is the key's, not the DB file's.
+    @Test
+    fun theWriteBudgetBelongsToTheKeyNotToTheDbFile() = runBlocking {
+        fx.close()
+        fx = MirrorFixture(rotateAfterWrites = 5)
+        bind()
+        val key = keyId()
+        m.recordState(origin, "s1", 10, null, state(), emptySet()) // blob 1
+        m.recordEvent(origin, "s1", 11, "message_delta", 11, event(11)) // 2
+        m.recordEvent(origin, "s1", 12, "message_delta", 12, event(12)) // 3
+        m.flush()
+        // An origin switch deletes the first DB and opens a new one under the SAME data key.
+        val other = "https://other.example:443"
+        assertTrue(m.bind(other)!!.sessions.isEmpty())
+        assertFalse(fx.dbFile(origin).exists())
+        assertEquals("an origin switch keeps the key", key, keyId())
+        assertEquals("the count lives with the key", 3L, fx.keyStore().writesFor(key))
+        m.recordState(other, "s1", 10, null, state(), emptySet()) // 4: still under the budget
+        m.flush()
+        assertEquals(key, keyId())
+        // A counter that had reset with the DB would stand at 2 here and never rotate.
+        m.recordEvent(other, "s1", 11, "message_delta", 11, event(11)) // 5th blob under the key
+        m.flush()
+        assertNotEquals("the budget was reset by deleting the DB", key, keyId())
+        assertEquals(0L, fx.keyStore().writesFor(key)) // the old key's count goes with it
+    }
+
+    // ta-705 (1): an install from before the per-key counter (no sidecar, key file as it was).
+    @Test
+    fun anInstallFromBeforeThePerKeyCounterUpgradesWithoutAWipe() = runBlocking {
+        fx.close()
+        fx = MirrorFixture(rotateAfterWrites = 4)
+        bind()
+        val key = keyId()
+        m.recordState(origin, "s1", 10, null, state(), emptySet())
+        m.recordEvent(origin, "s1", 11, "message_delta", 11, event(11))
+        m.recordEvent(origin, "s1", 12, "message_delta", 12, event(12))
+        m.flush()
+        val keyFileBefore = fx.keyFile.readBytes()
+        java.io.File(fx.keyFile.path + ".writes").delete() // the old build never wrote one
+        fx.restart()
+        bind()
+        assertArrayEquals("the key file is never rewritten", keyFileBefore, fx.keyFile.readBytes())
+        assertEquals("the key is the old one", key, keyId())
+        assertEquals("nothing was wiped", 12L, loaded().cursor)
+        // The count is seeded from the DB's own meta (3 blobs): one more reaches the budget of 4.
+        m.recordEvent(origin, "s1", 13, "message_delta", 13, event(13))
+        m.flush()
+        assertNotEquals(key, keyId())
+    }
+
+    // ta-epo / ta-705: a death INSIDE a commit never leaves a cursor the DB does not cover.
+    @Test
+    fun aDeathInsideACommitNeverLeavesTheCursorAheadOfTheTail() = runBlocking {
+        for (stage in listOf("sealed", "inserted")) {
+            fx.close()
+            fx = MirrorFixture()
+            bind()
+            m.recordState(origin, "s1", 10, null, state(), emptySet())
+            m.recordEvent(origin, "s1", 11, "message_delta", 11, event(11))
+            m.flush()
+            val old = m
+            old.duringEventCommit = { at -> if (at == stage) throw OutOfMemoryError("simulated death") }
+            old.recordEvent(origin, "s1", 12, "message_delta", 12, event(12))
+            old.recordEvent(origin, "s1", 13, "message_delta", 13, event(13))
+            val until = System.currentTimeMillis() + budgetS * 1000
+            while (!old.dead && System.currentTimeMillis() < until) Thread.sleep(10)
+            assertTrue("the writer never reached the commit ($stage)", old.dead)
+            fx.restart()
+            m.bind(origin)
+            val h = loaded()
+            assertEquals("stage $stage: cursor vs tail", h.cursor.toString(), tailSeqs(h).last())
+            assertEquals("stage $stage", 11L, h.cursor)
+            assertEquals("stage $stage", listOf("11"), tailSeqs(h))
+        }
+    }
 }

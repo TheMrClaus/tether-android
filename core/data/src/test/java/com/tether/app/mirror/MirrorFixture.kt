@@ -140,6 +140,8 @@ class MirrorFixture(
         scope.cancel()
         for (name in factory.existing()) factory.delete(name)
         keyFile.delete()
+        File(keyFile.path + ".writes").delete()
+        File(keyFile.path + ".suspect").delete()
     }
 
     companion object {

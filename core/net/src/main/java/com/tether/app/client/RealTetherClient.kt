@@ -3804,7 +3804,9 @@ class RealTetherClient(
                     seqlessCleared = mirrorOriginForLocked(message.sessionId)?.let { mirrorLink?.event(it, message.sessionId, event) }
                     if (event.seq != null && mirrorLink != null) sessionStore.countTail(message.sessionId)
                     // Its saved copy is being read: fold this on top of it when it lands.
-                    if (mirrorLink != null) buffered = sessionStore.bufferIfHydrating(message.sessionId, JsCodec.fromJson(event.raw) as JsObj)
+                    // ta-705 (4): the JsonElement -> JsObj walk happens only for an event that is
+                    // really buffered; every other event is converted once, after the lock (below).
+                    if (mirrorLink != null) buffered = sessionStore.bufferIfHydrating(message.sessionId) { eventTreeOf(event.raw) }
                 }
                 // §3.1 rule 1a applies to the gap resync too (on a gap the cursor is decision.afterSeq).
                 if (decision is CursorTracker.Decision.Resync) {
@@ -3855,7 +3857,7 @@ class RealTetherClient(
         if (buffered) return
         val tree = synchronized(lock) { sessionStore.tree(message.sessionId) } ?: return
         val next = try {
-            reduce(tree, JsCodec.fromJson(event.raw) as JsObj)
+            reduce(tree, eventTreeOf(event.raw))
         } catch (e: RuntimeException) {
             // The fold is a line port of events.mjs and, like it, assumes the server's full
             // projection shape (a JS reduce throws on the same malformed base). Never let that
@@ -5662,6 +5664,15 @@ class RealTetherClient(
 
     /** Test seam: the bound on a mirror bind (production: [MIRROR_BIND_TIMEOUT_MS]). */
     @Volatile
+    /** Test probe (ta-705 (4)): conversions of an event's raw JSON that ran while [lock] was held. */
+    internal val eventConversionsUnderLock = java.util.concurrent.atomic.AtomicInteger()
+
+    /** The one place a folded event's wire JSON becomes a tree, so a test can see where it runs. */
+    private fun eventTreeOf(raw: kotlinx.serialization.json.JsonObject): JsObj {
+        if (Thread.holdsLock(lock)) eventConversionsUnderLock.incrementAndGet()
+        return JsCodec.fromJson(raw) as JsObj
+    }
+
     internal var mirrorBindTimeoutMs: Long = MIRROR_BIND_TIMEOUT_MS
 
     // ta-jt9 L-A2: the boot purge's outcome (see [awaitBootPurge]); true = decided.

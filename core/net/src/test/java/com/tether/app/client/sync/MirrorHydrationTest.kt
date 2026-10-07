@@ -267,6 +267,39 @@ class MirrorHydrationTest {
         assertEquals(tree, JsCodec.canonical(h.dbFold("s1")!!))
     }
 
+    // ta-705 (4): the event JSON -> tree walk is not done under the client lock for an event
+    // nothing is waiting to buffer (every live event of a normal session).
+    @Test
+    fun noFoldedEventIsConvertedUnderTheClientLockWhenNothingHydrates() {
+        firstProcess() // snapshot + events 4 and 5 over a live session, nothing hydrating
+        h.ws.send(event(6, """"type":"message_delta","turnId":"t1","blockId":"b1","text":" +6""""))
+        h.ws.send(event(7, """"type":"message_delta","turnId":"t1","blockId":"b1","text":" +7""""))
+        h.serverBarrier()
+        assertTrue(shown().contains("saved text +6 +7"))
+        assertEquals(
+            "an event was converted while the client lock was held with no hydration in flight",
+            0,
+            h.client.eventConversionsUnderLock.get(),
+        )
+    }
+
+    @Test
+    fun anEventBufferedForAHydrationIsStillConvertedAndFoldedOnce() {
+        firstProcess()
+        h.kill(flushFirst = true)
+        val gate = CountDownLatch(1)
+        h.boot(ready = ready(sessionJson("s1"))) { p -> p.mirror.beforeHydrateRead = { gate.await(10, TimeUnit.SECONDS) } }
+        h.client.attach("s1")
+        attachesFor(h.framesUntilBarrier(), "s1").single()
+        h.ws.send(snapshotFrame("s1", 5, state = null))
+        h.ws.send(event(6, """"type":"message_delta","turnId":"t1","blockId":"b1","text":" +6""""))
+        h.serverBarrier()
+        // The probe sees the lock: the one place an event IS converted under it is the buffer.
+        assertEquals(1, h.client.eventConversionsUnderLock.get())
+        gate.countDown()
+        assertTrue(shown().contains("saved text +6"))
+    }
+
     @Test
     fun anUnreadableSavedCopyIsDroppedAndTheSessionFullyReattached() {
         firstProcess()
