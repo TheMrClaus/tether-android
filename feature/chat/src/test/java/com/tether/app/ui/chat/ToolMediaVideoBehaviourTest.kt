@@ -2,6 +2,8 @@ package com.tether.app.ui.chat
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -145,6 +147,44 @@ class ToolMediaVideoBehaviourTest {
     @Test fun aFailedClipUsesItsOneLine() = failedClipSays(ToolMediaResult.Failed(500), MediaCopy.VIDEO_UNAVAILABLE)
 
     @Test fun aTooLargeClipUsesItsOneLine() = failedClipSays(ToolMediaResult.TooLarge, MediaCopy.VIDEO_TOO_LARGE)
+
+    // --- the phone <-> expanded shell switch rebuilds every row (no activity recreation) ----------------
+
+    @Test fun theOpenViewerSurvivesTheRowBeingRebuiltAsTheOtherShellDoes() {
+        val server = ClipServer(park = true)
+        val r = ToolClipRegistry(
+            server, rule.activity.cacheDir, { ClipFixtures.ORIGIN }, CoroutineScope(Dispatchers.Unconfined),
+            makePlayer = { reader, failed -> StubVideoPlayer(reader, failed).also { players += it } },
+        )
+        registry = r
+        var shell by androidx.compose.runtime.mutableStateOf(0)
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) {
+                CompositionLocalProvider(LocalToolMediaLoader provides ToolFixtures.FakeLoader(), LocalToolClips provides r, LocalVideoSurfaceEnabled provides false) {
+                    // Each shell's transcript is its own composition: a new key = a new ToolMediaRow with no state of its own.
+                    androidx.compose.runtime.key(shell) { ToolMediaRow(listOf(item)) }
+                }
+            }
+        }
+        rule.onNodeWithContentDescription("Play video").performClick()
+        rule.onNodeWithContentDescription("View video full size").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Video viewer").assertIsDisplayed()
+        assertEquals(2, players.size)
+        rule.runOnIdle { shell = 1 }
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Video viewer").assertIsDisplayed()
+        assertEquals("no player was made or released by the switch", 2, players.size)
+        assertTrue(players.none { it.released })
+        rule.runOnIdle { shell = 0 }
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Video viewer").assertIsDisplayed()
+        assertTrue(players.none { it.released })
+        rule.onNodeWithContentDescription("Close").performClick()
+        rule.waitForIdle()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Video viewer").fetchSemanticsNodes().size)
+        assertTrue("only the viewer's player", players[1].released && !players[0].released)
+    }
 
     // --- ta-2hv: the lightbox's Blocked copy, for a picture ------------------------------------------
 

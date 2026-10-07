@@ -59,9 +59,20 @@ fun roundBoxCorners(view: View, boxHeight: () -> Int, radiusPx: Float) {
  * The frame view, the controller bar and the app-stop pause, for one [player]. [clipWidth] x
  * [clipHeight] is the picture's size inside the box [modifier] gives (0 = fill it); the controller
  * is clipped to the box's corners, [cornerRadius] (default the skin's radius-md) round, 0 for none.
+ * The controller is its own window, which the box's clip never reaches: a caller whose box can be
+ * partly scrolled away passes [controllerAllowed] false then, and the bar is hidden. [onFrame] is told
+ * `true` when a frame is on the surface and `false` when the surface is new or gone and none is yet.
  */
 @Composable
-fun VideoSurface(player: VideoPlayer, clipWidth: Dp, clipHeight: Dp, modifier: Modifier = Modifier, cornerRadius: Dp? = null) {
+fun VideoSurface(
+    player: VideoPlayer,
+    clipWidth: Dp,
+    clipHeight: Dp,
+    modifier: Modifier = Modifier,
+    cornerRadius: Dp? = null,
+    controllerAllowed: Boolean = true,
+    onFrame: ((Boolean) -> Unit)? = null,
+) {
     val context = LocalContext.current
     val radiusPx = with(LocalDensity.current) { (cornerRadius ?: LocalTetherTokens.current.radiusMd).toPx() }
     val host = remember(player) { VideoHost(context, player, radiusPx) }
@@ -86,7 +97,10 @@ fun VideoSurface(player: VideoPlayer, clipWidth: Dp, clipHeight: Dp, modifier: M
     val clipHeightPx = (clipHeight.value * density).roundToInt()
     // The host fills the WHOLE video box (the controller anchors to it, so its bar spans the box and
     // meets the rounded corners); the picture is sized and centred inside it.
-    AndroidView(factory = { host.frame }, modifier = modifier, update = { host.sync(ready, playing, clipWidthPx, clipHeightPx) })
+    AndroidView(factory = { host.frame }, modifier = modifier, update = {
+        host.onFrame = onFrame
+        host.sync(ready, playing, clipWidthPx, clipHeightPx, controllerAllowed)
+    })
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -113,6 +127,11 @@ class VideoHost(
     val texture = TextureView(context)
     private val controller = makeController(context)
     private var surface: Surface? = null
+    private var framed = false
+
+    /** Told whether a frame is drawn on the current surface (see [VideoSurface]). */
+    var onFrame: ((Boolean) -> Unit)? = null
+    private var allowed = true
     private var ready = false
     private var playing = false
     private var shownAt: List<Int>? = null
@@ -129,6 +148,7 @@ class VideoHost(
             override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
                 val mine = Surface(texture)
                 surface = mine
+                setFramed(false)
                 player.attachSurface(mine)
             }
 
@@ -139,7 +159,7 @@ class VideoHost(
                 return true
             }
 
-            override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+            override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = setFramed(true)
         }
         controller.setMediaPlayer(player.control)
         roundBoxCorners(controller, { frame.height }, radiusPx)
@@ -147,25 +167,26 @@ class VideoHost(
         controller.isEnabled = false
         frame.isClickable = true
         frame.setOnClickListener {
-            if (!ready) return@setOnClickListener
+            if (!ready || !allowed) return@setOnClickListener
             if (controller.isShowing) controller.hide() else showFor(playing)
         }
     }
 
     /** Called with the player's state and the clip's size (px) on every change. */
-    fun sync(ready: Boolean, playing: Boolean, clipWidthPx: Int, clipHeightPx: Int) {
+    fun sync(ready: Boolean, playing: Boolean, clipWidthPx: Int, clipHeightPx: Int, controllerAllowed: Boolean = true) {
         this.ready = ready
+        this.allowed = controllerAllowed
         this.playing = playing
         sizeClip(clipWidthPx, clipHeightPx)
         frame.keepScreenOn = playing
         controller.isEnabled = ready
-        if (!ready) {
+        if (!ready || !controllerAllowed) {
             controller.hide()
             shownAt = null
             return
         }
         // Held while paused / ended; the platform's own timeout while playing.
-        frame.post { if (this.ready && frame.isAttachedToWindow) showFor(this.playing) }
+        frame.post { if (this.ready && this.allowed && frame.isAttachedToWindow) showFor(this.playing) }
     }
 
     private fun sizeClip(widthPx: Int, heightPx: Int) {
@@ -194,13 +215,20 @@ class VideoHost(
 
     /** The anchor is laid out somewhere else than the controller was shown for: hide it and show it again there. */
     fun repositionIfMoved() {
-        if (!ready || !frame.isAttachedToWindow || !controller.isShowing) return
+        if (!ready || !allowed || !frame.isAttachedToWindow || !controller.isShowing) return
         if (anchorBounds() == shownAt) return
         controller.hide()
         showFor(playing)
     }
 
+    private fun setFramed(value: Boolean) {
+        if (framed == value) return
+        framed = value
+        onFrame?.invoke(value)
+    }
+
     private fun releaseSurface() {
+        setFramed(false)
         surface?.let {
             player.detachSurface(it)
             it.release()
@@ -209,6 +237,7 @@ class VideoHost(
     }
 
     fun dispose() {
+        onFrame = null
         ready = false
         controller.hide()
         if (frame.viewTreeObserver.isAlive) frame.viewTreeObserver.removeOnGlobalLayoutListener(relayout)

@@ -54,12 +54,13 @@ class ToolClipsViewModelTest {
         }
     }
 
-    private fun viewModel() = ToolClipsViewModel(
+    private fun viewModel(graceMs: Long = ToolClipsViewModel.LEAVE_GRACE_MS) = ToolClipsViewModel(
         create = { scope ->
             ToolClipRegistry(source, RuntimeEnvironment.getApplication().cacheDir, { "https://a" }, scope, makePlayer = { _, failed -> RecordingPlayer(failed).also { players += it } })
                 .also { made += it }
         },
         identity = identity,
+        leaveGraceMs = graceMs,
     )
 
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
@@ -115,6 +116,59 @@ class ToolClipsViewModelTest {
         waitForPart()
         vm.releaseAll()
         assertTrue(players.single().released)
+    }
+
+    @Test fun aShellSwitchLeavesAndEntersTheChatInOnePassAndKeepsTheClips() {
+        val vm = viewModel(graceMs = 500)
+        idle()
+        val clip = vm.registry.clip(src)!!
+        clip.inline.play()
+        waitForPart()
+        // Phone chat disposed, expanded chat entered: the leave's release is cancelled.
+        vm.chatLeft()
+        vm.chatEntered()
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(5))
+        assertFalse(players.single().released)
+        assertEquals(1, parts().size)
+        vm.releaseAll()
+    }
+
+    @Test fun leavingTheChatForGoodReleasesAfterTheGrace() {
+        val vm = viewModel(graceMs = 500)
+        idle()
+        vm.registry.clip(src)!!.inline.play()
+        waitForPart()
+        vm.registry.openViewer(src)
+        vm.chatLeft()
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(200))
+        assertFalse("not yet", players.single().released)
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+        assertTrue(players.single().released)
+        assertEquals(null, vm.registry.openViewerSrc)
+    }
+
+    @Test fun movingToAnotherSessionOrNoneReleasesTheOnesClipsAtOnce() {
+        val vm = viewModel()
+        idle()
+        vm.onSession("s1")
+        vm.registry.clip(src)!!.inline.play()
+        vm.onSession("s1")
+        assertFalse("the same session keeps them", players.single().released)
+        vm.onSession("s2")
+        assertTrue(players.single().released)
+        vm.registry.clip(src)!!.inline.play()
+        vm.onSession(null)
+        assertTrue(players.last().released)
+    }
+
+    @Test fun theOpenViewerSurvivesTheRegistryNotTheRowsComposition() {
+        val vm = viewModel()
+        idle()
+        vm.registry.openViewer(src)
+        vm.chatLeft()
+        vm.chatEntered()
+        assertEquals(src, vm.registry.openViewerSrc)
+        vm.releaseAll()
     }
 
     @Test fun theIdentityCarriesTheSignInGeneration() {

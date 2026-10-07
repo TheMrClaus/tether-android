@@ -620,7 +620,16 @@ class ToolMediaRepository(
 fun ToolMediaRow(items: List<ToolMediaItem>, modifier: Modifier = Modifier, bare: Boolean = false, limit: Int = MediaLimits.MAX_TILES) {
     if (items.isEmpty()) return
     val t = LocalTetherTokens.current
-    var openIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    // ta-coik.68: which item the viewer shows lives in the clip registry (keyed by src), not in this row: the
+    // phone and expanded shells each compose their own transcript, so a rotation that switches shell builds
+    // this row anew, and its own state would be gone. No registry (previews, tests): the row's own saved index.
+    val registry = LocalToolClips.current
+    var localIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    val openSrc = registry?.openViewerSrc
+    val openIndex: Int? = if (registry != null) openSrc?.let { src -> items.indexOfFirst { it.src == src }.takeIf { it >= 0 } } else localIndex
+    fun setOpen(index: Int?) {
+        if (registry != null) registry.openViewer(index?.let { items[it].src }) else localIndex = index
+    }
     val line = t.line
     FlowRow(
         modifier
@@ -641,14 +650,14 @@ fun ToolMediaRow(items: List<ToolMediaItem>, modifier: Modifier = Modifier, bare
     ) {
         val shown = limit.coerceIn(0, items.size)
         items.take(shown).forEachIndexed { index, item ->
-            MediaTile(item, onOpen = { openIndex = index })
+            MediaTile(item, onOpen = { setOpen(index) })
         }
         // At most [limit] tiles load here (the card's share of MAX_TILES); the rest open in the viewer.
-        if (items.size > shown) MoreTile(items.size - shown) { openIndex = shown }
+        if (items.size > shown) MoreTile(items.size - shown) { setOpen(shown) }
     }
     openIndex?.let { index ->
         if (index in items.indices) {
-            MediaLightbox(items, index, onIndexChange = { openIndex = it }, onClose = { openIndex = null })
+            MediaLightbox(items, index, onIndexChange = { setOpen(it) }, onClose = { setOpen(null) })
         }
     }
 }

@@ -27,6 +27,7 @@ import kotlin.concurrent.withLock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -479,6 +480,21 @@ class ToolClipRegistry(
 ) {
     private val clips = HashMap<String, ToolClip>()
 
+    /**
+     * The `src` the full-size viewer shows, or null. Here, not in a row's composition: the phone and
+     * expanded shells compose separate transcripts, so a rotation that switches shell rebuilds every
+     * row, and the open viewer (and its player) must come through it.
+     */
+    var openViewerSrc: String? by mutableStateOf(null)
+        private set
+
+    /** Shows [src] in the viewer (null closes it); the viewer player of the item it leaves is released. */
+    fun openViewer(src: String?) {
+        val previous = openViewerSrc
+        if (previous != null && previous != src) clip(previous)?.viewer?.release()
+        openViewerSrc = src
+    }
+
     private val players: ClipPlayerFactory = makePlayer ?: { src, failed ->
         MediaVideoPlayer(src, main, failed, playWhenReady = true, newPlayer = newPlayer)
     }
@@ -496,6 +512,7 @@ class ToolClipRegistry(
 
     /** Every clip idle, every download stopped, every part file deleted. */
     fun releaseAll() {
+        openViewerSrc = null
         val all = synchronized(clips) { clips.values.toList() }
         all.forEach { it.release() }
     }
@@ -513,6 +530,7 @@ val LocalToolClips = staticCompositionLocalOf<ToolClipRegistry?> { null }
 class ToolClipsViewModel(
     private val create: (CoroutineScope) -> ToolClipRegistry,
     identity: Flow<String?>,
+    private val leaveGraceMs: Long = LEAVE_GRACE_MS,
 ) : ViewModel() {
     var registry by mutableStateOf(create(viewModelScope))
         private set
@@ -533,11 +551,43 @@ class ToolClipsViewModel(
 
     fun releaseAll() = registry.releaseAll()
 
+    private var boundSession: String? = null
+    private var leaving: Job? = null
+
+    /**
+     * The chat screen is on screen. The phone and expanded shells each compose their own chat, so a
+     * rotation that switches shell leaves one and enters the other in the same pass: entering cancels the
+     * pending release a leave started.
+     */
+    fun chatEntered() {
+        leaving?.cancel()
+        leaving = null
+    }
+
+    /** The chat screen left composition: released after [leaveGraceMs] unless a chat screen enters first. */
+    fun chatLeft() {
+        leaving?.cancel()
+        leaving = viewModelScope.launch {
+            delay(leaveGraceMs)
+            registry.releaseAll()
+        }
+    }
+
+    /** The session on screen: moving to another one (or to none) releases every clip of the one it leaves. */
+    fun onSession(id: String?) {
+        val was = boundSession
+        boundSession = id
+        if (was != null && was != id) registry.releaseAll()
+    }
+
     override fun onCleared() {
         registry.releaseAll()
     }
 
     companion object {
+        /** A shell switch recomposes the chat within a frame; this is how long "left" must last to count. */
+        const val LEAVE_GRACE_MS = 1_000L
+
         /** The server a signed-in client talks to, with the sign-in generation; null while nobody is signed in there. */
         fun identityOf(client: TetherClient): Flow<String?> =
             combine(

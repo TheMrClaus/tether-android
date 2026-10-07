@@ -112,10 +112,13 @@ fun ChatScreen(
             identity = ToolClipsViewModel.identityOf(vm.client),
         )
     }
-    val activity = context.findChatActivity()
-    DisposableEffect(session?.id) {
-        onDispose { if (activity?.isChangingConfigurations != true) toolClips.releaseAll() }
+    // The phone and expanded shells compose separate chat screens (a rotation can switch them without recreating
+    // the activity): leaving is released after a short grace that entering the other one cancels.
+    DisposableEffect(toolClips) {
+        toolClips.chatEntered()
+        onDispose { toolClips.chatLeft() }
     }
+    LaunchedEffect(session?.id) { toolClips.onSession(session?.id) }
 
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
     val tree = session?.let { trees[it.id] }
@@ -851,9 +854,3 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
 
 /** A picked element and the session it was picked for (dashboard.tsx :235 `BrowserPick & { sessionId }`). */
 private class SessionPick(val sessionId: String, val pick: com.tether.app.client.BrowserPick)
-
-private tailrec fun android.content.Context.findChatActivity(): android.app.Activity? = when (this) {
-    is android.app.Activity -> this
-    is android.content.ContextWrapper -> baseContext.findChatActivity()
-    else -> null
-}

@@ -137,7 +137,9 @@ class MediaVideoPlayer(
         val mp = player ?: return
         if (!prepared || released || playing || surface == null || engine == Engine.Idle) return
         try {
-            mp.seekTo(mp.currentPosition.toLong(), MediaPlayer.SEEK_CLOSEST)
+            // An ended clip's position is its duration, where there is no frame to draw: its last one.
+            val at = if (engine == Engine.Completed) (mp.duration - 1).coerceAtLeast(0) else mp.currentPosition
+            mp.seekTo(at.toLong(), MediaPlayer.SEEK_CLOSEST)
         } catch (_: IllegalStateException) {
         }
     }
@@ -166,6 +168,9 @@ class MediaVideoPlayer(
             // Valid from prepared, paused and completed (a completed clip plays again from its start).
             if (engine == Engine.Started) return
             mp(Unit) {
+                // An ended clip plays again from its start; said outright, since a frame seek made on a new
+                // surface (showFrame) may have moved its place.
+                if (engine == Engine.Completed) it.seekTo(0L, MediaPlayer.SEEK_CLOSEST)
                 it.start()
                 engine = Engine.Started
                 playing = true

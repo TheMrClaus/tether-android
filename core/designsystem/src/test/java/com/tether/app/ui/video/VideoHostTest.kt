@@ -112,4 +112,46 @@ class VideoHostTest {
         host.repositionIfMoved()
         assertTrue(controller.calls.isEmpty())
     }
+
+    @Test fun aControllerThatIsNotAllowedStaysHiddenAndATapDoesNotShowIt() {
+        layoutBox(0, 0, 400, 300)
+        host.sync(ready = true, playing = false, clipWidthPx = 0, clipHeightPx = 0, controllerAllowed = false)
+        ShadowLooper.idleMainLooper()
+        assertTrue("never shown while not allowed: ${controller.calls}", controller.calls.none { it.startsWith("show") })
+        host.frame.performClick()
+        assertTrue(controller.calls.none { it.startsWith("show") })
+        host.repositionIfMoved()
+        assertTrue(controller.calls.none { it.startsWith("show") })
+        // Allowed again (scrolled back into view): it is shown, held (paused).
+        host.sync(ready = true, playing = false, clipWidthPx = 0, clipHeightPx = 0, controllerAllowed = true)
+        ShadowLooper.idleMainLooper()
+        assertTrue(controller.calls.contains("show(0)"))
+    }
+
+    @Test fun anAllowedControllerGoesAwayWhenItStopsBeingAllowed() {
+        layoutBox(0, 0, 400, 300)
+        host.sync(ready = true, playing = false, clipWidthPx = 0, clipHeightPx = 0)
+        ShadowLooper.idleMainLooper()
+        assertTrue(controller.showing)
+        host.sync(ready = true, playing = false, clipWidthPx = 0, clipHeightPx = 0, controllerAllowed = false)
+        assertTrue("hidden when the box is scrolled out of the viewport", !controller.showing)
+    }
+
+    @Test fun theHostSaysWhenAFrameIsOnItsSurface() {
+        val told = mutableListOf<Boolean>()
+        host.onFrame = { told += it }
+        val texture = android.graphics.SurfaceTexture(0)
+        host.texture.surfaceTextureListener!!.onSurfaceTextureAvailable(texture, 10, 10)
+        assertTrue("a new surface has no frame yet", told.isEmpty())
+        host.texture.surfaceTextureListener!!.onSurfaceTextureUpdated(texture)
+        host.texture.surfaceTextureListener!!.onSurfaceTextureUpdated(texture)
+        assertEquals("told once", listOf(true), told)
+        // The surface goes (a rotation, scrolled off): no frame until the next one.
+        host.texture.surfaceTextureListener!!.onSurfaceTextureDestroyed(texture)
+        assertEquals(listOf(true, false), told)
+        host.texture.surfaceTextureListener!!.onSurfaceTextureAvailable(android.graphics.SurfaceTexture(1), 10, 10)
+        assertEquals("the new surface is blank", listOf(true, false), told)
+        host.texture.surfaceTextureListener!!.onSurfaceTextureUpdated(texture)
+        assertEquals(listOf(true, false, true), told)
+    }
 }

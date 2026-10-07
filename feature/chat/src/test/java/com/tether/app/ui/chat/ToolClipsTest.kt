@@ -423,6 +423,46 @@ class ToolClipsTest {
         assertTrue(players.isEmpty())
     }
 
+    @Test fun theOpenViewerLivesInTheRegistryAndOnlyItsCloseOrAnotherItemReleasesItsPlayer() {
+        val players = mutableListOf<FakePlayer>()
+        val registry = registry(Server(chunks = 2, gates = listOf(CompletableDeferred(), CompletableDeferred())), players)
+        val other = "/api/tool-media/${"b".repeat(64)}.mp4"
+        val a = registry.clip(src)!!
+        val b = registry.clip(other)!!
+        assertNull(registry.openViewerSrc)
+        registry.openViewer(src)
+        a.viewer.play()
+        // A rotation that rebuilds every row changes nothing here: the state is the registry's.
+        assertEquals(src, registry.openViewerSrc)
+        assertFalse(players.single().released)
+        // Moving to another item releases the one it leaves.
+        registry.openViewer(other)
+        b.viewer.play()
+        assertTrue(players[0].released)
+        assertFalse(players[1].released)
+        registry.openViewer(null)
+        assertNull(registry.openViewerSrc)
+        assertTrue(players[1].released)
+        // releaseAll closes it too.
+        registry.openViewer(src)
+        registry.releaseAll()
+        assertNull(registry.openViewerSrc)
+    }
+
+    @Test fun theControllerIsOnlyShownWhileItsPartOfTheBoxIsOnScreen() {
+        val full = androidx.compose.ui.geometry.Rect(0f, 100f, 300f, 400f) // a 300 px tall box
+        fun visible(top: Float, bottom: Float) = androidx.compose.ui.geometry.Rect(0f, top, 300f, bottom)
+        val reserve = 96f
+        assertTrue("whole box visible", VideoSizing.controllerVisible(full, full, reserve))
+        assertTrue("top scrolled under the header, the bar's part still on screen", VideoSizing.controllerVisible(full, visible(200f, 400f), reserve))
+        assertFalse("bottom under the composer", VideoSizing.controllerVisible(full, visible(100f, 350f), reserve))
+        assertFalse("only a sliver of the bottom is left", VideoSizing.controllerVisible(full, visible(350f, 400f), reserve))
+        assertFalse("scrolled out entirely", VideoSizing.controllerVisible(full, androidx.compose.ui.geometry.Rect.Zero, reserve))
+        val short = androidx.compose.ui.geometry.Rect(0f, 100f, 300f, 160f) // shorter than the bar: the whole box must show
+        assertTrue(VideoSizing.controllerVisible(short, short, reserve))
+        assertFalse(VideoSizing.controllerVisible(short, visible(100f, 140f), reserve))
+    }
+
     private fun assertBox(w: Float, h: Float, actual: VideoSizing.Box) {
         assertEquals(w, actual.width, 0.01f)
         assertEquals(h, actual.height, 0.01f)

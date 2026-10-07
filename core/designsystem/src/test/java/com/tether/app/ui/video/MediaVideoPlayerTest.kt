@@ -314,4 +314,45 @@ class MediaVideoPlayerTest {
         source.onWaiting?.invoke(true)
         assertFalse(p.buffering)
     }
+
+    // --- ta-coik.68 device findings: an ended clip's picture comes back; its play restarts from 0 -----------
+
+    @Test fun anEndedClipRepaintsItsLastFrameOnANewSurfaceNotItsPastTheEndPosition() {
+        val p = recordingPlayer()
+        val first = surface()
+        p.attachSurface(first)
+        shadowOf(created[0]).invokePreparedListener()
+        p.control.start()
+        shadowOf(created[0]).invokeCompletionListener()
+        calls.clear()
+        val second = p.rotate(first)
+        assertTrue("the frame is redrawn on the new surface: $calls", calls.any { it.startsWith("seekTo@") })
+        assertEquals(0, failures)
+        p.detachSurface(second)
+    }
+
+    @Test fun anEndedClipsPlaySeeksToItsStartThenStarts() {
+        val p = recordingPlayer()
+        shadowOf(created[0]).invokePreparedListener()
+        p.control.start()
+        shadowOf(created[0]).invokeCompletionListener()
+        calls.clear()
+        p.control.start()
+        assertTrue(p.playing)
+        val seek = calls.indexOfFirst { it.startsWith("seekTo@") }
+        val start = calls.indexOfFirst { it.startsWith("start@") }
+        assertTrue("seek to 0 before the start: $calls", seek in 0 until start)
+    }
+
+    @Test fun aPausedClipRepaintsItsFrameOnANewSurface() {
+        val p = recordingPlayer()
+        val first = surface()
+        p.attachSurface(first)
+        shadowOf(created[0]).invokePreparedListener()
+        p.control.start()
+        p.control.pause()
+        calls.clear()
+        p.rotate(first)
+        assertTrue("the paused frame is redrawn: $calls", calls.any { it.startsWith("seekTo@") })
+    }
 }

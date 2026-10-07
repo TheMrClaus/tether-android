@@ -1,8 +1,5 @@
 package com.tether.app.ui.chat
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,15 +15,22 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -54,6 +58,18 @@ internal object VideoSizing {
 
     /** `.chat-tool-media-item { max-height: 320px }` */
     const val MAX_HEIGHT = 320f
+
+    /** The platform controller bar is about this tall (dp): the part of the box's bottom that must be on screen. */
+    const val CONTROLLER_RESERVE = 96f
+
+    /**
+     * Whether the controller (anchored to the box's bottom) can be shown: the box's bottom edge is not
+     * clipped away and at least the controller's height (or the whole box, if shorter) is [visible]
+     * of the [full] box. A box scrolled out of the transcript's viewport must not leave its bar floating
+     * over the header or the composer.
+     */
+    fun controllerVisible(full: Rect, visible: Rect, reservePx: Float): Boolean =
+        visible.height > 0f && visible.bottom >= full.bottom - 1f && visible.height >= minOf(full.height, reservePx) - 1f
 
     data class Box(val width: Float, val height: Float)
 
@@ -91,6 +107,11 @@ internal fun InlineVideo(item: ToolMediaItem, onOpen: () -> Unit) {
     val state = view?.state ?: ClipState.Idle
     val ready = state as? ClipState.Ready
     LaunchedEffect(clip, ready) { if (clip != null && ready != null) clip.noteSize(ready.width, ready.height) }
+    // The platform controller is its own window: it is only shown while the part of the box it sits on is on
+    // screen (the transcript's clip is not applied to it); and the box keeps its edge until a frame is drawn.
+    var controllerAllowed by remember { mutableStateOf(true) }
+    var frameDrawn by remember(view?.player) { mutableStateOf(false) }
+    val reservePx = with(LocalDensity.current) { VideoSizing.CONTROLLER_RESERVE.dp.toPx() }
     BoxWithConstraints {
         val box = VideoSizing.inline(clip?.knownSize, maxWidth.value)
         val shape = RoundedCornerShape(t.radiusMd)
@@ -99,11 +120,19 @@ internal fun InlineVideo(item: ToolMediaItem, onOpen: () -> Unit) {
         Box(
             Modifier
                 .testTag("tool-media-video")
+                .onGloballyPositioned { c ->
+                    controllerAllowed = VideoSizing.controllerVisible(
+                        Rect(c.positionInWindow(), c.size.toSize()),
+                        c.boundsInWindow(),
+                        reservePx,
+                    )
+                }
                 .width(box.width.dp)
                 .then(if (error) Modifier.heightIn(min = box.height.dp) else Modifier.height(box.height.dp))
                 .background(t.graphite, shape)
-                // No frame is drawn (idle, loading, error): graphite is white in the light skin, so an edge.
-                .then(if (ready == null) Modifier.border(1.dp, t.line, shape) else Modifier)
+                // No frame is drawn (idle, loading, error, or a new surface not yet painted): graphite is white
+                // in the light skin, so an edge. With the surface off nothing is awaited.
+                .then(if (ready == null || (!frameDrawn && LocalVideoSurfaceEnabled.current)) Modifier.border(1.dp, t.line, shape) else Modifier)
                 .clip(shape),
         ) {
             Box(
@@ -122,7 +151,11 @@ internal fun InlineVideo(item: ToolMediaItem, onOpen: () -> Unit) {
             ) {
                 val player = view?.player
                 if (player != null && state !is ClipState.Error && LocalVideoSurfaceEnabled.current) {
-                    VideoSurface(player, box.width.dp, box.height.dp, Modifier.fillMaxSize())
+                    VideoSurface(
+                        player, box.width.dp, box.height.dp, Modifier.fillMaxSize(),
+                        controllerAllowed = controllerAllowed,
+                        onFrame = { frameDrawn = it },
+                    )
                 }
                 when (state) {
                     ClipState.Idle -> Box(Modifier.size(44.dp).background(opaqueScrim, CircleShape), contentAlignment = Alignment.Center) {
@@ -182,11 +215,10 @@ internal fun ViewerVideo(item: ToolMediaItem) {
         return
     }
     val view = clip.viewer
-    val activity = LocalContext.current.findHostActivity()
+    // The viewer's player is the registry's: it is released when the viewer is closed or moved to another item
+    // (ToolClipRegistry.openViewer), never by this composable leaving composition (a rotation that switches
+    // shell does that without recreating the activity).
     LaunchedEffect(clip) { view.play() }
-    DisposableEffect(clip) {
-        onDispose { if (activity?.isChangingConfigurations != true) view.release() }
-    }
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val state = view.state
         if (state is ClipState.Error) {
@@ -207,10 +239,4 @@ internal fun ViewerVideo(item: ToolMediaItem) {
         }
         if (ready == null) SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 18.dp, contentDescription = "Loading video")
     }
-}
-
-private tailrec fun Context.findHostActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findHostActivity()
-    else -> null
 }
