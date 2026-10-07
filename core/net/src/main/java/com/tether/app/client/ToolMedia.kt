@@ -92,9 +92,16 @@ interface ToolMediaSource {
  * path that passed [ToolMediaSource.PATH_PATTERN] (no host, query or fragment from the journal is
  * ever used), the request is re-checked to be on that origin before it is sent, and the body is
  * bounded while it streams. Cancelling the caller cancels the socket.
+ *
+ * ta-coik.68: no read timeout. The web plays a clip with a plain `<video src controls>` (chat-tool-render.tsx
+ * :129, :346): a slow or stalled body just waits, and the browser has no timer that gives up. [http] is the
+ * paired client with its default 10 s socket read timeout, which would end a slow clip as "unavailable";
+ * [client] is derived from it with `newBuilder()` (so no-redirect, the credential's interceptors and every other
+ * setting stay) and only its read timeout is 0. A dead connection still ends the call (a socket error is an
+ * error), and cancelling the caller still cancels the socket.
  */
 class HttpToolMedia(
-    private val http: OkHttpClient,
+    http: OkHttpClient,
     private val authority: () -> FilesAuthority,
 ) : ToolMediaSource {
 
@@ -103,6 +110,9 @@ class HttpToolMedia(
             "HttpToolMedia needs a client that never follows redirects (the credential must stay on its origin)"
         }
     }
+
+    /** [http] with the read timeout lifted (see the class comment); everything else is the paired client's. */
+    private val client: OkHttpClient = http.newBuilder().readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS).build()
 
     override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
         val ext = ToolMediaSource.extensionOf(url) ?: return ToolMediaResult.Refused
@@ -114,7 +124,7 @@ class HttpToolMedia(
         val target = paired.origin.newBuilder().encodedPath(url).query(null).fragment(null).build()
         val request = paired.sign(Request.Builder().url(target).header("Accept", ToolMediaSource.CONTENT_TYPE_BY_EXT.getValue(ext))).get().build()
         if (!sameOrigin(request.url, paired.origin) || request.url.encodedPath != url) return ToolMediaResult.Refused
-        val call = http.newCall(request)
+        val call = client.newCall(request)
         return try {
             callCancellably(call) { response -> read(response, ext, maxBytes, sink) }
         } catch (e: CancellationException) {

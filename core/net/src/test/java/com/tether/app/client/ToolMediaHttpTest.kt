@@ -182,6 +182,43 @@ class ToolMediaHttpTest {
         HttpToolMedia(OkHttpClient()) { authority }
     }
 
+    // --- ta-coik.68: the web's <video> has no timer that gives up -------------------------------------
+
+    /** The paired client as production builds it: no redirects, a 10 s-style short read timeout, an interceptor on the credential. */
+    private fun pairedClient(readTimeoutMs: Long) = noRedirects.newBuilder()
+        .readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS)
+        .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("X-Probe", "kept").build()) }
+        .build()
+
+    @Test fun aSlowBodyAndSlowHeadersAreWaitedForNotCutOffByThePairedClientsReadTimeout() = runBlocking {
+        val mp4 = "/api/tool-media/$hash.mp4"
+        val body = ByteArray(2048) { it.toByte() }
+        // Both the answer and then the body take several times the client's 250 ms read timeout.
+        server.enqueue(image(type = "video/mp4", body = body).setHeadersDelay(900, TimeUnit.MILLISECONDS).setBodyDelay(900, TimeUnit.MILLISECONDS))
+        val slow = HttpToolMedia(pairedClient(250)) { authority }
+        val sink = ByteArrayOutputStream()
+        assertEquals(ToolMediaResult.Ok(2048, "video/mp4"), slow.fetch(mp4, 1024 * 1024, sink))
+        assertArrayEquals(body, sink.toByteArray())
+    }
+
+    @Test fun theDerivedClientKeepsNoRedirectTheInterceptorsAndTheRestOfThePairedClient() = runBlocking {
+        val derived = HttpToolMedia(pairedClient(250)) { authority }
+        // The interceptor runs (the credential's), and a redirect is still Blocked, never followed.
+        server.enqueue(image())
+        assertEquals(ToolMediaResult.Ok(300, "image/png"), derived.fetch(png, 1024, ByteArrayOutputStream()))
+        assertEquals("kept", take().getHeader("X-Probe"))
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", elsewhere.url("/x").toString()))
+        assertEquals(ToolMediaResult.Blocked(302), derived.fetch(png, 1024, ByteArrayOutputStream()))
+        assertEquals(0, elsewhere.requestCount)
+    }
+
+    @Test fun aDroppedConnectionIsStillAFailure() = runBlocking {
+        val mp4 = "/api/tool-media/$hash.mp4"
+        server.enqueue(image(type = "video/mp4", body = ByteArray(4096)).setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY))
+        val slow = HttpToolMedia(pairedClient(250)) { authority }
+        assertEquals(ToolMediaResult.Failed(), slow.fetch(mp4, 1024 * 1024, ByteArrayOutputStream()))
+    }
+
     @Test fun theDefaultSourceNeverTouchesTheNetwork() = runBlocking {
         assertEquals(ToolMediaResult.SignedOut, ToolMediaSource.Unavailable.fetch(png, 1024, ByteArrayOutputStream()))
         assertNull(ToolMediaSource.extensionOf("/api/tool-media/$hash.png.png"))
