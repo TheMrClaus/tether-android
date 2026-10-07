@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -225,6 +227,9 @@ private fun StatusLine(text: String, color: Color, tag: String) {
     )
 }
 
+/** The most height the path rows take inside a card; past it they scroll in place (every row stays reachable). */
+internal val GRANT_LIST_MAX_HEIGHT = 400.dp
+
 // --- ApprovalCard -----------------------------------------------------------------------------------
 
 /**
@@ -257,8 +262,10 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     val readPaths = readList.filter { readList.indexOf(it) !in selection.offRead }.distinct()
     val writePaths = writeList.filter { writeList.indexOf(it) !in selection.offWrite }.distinct()
     val network = requested?.network == true && !selection.networkOff
-    // Every requested path is a row, as on the web (the reducer bounds a path to 4096 code points and a list to 64).
+    // Every requested path is a row, as on the web (the reducer bounds a path to 4096 code points and a list to 64);
+    // the rows live in a height-bounded lazy list, so only the visible ones are laid out (the lazy list below).
     val rows = remember(view.request) { requested?.let(::grantRows) }
+    val entries = remember(rows) { rows?.let { grantEntries(it, readList, writeList) }.orEmpty() }
     // The web's "exact" confirmation (chat-view.tsx 90fbb9f :1173, :1270-1279; ta-coik.5): a tick that
     // stands for the complete request, so a path box changing does not clear it. Never saved.
     var confirmed by remember(store, cfp) { mutableStateOf(false) }
@@ -357,25 +364,33 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                 Column(Modifier.fillMaxWidth()) { ToolInputView(view.name, view.input) }
             }
 
-            if (requested != null && rows != null) {
+            if (requested != null) {
                 GrantFieldset {
-                    rows.read.forEach { (path, shown) ->
-                        GrantCheckbox(
-                            checked = readList.indexOf(path) !in selection.offRead,
-                            enabled = !frozen && view.allowsSubset,
-                            onChange = { toggle(read = true, path = path) },
-                            tag = "grant-read",
-                            onBlocked = blocked,
-                        ) { GrantPathText("Read", shown) }
-                    }
-                    rows.write.forEach { (path, shown) ->
-                        GrantCheckbox(
-                            checked = writeList.indexOf(path) !in selection.offWrite,
-                            enabled = !frozen && view.allowsSubset,
-                            onChange = { toggle(read = false, path = path) },
-                            tag = "grant-write",
-                            onBlocked = blocked,
-                        ) { GrantPathText("Write", shown) }
+                    // EVERY path is a row with its full text; the list scrolls inside the card and composes
+                    // only the rows in view (128 rows of 4096 code points would otherwise lay out ~500k+ characters).
+                    if (entries.isNotEmpty()) LazyColumn(Modifier.fillMaxWidth().heightIn(max = GRANT_LIST_MAX_HEIGHT).testTag("grant-paths")) {
+                        itemsIndexed(entries, key = { _, e -> e.key }) { index, e ->
+                            // The gap between PATHS (not between the pieces of one path).
+                            Box(Modifier.padding(top = if (e.piece == 0 && index > 0) t.css.spaceXs else 0.dp)) {
+                                when {
+                                    e.piece > 0 -> GrantPathPiece(e.text)
+                                    e.read -> GrantCheckbox(
+                                        checked = readList.indexOf(e.path) !in selection.offRead,
+                                        enabled = !frozen && view.allowsSubset,
+                                        onChange = { toggle(read = true, path = e.path) },
+                                        tag = "grant-read",
+                                        onBlocked = blocked,
+                                    ) { GrantPathText("Read", e.text) }
+                                    else -> GrantCheckbox(
+                                        checked = writeList.indexOf(e.path) !in selection.offWrite,
+                                        enabled = !frozen && view.allowsSubset,
+                                        onChange = { toggle(read = false, path = e.path) },
+                                        tag = "grant-write",
+                                        onBlocked = blocked,
+                                    ) { GrantPathText("Write", e.text) }
+                                }
+                            }
+                        }
                     }
                     if (requested.network) {
                         GrantCheckbox(
@@ -508,18 +523,42 @@ private fun GrantFieldset(content: @Composable () -> Unit) {
     }
 }
 
+/** One lazy-list entry: a path's first piece (with its checkbox) or a later piece of a long path. */
+internal data class GrantEntry(val read: Boolean, val path: String, val piece: Int, val text: String, val key: String)
+
+/** The flat lazy-list entries for [rows]: reads then writes, a path's pieces consecutive. */
+internal fun grantEntries(rows: GrantRows, readList: List<String>, writeList: List<String>): List<GrantEntry> = buildList {
+    rows.read.forEachIndexed { i, pieces -> pieces.forEachIndexed { p, text -> add(GrantEntry(true, readList[i], p, text, "read:$i:$p")) } }
+    rows.write.forEachIndexed { i, pieces -> pieces.forEachIndexed { p, text -> add(GrantEntry(false, writeList[i], p, text, "write:$i:$p")) } }
+}
+
 @Composable
 private fun GrantPathText(verb: String, shown: String) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
+    val wrapped = remember(shown) { shown.breakAnywhere() }
     Text(
         buildAnnotatedString {
             append("$verb ")
-            // L-3: escaped, cut and quoted for display ([showPath], computed once per request); the grant carries the raw path.
-            withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(shown.breakAnywhere()) }
+            // L-3: escaped, quoted and isolated for display ([displayPathChunks]); the grant carries the raw path.
+            withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(wrapped) }
         },
         style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
         color = t.muted,
+    )
+}
+
+/** A later piece of a long path: the same mono text, indented under the row's label (past the 16dp box and its gap). */
+@Composable
+private fun GrantPathPiece(shown: String) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val wrapped = remember(shown) { shown.breakAnywhere() }
+    Text(
+        buildAnnotatedString { withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(wrapped) } },
+        style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
+        color = t.muted,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp + t.css.spaceSm).testTag("grant-path-piece"),
     )
 }
 

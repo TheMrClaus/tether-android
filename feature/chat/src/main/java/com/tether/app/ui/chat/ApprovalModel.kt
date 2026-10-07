@@ -186,19 +186,58 @@ internal const val RELATIVE_MARKER = " (contains relative segments (..))"
  *   part of the sentence ("/x; no network access", `/fake”; network access; read “/y`) nor let RTL
  *   letters reorder the separators around it.
  */
-internal fun displayPath(path: String): String {
+internal fun displayPath(path: String): String = displayPathChunks(path, Int.MAX_VALUE).single()
+
+/** ta-57l: the card's lazy list draws a long path in pieces of at most this many characters (see [displayPathChunks]). */
+internal const val GRANT_CHUNK_CHARS = 1_200
+
+/**
+ * [displayPath] in pieces, so a row of 36,000 escaped characters (4096 tag characters) is laid out a
+ * piece at a time, only as it scrolls into view. Every piece is cut at an escape boundary and is its own
+ * balanced LRI…PDI island (a right-to-left letter at the start of a piece cannot flip it); the pieces
+ * hold exactly the text of [displayPath] (quotes, escapes, "…") and a relative path's [RELATIVE_MARKER]
+ * ends the last one. With [chunk] = Int.MAX_VALUE the one piece is [displayPath] itself.
+ */
+internal fun displayPathChunks(path: String, chunk: Int = GRANT_CHUNK_CHARS): List<String> {
     val cps = path.codePoints().toArray()
-    if (!hasRelativeSegment(path)) {
-        // Round 5/6: a plain path is cut by CODE POINTS in the middle (its tail decides the scope and
-        // stays); the escaped result is bounded by DISPLAY_PATH_MAX escapes (at most ~10 chars each).
-        val shown = if (cps.size <= DISPLAY_PATH_MAX) {
-            render(cps, 0, cps.size)
-        } else {
-            render(cps, 0, DISPLAY_PATH_HEAD) + "…" + render(cps, cps.size - DISPLAY_PATH_TAIL, cps.size)
-        }
-        return "$LRI“$shown”$PDI"
+    val relative = hasRelativeSegment(path)
+    val body = ArrayList<String>(cps.size + 3)
+    body += "“"
+    if (relative || cps.size <= DISPLAY_PATH_MAX) {
+        // A relative path is NEVER cut (the segments decide where it really points).
+        body += escapeTokens(cps, 0, cps.size)
+    } else {
+        // Round 5/6: a plain path is cut by CODE POINTS in the middle (its tail decides the scope and stays).
+        body += escapeTokens(cps, 0, DISPLAY_PATH_HEAD)
+        body += "…"
+        body += escapeTokens(cps, cps.size - DISPLAY_PATH_TAIL, cps.size)
     }
-    return "$LRI“${render(cps, 0, cps.size)}”$PDI$RELATIVE_MARKER"
+    body += "”"
+    val pieces = ArrayList<String>()
+    val sb = StringBuilder()
+    for (t in body) {
+        if (sb.isNotEmpty() && sb.length + t.length > chunk) {
+            pieces += sb.toString()
+            sb.setLength(0)
+        }
+        sb.append(t)
+    }
+    pieces += sb.toString()
+    return pieces.mapIndexed { i, piece -> "$LRI$piece$PDI" + if (relative && i == pieces.lastIndex) RELATIVE_MARKER else "" }
+}
+
+/**
+ * The grant card's rows, each path as the pieces [displayPathChunks] makes of it (read, then write, in
+ * request order). EVERY requested path is a row with its full text; the only bounds are the reducer's own
+ * (4096 code points a path, 64 a list), which the web enforces too.
+ */
+@Immutable
+internal data class GrantRows(val read: List<List<String>>, val write: List<List<String>>)
+
+internal fun grantRows(requested: RequestedPermissionsView): GrantRows {
+    val cache = HashMap<String, List<String>>()
+    fun take(list: List<String>) = list.map { path -> cache.getOrPut(path) { displayPathChunks(path) } }
+    return GrantRows(take(requested.read), take(requested.write))
 }
 
 /** Round 7/8 (context lines): server text escaped like a path, isolated FSI…PDI, at most [max] escaped characters then a real "…". */
@@ -240,7 +279,6 @@ private fun isRelativeSegment(segment: String): Boolean {
     return trimmed.isNotEmpty() && trimmed.all { it == '.' }
 }
 
-private fun render(cps: IntArray, from: Int, to: Int): String = escapeTokens(cps, from, to).joinToString("")
 
 private const val HEX = "0123456789ABCDEF"
 
@@ -331,26 +369,6 @@ internal fun icuDefaultIgnorable(cp: Int): Boolean? =
     runCatching { android.icu.lang.UCharacter.hasBinaryProperty(cp, android.icu.lang.UProperty.DEFAULT_IGNORABLE_CODE_POINT) }.getOrNull()
 
 private fun isDefaultIgnorable(cp: Int): Boolean = cp in IGNORABLE_FALLBACK || icuDefaultIgnorable(cp) == true
-
-/**
- * The grant card's rows as shown: the shown text of each requested path, in request order. EVERY
- * requested path is a row (the web lists them all); the only bounds are the reducer's own (a path of
- * at most 4096 code points, at most 64 paths a list), which the web enforces too.
- */
-@Immutable
-internal data class GrantRows(
-    val read: List<Pair<String, String>>,
-    val write: List<Pair<String, String>>,
-) {
-    /** Raw path -> its shown text (for the confirmation's words). */
-    val shown: Map<String, String> by lazy { (read + write).toMap() }
-}
-
-internal fun grantRows(requested: RequestedPermissionsView): GrantRows {
-    val cache = HashMap<String, String>()
-    fun take(list: List<String>): List<Pair<String, String>> = list.map { path -> path to cache.getOrPut(path) { displayPath(path) } }
-    return GrantRows(take(requested.read), take(requested.write))
-}
 
 /** What one choice key sends: its id and (for a permission-granting choice) the grant, or null when it is disabled. */
 internal data class ApprovalPick(val choiceId: String, val granted: GrantedPermissions?)

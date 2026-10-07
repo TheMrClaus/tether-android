@@ -5,7 +5,9 @@ import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.reduce.ev
 import com.tether.app.protocol.reduce.foldTree
 import com.tether.app.protocol.model.LegacyProjectionAdapter
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -361,18 +363,54 @@ class ApprovalModelTest {
         assertEquals("abc", denialTarget(com.tether.app.protocol.tree.JsStr("abc"))!!.value)
     }
 
-    @Test fun everyRequestedPathIsARowWhateverItsLength() {
-        // Past the old 1024-escaped-character cap and the old 16,000-character budget: all 128 rows.
+    @Test fun everyRequestedPathReachesTheViewWholeWhateverItsLength() {
+        // Past the old 1024-escaped-character cap and the old 16,000-character budget: all 128 paths, raw.
         val read = (0 until 64).map { "/r$it/../" + tag.repeat(4_000) }
         val write = (0 until 64).map { "/w$it/" + tag.repeat(4_000) }
-        val rows = grantRows(requested(read, write))
-        assertEquals(read, rows.read.map { it.first })
-        assertEquals(write, rows.write.map { it.first })
-        // A relative path is whole (no elision); a plain one keeps the usual head...tail.
-        assertTrue(!rows.read.first().second.contains("…"))
-        assertEquals(displayPath(read[0]), rows.shown[read[0]])
-        assertEquals(displayPath(write[5]), rows.shown[write[5]])
-        assertEquals(displayPath("/srv/data/file-3"), grantRows(requested(listOf("/srv/data/file-3"))).shown["/srv/data/file-3"])
+        val tree = foldTree(com.tether.app.protocol.reduce.freshTree(),
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k1") },
+            ev("approval_request", "t1", ts = 1) {
+                put("requestId", "r"); put("toolId", "x"); put("name", "permissions")
+                putJsonObject("metadata") {
+                    put("provider", "codex"); put("kind", "permissions")
+                    putJsonObject("requestedPermissions") {
+                        putJsonObject("fileSystem") {
+                            putJsonArray("read") { read.forEach { add(it) } }
+                            putJsonArray("write") { write.forEach { add(it) } }
+                        }
+                    }
+                }
+            },
+        )
+        val view = pendingApprovals(tree).single().requested!!
+        assertEquals(read, view.read)
+        assertEquals(write, view.write)
+        // A relative path is shown whole (no elision); a plain one keeps the usual head...tail.
+        assertTrue(!displayPath(read[0]).contains("…"))
+        assertTrue(displayPath(write[5]).contains("…"))
+    }
+
+    @Test fun aPathInPiecesHoldsExactlyTheTextOfDisplayPath() {
+        val tag = "\uDB40\uDC41"
+        for (path in listOf("/a/b", "/" + "x".repeat(500), "../" + "a".repeat(4_000) + "/../etc", "/p/../" + tag.repeat(4_000), "/p/" + tag.repeat(4_000))) {
+            val whole = displayPath(path)
+            assertEquals(listOf(whole), displayPathChunks(path, Int.MAX_VALUE))
+            val pieces = displayPathChunks(path)
+            // Strip each piece's own island marks and the relative marker: the concatenation is the whole.
+            val body = pieces.joinToString("") { it.removePrefix("$LRI").removeSuffix(RELATIVE_MARKER).removeSuffix("$PDI") }
+            assertEquals(whole.removePrefix("$LRI").removeSuffix(RELATIVE_MARKER).removeSuffix("$PDI"), body)
+            // Each piece is its own balanced island, cut at an escape boundary, within the bound.
+            for (p in pieces) {
+                assertTrue(p.startsWith("$LRI") && (p.endsWith("$PDI") || p.endsWith("$PDI$RELATIVE_MARKER")))
+                assertTrue(p.length <= GRANT_CHUNK_CHARS + 2 + RELATIVE_MARKER.length + 12)
+            }
+            if (hasRelativeSegment(path)) assertTrue(pieces.last().endsWith(RELATIVE_MARKER))
+        }
+        assertEquals(1, displayPathChunks("/srv/data/file-1").size)
+        assertTrue(displayPathChunks("/" + tag.repeat(4_000)).size <= 2) // plain: elided to 160 escapes (1,440 characters)
+        assertTrue(displayPathChunks("/p/../" + tag.repeat(4_000)).size > 25) // relative: whole, ~36k characters
+        // No escape is split across pieces.
+        for (p in displayPathChunks("/p/../" + tag.repeat(4_000))) assertTrue(p, p.removePrefix("$LRI").removeSuffix("$PDI").let { it.replace("\\u{E0041}", "").replace("“", "").replace("”", "").replace("/p/../", "").isEmpty() || it.replace("\\u{E0041}", "").isEmpty() })
     }
 
     @Test fun aRelativePathIsNeverCutHoweverLong() {

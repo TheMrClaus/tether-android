@@ -25,6 +25,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -1298,49 +1299,72 @@ class ApprovalCardBehaviourTest {
         return (0 until 64).map { path("r", it) } to (0 until 64).map { path("w", it) }
     }
 
-    /** Every row of the card is drawn: [read] + [write] checkboxes, none summarised away, no refusal line. */
-    private fun assertEveryRowShown(read: Int, write: Int) {
-        rule.onAllNodesWithTag("grant-read").assertCountEquals(read)
-        rule.onAllNodesWithTag("grant-write").assertCountEquals(write)
+    /** The text of every composed path piece (the break-anywhere joiners are layout, not text). */
+    private fun shownRows(): List<String> = listOf("grant-read", "grant-write", "grant-path-piece").flatMap { tag -> rule.onAllNodesWithTag(tag).fetchSemanticsNodes() }
+        .map { n -> n.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text }.filterNot { it == '\u2060' || it == '\u200B' } }
+
+    /** The lazy list's entries of the shown card: every piece of every path, reads first (the card's own [grantRows]). */
+    private fun pieces(): List<String> = grantRows(pendingApprovals(fixture.tree).single().requested!!).let { r -> (r.read + r.write).flatten() }
+
+    /**
+     * Entry [index] of the lazy path list is reachable: scroll the list to it and its FULL text (one piece,
+     * quotes and escapes whole) is composed. No refusal and no "not shown" line anywhere.
+     */
+    private fun assertEntryReachable(index: Int, all: List<String> = pieces()) {
+        rule.onNodeWithTag("grant-paths").performScrollToIndex(index)
+        rule.waitForIdle()
+        assertTrue("entry $index not composed with its full text", shownRows().any { it.contains(all[index]) })
         rule.onAllNodesWithTag("grant-hidden").assertCountEquals(0)
         rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
     }
 
     /**
      * The METRIC (W4-A, ta-57l): wall-clock milliseconds in Robolectric from handing the card to the
-     * transcript until every one of its [read] + [write] rows is composed and the confirmation is in
-     * view (System.nanoTime around show() + scrollTo()), asserted under [maxMs] (5,000 ms). Then the card is used:
-     * the confirmation is ticked and "Allow all" sends the request as it came.
+     * transcript until the path list is on screen and its FIRST and LAST entries (the last piece of the
+     * 64th write path) have been scrolled to and composed with their full text, plus the confirmation in
+     * view (System.nanoTime around show() + scrollTo() + the two entry scrolls), asserted under
+     * 5,000 ms. Then the card is used: the confirmation is ticked and "Allow all" sends the request as it
+     * came (every raw path).
      */
-    private fun assertWorstCardDrawsAndGrants(read: List<String>, write: List<String>, label: String, maxMs: Long = 5_000) {
+    private fun assertWorstCardDrawsAndGrants(read: List<String>, write: List<String>, label: String) {
         val started = System.nanoTime()
         show(permissionCard(read, write))
         scrollTo("grant-confirm")
-        assertEveryRowShown(read.size, write.size)
+        val all = pieces()
+        assertEntryReachable(all.size - 1, all)
+        assertEntryReachable(0, all)
         val ms = (System.nanoTime() - started) / 1_000_000
-        println("ta-57l: $label (64+64 x 4096 code points, every row drawn) rendered in $ms ms")
-        assertTrue("$label rendered in $ms ms (bound $maxMs)", ms < maxMs)
+        println("ta-57l: $label (64+64 x 4096 code points, ${all.size} lazy entries, first and last composed) in $ms ms")
+        assertTrue("$label took $ms ms (bound 5000)", ms < 5_000)
         rule.onNodeWithTag("grant-confirm").performClick()
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("Allow all", ignoreCase = true))
         rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(1, calls.size)
         assertTrue(calls.single().take(120), calls.single().startsWith("approval:req-b:all:"))
-        // The raw last path of each list went out whole.
-        assertTrue(calls.single().contains(read.last()) && calls.single().contains(write.last()))
+        // The raw paths went out whole, first and last of each list.
+        assertTrue(calls.single().contains(read.first()) && calls.single().contains(read.last()))
+        assertTrue(calls.single().contains(write.first()) && calls.single().contains(write.last()))
     }
 
-    @Test fun theWorstRelativeCardDrawsEveryRowQuicklyAndCanGrant() {
+    @Test fun theWorstRelativeCardDrawsQuicklyAndCanGrant() {
         val (read, write) = worstPaths(relative = true)
-        // OPEN (ta-57l receipt): a relative path is drawn whole, so 128 x 4096 drawn characters (each with
-        // its break-anywhere joiners) measure ~10.5 s alone in Robolectric, over the brief's 5 s. The bound
-        // here only proves every row draws and grants (Compose idles); it is NOT the 5 s bar.
-        assertWorstCardDrawsAndGrants(read, write, "worst relative card", maxMs = 60_000)
+        assertWorstCardDrawsAndGrants(read, write, "worst relative card")
     }
 
-    @Test fun theWorstPlainCardDrawsEveryRowQuicklyAndCanGrant() {
+    @Test fun theWorstPlainCardDrawsQuicklyAndCanGrant() {
         val (read, write) = worstPaths(relative = false)
         assertWorstCardDrawsAndGrants(read, write, "worst plain card")
+    }
+
+    @Test fun theEscapeHeavyRelativeCardDrawsQuicklyAndCanGrant() {
+        // 4096 tag characters a path: each is a 9-character \u{E0041} escape (~36k drawn characters a row, whole).
+        val tag = tagChar
+        fun path(side: String, i: Int): String {
+            val head = "/$side$i/../"
+            return head + tag.repeat(4_096 - head.length)
+        }
+        assertWorstCardDrawsAndGrants((0 until 64).map { path("r", it) }, (0 until 64).map { path("w", it) }, "escape-heavy relative card")
     }
 
     @Test fun aLongRelativePathIsShownWholeAndGrantsLikeAnyOther() {
@@ -1348,8 +1372,9 @@ class ApprovalCardBehaviourTest {
         val path = "../" + "a".repeat(3_000) + "/../etc"
         show(permissionCard(listOf("/srv/a", path), emptyList()))
         scrollTo("grant-confirm")
-        assertEveryRowShown(2, 0)
-        rule.onNodeWithText(displayPath(path).breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
+        for (i in pieces().indices) assertEntryReachable(i)
+        assertTrue(pieces().size > 2) // 3,000 characters: several pieces, every one reachable above
+        rule.onNodeWithTag("grant-paths").performScrollToIndex(0)
         rule.onAllNodesWithTag("grant-read").onFirst().assertIsEnabled()
         rule.onNodeWithTag("grant-confirm").assertIsEnabled().performClick()
         rule.onNodeWithText("ALLOW ALL", ignoreCase = true).performScrollTo().assertIsEnabled().performClick()
@@ -1361,7 +1386,8 @@ class ApprovalCardBehaviourTest {
         val path = "../" + "a".repeat(3_000)
         show(permissionCard(listOf("/srv/a", path), listOf("/w/b")))
         scrollTo("grant-confirm")
-        rule.onAllNodesWithTag("grant-read")[0].performScrollTo().performClick() // untick /srv/a
+        rule.onNodeWithTag("grant-paths").performScrollToIndex(0)
+        rule.onAllNodesWithTag("grant-read")[0].performClick() // untick /srv/a
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performScrollTo().assertIsEnabled().performClick()
         rule.waitForIdle()
         val call = calls.single()
@@ -1371,7 +1397,7 @@ class ApprovalCardBehaviourTest {
     @Test fun withoutChoicesALongRelativePathStillApproves() {
         show(permissionCard(listOf("/srv/a", "../" + "a".repeat(3_000)), emptyList(), choices = false))
         scrollTo("approval-allow")
-        assertEveryRowShown(2, 0)
+        for (i in pieces().indices) assertEntryReachable(i)
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:req-b:allow"), calls)
@@ -1381,7 +1407,7 @@ class ApprovalCardBehaviourTest {
         val (read, write) = worstPaths(relative = false)
         show(permissionCard(read, write, choices = false))
         scrollTo("approval-allow")
-        assertEveryRowShown(64, 64)
+        assertEntryReachable(127)
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:req-b:allow"), calls)
@@ -1392,7 +1418,8 @@ class ApprovalCardBehaviourTest {
         val write = (0 until 64).map { "/w/out/report-$it" }
         show(permissionCard(read, write))
         scrollTo("grant-confirm")
-        assertEveryRowShown(64, 64)
+        assertEquals(128, pieces().size) // one piece a short path
+        for (i in 0 until 128) assertEntryReachable(i)
         rule.onNodeWithTag("grant-confirm").performClick()
         // Studio's roomier card puts the choice keys below the confirmation's fold: bring them in.
         rule.onNodeWithText("ALLOW ALL", ignoreCase = true).performScrollTo().assertIsEnabled().performClick()
