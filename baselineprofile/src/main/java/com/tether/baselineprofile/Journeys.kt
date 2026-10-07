@@ -162,10 +162,33 @@ private fun MacrobenchmarkScope.typeInto(desc: String, value: String, secret: Bo
     fail("could not type into \"$desc\": $lastProblem")
 }
 
+/** Anything only a signed-in app shows: the top bar's brand link / drawer key / tools menu, or the chat composer. */
+private val SIGNED_IN_MARKER = By.desc(
+    Pattern.compile("Tether \u2014 Overview|Open sessions|Menu: navigation and tools.*|More tools.*|Message the agent"),
+)
+
 private fun MacrobenchmarkScope.signIn(sign: SignInArgs) {
-    if (device.wait(Until.hasObject(By.desc("Server URL")), WAIT_MS) != true) {
-        fail("sign-in screen not shown (is the app already signed in? clear its data first)")
+    // BaselineProfileRule repeats the journey and app data is not cleared between iterations, so the app may
+    // already be signed in (on the transcript of the session the last iteration opened). Wait for either the
+    // sign-in screen or a signed-in marker; if signed in, go back to Overview (the brand link is on every
+    // shell) so openSession starts from a known place, and skip sign-in.
+    val screenDeadline = System.currentTimeMillis() + WAIT_MS
+    var onSignIn = false
+    var signedIn = false
+    while (!onSignIn && !signedIn && System.currentTimeMillis() < screenDeadline) {
+        onSignIn = device.wait(Until.hasObject(By.desc("Server URL")), 500L)
+        if (!onSignIn) {
+            signedIn = device.hasObject(SIGNED_IN_MARKER)
+            if (!signedIn) allowPermissionDialog()
+        }
     }
+    if (signedIn) {
+        device.findObject(By.desc("Tether \u2014 Overview"))?.click()
+        device.waitForIdle()
+        Log.i(TAG, "already signed in: skipped sign-in")
+        return
+    }
+    if (!onSignIn) fail("neither the sign-in screen nor a signed-in marker (shell / transcript) is shown within $WAIT_MS ms")
     typeInto("Server URL", sign.serverUrl, secret = false)
     // The soft keyboard now covers the lower form, and the screen fetches the server's sign-in methods
     // (debounced) before the password field exists: typeInto closes the keyboard and scroll-searches.
