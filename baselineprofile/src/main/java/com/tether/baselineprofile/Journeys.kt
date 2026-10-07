@@ -31,10 +31,35 @@ fun signInArgs(): SignInArgs? {
     return if (url.isNotEmpty() && password.isNotEmpty()) SignInArgs(url, password) else null
 }
 
-/** Cold start: the launcher activity drawn and the first frame reported (also the signed-out journey's root). */
+/**
+ * Cold start: the launcher activity drawn and the first frame reported (also the signed-out journey's root).
+ * The notification permission is granted first (a no-op once granted, and `pm clear` between iterations
+ * revokes it again), so the system "Allow Tether to send you notifications?" dialog the shell raises
+ * after sign-in never covers the screen the journeys wait on.
+ */
 fun MacrobenchmarkScope.coldStart() {
     pressHome()
+    grantNotifications()
     startActivityAndWait()
+}
+
+/** `pm grant` answers on stdout rather than throwing (e.g. an unknown package), so the output is only logged. */
+private fun MacrobenchmarkScope.grantNotifications() {
+    val out = device.executeShellCommand("pm grant $TARGET_PACKAGE android.permission.POST_NOTIFICATIONS").trim()
+    if (out.isNotEmpty()) Log.i(TAG, "pm grant POST_NOTIFICATIONS: $out")
+}
+
+/** The permission controller's Allow button (resource id on AOSP/Google builds, text otherwise); not "Don\u2019t allow". */
+private val ALLOW_BUTTON = By.res("com.android.permissioncontroller", "permission_allow_button")
+private val ALLOW_BUTTON_BY_TEXT = By.text(Pattern.compile("Allow", Pattern.CASE_INSENSITIVE))
+
+/** Taps "Allow" when a runtime-permission dialog is up; true if it did. */
+private fun MacrobenchmarkScope.allowPermissionDialog(): Boolean {
+    val allow = device.findObject(ALLOW_BUTTON) ?: device.findObject(ALLOW_BUTTON_BY_TEXT) ?: return false
+    allow.click()
+    device.waitForIdle()
+    Log.i(TAG, "tapped Allow on a permission dialog")
+    return true
 }
 
 /**
@@ -80,11 +105,17 @@ private fun MacrobenchmarkScope.signIn(sign: SignInArgs) {
     val unlock = device.wait(Until.findObject(By.desc("Unlock Tether")), WAIT_MS)
         ?: error("no 'Unlock Tether' button")
     unlock.click()
-    // Signed in once the shell's sessions affordance (phone Topbar) or an overview card shows.
-    val landed = device.wait(
-        Until.hasObject(By.desc(Pattern.compile("Open sessions|Open session: .*"))),
-        WAIT_MS * 2,
-    )
+    // Signed in once the shell's top bar shows. Its brand link ("Tether — Overview", Topbar.kt BrandLink) is
+    // on every layout; "Open sessions" (drawer key, narrow only) and the Overview cards are not on all of
+    // them. A permission dialog over the shell is dismissed while waiting (the grant above should make that
+    // rare; this is the fallback).
+    val shell = By.desc(Pattern.compile("Tether \u2014 Overview|Open sessions|Open session: .*"))
+    val deadline = System.currentTimeMillis() + WAIT_MS * 2
+    var landed = false
+    while (!landed && System.currentTimeMillis() < deadline) {
+        landed = device.wait(Until.hasObject(shell), 500L)
+        if (!landed) allowPermissionDialog()
+    }
     check(landed) { "sign-in did not reach the shell within ${WAIT_MS * 2} ms" }
     Log.i(TAG, "signed in")
 }
