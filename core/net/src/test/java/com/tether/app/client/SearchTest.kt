@@ -189,15 +189,32 @@ class SearchTest {
         assertEquals(emptyList<JsonObject>(), h.framesUntilBarrier())
     }
 
-    @Test fun anUnsentSearchSaysSoAndIsNotPending() {
+    @Test fun anUnsentSearchSaysSoAndStaysPendingAsOnTheWeb() {
         h.newClient(configured = false)
         runBlocking {
             val toast = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { withTimeout(20_000) { h.client.errors.first() } }
             assertFalse(h.client.runGlobalSearch(GlobalSearchParams("parity")))
             assertEquals(NodeRegistryRules.NOT_SENT_MESSAGE, toast.await())
         }
-        assertEquals(GlobalSearchResults(requestId = 1, query = "parity", pending = false), h.client.globalSearchResults.value)
+        // Aligned with the web (use-tether.ts:1472-1481 at 29537e0): the searching state stays set.
+        assertEquals(GlobalSearchResults(requestId = 1, query = "parity", pending = true), h.client.globalSearchResults.value)
         assertFalse(h.client.search("/w", "parity"))
+    }
+
+    @Test fun anUnsentSearchKeepsThePreviousResultsAndShowsTheSearchingState() {
+        // use-tether.ts:1472-1473: setGlobalSearchResults(prev => ({...prev, requestId, query, pending: true}))
+        // runs before send(); a refused frame changes nothing after it.
+        var open = true
+        val sync = SearchSync { open }
+        val hit = com.tether.app.protocol.SearchHit("h")
+        sync.runGlobalSearch(GlobalSearchParams("parity"))
+        sync.onFrame(ServerMessage.GlobalSearchResults(1, "parity", listOf(hit)))
+        open = false
+        assertFalse(sync.runGlobalSearch(GlobalSearchParams("parity two")))
+        assertEquals(
+            GlobalSearchResults(requestId = 2, query = "parity two", hits = listOf(hit), pending = true),
+            sync.globalSearchResults.value,
+        )
     }
 
     // ---- SearchSync alone ----------------------------------------------------------------------

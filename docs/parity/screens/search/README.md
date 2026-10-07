@@ -65,9 +65,6 @@ Machine and Studio. Every value comes from `globals.css` 5757-5905 / 11810 and `
   its text.
 - **A find jump stops the follow mode.** Otherwise the next streamed delta would pull the view off
   the match. The web's follow mode ignores programmatic scrolls.
-- **An unsent global search is not pending.** The web keeps the spinner running forever for a
-  request that never left. Both show the web's "The secure link is reconnecting. Your input was
-  not sent." toast.
 - **The IME's Search key** puts the keyboard away in the modal (the web has no Enter action) and
   goes to the next match in the find bar (the web's Enter).
 - **No backdrop blur** (`backdrop-filter: blur(2px)`). The house rules forbid glass. The mark's

@@ -70,8 +70,9 @@ internal class SearchSync(private val send: (ClientMessage) -> Boolean) {
     /**
      * use-tether.ts:1406-1430. Every call takes a NEW request id, so an in-flight reply for an
      * older query / filter set can never land ([onFrame] drops it). A too-short query clears the
-     * results. The web leaves `pending` set when its socket refuses the frame (a spinner that
-     * never stops); here an unsent request is not pending. Returns whether a frame went out.
+     * results. As on the web (use-tether.ts:1472-1481 at 29537e0), a frame the socket refuses leaves
+     * the previous hits in place with `pending` set (the searching state), and [send] raises the
+     * not-sent message (use-tether.ts:350-353). Returns whether a frame went out.
      */
     fun runGlobalSearch(params: GlobalSearchParams): Boolean {
         val query = jsTrim(params.query)
@@ -84,7 +85,7 @@ internal class SearchSync(private val send: (ClientMessage) -> Boolean) {
             globalSearchResults.value = globalSearchResults.value.copy(requestId = id, query = query, pending = true)
             id
         }
-        val sent = send(
+        return send(
             ClientMessage.GlobalSearch(
                 requestId = requestId,
                 query = query,
@@ -94,13 +95,6 @@ internal class SearchSync(private val send: (ClientMessage) -> Boolean) {
                 cwd = params.cwd?.takeIf { it.isNotEmpty() },
             ),
         )
-        if (!sent) {
-            synchronized(this) {
-                val current = globalSearchResults.value
-                if (current.requestId == requestId) globalSearchResults.value = current.copy(pending = false)
-            }
-        }
-        return sent
     }
 
     /** use-tether.ts:1432-1435: closing the modal invalidates any in-flight reply. */
