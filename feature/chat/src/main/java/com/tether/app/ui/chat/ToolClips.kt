@@ -530,6 +530,8 @@ class ToolClipRegistry(
     private val stallMs: Long = MediaLimits.VIDEO_STALL_MS,
     private val newPlayer: () -> MediaPlayer = { MediaPlayer() },
     private val makePlayer: ((PlayableSource, () -> Unit) -> VideoPlayer)? = null,
+    /** Where each clip's platform player is called (a seam for tests: inline); null is a thread of its own. */
+    private val playerThread: java.util.concurrent.Executor? = null,
 ) {
     private val clips = HashMap<String, ToolClip>()
 
@@ -566,7 +568,7 @@ class ToolClipRegistry(
     }
 
     private val players: ClipPlayerFactory = makePlayer ?: { src, failed ->
-        MediaVideoPlayer(src, main, failed, playWhenReady = true, newPlayer = newPlayer)
+        MediaVideoPlayer(src, main, failed, playWhenReady = true, newPlayer = newPlayer, playerThread = playerThread)
     }
 
     /** Null when [src] is not an mp4 tool-media path (nothing else is ever requested). */

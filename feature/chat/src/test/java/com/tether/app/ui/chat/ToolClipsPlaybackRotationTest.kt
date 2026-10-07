@@ -98,6 +98,8 @@ class ToolClipsPlaybackRotationTest {
                                     ToolClipRegistry(
                                         server, RuntimeEnvironment.getApplication().cacheDir, { ClipFixtures.ORIGIN }, scope,
                                         newPlayer = { Platform().also { platforms += it } },
+                                        // Inline: the test moves the modelled platform's place itself, between calls.
+                                        playerThread = { it.run() },
                                     )
                                 },
                                 identity = identity,
