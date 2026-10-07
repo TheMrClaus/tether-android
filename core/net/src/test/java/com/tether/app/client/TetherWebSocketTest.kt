@@ -18,6 +18,8 @@ import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import javax.net.ServerSocketFactory
+import javax.net.SocketFactory
 import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLPeerUnverifiedException
 import okhttp3.CertificatePinner
@@ -800,14 +802,49 @@ class TetherWebSocketTest {
         }
     }
 
+    /**
+     * ta-xy3q: sockets with a fixed, large receive buffer, for a test that moves tens of MiB over
+     * loopback. The kernel's receive-window autotuning on loopback (a 64 KiB MTU, so a 32 KiB MSS) can
+     * pin a fresh connection's window under one MSS (`ss`: `rwnd_limited` 100%, window 24 KiB); the
+     * sender then moves about 120 KB/s, so 20 MiB takes minutes, in about one run in four. That is the
+     * host's TCP, not this socket's framing or writes (the writer was parked in the socket write, the
+     * server's reader in its read, bytes arriving all along). A buffer fixed before the connection
+     * opens takes the connection out of autotuning, so the window is open from the first byte.
+     */
+    private class BigReceiveWindow(private val bytes: Int = 8 * 1024 * 1024) {
+        val sockets: SocketFactory = object : SocketFactory() {
+            private val delegate = getDefault()
+            private fun <S : Socket> S.sized(): S = apply { receiveBufferSize = bytes }
+            override fun createSocket(): Socket = delegate.createSocket().sized()
+            override fun createSocket(host: String, port: Int): Socket = delegate.createSocket(host, port).sized()
+            override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket =
+                delegate.createSocket(host, port, localHost, localPort).sized()
+            override fun createSocket(host: InetAddress, port: Int): Socket = delegate.createSocket(host, port).sized()
+            override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): Socket =
+                delegate.createSocket(address, port, localAddress, localPort).sized()
+        }
+        val serverSockets: ServerSocketFactory = object : ServerSocketFactory() {
+            private val delegate = getDefault()
+            private fun ServerSocket.sized(): ServerSocket = apply { receiveBufferSize = bytes }
+            override fun createServerSocket(): ServerSocket = delegate.createServerSocket().sized()
+            override fun createServerSocket(port: Int): ServerSocket = delegate.createServerSocket().sized().apply { bind(java.net.InetSocketAddress(port)) }
+            override fun createServerSocket(port: Int, backlog: Int): ServerSocket =
+                delegate.createServerSocket().sized().apply { bind(java.net.InetSocketAddress(port), backlog) }
+            override fun createServerSocket(port: Int, backlog: Int, ifAddress: InetAddress): ServerSocket =
+                delegate.createServerSocket().sized().apply { bind(java.net.InetSocketAddress(ifAddress, port), backlog) }
+        }
+    }
+
     @Test
     fun aMessagePastOkHttpsOld16MiBRoundTripsThroughAConformingServer() {
+        val window = BigReceiveWindow()
         val server = mockServer()
+        server.serverSocketFactory = window.serverSockets
         val side = ServerSide()
         server.enqueue(MockResponse().withWebSocketUpgrade(side))
         server.start()
         val events = Recorder()
-        val ws = connect(server.url("/ws").toString(), events)
+        val ws = connect(server.url("/ws").toString(), events, client = OkHttpClient.Builder().socketFactory(window.sockets).build())
         assertEquals("open", events.next())
         val serverSocket = side.sockets.poll(20, TimeUnit.SECONDS)!!
         val up = text(20 * 1024 * 1024, 3)
