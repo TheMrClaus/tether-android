@@ -41,7 +41,11 @@ class PushLogoutForgetFirstTest {
         }
     }
 
-    private fun controller(scope: CoroutineScope, tokenProvider: FirebaseTokenProvider) = PushController(
+    private fun controller(
+        scope: CoroutineScope,
+        tokenProvider: FirebaseTokenProvider,
+        firebase: FirebaseInitializer = recordingFirebase,
+    ) = PushController(
         app = ApplicationProvider.getApplicationContext<Application>(),
         settings = InMemorySettings(),
         prefs = object : PushPrefs {
@@ -53,7 +57,7 @@ class PushLogoutForgetFirstTest {
         httpClient = OkHttpClient(),
         scope = scope,
         tokenProvider = tokenProvider,
-        firebase = recordingFirebase,
+        firebase = firebase,
         registrarFactory = {
             object : PushRegistrar(InMemorySettings(), OkHttpClient(), FirebaseTokenProvider { null }) {
                 override suspend fun unregister(baseUrl: String, credential: Credential): PushRegistrarResult {
@@ -98,6 +102,27 @@ class PushLogoutForgetFirstTest {
             }
         }
         assertTrue("a failed delete is best-effort", logoutHook(controller(backgroundScope, failingDelete)))
+        assertEquals(listOf("server-delete", "forget", "token-delete"), events)
+    }
+
+    @Test
+    fun aThrowingForgetStillDeletesTheToken() = runTest {
+        // ta-6z4: forget() has its own guard, so its failure cannot skip the token delete.
+        val throwingForget = object : FirebaseInitializer {
+            override suspend fun ensure(serverConfig: FirebaseClientConfig?, origin: String) = FirebaseSetup.Ready
+            override suspend fun forget() {
+                events += "forget"
+                throw IllegalStateException("fake Firebase forget failure")
+            }
+        }
+        val recordingDelete = object : FirebaseTokenProvider {
+            override suspend fun token(): String? = null
+            override suspend fun delete() {
+                events += "token-delete"
+            }
+        }
+        val controller = controller(backgroundScope, recordingDelete, throwingForget)
+        assertTrue("a failed forget is best-effort", logoutHook(controller))
         assertEquals(listOf("server-delete", "forget", "token-delete"), events)
     }
 

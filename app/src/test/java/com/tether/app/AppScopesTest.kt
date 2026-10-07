@@ -72,4 +72,25 @@ class AppScopesTest {
         appScope.cancel()
         assertFalse(pushScope.isActive)
     }
+
+    @Test
+    fun theProcessWiringHandsPushTheContainedChildNotTheAppScope() = runTest {
+        // ta-6z4: what TetherApp hands the push controller is process().push, i.e.
+        // AppScopes.push(app): a distinct child that contains and logs a failed job
+        // and is cancelled with the app scope. Handing it the app scope itself
+        // would fail every assertion below.
+        ShadowLog.clear()
+        val scopes = AppScopes.process()
+        assertTrue(scopes.push !== scopes.app)
+        // Contained: runTest would fail on an uncaught exception.
+        scopes.push.launch { throw IllegalStateException("fake-push-failure") }.join()
+        assertTrue(scopes.app.isActive)
+        assertTrue(scopes.push.isActive)
+        assertEquals(
+            listOf("Background push job failed: IllegalStateException"),
+            ShadowLog.getLogsForTag(AppScopes.TAG).map { it.msg },
+        )
+        scopes.app.cancel()
+        assertFalse(scopes.push.isActive)
+    }
 }

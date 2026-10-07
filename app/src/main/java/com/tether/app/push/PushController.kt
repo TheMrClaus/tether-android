@@ -69,7 +69,15 @@ class PushController(
             // accept another one from the same server, before the network
             // delete. A hung delete (cut by the 5 s logout bound) or a failed one
             // then never leaves the old binding behind.
-            firebase.forget()
+            // A throwing forget() must not skip the token delete (ta-6z4): it has
+            // its own guard, and cancellation still propagates.
+            try {
+                firebase.forget()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Best-effort by contract; the token delete below still runs.
+            }
             tokenProvider.delete()
         } }
 

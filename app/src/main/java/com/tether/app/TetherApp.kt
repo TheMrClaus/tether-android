@@ -38,8 +38,9 @@ class TetherApp : Application() {
 
         // Fail-fast for the settings store and the client; push alone gets a
         // child scope that contains and logs (class name only) what escapes it.
-        val appScope = AppScopes.app()
-        val pushScope = AppScopes.push(appScope)
+        val scopes = AppScopes.process()
+        val appScope = scopes.app
+        val pushScope = scopes.push
         // Credentials are sealed with a non-exportable Android Keystore AES-GCM key
         // (PLAN D8); a pre-T1.4 plaintext install is migrated on first load.
         val settings = DataStoreSettings.create(

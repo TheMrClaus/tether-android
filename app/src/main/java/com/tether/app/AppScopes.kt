@@ -38,5 +38,14 @@ internal object AppScopes {
                 CoroutineExceptionHandler { _, e -> log("Background push job failed: ${e.javaClass.simpleName}") },
         )
 
+    /** The process's two scopes, built once in [TetherApp.onCreate] (ta-6z4: the choice is testable). */
+    class Process(val app: CoroutineScope, val push: CoroutineScope)
+
+    /** The app scope plus its push child. [TetherApp] hands `.push`, never `.app`, to the push controller. */
+    fun process(log: (String) -> Unit = { Log.w(TAG, it) }): Process {
+        val app = app()
+        return Process(app, push(app, log))
+    }
+
     const val TAG = "TetherApp"
 }
