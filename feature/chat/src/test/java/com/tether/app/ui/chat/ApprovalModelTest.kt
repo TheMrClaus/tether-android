@@ -409,8 +409,11 @@ class ApprovalModelTest {
         assertEquals(1, displayPathChunks("/srv/data/file-1").size)
         assertTrue(displayPathChunks("/" + tag.repeat(4_000)).size <= 2) // plain: elided to 160 escapes (1,440 characters)
         assertTrue(displayPathChunks("/p/../" + tag.repeat(4_000)).size > 25) // relative: whole, ~36k characters
-        // No escape is split across pieces.
-        for (p in displayPathChunks("/p/../" + tag.repeat(4_000))) assertTrue(p, p.removePrefix("$LRI").removeSuffix("$PDI").let { it.replace("\\u{E0041}", "").replace("“", "").replace("”", "").replace("/p/../", "").isEmpty() || it.replace("\\u{E0041}", "").isEmpty() })
+        // No escape is split across pieces: strip the islands, quotes, marker and the head, only whole escapes are left.
+        for (p in displayPathChunks("/p/../" + tag.repeat(4_000))) {
+            val left = p.removePrefix("$LRI").removeSuffix(RELATIVE_MARKER).removeSuffix("$PDI").replace("“", "").replace("”", "").replace("/p/../", "")
+            assertTrue(p, left.replace("\\u{E0041}", "").isEmpty())
+        }
     }
 
     @Test fun aRelativePathIsNeverCutHoweverLong() {
