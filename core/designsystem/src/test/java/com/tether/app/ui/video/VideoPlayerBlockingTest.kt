@@ -73,6 +73,9 @@ class VideoPlayerBlockingTest {
         val calls = java.util.Collections.synchronizedList(mutableListOf<String>())
         @Volatile var prepared: MediaPlayer.OnPreparedListener? = null
         @Volatile var released = false
+
+        /** When set, the platform's reset waits for it (a player thread that is busy letting go). */
+        @Volatile var holdReset: CountDownLatch? = null
         @Volatile private var pos = 0
         @Volatile private var running = false
 
@@ -107,7 +110,10 @@ class VideoPlayerBlockingTest {
         override fun getVideoWidth(): Int { native("videoWidth"); return 320 }
         override fun getVideoHeight(): Int { native("videoHeight"); return 240 }
         override fun getAudioSessionId(): Int { native("audioSessionId"); return 0 }
-        override fun reset() = native("reset")
+        override fun reset() {
+            native("reset")
+            holdReset?.await(30, TimeUnit.SECONDS)
+        }
         override fun release() { native("release"); released = true }
     }
 
@@ -232,6 +238,30 @@ class VideoPlayerBlockingTest {
         until("the texture is released once the player let go of its surface") { texture.gone }
         host.dispose()
         p.release()
+    }
+
+    @Test fun aSurfaceDestroyedAfterTheReleaseKeepsItsTextureUntilThePlatformPlayerLetGo() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val p = playing(null)
+        val host = VideoHost(activity, p, radiusPx = 12f)
+        val texture = WatchedTexture()
+        val listener = host.texture.surfaceTextureListener!!
+        listener.onSurfaceTextureAvailable(texture, 10, 10)
+        until("the host's surface reached the platform") { platform.calls.contains("setSurface") }
+        // The player is released (the session left): its reset / release is queued on the player's thread, and that
+        // thread is busy in the reset when the texture is destroyed.
+        val hold = CountDownLatch(1)
+        platform.holdReset = hold
+        p.release()
+        until("the platform player is in its reset") { platform.calls.contains("reset") }
+        listener.onSurfaceTextureDestroyed(texture)
+        Thread.sleep(300)
+        assertFalse("the platform player still holds the surface: the texture must not be released yet", texture.gone)
+        assertFalse(platform.released)
+        hold.countDown()
+        until("the texture is released once the player let go") { texture.gone }
+        assertTrue("and only after the platform player was released", platform.released)
+        host.dispose()
     }
 
     private companion object {

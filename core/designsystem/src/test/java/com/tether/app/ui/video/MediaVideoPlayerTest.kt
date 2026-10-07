@@ -570,4 +570,28 @@ class MediaVideoPlayerTest {
         assertTrue("the paused picture is there at once", p.still === marker)
         source.stillGate?.countDown()
     }
+
+    @Test fun aFrameSeekNeverMovesAClipThatIsNotAtItsEndToItsEnd() {
+        val p = modelled()
+        val platform = platforms[0]
+        val first = surface()
+        p.attachSurface(first)
+        p.control.start()
+        platform.ends()
+        assertFalse(p.playing)
+        // The user drags the bar back on the ended clip: the engine still says "ended", the place is 10 s.
+        p.control.seekTo(10_000)
+        assertEquals(10_000, platform.pos)
+        platform.seeks.clear()
+        // A surface change repaints the frame the clip rests at: that place, not its last frame.
+        val second = p.rotate(first)
+        assertEquals("the frame is shown at the place it is at: ${platform.seeks}", listOf(10_000), platform.seeks)
+        p.rotate(second)
+        assertTrue("never to its end: ${platform.seeks}", platform.seeks.none { it >= platform.dur - 1_500 })
+        // A clip that really is at its end still rests on its last frame, not past it.
+        platform.ends()
+        platform.seeks.clear()
+        p.rotate(second)
+        assertEquals(listOf(platform.dur - 1), platform.seeks.take(1))
+    }
 }

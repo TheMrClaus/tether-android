@@ -133,12 +133,26 @@ class MediaVideoPlayer(
         }
     }
 
-    /** As [onPlayer], but [job] (a hand-over, not a call into the platform player) runs here when the thread is gone. */
+    /**
+     * Completed once the platform player's reset and release have run (or at once when there never was one): from
+     * then on nothing of it holds a surface. A hand-over that comes after the player's thread was shut down waits
+     * for this, never running ahead of the release that is still queued on that thread (a texture released while
+     * the platform player may still draw into it).
+     */
+    private val platformGone = java.util.concurrent.CompletableFuture<Unit>()
+
+    /** Set when a reset / release was queued for a platform player (then [platformGone] is completed by it). */
+    @Volatile private var platformQueued = false
+
+    /**
+     * As [onPlayer], but [job] (a hand-over, not a call into the platform player) always runs: after what was
+     * asked before it on the player's thread, or, when that thread is gone, once the platform player is.
+     */
     private fun onPlayerAlways(job: () -> Unit) {
         try {
             exec.execute(job)
         } catch (_: RejectedExecutionException) {
-            job()
+            platformGone.whenComplete { _, _ -> job() }
         }
     }
 
@@ -591,6 +605,7 @@ class MediaVideoPlayer(
                 mp.setOnBufferingUpdateListener(null)
             } catch (_: Exception) {
             }
+            platformQueued = true
             onPlayerAlways {
                 try {
                     mp.reset()
@@ -600,8 +615,11 @@ class MediaVideoPlayer(
                         mp.release()
                     } catch (_: Exception) {
                     }
+                    platformGone.complete(Unit)
                 }
             }
+        } else if (!platformQueued) {
+            platformGone.complete(Unit)
         }
         // Lets what is queued finish (the release above, a surface's hand-over), then the thread ends.
         ownThread?.shutdown()
