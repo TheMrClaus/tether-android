@@ -155,6 +155,46 @@ class ToolClipsTest {
         reader.close()
     }
 
+    @Test fun readAheadWaitsForBytesPastTheReadThatWaitedAndEndsWhenTheyAreThere() = runBlocking {
+        val gates = List(3) { CompletableDeferred<Unit>() }
+        val server = Server(chunks = 4, gates = gates)
+        val d = download(server)
+        d.start()
+        val reader = ClipReader(d)
+        gates[0].complete(Unit)
+        assertTrue(reader.open())
+        eventually("first chunk") { if (d.bytesWritten >= 1024) true else null }
+        // A read at 1000 waits (the file is 1024 bytes long so far, a read at 1500 has to).
+        val readDone = CountDownLatch(1)
+        Thread { reader.read(1500, 10); readDone.countDown() }.start()
+        eventually("it waits") { if (d.bytesWritten >= 1024) true else null }
+        Thread.sleep(100)
+        // The player asks for 1000 bytes past 1500: the file must hold 2500.
+        val ahead = CountDownLatch(1)
+        Thread { reader.awaitReadAhead(1000); ahead.countDown() }.start()
+        gates[1].complete(Unit) // 2048 bytes: the read at 1500 is served, 2500 is not there
+        assertTrue(readDone.await(20, TimeUnit.SECONDS))
+        assertFalse("not enough yet", ahead.await(300, TimeUnit.MILLISECONDS))
+        gates[2].complete(Unit)
+        assertTrue("the third chunk is past 2500", ahead.await(20, TimeUnit.SECONDS))
+        reader.close()
+        d.close()
+    }
+
+    @Test fun readAheadReturnsWhenTheReaderIsClosed() = runBlocking {
+        val open = CompletableDeferred<Unit>().also { it.complete(Unit) }
+        val d = download(Server(chunks = 2, gates = listOf(open, CompletableDeferred())))
+        d.start()
+        val reader = ClipReader(d)
+        assertTrue(reader.open())
+        val ahead = CountDownLatch(1)
+        Thread { reader.awaitReadAhead(1_000_000); ahead.countDown() }.start()
+        assertFalse(ahead.await(150, TimeUnit.MILLISECONDS))
+        reader.close()
+        assertTrue(ahead.await(20, TimeUnit.SECONDS))
+        d.close()
+    }
+
     private fun blockedReadEnds(stop: (ClipReader, ClipDownload) -> Unit) = runBlocking {
         val open = CompletableDeferred<Unit>().also { it.complete(Unit) }
         val d = download(Server(chunks = 2, gates = listOf(open, CompletableDeferred())))

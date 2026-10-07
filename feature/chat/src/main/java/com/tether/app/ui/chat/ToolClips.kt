@@ -203,6 +203,29 @@ internal class ClipDownload(
         }
     }
 
+    /**
+     * Blocks until the file has at least [target] bytes, or the body is whole, or this download was closed or failed
+     * (it then returns as well: the reader finds the failure on its next read). [target] is read again at every wake-up.
+     */
+    fun awaitFrontier(target: () -> Long, readerClosed: () -> Boolean) {
+        lock.lock()
+        try {
+            while (true) {
+                if (closed || readerClosed()) return
+                val v = verdict
+                if (v != null && v !is MediaVideo.Ok && !unverified) return
+                if (written >= target() || streamEnded) return
+                try {
+                    changed.await()
+                } catch (_: InterruptedException) {
+                    return
+                }
+            }
+        } finally {
+            lock.unlock()
+        }
+    }
+
     // --- the download ---------------------------------------------------------------------------
 
     private fun settle(result: MediaVideo) {
@@ -364,6 +387,11 @@ internal class ClipReader(private val download: ClipDownload) : PlayableSource()
 
     override suspend fun open(): Boolean = download.awaitReadable()
 
+    /** Where the read that last had to wait for bytes was: what the player's buffering is measured from. */
+    @Volatile private var waitedAt = 0L
+
+    override fun awaitReadAhead(bytes: Long) = download.awaitFrontier({ waitedAt + bytes }, { closed })
+
     override fun getSize(): Long = download.size()
 
     override fun stillAt(positionMs: Int, maxSide: Int): Bitmap? {
@@ -397,7 +425,10 @@ internal class ClipReader(private val download: ClipDownload) : PlayableSource()
         if (closed) throw IOException("the video was closed")
         if (size == 0) return 0
         if (position < 0) throw IOException("negative position")
-        val available = download.awaitBytes(position, { closed }) { waiting -> onWaiting?.invoke(waiting) }
+        val available = download.awaitBytes(position, { closed }) { waiting ->
+            if (waiting) waitedAt = position
+            onWaiting?.invoke(waiting)
+        }
         if (available < 0) return -1
         val count = minOf(size.toLong(), available).toInt()
         synchronized(this) {

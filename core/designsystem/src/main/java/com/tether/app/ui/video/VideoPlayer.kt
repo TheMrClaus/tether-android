@@ -264,8 +264,76 @@ class MediaVideoPlayer(
     private var buffered by mutableIntStateOf(0)
     private val opening: Job
 
+    /** A read of the source is waiting for bytes right now (on [main]). */
+    private var waiting = false
+
+    /**
+     * Buffering, as the web's media element does on underrun (ta-coik.68 F-5): a read waited for bytes while the clip
+     * played, so the platform player is paused (its clock stops with its picture) until [source] has [readAheadBytes]
+     * past the read point, then it plays on. [playing] stays true (the user's play is not undone; the bar shows the
+     * held time and the spinner). Left to run, a platform player on a link slower than the clip keeps its audio clock
+     * going while every video frame is late and dropped: the first frame stayed up while the bar ran to the end.
+     * On [main].
+     */
+    private var stalled = false
+    private var readAheadArrived = false
+    private var stallJob: Job? = null
+
+    private fun checkStall() {
+        if (released || stalled || !waiting || !playing || engine != Engine.Started) return
+        val mp = player ?: return
+        stalled = true
+        readAheadArrived = false
+        buffering = true
+        onPlayer { mp.pause() }
+        stallJob = main.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    source.awaitReadAhead(readAheadBytes())
+                } catch (_: Exception) {
+                }
+            }
+            if (released || !stalled) return@launch
+            readAheadArrived = true
+            maybeResume()
+            buffering = playing && (stalled || waiting)
+        }
+    }
+
+    /** Plays on once the read that waited has its bytes and the read-ahead is there. A failing source resumes too: the player then meets the failure. */
+    private fun maybeResume() {
+        if (released || !stalled || !readAheadArrived || waiting || engine != Engine.Started) return
+        val mp = player ?: return
+        clearStall()
+        buffering = false
+        place = Place(place.ms, System.nanoTime())
+        onPlayer { mp.start() }
+    }
+
+    private fun clearStall() {
+        stalled = false
+        readAheadArrived = false
+        stallJob?.cancel()
+        stallJob = null
+    }
+
+    /** A few seconds of the clip (by the file's mean rate), what a stalled player waits for; asked of the source off the main thread. */
+    private fun readAheadBytes(): Long {
+        val size = source.size
+        val ms = durationMs
+        val perMs = if (size > 0 && ms > 0) size.toDouble() / ms else 0.0
+        return (perMs * BUFFER_AHEAD_MS).toLong().coerceIn(MIN_READ_AHEAD_BYTES, MAX_READ_AHEAD_BYTES)
+    }
+
     init {
-        source.onWaiting = { waiting -> main.launch { if (!released) buffering = waiting && playing } }
+        source.onWaiting = { isWaiting ->
+            main.launch {
+                if (released) return@launch
+                waiting = isWaiting
+                if (isWaiting) checkStall() else maybeResume()
+                buffering = playing && (stalled || waiting)
+            }
+        }
         opening = main.launch {
             val opened = source.open()
             if (released) return@launch
@@ -388,6 +456,7 @@ class MediaVideoPlayer(
         if (engine == Engine.Started) engine = Engine.Completed
         playing = false
         buffering = false
+        clearStall()
         placeWatch?.cancel()
         placeAtDetach = -1
         refreshPlace()
@@ -425,6 +494,7 @@ class MediaVideoPlayer(
         phase = VideoPhase.Failed
         playing = false
         buffering = false
+        clearStall()
         teardown()
         onFailed()
     }
@@ -455,6 +525,9 @@ class MediaVideoPlayer(
                     if (ended) mp.seekTo(0L, MediaPlayer.SEEK_CLOSEST)
                     mp.start()
                 }
+                // A read that is already waiting (the platform's first reads of a clip still downloading).
+                checkStall()
+                buffering = playing && (stalled || waiting)
             }
         }
 
@@ -466,6 +539,7 @@ class MediaVideoPlayer(
                 engine = Engine.Paused
                 playing = false
                 buffering = false
+                clearStall()
                 placeWatch?.cancel()
                 placeAtDetach = -1
                 place = Place(at, System.nanoTime())
@@ -579,6 +653,7 @@ class MediaVideoPlayer(
         opening.cancel()
         playing = false
         buffering = false
+        clearStall()
         still = null
         restingStill = null
         placeWatch?.cancel()
@@ -633,6 +708,11 @@ private const val END_SLACK_MS = 1_500
 private const val STALE_END_MS = 3_000L
 
 private const val MAX_RECOVERIES = 2
+
+/** What a player that waited for bytes has past the read point before it plays on: this much of the clip (by its mean rate), within these bounds. */
+private const val BUFFER_AHEAD_MS = 5_000L
+private const val MIN_READ_AHEAD_BYTES = 64L * 1024
+private const val MAX_READ_AHEAD_BYTES = 8L * 1024 * 1024
 
 /** How long (ms) after a surface change the place of a playing clip is checked, how far (ms) it may have fallen, how often it is put back. */
 private const val SETTLE_MS = 4_000L

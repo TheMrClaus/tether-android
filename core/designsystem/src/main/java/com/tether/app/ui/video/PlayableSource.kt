@@ -23,6 +23,15 @@ abstract class PlayableSource : MediaDataSource() {
     abstract suspend fun open(): Boolean
 
     /**
+     * Blocks (call it off the main thread) until [bytes] are readable past where the read that last had to wait
+     * was, the body is whole, or this source is closed or failed (it returns then too: the player reads on and
+     * meets the failure). It is how the player knows it may play on after it paused for a read that waited
+     * (ta-coik.68 F-5: a player left to run on a link slower than the clip has its clock run while no picture
+     * is shown). A source whose read is one request answers at once.
+     */
+    open fun awaitReadAhead(bytes: Long) {}
+
+    /**
      * The picture at [positionMs], at most [maxSide] px on its longer side, decoded WITHOUT the player or a
      * surface (a local file and a metadata retriever), or null when this source cannot. Blocking: call it off
      * the main thread. It is what a paused or ended clip shows on a fresh surface that the platform player

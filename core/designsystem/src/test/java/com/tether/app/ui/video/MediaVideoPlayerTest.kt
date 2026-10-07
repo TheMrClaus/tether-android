@@ -303,6 +303,9 @@ class MediaVideoPlayerTest {
         source.onWaiting?.invoke(true)
         assertTrue(p.buffering)
         source.onWaiting?.invoke(false)
+        // ta-coik.68 F-5: it keeps buffering until the source has the bytes past the read point (here: at once, on its own coroutine).
+        val until = System.nanoTime() + 10_000_000_000L
+        while (p.buffering && System.nanoTime() < until) Thread.sleep(10)
         assertFalse(p.buffering)
         p.control.pause()
         source.onWaiting?.invoke(true)

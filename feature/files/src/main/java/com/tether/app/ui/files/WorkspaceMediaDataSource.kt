@@ -10,6 +10,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -30,6 +32,7 @@ class WorkspaceMediaDataSource(
     private val files: WorkspaceFiles,
     private val path: String,
     private val blockSize: Int = BLOCK_BYTES,
+    private val waitingAfterMs: Long = WAITING_AFTER_MS,
 ) : PlayableSource() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
@@ -74,7 +77,7 @@ class WorkspaceMediaDataSource(
         if (position < 0) throw IOException("negative position")
         synchronized(lock) {
             if (total != UNKNOWN && position >= total) return -1
-            val block = cached(position) ?: fetch(position) ?: return -1
+            val block = cached(position) ?: fetchTold(position) ?: return -1
             val count = minOf(size.toLong(), block.end - position).toInt()
             System.arraycopy(block.bytes, (position - block.start).toInt(), buffer, offset, count)
             return count
@@ -83,6 +86,25 @@ class WorkspaceMediaDataSource(
 
     private fun cached(position: Long): Block? =
         listOfNotNull(recent, head).firstOrNull { position >= it.start && position < it.end }
+
+    /**
+     * [fetch], with the player told it is waiting when the request takes longer than [waitingAfterMs] (a slow link: the
+     * player pauses for it instead of running its clock on, ta-coik.68 F-5). A quick request is no wait.
+     */
+    private fun fetchTold(position: Long): Block? {
+        val gate = Any()
+        var state = 0 // 0 quiet, 1 told "waiting", 2 done; under gate, so "false" never overtakes its "true"
+        val told = scope.launch {
+            delay(waitingAfterMs)
+            synchronized(gate) { if (state == 0) { state = 1; onWaiting?.invoke(true) } }
+        }
+        try {
+            return fetch(position)
+        } finally {
+            told.cancel()
+            synchronized(gate) { if (state == 1) onWaiting?.invoke(false); state = 2 }
+        }
+    }
 
     /** One block from [position], or null at the end of the file. Throws when the read is refused or the file changed. */
     private fun fetch(position: Long): Block? {
@@ -118,5 +140,8 @@ class WorkspaceMediaDataSource(
         /** One request's worth: big enough to keep a stream fed, small enough that a seek is quick. */
         const val BLOCK_BYTES = 256 * 1024
         private const val UNKNOWN = -1L
+
+        /** A request that takes this long (ms) is a wait the player is told about. */
+        const val WAITING_AFTER_MS = 400L
     }
 }

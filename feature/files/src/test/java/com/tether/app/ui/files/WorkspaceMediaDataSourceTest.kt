@@ -176,4 +176,27 @@ class WorkspaceMediaDataSourceTest {
         assertEquals("one block's worth; the player asks again for the rest", 1024, n)
         assertEquals("readRange $path 2000000 1024", reads().last())
     }
+
+    @Test fun aRequestThatTakesLongTellsThePlayerItWaitsAndAQuickOneDoesNot() {
+        files.virtualFiles[path] = 1_000_000
+        val s = WorkspaceMediaDataSource(files, path, blockSize = 1024, waitingAfterMs = 150)
+        runBlocking { s.open() }
+        val told = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+        s.onWaiting = { told += it }
+        // A quick request (the fake answers at once): no wait.
+        s.read(500_000, 10)
+        assertEquals(emptyList<Boolean>(), told)
+        // A slow one: told it waits, and told when it is over.
+        val gate = CompletableDeferred<Unit>()
+        files.gates["readRange"] = gate
+        val done = CountDownLatch(1)
+        Thread { s.read(700_000, 10); done.countDown() }.start()
+        val deadline = System.currentTimeMillis() + 5_000
+        while (told.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        assertEquals(listOf(true), told.toList())
+        gate.complete(Unit)
+        assertTrue(done.await(5, TimeUnit.SECONDS))
+        assertEquals(listOf(true, false), told.toList())
+        s.close()
+    }
 }

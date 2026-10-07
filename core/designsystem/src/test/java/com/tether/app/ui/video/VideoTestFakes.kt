@@ -21,6 +21,15 @@ class FakeSource : PlayableSource() {
 
     @Volatile var stillGate: java.util.concurrent.CountDownLatch? = null
 
+    /** While set, [awaitReadAhead] waits on it (the bytes a stalled player needs have not arrived); [close] opens it. */
+    @Volatile var readAheadGate: java.util.concurrent.CountDownLatch? = null
+    val readAheadAsks = java.util.concurrent.CopyOnWriteArrayList<Long>()
+
+    override fun awaitReadAhead(bytes: Long) {
+        readAheadAsks += bytes
+        readAheadGate?.await()
+    }
+
     override fun stillAt(positionMs: Int, maxSide: Int): android.graphics.Bitmap? {
         stillCalls++
         stillGate?.await()
@@ -41,6 +50,7 @@ class FakeSource : PlayableSource() {
 
     override fun close() {
         closed = true
+        readAheadGate?.countDown()
     }
 }
 
