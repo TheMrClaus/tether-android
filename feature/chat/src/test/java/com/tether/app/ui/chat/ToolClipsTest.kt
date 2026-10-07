@@ -205,6 +205,30 @@ class ToolClipsTest {
         r2.close()
     }
 
+    @Test fun aClipReleasedOnItsLastByteIsStillCheckedAndCached() = runBlocking {
+        lateinit var d: ClipDownload
+        // The session is left just as the last byte lands: the release arrives before the source has answered.
+        val server = object : ToolMediaSource {
+            val calls = AtomicInteger()
+            override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
+                calls.incrementAndGet()
+                (sink as? DeclaredLengthSink)?.declaredLength(clip.size.toLong())
+                sink.write(clip)
+                d.close()
+                return ToolMediaResult.Ok(clip.size.toLong(), "video/mp4")
+            }
+        }
+        d = download(server)
+        d.start()
+        eventually("the verified clip is in the cache") { File(dir, "$sha.mp4").takeIf { it.isFile && it.length() == clip.size.toLong() } }
+        assertTrue("no partial file is left", partFiles().isEmpty())
+        val again = Server()
+        val d2 = download(again)
+        d2.start()
+        eventually("served from the cache") { d2.outcome() as? MediaVideo.Ok }
+        assertEquals("the next play makes no request", 0, again.calls.get())
+    }
+
     @Test fun bytesThatDoNotHashToTheirNameAreNeverCachedAndStopThePlay() = runBlocking {
         val impostor = clip.copyOf().also { it[100] = (it[100] + 1).toByte() }
         val d = download(Server(body = impostor))

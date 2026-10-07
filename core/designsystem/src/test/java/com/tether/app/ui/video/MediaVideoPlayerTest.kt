@@ -244,6 +244,7 @@ class MediaVideoPlayerTest {
         p.attachSurface(first)
         shadowOf(created[0]).invokePreparedListener()
         p.control.start()
+        shadowOf(created[0]).setCurrentPosition(60_000) // the end: where the platform is when a clip really ended
         shadowOf(created[0]).invokeCompletionListener()
         assertFalse(p.playing)
         val second = p.rotate(first)
@@ -323,6 +324,7 @@ class MediaVideoPlayerTest {
         p.attachSurface(first)
         shadowOf(created[0]).invokePreparedListener()
         p.control.start()
+        shadowOf(created[0]).setCurrentPosition(60_000) // the end: where the platform is when a clip really ended
         shadowOf(created[0]).invokeCompletionListener()
         calls.clear()
         val second = p.rotate(first)
@@ -335,6 +337,7 @@ class MediaVideoPlayerTest {
         val p = recordingPlayer()
         shadowOf(created[0]).invokePreparedListener()
         p.control.start()
+        shadowOf(created[0]).setCurrentPosition(60_000) // the end: where the platform is when a clip really ended
         shadowOf(created[0]).invokeCompletionListener()
         calls.clear()
         p.control.start()
@@ -408,5 +411,160 @@ class MediaVideoPlayerTest {
         gate.countDown()
         Thread.sleep(300)
         assertEquals("stale: a frame was drawn first", null, p.still)
+    }
+
+    // --- ta-coik.68 round 5 (F-1, F-2): a playing clip keeps its place through a surface change; an ended or
+    // paused one keeps its picture. The platform is modelled: what a surface change does to its place, the late
+    // "ended" event, and a picture that only the clip's own bytes can give. ---------------------------------------
+
+    /** A platform player with a place of its own, which the tests move the way the device was seen to. */
+    private class Platform : MediaPlayer() {
+        @Volatile var pos = 0
+        @Volatile var running = false
+        val dur = 120_000
+        val seeks = java.util.Collections.synchronizedList(mutableListOf<Int>())
+        var prepared: MediaPlayer.OnPreparedListener? = null
+        var completed: MediaPlayer.OnCompletionListener? = null
+
+        /** What a surface change does to a playing clip: it restarts from an earlier sync frame (null: nothing). */
+        var rewindsTo: Int? = null
+
+        override fun setDataSource(dataSource: android.media.MediaDataSource) = Unit
+        override fun prepareAsync() = Unit
+        override fun setOnPreparedListener(l: MediaPlayer.OnPreparedListener?) { prepared = l }
+        override fun setOnCompletionListener(l: MediaPlayer.OnCompletionListener?) { completed = l }
+        override fun setOnErrorListener(l: MediaPlayer.OnErrorListener?) = Unit
+        override fun setOnVideoSizeChangedListener(l: MediaPlayer.OnVideoSizeChangedListener?) = Unit
+        override fun setOnBufferingUpdateListener(l: MediaPlayer.OnBufferingUpdateListener?) = Unit
+        override fun setSurface(surface: Surface?) {
+            val to = rewindsTo
+            if (running && to != null && pos > to) pos = to
+        }
+        override fun start() { running = true }
+        override fun pause() { running = false }
+        override fun seekTo(msec: Long, mode: Int) { seeks += msec.toInt(); pos = msec.toInt() }
+        override fun getCurrentPosition() = pos
+        override fun getDuration() = dur
+        override fun isPlaying() = running
+        override fun getVideoWidth() = 320
+        override fun getVideoHeight() = 240
+        override fun getAudioSessionId() = 0
+        override fun reset() = Unit
+        override fun release() = Unit
+
+        fun ends() { pos = dur; running = false; completed?.onCompletion(this) }
+    }
+
+    private val platforms = mutableListOf<Platform>()
+
+    private fun modelled(): MediaVideoPlayer {
+        val p = MediaVideoPlayer(
+            source, CoroutineScope(Dispatchers.Unconfined), onFailed = { failures++ }, playWhenReady = false,
+            newPlayer = { Platform().also { platforms += it } }, settleStepMs = 10,
+        )
+        platforms[0].prepared?.onPrepared(platforms[0])
+        return p
+    }
+
+    private fun until(what: String, check: () -> Boolean) {
+        val limit = System.nanoTime() + 5_000_000_000L
+        while (!check() && System.nanoTime() < limit) Thread.sleep(10)
+        assertTrue("never: $what", check())
+    }
+
+    @Test fun aPlayingClipIsPutBackWhereItWasWhenASurfaceChangeRewoundIt() {
+        val p = modelled()
+        val platform = platforms[0]
+        val first = surface()
+        p.attachSurface(first)
+        p.control.start()
+        platform.pos = 62_667
+        platform.rewindsTo = 53_000
+        val second = p.rotate(first)
+        assertTrue("it is still playing", p.playing && platform.running)
+        until("the place is where it was (at ${platform.pos})") { platform.pos >= 62_000 }
+        assertTrue(p.playing && platform.running)
+        p.detachSurface(second)
+        p.release()
+    }
+
+    @Test fun aReplayedClipWhoseStaleEndEventArrivesLateKeepsPlayingThroughARotation() {
+        val p = modelled()
+        val platform = platforms[0]
+        val first = surface()
+        p.attachSurface(first)
+        p.control.start()
+        platform.ends()
+        assertFalse(p.playing)
+        // Play again from the start; the end of the frame seek a new surface made at the end arrives late.
+        p.control.start()
+        assertTrue(p.playing)
+        platform.pos = 800
+        platform.completed?.onCompletion(platform)
+        assertTrue("a stale end does not end a clip that has just been started", p.playing)
+        platform.pos = 20_000
+        platform.seeks.clear()
+        val second = p.rotate(first)
+        p.rotate(second)
+        assertTrue("still playing after the rotation", p.playing && platform.running)
+        assertTrue("never sought to its end: ${platform.seeks}", platform.seeks.none { it >= platform.dur - 1_000 })
+        assertEquals("from where it was", 20_000, platform.pos)
+    }
+
+    @Test fun aClipTheBookkeepingCallsEndedButThePlatformPlaysIsNotSoughtToItsEnd() {
+        val p = modelled()
+        val platform = platforms[0]
+        val first = surface()
+        p.attachSurface(first)
+        p.control.start()
+        platform.ends()
+        // The platform plays on (a replay the bookkeeping missed) at 20 s.
+        platform.running = true
+        platform.pos = 20_000
+        platform.seeks.clear()
+        p.rotate(first)
+        assertTrue("the platform is the truth: it plays", p.playing)
+        assertTrue("not sought to the end: ${platform.seeks}", platform.seeks.none { it >= platform.dur - 1_000 })
+    }
+
+    @Test fun anEndedClipHasItsPictureAtOnceOnANewSurfaceWithNoDecodeToWaitFor() {
+        val marker = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888)
+        source.still = marker
+        val p = modelled()
+        val platform = platforms[0]
+        val first = surface()
+        p.attachSurface(first)
+        p.control.start()
+        platform.ends()
+        until("the picture of the end was decoded when it ended") { source.stillCalls >= 1 }
+        Thread.sleep(200)
+        // A frame was drawn on the first surface (clears the held picture), then a rotation: the next surface
+        // has the picture in the same pass, before any decode could have finished.
+        p.keepStill(null)
+        source.stillGate = java.util.concurrent.CountDownLatch(1)
+        val second = p.rotate(first)
+        assertTrue("the ended picture is there at once", p.still === marker)
+        source.stillGate?.countDown()
+        p.keepStill(null)
+        p.rotate(second)
+        assertTrue("and again on the next surface", p.still === marker)
+    }
+
+    @Test fun aPausedClipHasItsPictureAtOnceOnANewSurface() {
+        val marker = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888)
+        source.still = marker
+        val p = modelled()
+        val first = surface()
+        p.attachSurface(first)
+        p.control.start()
+        platforms[0].pos = 9_000
+        p.control.pause()
+        until("the paused picture was decoded") { source.stillCalls >= 1 }
+        Thread.sleep(200)
+        p.keepStill(null)
+        source.stillGate = java.util.concurrent.CountDownLatch(1)
+        p.rotate(first)
+        assertTrue("the paused picture is there at once", p.still === marker)
+        source.stillGate?.countDown()
     }
 }

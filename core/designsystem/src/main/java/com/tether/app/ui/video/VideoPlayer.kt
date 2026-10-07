@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -75,6 +76,8 @@ class MediaVideoPlayer(
     private val onFailed: () -> Unit,
     private val playWhenReady: Boolean = false,
     private val newPlayer: () -> MediaPlayer = { MediaPlayer() },
+    /** How often the place is checked for [SETTLE_MS] after a surface change while it plays (a seam for tests). */
+    private val settleStepMs: Long = 200,
 ) : VideoPlayer {
     override var phase: VideoPhase by mutableStateOf(VideoPhase.Opening)
         private set
@@ -88,21 +91,49 @@ class MediaVideoPlayer(
     /** Bumped whenever a frame was drawn or a surface came: a decode started before that is stale. */
     private var stillEpoch = 0
 
+    /**
+     * The picture of the place the clip rests at (paused, ended), decoded from its bytes while a surface still
+     * showed it, so a surface that comes later has it at once (a frame drawn clears [still], not this) and
+     * does not wait for a decode that a late frame event may make stale. Dropped when the clip moves.
+     */
+    private var restingStill: Bitmap? = null
+
+    /** Where the clip played to when its surface went away, -1 when it was not playing then (see [watchPlace]). */
+    private var placeAtDetach = -1
+    private var placeWatch: Job? = null
+
+    /** When [control] last started the clip (nanoTime): an end reported right after is the platform's stale one. */
+    private var startedAtNs = 0L
+    private var recoveries = 0
+
     override fun keepStill(bitmap: Bitmap?) {
         if (released) return
         if (bitmap == null) stillEpoch++
         still = bitmap
     }
 
-    /** Decodes the picture the clip is at from its own bytes, for a surface the platform player will not paint onto. */
-    private fun loadStill() {
+    /** Where the picture of a clip that is not playing is: its last frame when it ended, else where it is. */
+    private fun restingPlace(mp: MediaPlayer): Int {
+        val position = mp.currentPosition
+        if (engine != Engine.Completed) return position
+        // Only a clip that really is at its end rests on its last frame: the bookkeeping saying "ended" while the
+        // platform is elsewhere must never move the clip to the end.
+        val end = mp.duration
+        return if (end > 0 && position >= end - END_SLACK_MS) (end - 1).coerceAtLeast(0) else position
+    }
+
+    /**
+     * Decodes the picture the clip rests at from its own bytes, for a surface the platform player will not paint
+     * onto; kept as [restingStill] and shown as [still] when [show] and no frame is drawn yet.
+     */
+    private fun loadStill(show: Boolean) {
         val mp = player ?: return
         val at = try {
-            if (engine == Engine.Completed) (mp.duration - 1).coerceAtLeast(0) else mp.currentPosition
+            restingPlace(mp)
         } catch (_: IllegalStateException) {
             return
         }
-        val epoch = ++stillEpoch
+        val epoch = if (show) ++stillEpoch else stillEpoch
         main.launch {
             val bitmap = withContext(Dispatchers.IO) {
                 try {
@@ -111,7 +142,9 @@ class MediaVideoPlayer(
                     null
                 }
             }
-            if (bitmap != null && !released && !playing && still == null && epoch == stillEpoch) still = bitmap
+            if (bitmap == null || released || playing) return@launch
+            restingStill = bitmap
+            if (show && still == null && epoch == stillEpoch) still = bitmap
         }
     }
 
@@ -142,11 +175,7 @@ class MediaVideoPlayer(
                 player = mp
                 mp.setOnPreparedListener { onPrepared(it) }
                 mp.setOnVideoSizeChangedListener { _, w, h -> if (prepared && !released) phase = VideoPhase.Ready(w, h) }
-                mp.setOnCompletionListener {
-                    if (engine == Engine.Started) engine = Engine.Completed
-                    playing = false
-                    buffering = false
-                }
+                mp.setOnCompletionListener { onCompleted(it) }
                 mp.setOnBufferingUpdateListener { _, percent -> buffered = percent }
                 mp.setOnErrorListener { _, what, _ ->
                     // -38: the platform refusing a call made in the wrong state. Nothing is wrong with the
@@ -181,9 +210,93 @@ class MediaVideoPlayer(
         if (!prepared || released || playing || surface == null || engine == Engine.Idle) return
         try {
             // An ended clip's position is its duration, where there is no frame to draw: its last one.
-            val at = if (engine == Engine.Completed) (mp.duration - 1).coerceAtLeast(0) else mp.currentPosition
-            mp.seekTo(at.toLong(), MediaPlayer.SEEK_CLOSEST)
+            mp.seekTo(restingPlace(mp).toLong(), MediaPlayer.SEEK_CLOSEST)
         } catch (_: IllegalStateException) {
+        }
+    }
+
+    /**
+     * The platform is the truth about whether the clip plays: a late "ended" event (the end of a frame seek made
+     * on a new surface, delivered after a replay began) must not leave this player believing it is ended while
+     * it plays, which a later surface would then answer by seeking the playing clip to its end.
+     */
+    private fun syncWithPlatform(mp: MediaPlayer) {
+        if (released || !prepared || engine == Engine.Started) return
+        val running = try {
+            mp.isPlaying
+        } catch (_: IllegalStateException) {
+            false
+        }
+        if (running) {
+            engine = Engine.Started
+            playing = true
+        }
+    }
+
+    private fun onCompleted(mp: MediaPlayer) {
+        if (released) return
+        if (engine == Engine.Started && staleEnd(mp)) {
+            // The platform says "ended" for a clip that was started a moment ago and is nowhere near its end.
+            // If it stopped, it plays on from where it is; if it plays, the event is ignored.
+            val running = try {
+                mp.isPlaying
+            } catch (_: IllegalStateException) {
+                false
+            }
+            if (running || recoveries >= MAX_RECOVERIES) return
+            recoveries++
+            try {
+                mp.start()
+            } catch (_: IllegalStateException) {
+            }
+            return
+        }
+        if (engine == Engine.Started) engine = Engine.Completed
+        playing = false
+        buffering = false
+        placeWatch?.cancel()
+        placeAtDetach = -1
+        loadStill(show = false)
+    }
+
+    private fun staleEnd(mp: MediaPlayer): Boolean = try {
+        val end = mp.duration
+        val sinceStartMs = (System.nanoTime() - startedAtNs) / 1_000_000L
+        end > 2 * END_SLACK_MS && mp.currentPosition < end - END_SLACK_MS && sinceStartMs < STALE_END_MS
+    } catch (_: IllegalStateException) {
+        false
+    }
+
+    /**
+     * A surface change while the clip plays can make the platform restart its decoding from an earlier sync
+     * frame (the place goes back, up to a whole GOP). For a short while after the new surface is in, the place is
+     * checked and, if it fell back behind where it was, put back there. A seek or a pause of the user ends this.
+     */
+    private fun watchPlace() {
+        val at = placeAtDetach
+        placeWatch?.cancel()
+        if (at < 0) return
+        placeWatch = main.launch {
+            var corrections = 0
+            var waited = 0L
+            while (waited < SETTLE_MS && !released && engine == Engine.Started) {
+                delay(settleStepMs)
+                waited += settleStepMs
+                val mp = player ?: return@launch
+                val position = try {
+                    mp.currentPosition
+                } catch (_: IllegalStateException) {
+                    return@launch
+                }
+                if (position < at - PLACE_SLACK_MS && corrections < MAX_PLACE_CORRECTIONS) {
+                    corrections++
+                    try {
+                        mp.seekTo(at.toLong(), MediaPlayer.SEEK_CLOSEST)
+                    } catch (_: IllegalStateException) {
+                        return@launch
+                    }
+                }
+            }
         }
     }
 
@@ -217,6 +330,11 @@ class MediaVideoPlayer(
                 it.start()
                 engine = Engine.Started
                 playing = true
+                startedAtNs = System.nanoTime()
+                recoveries = 0
+                restingStill = null
+                placeAtDetach = -1
+                placeWatch?.cancel()
             }
         }
 
@@ -228,12 +346,20 @@ class MediaVideoPlayer(
                 engine = Engine.Paused
                 playing = false
                 buffering = false
+                placeWatch?.cancel()
+                placeAtDetach = -1
+                loadStill(show = false)
             }
         }
 
         override fun getDuration(): Int = mp(0) { it.duration }
         override fun getCurrentPosition(): Int = mp(0) { it.currentPosition }
-        override fun seekTo(pos: Int) = mp(Unit) { it.seekTo(pos.toLong(), MediaPlayer.SEEK_CLOSEST) }
+        override fun seekTo(pos: Int) = mp(Unit) {
+            placeWatch?.cancel()
+            placeAtDetach = -1
+            restingStill = null
+            it.seekTo(pos.toLong(), MediaPlayer.SEEK_CLOSEST)
+        }
         override fun isPlaying(): Boolean = playing
         override fun getBufferPercentage(): Int = buffered
         override fun canPause(): Boolean = true
@@ -249,16 +375,34 @@ class MediaVideoPlayer(
             player?.setSurface(surface)
         } catch (_: IllegalStateException) {
         }
+        player?.let(::syncWithPlatform)
+        if (playing) {
+            watchPlace()
+            return
+        }
         // A new surface is blank: paint the frame the video is paused on, and (a paused or ended platform
-        // player does not always paint onto it) have its picture ready from the bytes until one is drawn.
+        // player does not always paint onto it) have its picture ready until one is drawn: the one decoded when
+        // the clip came to rest, else one decoded now.
         showFrame()
-        if (prepared && !playing && still == null) loadStill()
+        if (prepared && still == null) {
+            val ready = restingStill
+            if (ready != null) still = ready else loadStill(show = true)
+        }
     }
 
     override fun detachSurface(surface: Surface) {
         // Only the surface in use: a replaced view's late teardown must not blank its successor's.
         if (this.surface !== surface) return
         this.surface = null
+        // Where a playing clip is when its picture goes: a surface change may take the platform back from here.
+        placeAtDetach = -1
+        if (engine == Engine.Started) {
+            placeAtDetach = try {
+                player?.currentPosition ?: -1
+            } catch (_: IllegalStateException) {
+                -1
+            }
+        }
         // The picture goes; the player, its place and its playing / paused state stay (a rotation re-attaches).
         try {
             player?.setSurface(null)
@@ -278,6 +422,8 @@ class MediaVideoPlayer(
         playing = false
         buffering = false
         still = null
+        restingStill = null
+        placeWatch?.cancel()
         teardown()
     }
 
@@ -304,6 +450,19 @@ class MediaVideoPlayer(
         }
     }
 }
+
+/** A clip this close (ms) to its duration is at its end. */
+private const val END_SLACK_MS = 1_500
+
+/** An "ended" event this soon (ms) after a start, from far before the end, is a stale one. */
+private const val STALE_END_MS = 3_000L
+
+private const val MAX_RECOVERIES = 2
+
+/** How long (ms) after a surface change the place of a playing clip is checked, how far (ms) it may have fallen, how often it is put back. */
+private const val SETTLE_MS = 4_000L
+private const val PLACE_SLACK_MS = 1_000
+private const val MAX_PLACE_CORRECTIONS = 3
 
 /** The longest side of a decoded still (px): a box is at most 569 dp wide. */
 private const val STILL_MAX_SIDE = 1280

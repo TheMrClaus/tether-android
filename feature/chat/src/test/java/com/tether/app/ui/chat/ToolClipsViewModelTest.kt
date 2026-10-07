@@ -179,4 +179,49 @@ class ToolClipsViewModelTest {
         assertEquals(null, ToolClipsViewModel.identity(true, com.tether.app.client.ConnectionState.AuthRequired, "https://a"))
         assertEquals(null, ToolClipsViewModel.identity(false, com.tether.app.client.ConnectionState.Disconnected, "https://a"))
     }
+
+    // --- ta-coik.68 round 5 (F-3): a verified clip outlives leaving the session --------------------------------
+
+    private var gets = java.util.concurrent.atomic.AtomicInteger()
+
+    /** A server that answers the whole clip at once, counting its requests. */
+    private val wholeSource = object : ToolMediaSource {
+        override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
+            gets.incrementAndGet()
+            sink.write(clip)
+            return ToolMediaResult.Ok(clip.size.toLong(), "video/mp4")
+        }
+    }
+
+    private fun wholeViewModel() = ToolClipsViewModel(
+        create = { scope ->
+            ToolClipRegistry(wholeSource, RuntimeEnvironment.getApplication().cacheDir, { "https://a" }, scope, makePlayer = { _, failed -> RecordingPlayer(failed).also { players += it } })
+                .also { made += it }
+        },
+        identity = identity,
+        leaveGraceMs = 500,
+    )
+
+    @Test fun aVerifiedClipReplaysFromTheCacheAfterLeavingTheSessionAndReturning() {
+        val vm = wholeViewModel()
+        idle()
+        vm.onSession("s1")
+        vm.registry.clip(src)!!.inline.play()
+        val until = System.nanoTime() + 20_000_000_000L
+        while (vm.registry.clip(src)!!.currentDownload?.outcome() !is MediaVideo.Ok && System.nanoTime() < until) Thread.sleep(10)
+        assertEquals(1, gets.get())
+        // Leave the chat (the registry is released after the grace), return, play again.
+        vm.chatLeft()
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
+        assertTrue(players.single().released)
+        vm.chatEntered()
+        vm.onSession("s1")
+        val again = vm.registry.clip(src)!!
+        again.inline.play()
+        val until2 = System.nanoTime() + 20_000_000_000L
+        while (again.currentDownload?.outcome() == null && System.nanoTime() < until2) Thread.sleep(10)
+        assertTrue("replayed from the cache: ${again.currentDownload?.outcome()}", again.currentDownload?.outcome() is MediaVideo.Ok)
+        assertEquals("no second GET", 1, gets.get())
+        vm.releaseAll()
+    }
 }

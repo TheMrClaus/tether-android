@@ -84,6 +84,17 @@ internal class ClipDownload(
     /** Every byte of the body is in the file (it may not be verified yet). */
     private var streamEnded = false
 
+    /**
+     * The source answered [ToolMediaResult.Ok]: the whole body is in the part file and only its check and its
+     * move into the cache are left. A [close] that lands now (the session left on the last byte) must not
+     * throw that clip away: a clip that finished and verifies is kept.
+     */
+    private var fetchedOk: ToolMediaResult.Ok? = null
+
+    /** The body is whole: the source said so, or every byte of the length the server declared is written. Under [lock]. */
+    private fun wholeBody(): ToolMediaResult.Ok? =
+        fetchedOk ?: if (declared >= 0 && written >= declared) ToolMediaResult.Ok(written, "video/mp4") else null
+
     /** Terminal: [MediaVideo.Ok] (verified, cached) or why not. Null while it downloads. */
     private var verdict: MediaVideo? = null
     private var readable: File? = null
@@ -115,7 +126,7 @@ internal class ClipDownload(
             if (closed) return
             closed = true
             changed.signalAll()
-            scope to part.also { part = null }
+            scope to (if (wholeBody() != null) null else part.also { part = null })
         }
         s?.cancel()
         p?.delete()
@@ -219,7 +230,14 @@ internal class ClipDownload(
                 }
             }
             if (!go) return
-            val result = fetch(file)
+            val result = try {
+                fetch(file)
+            } catch (e: CancellationException) {
+                // Released on the very last byte: a body that arrived whole is still checked and cached.
+                val whole = lock.withLock { wholeBody() }
+                if (whole != null) settle(conclude(file, cached, whole))
+                throw e
+            }
             val answer = conclude(file, cached, result)
             settle(answer)
             if (answer is MediaVideo.Ok) ToolMediaCache.evict(dir)
@@ -247,6 +265,7 @@ internal class ClipDownload(
         val fetching = async(Dispatchers.IO) {
             try {
                 FileOutputStream(file).use { out -> source.fetch(src, maxBytes, ProgressSink(out)) }
+                    .also { if (it is ToolMediaResult.Ok) lock.withLock { fetchedOk = it } }
             } catch (_: IOException) {
                 ToolMediaResult.Failed()
             }
@@ -286,8 +305,9 @@ internal class ClipDownload(
                 // The CLOSED file re-hashed: a server cannot swap content under a name the transcript holds.
                 sha256OfFile(file) != expected -> MediaVideo.Failed
                 !MediaMagic.matches(file, "video/mp4") -> MediaVideo.Failed
+                // Closed or not: a finished, verified clip takes its content address (see [fetchedOk]).
                 else -> lock.withLock {
-                    if (closed || !file.renameTo(cached)) {
+                    if (!file.renameTo(cached)) {
                         MediaVideo.Failed
                     } else {
                         readable = cached
