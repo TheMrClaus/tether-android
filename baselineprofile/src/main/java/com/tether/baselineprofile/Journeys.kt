@@ -87,28 +87,95 @@ fun MacrobenchmarkScope.signedOutJourney() {
  * passing credentials, so a silent skip would produce a cold-start-only profile unnoticed).
  */
 fun MacrobenchmarkScope.signedInJourney(sign: SignInArgs) {
-    signIn(sign)
-    openSession()
-    scrollTranscript()
+    step("sign in") { signIn(sign) }
+    step("open a session") { openSession() }
+    step("scroll the transcript") { scrollTranscript() }
+}
+
+/**
+ * Runs one journey step. Any failure leaves as an IllegalStateException that names the step, the
+ * original exception class (UiAutomator's StaleObjectException and IOException carry no message, which
+ * once surfaced as an empty failure in the test XML) and the labelled nodes on screen.
+ */
+private fun <T> MacrobenchmarkScope.step(name: String, block: () -> T): T = try {
+    block()
+} catch (e: Throwable) {
+    val msg = e.message?.takeIf { it.isNotBlank() } ?: "(no message)"
+    // fail() already appended the screen; any other exception (UiAutomator's own) gets it here.
+    val tail = if ("| on screen:" in msg) "" else " | on screen: ${screenDump()}"
+    throw IllegalStateException("[journey step: $name] ${e.javaClass.simpleName}: $msg$tail", e)
+}
+
+private fun MacrobenchmarkScope.fail(what: String): Nothing =
+    throw IllegalStateException("$what | on screen: ${screenDump()}")
+
+/** Up to 30 labelled nodes of the app: `class[desc|text]`, for failure messages. */
+private fun MacrobenchmarkScope.screenDump(): String = try {
+    device.findObjects(By.pkg(TARGET_PACKAGE)).asSequence()
+        .mapNotNull { n ->
+            val d = runCatching { n.contentDescription }.getOrNull()
+            val t = runCatching { n.text }.getOrNull()
+            if (d.isNullOrEmpty() && t.isNullOrEmpty()) null
+            else "${n.className.substringAfterLast('.')}[${d.orEmpty()}|${t.orEmpty()}]"
+        }
+        .take(30).joinToString("; ").ifEmpty { "(no labelled nodes)" } + " ; ime=" + imeShown()
+} catch (e: Throwable) {
+    "(screen dump failed: ${e.javaClass.simpleName})"
+}
+
+private const val EDIT_TEXT = "android.widget.EditText"
+
+/**
+ * Types [value] into the text input whose accessibility description is [desc]. LoginScreen.kt puts that
+ * description on the input well's outer Box (a non-focusable android.view.View: ACTION_SET_TEXT fails on it,
+ * which UiObject2 only logs), while the editable BasicTextField is a child (android.widget.EditText) of it.
+ * So: find the description's node (scrolling / closing the keyboard as needed), take its EditText descendant
+ * (else the focused EditText after tapping it), set the text and read it back. [secret]: only the length is
+ * compared (a password field reports its characters masked) and the value is never put in a message.
+ */
+private fun MacrobenchmarkScope.typeInto(desc: String, value: String, secret: Boolean) {
+    var lastProblem = "never attempted"
+    repeat(3) { attempt ->
+        try {
+            val well = findScrolling(By.desc(desc), WAIT_MS)
+                ?: fail("no node with content-description \"$desc\" within $WAIT_MS ms")
+            var edit = well.findObject(By.clazz(EDIT_TEXT))
+            if (edit == null) {
+                well.click()
+                device.waitForIdle()
+                edit = device.findObject(By.clazz(EDIT_TEXT).focused(true))
+                    ?: fail("\"$desc\" has no EditText descendant and none took focus (well class ${well.className}, " +
+                        "children ${well.childCount})")
+            }
+            edit.click()
+            edit.text = value
+            device.waitForIdle()
+            val shown = edit.text.orEmpty()
+            val ok = if (secret) shown.length == value.length else shown.trim() == value
+            if (ok) return
+            lastProblem = if (secret) "field shows ${shown.length} chars, typed ${value.length}"
+            else "field shows \"$shown\", typed \"$value\""
+        } catch (e: androidx.test.uiautomator.StaleObjectException) {
+            lastProblem = "node went stale (${e.javaClass.simpleName}) on attempt ${attempt + 1}"
+        }
+    }
+    fail("could not type into \"$desc\": $lastProblem")
 }
 
 private fun MacrobenchmarkScope.signIn(sign: SignInArgs) {
-    val server = device.wait(Until.findObject(By.desc("Server URL")), WAIT_MS)
-        ?: error("sign-in screen not shown (is the app already signed in? clear its data first)")
-    server.click()
-    server.text = sign.serverUrl
-    device.waitForIdle()
+    if (device.wait(Until.hasObject(By.desc("Server URL")), WAIT_MS) != true) {
+        fail("sign-in screen not shown (is the app already signed in? clear its data first)")
+    }
+    typeInto("Server URL", sign.serverUrl, secret = false)
     // The soft keyboard now covers the lower form, and the screen fetches the server's sign-in methods
-    // (debounced) before the password field exists: close the keyboard, then search with scrolling.
-    val password = findScrolling(By.desc("Dashboard password"), WAIT_MS)
-        ?: error("no password field: the server offers no password sign-in (or the form never scrolled to it)")
-    password.click()
-    password.text = sign.password
-    device.waitForIdle()
-    val unlock = findScrolling(By.desc("Unlock Tether"), WAIT_MS)
-        ?: error("no 'Unlock Tether' button")
+    // (debounced) before the password field exists: typeInto closes the keyboard and scroll-searches.
+    if (findScrolling(By.desc("Dashboard password"), WAIT_MS) == null) {
+        fail("no password field: the server offers no password sign-in (or the form never scrolled to it)")
+    }
+    typeInto("Dashboard password", sign.password, secret = true)
+    val unlock = findScrolling(By.desc("Unlock Tether"), WAIT_MS) ?: fail("no 'Unlock Tether' button")
     unlock.click()
-    // Signed in once the shell's top bar shows. Its brand link ("Tether — Overview", Topbar.kt BrandLink) is
+    // Signed in once the shell's top bar shows. Its brand link ("Tether \u2014 Overview", Topbar.kt BrandLink) is
     // on every layout; "Open sessions" (drawer key, narrow only) and the Overview cards are not on all of
     // them. A permission dialog over the shell is dismissed while waiting (the grant above should make that
     // rare; this is the fallback).
@@ -119,13 +186,19 @@ private fun MacrobenchmarkScope.signIn(sign: SignInArgs) {
         landed = device.wait(Until.hasObject(shell), 500L)
         if (!landed) allowPermissionDialog()
     }
-    check(landed) { "sign-in did not reach the shell within ${WAIT_MS * 2} ms" }
+    if (!landed) fail("sign-in did not reach the shell within ${WAIT_MS * 2} ms (wrong password, or a username is required?)")
     Log.i(TAG, "signed in")
 }
 
-/** True while the soft keyboard is up (`pressBack` with it down would leave the activity, so it is checked first). */
-private fun MacrobenchmarkScope.imeShown(): Boolean =
-    device.executeShellCommand("dumpsys input_method").contains("mInputShown=true")
+/**
+ * True while the soft keyboard is up (`pressBack` with it down would leave the activity, so it is checked
+ * first). The IME is its own accessibility window, found by its package; `dumpsys input_method` is only a
+ * fallback and guarded, because a throwing shell call here once ended the whole test with no message.
+ */
+private fun MacrobenchmarkScope.imeShown(): Boolean {
+    if (device.hasObject(By.pkg(Pattern.compile(".*(inputmethod|keyboard).*", Pattern.CASE_INSENSITIVE)))) return true
+    return runCatching { device.executeShellCommand("dumpsys input_method").contains("mInputShown=true") }.getOrDefault(false)
+}
 
 /**
  * Finds [selector], polling up to [timeoutMs]: between polls the soft keyboard is closed (Back, only if shown)
@@ -165,7 +238,7 @@ private fun MacrobenchmarkScope.openSession() {
             WAIT_MS,
         )
     }
-    checkNotNull(target) { "no session to open (does the server have at least one session?)" }
+    if (target == null) fail("no session to open (does the server have at least one session?)")
     target.click()
     device.waitForIdle()
     Log.i(TAG, "opened a session")
@@ -173,7 +246,7 @@ private fun MacrobenchmarkScope.openSession() {
 
 private fun MacrobenchmarkScope.scrollTranscript() {
     val list = device.wait(Until.findObject(By.scrollable(true)), WAIT_MS)
-        ?: error("no scrollable transcript on screen")
+        ?: fail("no scrollable transcript on screen")
     list.setGestureMargin(device.displayWidth / 5)
     repeat(3) {
         list.fling(Direction.UP)
