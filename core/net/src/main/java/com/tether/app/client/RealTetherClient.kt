@@ -5662,8 +5662,6 @@ class RealTetherClient(
     @Volatile
     internal var revokeRetryMs: Long = REVOKE_RETRY_MS
 
-    /** Test seam: the bound on a mirror bind (production: [MIRROR_BIND_TIMEOUT_MS]). */
-    @Volatile
     /** Test probe (ta-705 (4)): conversions of an event's raw JSON that ran while [lock] was held. */
     internal val eventConversionsUnderLock = java.util.concurrent.atomic.AtomicInteger()
 
@@ -5673,6 +5671,8 @@ class RealTetherClient(
         return JsCodec.fromJson(raw) as JsObj
     }
 
+    /** Test seam: the bound on a mirror bind (production: [MIRROR_BIND_TIMEOUT_MS]). */
+    @Volatile
     internal var mirrorBindTimeoutMs: Long = MIRROR_BIND_TIMEOUT_MS
 
     // ta-jt9 L-A2: the boot purge's outcome (see [awaitBootPurge]); true = decided.
