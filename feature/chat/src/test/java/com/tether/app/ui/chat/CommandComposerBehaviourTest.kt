@@ -1,5 +1,8 @@
 package com.tether.app.ui.chat
 
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +24,7 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.withKeyDown
 import com.tether.app.client.ProviderCatalogEntry
 import com.tether.app.client.RunCommandResult
@@ -33,6 +37,7 @@ import com.tether.app.protocol.reduce.ev
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -277,6 +282,63 @@ class CommandComposerBehaviourTest {
         input().performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.B) } }
         rule.waitForIdle()
         assertEquals(listOf("t1"), rec.backgrounds)
+    }
+
+    // --- the slash palette, same-frame keyboard Send (ta-55u) -----------------------------------
+
+    private val modelAndCompact = ServerMessage.SessionControls(
+        "sess-0001", emptyList(),
+        listOf(
+            SessionCommandOption("compact", "Clear history but keep a summary", null, null, true),
+            SessionCommandOption("model", "Switch the model for this session", "[model]", null, true),
+        ),
+        model = null,
+    )
+
+    /** Settle [settled] in the field, then run [sameStep] with the IME's live connection in ONE UI-thread step. */
+    private fun typeThen(settled: String, sameStep: (InputConnection, View) -> Unit) {
+        input().requestFocus()
+        input().performTextInput(settled)
+        rule.waitForIdle()
+        rule.runOnUiThread {
+            val view = rule.activity.window.decorView.findFocus()
+            assertNotNull("the composer's view holds focus", view)
+            val ic = view!!.onCreateInputConnection(EditorInfo())
+            assertNotNull("an input connection", ic)
+            sameStep(ic!!, view)
+        }
+        rule.waitForIdle()
+    }
+
+    @Test
+    fun aSlashCommittedAndImeSentInOneStepAcceptsTheLiveMenuNotTheStaleOne() {
+        // "/" settled: the composition-time menu lists /compact first. "mo" and IME Send land in the
+        // same step, before the recomposition: the live field is "/mo", whose menu is /model alone.
+        // Reading the stale menu would complete "/compact " instead (mutation O6).
+        show(ComposerFixtures.idle, controls = modelAndCompact)
+        typeThen("/") { ic, _ ->
+            ic.commitText("mo", 1)
+            ic.performEditorAction(EditorInfo.IME_ACTION_SEND)
+        }
+        assertEquals("/model ", inputText())
+        assertEquals("accepting a command is not a send", emptyList<String>(), sends)
+    }
+
+    @Test
+    fun aSlashCommittedAndImeSentInOneStepWithNoLiveMatchSendsTheLiveText() {
+        // Live "/zz" matches nothing here (the palette always carries /model, so /mo cannot be used), so there is no menu and IME Send submits the field. The
+        // stale "/" menu (open, /compact first) would swallow the Send and complete "/compact ".
+        show(ComposerFixtures.idle, controls = ServerMessage.SessionControls(
+            "sess-0001", emptyList(),
+            listOf(SessionCommandOption("compact", "Clear history but keep a summary", null, null, true)),
+            model = null,
+        ))
+        typeThen("/") { ic, _ ->
+            ic.commitText("zz", 1)
+            ic.performEditorAction(EditorInfo.IME_ACTION_SEND)
+        }
+        assertEquals(listOf("/zz"), sends)
+        assertEquals("", inputText())
     }
 
     // --- the slash palette ----------------------------------------------------------------------
