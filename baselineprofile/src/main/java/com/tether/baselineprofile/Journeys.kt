@@ -223,25 +223,57 @@ private fun MacrobenchmarkScope.findScrolling(selector: BySelector, timeoutMs: L
     return device.findObject(selector)
 }
 
+/** A node labelled [label] exactly, by accessibility description or by text (a key's label may surface as either). */
+private fun MacrobenchmarkScope.byLabel(label: String): UiObject2? =
+    device.findObject(By.desc(label)) ?: device.findObject(By.text(label))
+
+private val SESSION_CARD = By.desc(Pattern.compile("Open session: .*"))
+
+/** SessionRow's merged description: "<name>, ..." ending in a status and a relative time, clickable, not an archive / drag handle. */
+private val SESSION_ROW = By.clickable(true)
+    .desc(Pattern.compile("(?!Archive |Hold and drag |Clear filters).+, (chat|terminal|.*ago|.*\\d+[smhd]).*"))
+
+/**
+ * Opens a session from where sign-in lands (Overview). Routes, in order, each taken only if the one before
+ * found nothing:
+ *  1. an Overview card "Open session: <title>" (scroll-searched);
+ *  2. the Overview folds sessions by status: tap its "Show ready sessions" / "Show active sessions" key
+ *     (OverviewScreen.kt empty state, shown when nothing is running or waiting), then the card again;
+ *  3. the sessions list: on a phone the top bar's "Menu: navigation and tools" -> "Sessions" (Topbar.kt),
+ *     or the narrow shell's "Open sessions" drawer key; then the first session row.
+ */
 private fun MacrobenchmarkScope.openSession() {
-    // Overview card first (the post-sign-in screen on a wide layout), else the sessions drawer.
-    var target: UiObject2? = device.findObject(By.desc(Pattern.compile("Open session: .*")))
+    var target: UiObject2? = device.wait(Until.findObject(SESSION_CARD), 3_000L)
+    val tried = mutableListOf("card")
     if (target == null) {
-        device.findObject(By.desc("Open sessions"))?.click()
-        device.waitForIdle()
-        // SessionRow's merged description: "<name>, ..." ending in a status and a relative time; the
-        // row is the clickable node that is not an archive / drag handle.
-        target = device.wait(
-            Until.findObject(
-                By.clickable(true).desc(Pattern.compile("(?!Archive |Hold and drag |Clear filters).+, (chat|terminal|.*ago|.*\\d+[smhd]).*")),
-            ),
-            WAIT_MS,
-        )
+        val show = byLabel("Show ready sessions") ?: byLabel("Show active sessions")
+        if (show != null) {
+            tried += "show-sessions key"
+            show.click()
+            device.waitForIdle()
+            target = findScrolling(SESSION_CARD, WAIT_MS)
+        }
     }
-    if (target == null) fail("no session to open (does the server have at least one session?)")
+    if (target == null) {
+        tried += "sessions list"
+        val menu = device.findObject(By.desc(Pattern.compile("Menu: navigation and tools.*")))
+        if (menu != null) {
+            menu.click()
+            device.waitForIdle()
+            // The menu item's label: the destinations are listed by name (DashboardView.kt "Sessions").
+            device.wait(Until.findObject(By.text("Sessions")), 3_000L)?.click()
+                ?: byLabel("Sessions")?.click()
+            device.waitForIdle()
+        } else {
+            device.findObject(By.desc("Open sessions"))?.click()
+            device.waitForIdle()
+        }
+        target = device.wait(Until.findObject(SESSION_ROW), WAIT_MS) ?: device.wait(Until.findObject(SESSION_CARD), 3_000L)
+    }
+    if (target == null) fail("no session to open (tried: ${tried.joinToString()}; does the server have at least one session?)")
     target.click()
     device.waitForIdle()
-    Log.i(TAG, "opened a session")
+    Log.i(TAG, "opened a session via ${tried.joinToString()}")
 }
 
 private fun MacrobenchmarkScope.scrollTranscript() {
