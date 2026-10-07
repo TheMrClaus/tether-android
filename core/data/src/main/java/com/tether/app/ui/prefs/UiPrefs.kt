@@ -10,7 +10,8 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.preferencesDataStoreFile
 import com.tether.app.client.serverOrigin
 import com.tether.app.ui.theme.ThemeMode
 import java.util.WeakHashMap
@@ -35,17 +36,32 @@ import kotlinx.serialization.json.buildJsonObject
 internal val uiPrefsCorruptionHandler: ReplaceFileCorruptionHandler<Preferences> =
     ReplaceFileCorruptionHandler { emptyPreferences() }
 
-private val Context.tetherUiDataStore: DataStore<Preferences> by preferencesDataStore(
-    name = "tether_ui_prefs",
-    corruptionHandler = uiPrefsCorruptionHandler,
-)
+/**
+ * ta-9tot: the preferences DataStore of an [android.app.Application], one per Application (what
+ * `preferencesDataStore` gave: a process singleton, which in the app IS one per Application). It is not a
+ * process-wide singleton on purpose: DataStore runs each update's transform in the CALLER's coroutine
+ * context on one actor, so a write a composition issued whose (main-looper) dispatcher was never run
+ * again (a test tearing its root down, Robolectric resetting the main looper) strands that store's
+ * actor for good. As a process singleton that wedged every later test's writes in the JVM (the gate's
+ * `runPrefsWrite` 30 s timeouts in ShareFlowTest / LoginVariantPerServerTest / MainShellSelectionModelTest
+ * under load); per Application, a stranded store dies with the test that stranded it. The file is
+ * resolved eagerly so a cached store does not keep its Context alive.
+ */
+private val uiDataStores = WeakHashMap<Context, DataStore<Preferences>>()
+
+private fun tetherUiDataStore(application: Context): DataStore<Preferences> = synchronized(uiDataStores) {
+    uiDataStores.getOrPut(application) {
+        val file = application.preferencesDataStoreFile("tether_ui_prefs")
+        PreferenceDataStoreFactory.create(corruptionHandler = uiPrefsCorruptionHandler, produceFile = { file })
+    }
+}
 
 /**
  * DataStore-backed UI preferences: the web's `tether.preferences.v1` fields as one
  * [TetherPreferences] model (T2.3), plus the native-only push / permission state.
  */
 class UiPrefs internal constructor(private val store: DataStore<Preferences>) {
-    constructor(context: Context) : this(context.applicationContext.tetherUiDataStore)
+    constructor(context: Context) : this(tetherUiDataStore(context.applicationContext))
 
     /**
      * What a write the disk refused would have stored (null: the disk copy is current), shared by

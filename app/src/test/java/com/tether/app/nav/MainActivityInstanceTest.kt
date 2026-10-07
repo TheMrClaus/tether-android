@@ -54,6 +54,10 @@ class MainActivityInstanceTest {
         ClientLocator.installForTest(null)
         ClientLocator.factory = { obtained++; client }
         forgetRememberedChat()
+        // ta-9tot: the preferences store is a test's own now (it was one JVM-wide store, in which an earlier
+        // test's cold start had already been through the one-time notification prompt, which these tests'
+        // "starts nothing" assertions silently relied on): a cold start here has been asked once already.
+        runPrefsWrite { com.tether.app.ui.prefs.UiPrefs(app).setPushPermissionAsked(true) }
     }
 
     @After
