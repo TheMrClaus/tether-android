@@ -276,17 +276,35 @@ private fun MacrobenchmarkScope.openSession() {
     Log.i(TAG, "opened a session via ${tried.joinToString()}")
 }
 
+/**
+ * Scrolls the open session's transcript. A long one exposes a scrollable node: fling it. A short one (a few
+ * messages fit on screen, as on the fake server) exposes none, which is not an error: the same gestures are
+ * swiped over the middle of the screen, between the header and the composer, so the scroll paths still run.
+ */
 private fun MacrobenchmarkScope.scrollTranscript() {
-    val list = device.wait(Until.findObject(By.scrollable(true)), WAIT_MS)
-        ?: fail("no scrollable transcript on screen")
-    list.setGestureMargin(device.displayWidth / 5)
+    val list = device.wait(Until.findObject(By.scrollable(true)), 5_000L)
+    if (list != null) {
+        list.setGestureMargin(device.displayWidth / 5)
+        repeat(3) {
+            list.fling(Direction.UP)
+            device.waitForIdle()
+        }
+        repeat(2) {
+            list.fling(Direction.DOWN)
+            device.waitForIdle()
+        }
+        Log.i(TAG, "scrolled the transcript (fling)")
+        return
+    }
+    val w = device.displayWidth
+    val h = device.displayHeight
     repeat(3) {
-        list.fling(Direction.UP)
+        device.swipe(w / 2, h * 7 / 10, w / 2, h * 3 / 10, 20)
         device.waitForIdle()
     }
     repeat(2) {
-        list.fling(Direction.DOWN)
+        device.swipe(w / 2, h * 3 / 10, w / 2, h * 7 / 10, 20)
         device.waitForIdle()
     }
-    Log.i(TAG, "scrolled the transcript")
+    Log.i(TAG, "no scrollable transcript (short session): swiped the screen instead")
 }
