@@ -459,6 +459,16 @@ class ApprovalModelTest {
         assertEquals("a\u0301\u0302\\u0303b\u0301\u0302", shownIn("a\u0301\u0302\u0303b\u0301\u0302"))
     }
 
+    @Test fun displayNameEscapesMarksLikeAPathAndLeavesTheRestToSafeText() {
+        // ta-d2cx: the same rule as a path (escapeTokens), applied to the tool name.
+        assertEquals("Ba\u0301\u0302\\u0303\\u0304sh", displayName("Ba\u0301\u0302\u0303\u0304sh"))
+        assertEquals("Cafe\u0301 to\u0302ol", displayName("Cafe\u0301 to\u0302ol")) // a normal accented name
+        assertEquals("plain", displayName("plain"))
+        assertEquals("a\\u20DDb", displayName("a\u20DDb")) // an enclosing mark
+        assertEquals("Ba\u202Esh", displayName("Ba\u202Esh")) // bidi stays raw for SafeText's token
+        assertEquals("a\u0301\u0302\\u0303b\u0301\u0302", displayName("a\u0301\u0302\u0303b\u0301\u0302")) // a new base restarts the run
+    }
+
     @Test fun everyEnclosingMarkIsEscaped() {
         assertEquals("a\\u20DD", shownIn("a\u20DD"))
         assertEquals("a\\u20DD\\u20DE", shownIn("a\u20DD\u20DE"))

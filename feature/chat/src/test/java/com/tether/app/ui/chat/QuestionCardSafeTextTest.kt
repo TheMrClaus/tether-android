@@ -54,7 +54,7 @@ class QuestionCardSafeTextTest {
 
     private val sent = mutableListOf<String>()
 
-    private fun fixture(question: String = QUESTION) = ChatFixtures.fold(
+    private fun fixture(question: String = QUESTION, toolName: String = "Bash${RLO}hsab") = ChatFixtures.fold(
         ev("turn_started", "t1", ts = ApprovalFixtures.T) { put("idempotencyKey", "k-t1") },
         ev("user_message_accepted", "t1", ts = ApprovalFixtures.T) { put("text", "Clean up.") },
         ev("tool_start", "t1", ts = ApprovalFixtures.T) { put("toolId", "ask-1"); put("name", "AskUserQuestion"); putJsonObject("input") {} },
@@ -70,9 +70,9 @@ class QuestionCardSafeTextTest {
                 }
             }
         },
-        ev("tool_start", "t1", ts = ApprovalFixtures.T) { put("toolId", "tool-x"); put("name", "Bash${RLO}hsab") },
+        ev("tool_start", "t1", ts = ApprovalFixtures.T) { put("toolId", "tool-x"); put("name", toolName) },
         ev("approval_request", "t1", ts = ApprovalFixtures.T) {
-            put("requestId", "req-x"); put("toolId", "tool-x"); put("name", "Bash${RLO}hsab")
+            put("requestId", "req-x"); put("toolId", "tool-x"); put("name", toolName)
             putJsonObject("input") { put("command", "ls") }
         },
     )
@@ -148,6 +148,21 @@ class QuestionCardSafeTextTest {
         rule.waitForIdle()
         assertTrue(spoken().toString(), spoken().any { it == "The agent wants to run  Bash${tok(0x202E)}hsab ." })
         for (s in spoken()) assertFalse("raw RLO in \"$s\"", s.startsWith("The agent wants to run") && s.contains(RLO))
+    }
+
+    @Test fun theApprovalCardsToolNameEscapesStackedCombiningMarksFromTheThird() {
+        // ta-d2cx: four marks on one base: 1 and 2 stay, 3 and 4 are written out, as in a path.
+        show(fixture(toolName = "Ba\u0301\u0302\u0303\u0304sh"))
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("approval-card"))
+        rule.waitForIdle()
+        assertTrue(spoken().toString(), spoken().any { it == "The agent wants to run  Ba\u0301\u0302\\u0303\\u0304sh ." })
+    }
+
+    @Test fun theApprovalCardsAccentedToolNameIsUnchanged() {
+        show(fixture(toolName = "Cafe\u0301_to\u0302ol"))
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("approval-card"))
+        rule.waitForIdle()
+        assertTrue(spoken().toString(), spoken().any { it == "The agent wants to run  Cafe\u0301_to\u0302ol ." })
     }
 
     @Test fun theAnswerCarriesTheAgentsLabelExactly() {

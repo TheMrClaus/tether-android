@@ -254,6 +254,22 @@ internal fun displayLine(text: String, max: Int = DISPLAY_TEXT_MAX): String {
     return if (total <= max) tokens.joinToString("") else headOf(tokens, max) + "…"
 }
 
+/**
+ * ta-d2cx: the tool name for the card's SafeText line: bidi / invisible code points stay raw here (SafeText
+ * draws them as warning-ink tokens, ta-28i), but a combining mark that [escapeTokens] escapes for a path (the
+ * 3rd and later of a run, every enclosing mark) is written out as `\uXXXX` the same way, from that same helper.
+ */
+internal fun displayName(name: String): String {
+    val cps = name.codePoints().toArray()
+    if (cps.none(::isMark)) return name
+    val tokens = escapeTokens(cps, 0, cps.size)
+    val sb = StringBuilder(name.length)
+    for (k in cps.indices) {
+        if (isMark(cps[k]) && tokens[k] != String(Character.toChars(cps[k])) && !needsEscape(cps[k])) sb.append(tokens[k]) else sb.appendCodePoint(cps[k])
+    }
+    return sb.toString()
+}
+
 /** Round 8: the longest a context value (reason, network host) shows, in escaped characters. */
 internal const val DISPLAY_TEXT_MAX = 2_000
 

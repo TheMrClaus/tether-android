@@ -346,7 +346,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                     val tokens = tokenStyle(t)
                     withStyle(SpanStyle(fontFamily = type.mono, background = t.tintMd)) {
                         append(" ")
-                        appendSafe(view.name, SafeText.Rule.Line, tokens)
+                        appendSafe(displayName(view.name), SafeText.Rule.Line, tokens)
                         append(" ")
                     }
                     append(".")
