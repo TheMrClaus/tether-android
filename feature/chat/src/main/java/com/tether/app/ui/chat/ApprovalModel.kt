@@ -81,10 +81,8 @@ internal data class ApprovalView(
     val activeTurnId: String,
     val request: JsObj,
     val toolId: String,
-    /** The tool name as the wire gave it (cut): it picks how [input] renders, so it is never escaped. */
+    /** The tool name as the wire gave it (cut): it picks how [input] renders; the card draws it through SafeText (ta-28i: every bidi / invisible code point a styled token). */
     val name: String,
-    /** [name] as the card SHOWS it: escaped by category, then cut ([displayLine]). */
-    val shownName: String,
     /** `approval.input`; null when absent or null (then no ToolInput renders). */
     val input: JsValue?,
     val choices: List<ApprovalChoiceView>,
@@ -125,7 +123,6 @@ internal fun approvalView(requestId: String, obj: JsObj, activeTurnId: String, s
         request = obj,
         toolId = obj["toolId"].string().orEmpty(),
         name = cut(obj["name"].string().orEmpty(), 200),
-        shownName = displayLine(obj["name"].string().orEmpty(), 200),
         input = input,
         choices = obj["choices"].objects().mapNotNull { c ->
             val id = c["choiceId"].string() ?: return@mapNotNull null
