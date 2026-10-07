@@ -3,6 +3,7 @@ package com.tether.app.ui.chat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,7 +41,9 @@ import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.video.LocalVideoSurfaceEnabled
+import com.tether.app.ui.video.VideoControlBar
 import com.tether.app.ui.video.VideoSurface
+import kotlinx.coroutines.delay
 
 /*
  * ta-coik.68: tool-media video as the web draws it (chat-tool-render.tsx:122-141 inline,
@@ -58,6 +61,9 @@ internal object VideoSizing {
 
     /** `.chat-tool-media-item { max-height: 320px }` */
     const val MAX_HEIGHT = 320f
+
+    /** How long the viewer's control bar stays up while the clip plays. */
+    const val VIEWER_BAR_MS = 3_000L
 
     /** The platform controller bar is about this tall (dp): the part of the box's bottom that must be on screen. */
     const val CONTROLLER_RESERVE = 96f
@@ -129,7 +135,9 @@ internal fun InlineVideo(item: ToolMediaItem, onOpen: () -> Unit) {
                 }
                 .width(box.width.dp)
                 .then(if (error) Modifier.heightIn(min = box.height.dp) else Modifier.height(box.height.dp))
-                .background(t.graphite, shape)
+                // Prepared but nothing painted on this surface yet (a new one after a rotation): a neutral fill, never
+                // the skin's graphite, which is white in the light skin and read as a hole.
+                .background(if (ready != null && !frameDrawn && LocalVideoSurfaceEnabled.current) t.tintMd else t.graphite, shape)
                 // No frame is drawn (idle, loading, error, or a new surface not yet painted): graphite is white
                 // in the light skin, so an edge. With the surface off nothing is awaited.
                 .then(if (ready == null || (!frameDrawn && LocalVideoSurfaceEnabled.current)) Modifier.border(1.dp, t.line, shape) else Modifier)
@@ -228,14 +236,42 @@ internal fun ViewerVideo(item: ToolMediaItem) {
         val ready = state as? ClipState.Ready
         val fit = ready?.takeIf { it.width > 0 && it.height > 0 }?.let { VideoSizing.fit(it.width to it.height, maxWidth.value, maxHeight.value) }
         val player = view.player
-        if (player != null && LocalVideoSurfaceEnabled.current) {
-            VideoSurface(
-                player,
-                fit?.width?.dp ?: 0.dp,
-                fit?.height?.dp ?: 0.dp,
-                if (fit != null) Modifier.size(fit.width.dp, fit.height.dp) else Modifier.fillMaxSize(),
-                cornerRadius = 0.dp,
-            )
+        if (player != null) {
+            // The viewer's controls are drawn here, in the dialog's own window (VideoControlBar): the platform
+            // controller is a window of its own, and held over a full-screen viewer (paused, ended) it left the
+            // Close key unpressable on a device. Held while paused or ended, gone after a few seconds of play,
+            // a tap on the picture brings it back or sends it away.
+            var barShown by remember(player) { mutableStateOf(true) }
+            val playing = player.playing
+            LaunchedEffect(player, playing, barShown) {
+                if (!playing) {
+                    barShown = true
+                } else if (barShown) {
+                    delay(VideoSizing.VIEWER_BAR_MS)
+                    barShown = false
+                }
+            }
+            Box(if (fit != null) Modifier.size(fit.width.dp, fit.height.dp) else Modifier.fillMaxSize()) {
+                if (LocalVideoSurfaceEnabled.current) {
+                    VideoSurface(
+                        player,
+                        fit?.width?.dp ?: 0.dp,
+                        fit?.height?.dp ?: 0.dp,
+                        Modifier.fillMaxSize(),
+                        cornerRadius = 0.dp,
+                        controllerAllowed = false,
+                    )
+                }
+                if (ready != null) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { barShown = !barShown }
+                            .testTag("viewer-video-tap"),
+                    )
+                    if (barShown) VideoControlBar(player, Modifier.align(Alignment.BottomCenter))
+                }
+            }
         }
         if (ready == null) SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 18.dp, contentDescription = "Loading video")
     }

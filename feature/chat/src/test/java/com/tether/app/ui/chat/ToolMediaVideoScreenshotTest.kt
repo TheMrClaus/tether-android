@@ -186,3 +186,50 @@ class ToolMediaVideoStatesPhoneScreenshotTest(private val skin: TetherSkin) {
         fun params(): List<Array<Any>> = listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(it) }
     }
 }
+
+/** ta-coik.68: the full-size viewer's own control bar (held while paused or ended), over a clip of a known size. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class ToolMediaVideoViewerScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun viewerPaused() {
+        val stubs = mutableListOf<StubVideoPlayer>()
+        val registry = ToolClipRegistry(
+            ClipServer(park = true), rule.activity.cacheDir, { ClipFixtures.ORIGIN }, CoroutineScope(Dispatchers.Unconfined),
+            makePlayer = { reader, failed -> StubVideoPlayer(reader, failed).also { stubs += it } },
+        )
+        try {
+            rule.mainClock.autoAdvance = false
+            rule.setContent {
+                ChatHost(skin, wellHeight = 700.dp) {
+                    CompositionLocalProvider(LocalToolMediaLoader provides ToolFixtures.FakeLoader(), LocalToolClips provides registry, LocalVideoSurfaceEnabled provides false) {
+                        ToolViewerHost()
+                    }
+                }
+            }
+            rule.runOnIdle {
+                registry.clip(ClipFixtures.src)!!.viewer.play()
+                registry.openViewer(listOf(ToolMediaItem("video", "video/mp4", ClipFixtures.src)), 0)
+            }
+            rule.mainClock.advanceTimeBy(600)
+            rule.waitForIdle()
+            rule.runOnIdle {
+                stubs.single().phase = VideoPhase.Ready(1280, 720)
+                stubs.single().position = 4_000
+                androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            }
+            rule.mainClock.advanceTimeBy(600)
+            rule.waitForIdle()
+            rule.onNodeWithTag("media-lightbox").captureRoboImage("src/test/screenshots/tool-media-video-viewer/${skin.id}-phone.png", roborazziOptions = exact)
+        } finally {
+            registry.releaseAll()
+        }
+    }
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(it) }
+    }
+}

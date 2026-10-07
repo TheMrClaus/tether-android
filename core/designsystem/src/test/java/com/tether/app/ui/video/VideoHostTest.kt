@@ -167,4 +167,28 @@ class VideoHostTest {
         host.texture.surfaceTextureListener!!.onSurfaceTextureUpdated(texture)
         assertEquals("the first frame on a surface clears the still kept for it", listOf<android.graphics.Bitmap?>(null), fake.stills)
     }
+
+    // --- device findings round 3 ---------------------------------------------------------------------
+
+    @Test fun theStillIsTakenWhenTheTextureDetachesNotAfterItsLayerIsGone() {
+        val marker = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888)
+        var grabs = 0
+        val player = RecordingVideoPlayer()
+        val h = VideoHost(activity, player, radiusPx = 12f, makeController = { RecordingController(it) }, grab = { grabs++; marker })
+        activity.setContentView(h.frame, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val texture = android.graphics.SurfaceTexture(0)
+        h.texture.surfaceTextureListener!!.onSurfaceTextureAvailable(texture, 10, 10)
+        h.texture.surfaceTextureListener!!.onSurfaceTextureUpdated(texture)
+        // Detach: the attach-state listener runs first, while the texture can still be read.
+        (h.frame.parent as ViewGroup).removeView(h.frame)
+        assertEquals(1, grabs)
+        assertTrue("the picture was kept with the player", player.stills.lastOrNull() === marker)
+        // The surface listener's destroy comes after: it must not read the dead layer and replace the good picture.
+        h.texture.surfaceTextureListener?.onSurfaceTextureDestroyed(texture)
+        h.dispose()
+        assertEquals("taken once per surface", 1, grabs)
+        assertTrue(player.stills.last() === marker)
+        // A frame on a new surface clears it and re-arms the capture.
+        h.texture.surfaceTextureListener = null
+    }
 }

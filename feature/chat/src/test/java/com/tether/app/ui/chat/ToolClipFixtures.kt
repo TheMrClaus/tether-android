@@ -20,7 +20,21 @@ class StubVideoPlayer(val reader: PlayableSource, val onFailed: () -> Unit) : Vi
     override var playing: Boolean by mutableStateOf(false)
     override var buffering: Boolean by mutableStateOf(false)
     var released = false
-    override val control: MediaController.MediaPlayerControl get() = throw UnsupportedOperationException("no decoder in this test")
+    var position = 0
+    var seeks = mutableListOf<Int>()
+    override val control: MediaController.MediaPlayerControl = object : MediaController.MediaPlayerControl {
+        override fun start() { playing = true }
+        override fun pause() { playing = false }
+        override fun getDuration() = 10_000
+        override fun getCurrentPosition() = position
+        override fun seekTo(pos: Int) { seeks += pos; position = pos }
+        override fun isPlaying() = playing
+        override fun getBufferPercentage() = 100
+        override fun canPause() = true
+        override fun canSeekBackward() = true
+        override fun canSeekForward() = true
+        override fun getAudioSessionId() = 0
+    }
     override fun attachSurface(surface: Surface) = Unit
     override fun detachSurface(surface: Surface) = Unit
     override fun pause() = Unit

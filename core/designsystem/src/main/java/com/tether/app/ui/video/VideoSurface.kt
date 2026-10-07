@@ -3,6 +3,7 @@ package com.tether.app.ui.video
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Bitmap
 import android.graphics.Outline
 import android.graphics.SurfaceTexture
 import android.view.Gravity
@@ -109,17 +110,8 @@ fun VideoSurface(
     val clipHeightPx = (clipHeight.value * density).roundToInt()
     // The host fills the WHOLE video box (the controller anchors to it, so its bar spans the box and
     // meets the rounded corners); the picture is sized and centred inside it. The last picture the previous
-    // surface showed is drawn under it until the new surface draws its own.
+    // surface showed is drawn over it until the new surface draws its own.
     Box(modifier, contentAlignment = Alignment.Center) {
-        if (still != null && !framed) {
-            val image = remember(still) { still.asImageBitmap() }
-            Image(
-                image,
-                contentDescription = null,
-                contentScale = ContentScale.FillBounds,
-                modifier = if (clipWidthPx > 0 && clipHeightPx > 0) Modifier.size(clipWidth, clipHeight) else Modifier.fillMaxSize(),
-            )
-        }
         AndroidView(
             factory = { host.frame },
             modifier = Modifier.fillMaxSize(),
@@ -131,6 +123,16 @@ fun VideoSurface(
                 host.sync(ready, playing, clipWidthPx, clipHeightPx, controllerAllowed)
             },
         )
+        // Above the surface, gone at its first frame (a paused or ended player may paint none onto a new one).
+        if (still != null && !framed) {
+            val image = remember(still) { still.asImageBitmap() }
+            Image(
+                image,
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                modifier = if (clipWidthPx > 0 && clipHeightPx > 0) Modifier.size(clipWidth, clipHeight) else Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 
@@ -152,6 +154,8 @@ class VideoHost(
     context: Context,
     private val player: VideoPlayer,
     radiusPx: Float,
+    /** The picture on a texture, taken while it can still be read (a seam for tests). */
+    private val grab: (TextureView) -> Bitmap? = { if (it.isAvailable) it.bitmap else null },
     makeController: (Context) -> MediaController = { MediaController(it) },
 ) {
     val frame = FrameLayout(context)
@@ -159,6 +163,9 @@ class VideoHost(
     private val controller = makeController(context)
     private var surface: Surface? = null
     private var framed = false
+
+    /** The still of the surface now (or last) in use has been taken: a later capture would read a dead layer. */
+    private var stillTaken = false
 
     /** Told whether a frame is drawn on the current surface (see [VideoSurface]). */
     var onFrame: ((Boolean) -> Unit)? = null
@@ -175,10 +182,18 @@ class VideoHost(
         frame.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
             if (bottom - top != oldBottom - oldTop) controller.invalidateOutline()
         }
+        // The picture can only be read while the texture still has its hardware layer: detaching destroys the
+        // layer BEFORE the surface listener's onSurfaceTextureDestroyed runs (a bitmap taken there is blank).
+        // This listener is called before the view's own detach work.
+        texture.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+            override fun onViewDetachedFromWindow(v: View) = captureStill()
+        })
         texture.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
                 val mine = Surface(texture)
                 surface = mine
+                stillTaken = false
                 setFramed(false)
                 player.attachSurface(mine)
             }
@@ -255,9 +270,10 @@ class VideoHost(
 
     /** The picture on screen, kept with the player before its surface goes (see [VideoPlayer.still]). */
     private fun captureStill() {
-        if (!framed || !texture.isAvailable) return
+        if (!framed || stillTaken) return
+        stillTaken = true
         try {
-            texture.bitmap?.let(player::keepStill)
+            grab(texture)?.let(player::keepStill)
         } catch (_: RuntimeException) {
         }
     }
@@ -265,7 +281,10 @@ class VideoHost(
     private fun setFramed(value: Boolean) {
         if (framed == value) return
         framed = value
-        if (value) player.keepStill(null)
+        if (value) {
+            stillTaken = false
+            player.keepStill(null)
+        }
         onFrame?.invoke(value)
     }
 

@@ -5,6 +5,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import com.tether.app.client.ToolMediaResult
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.video.LocalVideoSurfaceEnabled
@@ -190,6 +192,62 @@ class ToolMediaVideoBehaviourTest {
         rule.waitForIdle()
         assertEquals(0, rule.onAllNodesWithContentDescription("Video viewer").fetchSemanticsNodes().size)
         assertTrue("only the viewer's player", players[1].released && !players[0].released)
+    }
+
+    // --- the viewer's own control bar (device finding: a held platform controller left Close dead) ------
+
+    private fun openViewerWithPlayerReady(): StubVideoPlayer {
+        show(ClipServer(park = true))
+        rule.onNodeWithContentDescription("Play video").performClick()
+        rule.onNodeWithContentDescription("View video full size").performClick()
+        rule.waitForIdle()
+        val viewer = players[1]
+        rule.runOnIdle { viewer.phase = VideoPhase.Ready(1280, 720) }
+        rule.waitForIdle()
+        return viewer
+    }
+
+    @Test fun theViewersBarIsHeldWhilePausedOrEndedAndCloseStaysPressable() {
+        val viewer = openViewerWithPlayerReady()
+        // Not playing (paused / ended): the bar is up and held, in the dialog's own window.
+        rule.onNodeWithContentDescription("Play").assertIsDisplayed()
+        rule.onNodeWithTag("video-seek").assertIsDisplayed()
+        // The toolbar is reachable while it shows: Close is pressed and the viewer goes.
+        rule.onNodeWithContentDescription("Close").performClick()
+        rule.waitForIdle()
+        assertEquals(0, rule.onAllNodesWithContentDescription("Video viewer").fetchSemanticsNodes().size)
+        assertTrue(viewer.released)
+    }
+
+    @Test fun theBarPlaysPausesAndSeeksTheViewersPlayer() {
+        val viewer = openViewerWithPlayerReady()
+        rule.onNodeWithContentDescription("Play").performClick()
+        rule.waitForIdle()
+        assertTrue(viewer.playing)
+        rule.onNodeWithContentDescription("Pause").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Pause").performClick()
+        rule.waitForIdle()
+        assertFalse(viewer.playing)
+        rule.onNodeWithTag("video-seek").performTouchInput { click(androidx.compose.ui.geometry.Offset(width * 0.5f, height / 2f)) }
+        rule.waitForIdle()
+        assertTrue("a tap on the bar seeks about halfway: ${viewer.seeks}", viewer.seeks.single() in 4_000..6_000)
+        // The held bar stays up while paused even after a tap on the picture.
+        rule.onNodeWithTag("viewer-video-tap").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Play").assertIsDisplayed()
+    }
+
+    @Test fun thePlayingBarGoesAwayAndAPictureTapBringsItBack() {
+        val viewer = openViewerWithPlayerReady()
+        rule.runOnIdle { viewer.control.start() }
+        rule.mainClock.autoAdvance = false
+        rule.mainClock.advanceTimeBy(VideoSizing.VIEWER_BAR_MS + 500)
+        rule.waitForIdle()
+        assertEquals("gone after a few seconds of play", 0, rule.onAllNodesWithContentDescription("Pause").fetchSemanticsNodes().size)
+        rule.onNodeWithTag("viewer-video-tap").performClick()
+        rule.mainClock.advanceTimeBy(100)
+        rule.onNodeWithContentDescription("Pause").assertIsDisplayed()
+        rule.mainClock.autoAdvance = true
     }
 
     // --- ta-2hv: the lightbox's Blocked copy, for a picture ------------------------------------------
