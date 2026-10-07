@@ -1253,7 +1253,7 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithText(displayText("https://evil\u2066.example").breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
     }
 
-    // ---- Round 8: a bounded card, Deny-only when not every path can be shown in full ----
+    // ---- ta-57l: every requested path is a row and every choice grants, as on the web (no app-only cap) ----
 
     /** A permissions request (exact / subset / deny) for [read] and [write], optionally with a working directory. */
     private fun permissionCard(read: List<String>, write: List<String>, cwd: String? = null, choices: Boolean = true): ChatFixtures.Folded {
@@ -1292,93 +1292,98 @@ class ApprovalCardBehaviourTest {
         return (0 until 64).map { path("r", it) } to (0 until 64).map { path("w", it) }
     }
 
-    private fun assertDenyOnly(refusal: String) {
-        scrollTo("grant-refused")
-        rule.onNodeWithText(refusal).assertExists()
-        rule.onAllNodesWithTag("grant-confirm").assertCountEquals(0)
-        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsNotEnabled()
-        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).assertIsNotEnabled()
-        rule.onNodeWithText("DENY", ignoreCase = true).assertIsEnabled().performClick()
-        rule.waitForIdle()
-        assertEquals(listOf("approval:req-b:deny"), calls)
-    }
-
-    @Test fun theWorstRelativeCardRendersQuicklyAndIsDenyOnly() {
-        val (read, write) = worstPaths(relative = true)
-        val started = System.nanoTime()
-        show(permissionCard(read, write))
-        scrollTo("grant-refused")
-        val ms = (System.nanoTime() - started) / 1_000_000
-        println("round 8: worst relative card (64+64 x 4096 tag characters) rendered in $ms ms")
-        assertTrue("rendered in $ms ms", ms < 5_000)
-        assertDenyOnly(TOO_LONG_COPY)
-        // The budget also holds: not every row is drawn.
-        rule.onNodeWithTag("grant-hidden").assertExists()
-    }
-
-    @Test fun theWorstPlainCardRendersQuicklyAndIsDenyOnly() {
-        val (read, write) = worstPaths(relative = false)
-        val started = System.nanoTime()
-        show(permissionCard(read, write))
-        scrollTo("grant-refused")
-        val ms = (System.nanoTime() - started) / 1_000_000
-        println("round 8: worst plain card (64+64 x 4096 tag characters) rendered in $ms ms")
-        assertTrue("rendered in $ms ms", ms < 5_000)
-        val rows = grantRows(pendingApprovals(fixture.tree).single().requested!!)
-        rule.onNodeWithText("+${rows.hidden} more paths not shown").assertExists()
-        assertTrue(rows.hidden > 0)
-        assertDenyOnly(TOO_MANY_COPY)
-    }
-
-    @Test fun theLargestGrantableCardRendersQuickly() {
-        // Relative tag-character paths just under the cap (1016 escaped characters each), as many as
-        // the budget allows: every row AND the confirmation's words are drawn (~2 x the budget).
-        val paths = (10 until 25).map { "/r$it/../" + tagChar.repeat(112) }
-        val rows = grantRows(RequestedPermissionsView(paths, emptyList(), network = false, exact = GrantedPermissions()))
-        assertTrue(rows.grantable)
-        assertTrue(rows.read.sumOf { it.second.length } > CARD_PATH_BUDGET - 1_100)
-        val started = System.nanoTime()
-        show(permissionCard(paths, emptyList()))
-        scrollTo("grant-confirm")
-        rule.onNodeWithTag("grant-confirm").performClick()
-        rule.waitForIdle()
-        val ms = (System.nanoTime() - started) / 1_000_000
-        println("round 8: largest grantable card (15 relative paths at the cap) rendered in $ms ms")
-        assertTrue("rendered in $ms ms", ms < 5_000)
-        // The card is taller than the screen: bring the key into view before tapping it.
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("Allow all", ignoreCase = true))
-        rule.waitForIdle()
-        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled().performClick()
-        rule.waitForIdle()
-        assertTrue(calls.single(), calls.single().startsWith("approval:req-b:all:"))
-    }
-
-    @Test fun aRelativePathJustUnderTheCapIsGrantable() {
-        val path = "../" + "a".repeat(DISPLAY_PATH_RELATIVE_MAX - 3)
-        show(permissionCard(listOf(path), emptyList()))
-        scrollTo("grant-confirm")
+    /** Every row of the card is drawn: [read] + [write] checkboxes, none summarised away, no refusal line. */
+    private fun assertEveryRowShown(read: Int, write: Int) {
+        rule.onAllNodesWithTag("grant-read").assertCountEquals(read)
+        rule.onAllNodesWithTag("grant-write").assertCountEquals(write)
+        rule.onAllNodesWithTag("grant-hidden").assertCountEquals(0)
         rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
+    }
+
+    /**
+     * The METRIC (W4-A, ta-57l): wall-clock milliseconds in Robolectric from handing the card to the
+     * transcript until every one of its [read] + [write] rows is composed and the confirmation is in
+     * view (System.nanoTime around show() + scrollTo()), asserted under 5,000 ms. Then the card is used:
+     * the confirmation is ticked and "Allow all" sends the request as it came.
+     */
+    private fun assertWorstCardDrawsAndGrants(read: List<String>, write: List<String>, label: String) {
+        val started = System.nanoTime()
+        show(permissionCard(read, write))
+        scrollTo("grant-confirm")
+        assertEveryRowShown(read.size, write.size)
+        val ms = (System.nanoTime() - started) / 1_000_000
+        println("ta-57l: $label (64+64 x 4096 code points, every row drawn) rendered in $ms ms")
+        assertTrue("$label rendered in $ms ms", ms < 5_000)
         rule.onNodeWithTag("grant-confirm").performClick()
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("Allow all", ignoreCase = true))
         rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(1, calls.size)
-        assertTrue(calls.single(), calls.single().startsWith("approval:req-b:all:") && calls.single().contains(path))
+        assertTrue(calls.single().take(120), calls.single().startsWith("approval:req-b:all:"))
+        // The raw last path of each list went out whole.
+        assertTrue(calls.single().contains(read.last()) && calls.single().contains(write.last()))
     }
 
-    @Test fun aRelativePathJustOverTheCapIsDenyOnly() {
-        val path = "../" + "a".repeat(DISPLAY_PATH_RELATIVE_MAX - 2)
-        show(permissionCard(listOf(path), emptyList()))
-        rule.onAllNodesWithTag("grant-hidden").assertCountEquals(0)
-        assertDenyOnly(TOO_LONG_COPY)
+    @Test fun theWorstRelativeCardDrawsEveryRowQuicklyAndCanGrant() {
+        val (read, write) = worstPaths(relative = true)
+        assertWorstCardDrawsAndGrants(read, write, "worst relative card")
     }
 
-    @Test fun aFullCardWithinTheBudgetStaysGrantable() {
+    @Test fun theWorstPlainCardDrawsEveryRowQuicklyAndCanGrant() {
+        val (read, write) = worstPaths(relative = false)
+        assertWorstCardDrawsAndGrants(read, write, "worst plain card")
+    }
+
+    @Test fun aLongRelativePathIsShownWholeAndGrantsLikeAnyOther() {
+        // Used to be refused past 1024 escaped characters (an app-only rule); the web grants it.
+        val path = "../" + "a".repeat(3_000) + "/../etc"
+        show(permissionCard(listOf("/srv/a", path), emptyList()))
+        scrollTo("grant-confirm")
+        assertEveryRowShown(2, 0)
+        rule.onNodeWithText(displayPath(path).breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
+        rule.onAllNodesWithTag("grant-read").onFirst().assertIsEnabled()
+        rule.onNodeWithTag("grant-confirm").assertIsEnabled().performClick()
+        rule.onNodeWithText("ALLOW ALL", ignoreCase = true).performScrollTo().assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertTrue(calls.single().take(80), calls.single().startsWith("approval:req-b:all:") && calls.single().contains(path))
+    }
+
+    @Test fun aLongRelativePathGrantsAsASubsetToo() {
+        val path = "../" + "a".repeat(3_000)
+        show(permissionCard(listOf("/srv/a", path), listOf("/w/b")))
+        scrollTo("grant-confirm")
+        rule.onAllNodesWithTag("grant-read")[0].performClick() // untick /srv/a
+        rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performScrollTo().assertIsEnabled().performClick()
+        rule.waitForIdle()
+        val call = calls.single()
+        assertTrue(call, call.startsWith("approval:req-b:some:") && call.contains(path) && call.contains("/w/b") && !call.contains("/srv/a"))
+    }
+
+    @Test fun withoutChoicesALongRelativePathStillApproves() {
+        show(permissionCard(listOf("/srv/a", "../" + "a".repeat(3_000)), emptyList(), choices = false))
+        scrollTo("approval-allow")
+        assertEveryRowShown(2, 0)
+        rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("approval:req-b:allow"), calls)
+    }
+
+    @Test fun withoutChoicesAFullCardApproves() {
+        val (read, write) = worstPaths(relative = false)
+        show(permissionCard(read, write, choices = false))
+        scrollTo("approval-allow")
+        assertEveryRowShown(64, 64)
+        rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("approval:req-b:allow"), calls)
+    }
+
+    @Test fun aFullCardOfOrdinaryPathsGrants() {
         val read = (0 until 64).map { "/srv/data/file-$it" }
         val write = (0 until 64).map { "/w/out/report-$it" }
         show(permissionCard(read, write))
         scrollTo("grant-confirm")
-        rule.onAllNodesWithTag("grant-hidden").assertCountEquals(0)
-        rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
+        assertEveryRowShown(64, 64)
         rule.onNodeWithTag("grant-confirm").performClick()
         // Studio's roomier card puts the choice keys below the confirmation's fold: bring them in.
         rule.onNodeWithText("ALLOW ALL", ignoreCase = true).performScrollTo().assertIsEnabled().performClick()
@@ -1387,39 +1392,33 @@ class ApprovalCardBehaviourTest {
         assertTrue(calls.single(), calls.single().startsWith("approval:req-b:all:") && calls.single().contains("/w/out/report-63"))
     }
 
-    // ---- Round 9 (Low-1): no provider choices, requested permissions: a bare "allow" may grant them ----
-
-    private fun assertOnlyDenyWithoutChoices(refusal: String) {
-        scrollTo("grant-refused")
-        rule.onNodeWithText(refusal).assertExists()
-        rule.onAllNodesWithTag("approval-choice").assertCountEquals(0)
-        rule.onNodeWithTag("approval-allow").assertIsNotEnabled().performClick()
+    @Test fun theToolNameAndTheChoiceWordsAreEscaped() {
+        val tree = foldTree(com.tether.app.protocol.reduce.freshTree(),
+            ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k1") },
+            ev("approval_request", "t1", ts = 1) {
+                put("requestId", "req-n"); put("toolId", "n1"); put("name", "Ba\u202Esh")
+                putJsonArray("choices") {
+                    addJsonObject { put("choiceId", "go"); put("label", "Allow\u202E\u200B now"); put("description", "Runs\u2066 it\u2028"); put("permissionGrant", "subset") }
+                    addJsonObject { put("choiceId", "no"); put("label", "Deny") }
+                }
+                putJsonObject("metadata") {
+                    put("provider", "codex"); put("kind", "permissions")
+                    putJsonObject("requestedPermissions") { putJsonObject("fileSystem") { putJsonArray("read") { add("/a") } } }
+                }
+            },
+        )
+        val view = pendingApprovals(tree).single()
+        assertEquals("Ba\\u202Esh", view.shownName)
+        assertEquals("Ba\u202Esh", view.name) // the wire name still picks the input renderer
+        assertEquals("Allow\\u202E\\u200B now", view.choices[0].label)
+        assertEquals("Runs\\u2066 it\\u2028", view.choices[0].description)
+        show(ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree))
+        scrollTo("approval-choice")
+        rule.onNodeWithText("Allow\\u202E\\u200B now", ignoreCase = true).assertExists()
+        // The tap still sends the CHOICE ID, whatever its label looks like.
+        rule.onNodeWithText("Allow\\u202E\\u200B now", ignoreCase = true).performClick()
         rule.waitForIdle()
-        assertTrue("sent $calls", calls.isEmpty())
-        rule.onNodeWithTag("approval-deny").assertIsEnabled().performClick()
-        rule.waitForIdle()
-        assertEquals(listOf("approval:req-b:deny"), calls)
-    }
-
-    @Test fun withoutChoicesATooLongPathLeavesOnlyDeny() {
-        show(permissionCard(listOf("/srv/a", "../" + "a".repeat(DISPLAY_PATH_RELATIVE_MAX - 2)), emptyList(), choices = false))
-        assertOnlyDenyWithoutChoices(TOO_LONG_COPY)
-    }
-
-    @Test fun withoutChoicesAHiddenPathLeavesOnlyDeny() {
-        val (read, write) = worstPaths(relative = false)
-        show(permissionCard(read, write, choices = false))
-        rule.onNodeWithTag("grant-hidden").assertExists()
-        assertOnlyDenyWithoutChoices(TOO_MANY_COPY)
-    }
-
-    @Test fun withoutChoicesAGrantableCardStillApproves() {
-        show(permissionCard(listOf("/srv/a"), listOf("/w/b"), choices = false))
-        scrollTo("approval-allow")
-        rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
-        rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
-        rule.waitForIdle()
-        assertEquals(listOf("approval:req-b:allow"), calls)
+        assertTrue(calls.single(), calls.single().startsWith("approval:req-n:go:"))
     }
 
     @Test fun aLongWorkingDirectoryShowsItsRelativeTail() {
@@ -1429,7 +1428,7 @@ class ApprovalCardBehaviourTest {
         val shown = displayPath(cwd)
         assertTrue(shown, shown.endsWith("/../..\u201d$PDI$RELATIVE_MARKER"))
         rule.onNodeWithText(shown.breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
-        // The directory is context, not a grant: the card stays grantable.
+        // The directory is context, not a grant.
         scrollTo("grant-confirm")
         rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
     }

@@ -48,7 +48,14 @@ private fun JsValue?.strings(): List<String> = (this as? JsArr)?.mapNotNull { (i
 
 /** One normalized provider choice (events.mjs:658 normalizeApprovalChoices). */
 @Immutable
-internal data class ApprovalChoiceView(val choiceId: String, val label: String, val description: String?, val permissionGrant: String?)
+internal data class ApprovalChoiceView(
+    val choiceId: String,
+    /** DISPLAY text (escaped, then cut): the key's words. The choice id and grant, not this, decide what a tap sends. */
+    val label: String,
+    /** DISPLAY text, as [label]. */
+    val description: String?,
+    val permissionGrant: String?,
+)
 
 /** `metadata.requestedPermissions` as the card lists it, plus the exact wire form ([exact]). */
 @Immutable
@@ -74,7 +81,10 @@ internal data class ApprovalView(
     val activeTurnId: String,
     val request: JsObj,
     val toolId: String,
+    /** The tool name as the wire gave it (cut): it picks how [input] renders, so it is never escaped. */
     val name: String,
+    /** [name] as the card SHOWS it: escaped by category, then cut ([displayLine]). */
+    val shownName: String,
     /** `approval.input`; null when absent or null (then no ToolInput renders). */
     val input: JsValue?,
     val choices: List<ApprovalChoiceView>,
@@ -115,10 +125,16 @@ internal fun approvalView(requestId: String, obj: JsObj, activeTurnId: String, s
         request = obj,
         toolId = obj["toolId"].string().orEmpty(),
         name = cut(obj["name"].string().orEmpty(), 200),
+        shownName = displayLine(obj["name"].string().orEmpty(), 200),
         input = input,
         choices = obj["choices"].objects().mapNotNull { c ->
             val id = c["choiceId"].string() ?: return@mapNotNull null
-            ApprovalChoiceView(id, cut(c["label"].string().orEmpty(), 200), c["description"].truthyString()?.let(::cut), c["permissionGrant"].string())
+            ApprovalChoiceView(
+                id,
+                displayLine(c["label"].string().orEmpty(), 200),
+                c["description"].truthyString()?.let { displayLine(it, CARD_TEXT_MAX) },
+                c["permissionGrant"].string(),
+            )
         },
         // Round 8 (Low-2): raw here; the card escapes FIRST and cuts after (displayText / displayPath).
         reason = metadata?.get("reason").truthyString(),
@@ -147,7 +163,12 @@ internal const val DISPLAY_PATH_HEAD = 60
 internal const val DISPLAY_PATH_TAIL = 99
 internal const val DISPLAY_PATH_MAX = DISPLAY_PATH_HEAD + 1 + DISPLAY_PATH_TAIL
 
-/** FSI / PDI: each shown path is its own bidi island (round 7), so RTL text cannot reorder what is around it. */
+/**
+ * LRI / PDI: each shown path is its own LEFT-TO-RIGHT isolate, so RTL text cannot reorder what is
+ * around it and a path that STARTS with RTL letters (which FSI would resolve to right-to-left)
+ * cannot flip its own quotes. [FSI] still isolates prose ([displayText]), whose direction is its own.
+ */
+internal const val LRI = '\u2066'
 internal const val FSI = '\u2068'
 internal const val PDI = '\u2069'
 
@@ -158,32 +179,17 @@ internal const val RELATIVE_MARKER = " (contains relative segments (..))"
  * A server path as the card SHOWS it (never as it is granted: the grant carries the raw path).
  * - Escaped BY CATEGORY (L-C, round 7): every code point that could hide, reorder, fake a space, fake
  *   the quotes or fake the elision mark is written out as a visible `\uXXXX` (`\u{XXXXX}` above
- *   the BMP), see [needsEscape]; so is the backslash itself, so an escape cannot be faked.
+ *   the BMP), see [needsEscape]; so is the backslash itself, so an escape cannot be faked. A
+ *   combining mark is escaped from the third in a row, and every enclosing mark: see [escapeTokens].
  * - Cut in the MIDDLE (L-B): the head and the TAIL (which decides the scope) both stay, with "…"
  *   between them; but a path with a `.` or `..` segment is NEVER cut (the segments decide where it
- *   really points) and says so: [RELATIVE_MARKER].
- * - Quoted with curly quotes (always escaped inside), and isolated FSI…PDI, so a path cannot pose as
+ *   really points) and says so: [RELATIVE_MARKER]. Nothing else limits it: the reducer already holds a
+ *   path to 4096 code points and a list to 64 paths (the web enforces the same), and every row is shown.
+ * - Quoted with curly quotes (always escaped inside), and isolated LRI…PDI, so a path cannot pose as
  *   part of the sentence ("/x; no network access", `/fake”; network access; read “/y`) nor let RTL
  *   letters reorder the separators around it.
  */
-internal fun displayPath(path: String): String = showPath(path).text
-
-/**
- * Round 8: what a path shows, and whether it shows all of it. [complete] false = a RELATIVE path
- * (with `.` / `..` segments) whose escaped form is longer than [DISPLAY_PATH_RELATIVE_MAX]: it is
- * shown head…tail, marked, and the card offers no grant for it (fail closed: a segment that decides
- * where the path points may be hidden).
- */
-internal data class ShownPath(val text: String, val complete: Boolean)
-
-/** Round 8: the longest a relative path may be, in ESCAPED characters, and still be shown whole. */
-internal const val DISPLAY_PATH_RELATIVE_MAX = 1_024
-
-/** Round 8: an over-long relative path shows this many escaped characters of its head and of its tail. */
-internal const val DISPLAY_PATH_RELATIVE_HEAD = 400
-internal const val DISPLAY_PATH_RELATIVE_TAIL = 600
-
-internal fun showPath(path: String): ShownPath {
+internal fun displayPath(path: String): String {
     val cps = path.codePoints().toArray()
     if (!hasRelativeSegment(path)) {
         // Round 5/6: a plain path is cut by CODE POINTS in the middle (its tail decides the scope and
@@ -193,28 +199,23 @@ internal fun showPath(path: String): ShownPath {
         } else {
             render(cps, 0, DISPLAY_PATH_HEAD) + "…" + render(cps, cps.size - DISPLAY_PATH_TAIL, cps.size)
         }
-        return ShownPath("$FSI“$shown”$PDI", complete = true)
+        return "$LRI“$shown”$PDI"
     }
-    // Relative: whole when its ESCAPED form fits the cap; else head…tail of the escaped form, cut
-    // at code-point (escape) boundaries, marked, and incomplete.
-    val tokens = Array(cps.size) { escapeToken(cps[it]) }
-    val total = tokens.sumOf { it.length }
-    val shown = if (total <= DISPLAY_PATH_RELATIVE_MAX) {
-        tokens.joinToString("")
-    } else {
-        headOf(tokens, DISPLAY_PATH_RELATIVE_HEAD) + "…" + tailOf(tokens, DISPLAY_PATH_RELATIVE_TAIL)
-    }
-    return ShownPath("$FSI“$shown”$PDI$RELATIVE_MARKER", complete = total <= DISPLAY_PATH_RELATIVE_MAX)
+    return "$LRI“${render(cps, 0, cps.size)}”$PDI$RELATIVE_MARKER"
 }
 
 /** Round 7/8 (context lines): server text escaped like a path, isolated FSI…PDI, at most [max] escaped characters then a real "…". */
-internal fun displayText(text: String, max: Int = DISPLAY_TEXT_MAX): String {
+internal fun displayText(text: String, max: Int = DISPLAY_TEXT_MAX): String = "$FSI${displayLine(text, max)}$PDI"
+
+/**
+ * Server text escaped FIRST, then cut at an escape boundary at [max] escaped characters; the "…" is
+ * outside the escaped text (never escaped). No isolate: for a key's label, a name, a description.
+ */
+internal fun displayLine(text: String, max: Int = DISPLAY_TEXT_MAX): String {
     val cps = text.codePoints().toArray()
-    val tokens = Array(cps.size) { escapeToken(cps[it]) }
+    val tokens = escapeTokens(cps, 0, cps.size)
     val total = tokens.sumOf { it.length }
-    // Escaped FIRST, then cut at an escape boundary; the "…" is outside the escaped text (never escaped).
-    val shown = if (total <= max) tokens.joinToString("") else headOf(tokens, max) + "…"
-    return "$FSI$shown$PDI"
+    return if (total <= max) tokens.joinToString("") else headOf(tokens, max) + "…"
 }
 
 /** Round 8: the longest a context value (reason, network host) shows, in escaped characters. */
@@ -229,30 +230,58 @@ private fun headOf(tokens: Array<String>, budget: Int): String {
     return out.toString()
 }
 
-private fun tailOf(tokens: Array<String>, budget: Int): String {
-    var used = 0
-    var from = tokens.size
-    while (from > 0 && used + tokens[from - 1].length <= budget) {
-        used += tokens[from - 1].length
-        from--
-    }
-    return tokens.copyOfRange(from, tokens.size).joinToString("")
+/**
+ * A `.` or `..` segment, with `/` or `\` as the separator. Windows reads more as the same thing: a
+ * segment of dots (and trailing spaces) such as `...` or `.. `, whose trailing dots and spaces the
+ * file system drops, and a drive-relative `C:..` / `C:.`.
+ */
+internal fun hasRelativeSegment(path: String): Boolean = path.split('/', '\\').any(::isRelativeSegment)
+
+private fun isRelativeSegment(segment: String): Boolean {
+    val body = if (segment.length >= 2 && segment[1] == ':' && segment[0].let { it in 'a'..'z' || it in 'A'..'Z' }) segment.substring(2) else segment
+    val trimmed = body.trimEnd(' ')
+    return trimmed.isNotEmpty() && trimmed.all { it == '.' }
 }
 
-/** A `.` or `..` segment, with `/` or `\` as the separator. */
-internal fun hasRelativeSegment(path: String): Boolean = path.split('/', '\\').any { it == "." || it == ".." }
-
-private fun render(cps: IntArray, from: Int, to: Int): String {
-    val out = StringBuilder()
-    for (i in from until to) out.append(escapeToken(cps[i]))
-    return out.toString()
-}
+private fun render(cps: IntArray, from: Int, to: Int): String = escapeTokens(cps, from, to).joinToString("")
 
 private const val HEX = "0123456789ABCDEF"
 
+/** A combining mark (Mn, Mc or Me). */
+private fun isMark(cp: Int): Boolean = when (Character.getType(cp)) {
+    Character.NON_SPACING_MARK.toInt(), Character.COMBINING_SPACING_MARK.toInt(), Character.ENCLOSING_MARK.toInt() -> true
+    else -> false
+}
+
+/** The longest run of combining marks shown as themselves: NFD Vietnamese needs 2, an Indic cluster 2-3. The 3rd and later are escaped. */
+internal const val MARKS_SHOWN = 2
+
+/**
+ * The shown form of cps[from, to): each code point as itself or an escape ([escapeToken]). A run of
+ * combining marks counts from the code point before [from] too (a cut never restarts it), and the
+ * ([MARKS_SHOWN] + 1)th and later mark of a run is escaped (stacked marks overdraw the lines around);
+ * every enclosing mark (Me) is escaped, whatever its place.
+ */
+internal fun escapeTokens(cps: IntArray, from: Int, to: Int): Array<String> {
+    var run = 0
+    var i = from - 1
+    while (i >= 0 && isMark(cps[i])) { run++; i-- }
+    return Array(to - from) { k ->
+        val cp = cps[from + k]
+        if (isMark(cp)) {
+            run++
+            if (run > MARKS_SHOWN || Character.getType(cp) == Character.ENCLOSING_MARK.toInt()) escapeCodePoint(cp) else escapeToken(cp)
+        } else {
+            run = 0
+            escapeToken(cp)
+        }
+    }
+}
+
 /** One code point as shown: itself, or `\uXXXX` / `\u{X…}` (hex built by hand: no String.format on a 500k-code-point card). */
-private fun escapeToken(cp: Int): String {
-    if (!needsEscape(cp)) return String(Character.toChars(cp))
+private fun escapeToken(cp: Int): String = if (needsEscape(cp)) escapeCodePoint(cp) else String(Character.toChars(cp))
+
+private fun escapeCodePoint(cp: Int): String {
     val sb = StringBuilder(10).append("\\u")
     if (cp > 0xFFFF) {
         sb.append('{')
@@ -277,8 +306,10 @@ private fun escapeToken(cp: Int): String {
  * SPACE_SEPARATOR other than U+0020; any DEFAULT_IGNORABLE_CODE_POINT (ICU; [IGNORABLE_FALLBACK] if
  * ICU cannot answer); the variation selectors (U+FE00-FE0F, U+E0100-E01EF); the Hangul fillers
  * (U+115F, U+1160, U+3164, U+FFA0); the braille blank U+2800; the quote look-alikes U+201C, U+201D,
- * U+201E, U+201F, U+02EE, U+2033, U+FF02; the ellipsis U+2026 (so a fake elision mark cannot
- * appear); and the backslash.
+ * U+201E, U+201F, U+02EE, U+2033, U+FF02, and (round 10) U+2036, U+02DD, U+02BA, U+05F4,
+ * U+301D-301F, U+3003; the ellipsis U+2026 and its look-alikes U+2025, U+22EF, U+FE19, U+1D159 (so a
+ * fake elision mark cannot appear); and the backslash. (A combining mark's place in a run is
+ * [escapeTokens]'s to judge, not this per-code-point test.)
  */
 internal fun needsEscape(cp: Int): Boolean {
     when (Character.getType(cp)) {
@@ -291,88 +322,37 @@ internal fun needsEscape(cp: Int): Boolean {
     if (isDefaultIgnorable(cp)) return true
     return cp in 0xFE00..0xFE0F || cp in 0xE0100..0xE01EF || cp == 0x115F || cp == 0x1160 || cp == 0x3164 || cp == 0xFFA0 ||
         cp == 0x2800 || cp == 0x201C || cp == 0x201D || cp == 0x201E || cp == 0x201F || cp == 0x02EE || cp == 0x2033 || cp == 0xFF02 ||
-        cp == 0x2026 || cp == 0x5C
+        cp == 0x2036 || cp == 0x02DD || cp == 0x02BA || cp == 0x05F4 || cp in 0x301D..0x301F || cp == 0x3003 ||
+        cp == 0x2026 || cp == 0x2025 || cp == 0x22EF || cp == 0xFE19 || cp == 0x1D159 || cp == 0x5C
 }
 
 /** Default-ignorable code points ICU might not be asked about: combining grapheme joiner, Khmer / Mongolian ignorables. */
 internal val IGNORABLE_FALLBACK: Set<Int> = setOf(0x034F, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F)
 
-private fun isDefaultIgnorable(cp: Int): Boolean =
-    cp in IGNORABLE_FALLBACK ||
-        runCatching { android.icu.lang.UCharacter.hasBinaryProperty(cp, android.icu.lang.UProperty.DEFAULT_IGNORABLE_CODE_POINT) }.getOrDefault(false)
+/** ICU's DEFAULT_IGNORABLE_CODE_POINT for [cp], or null when ICU cannot answer (a plain JVM). */
+internal fun icuDefaultIgnorable(cp: Int): Boolean? =
+    runCatching { android.icu.lang.UCharacter.hasBinaryProperty(cp, android.icu.lang.UProperty.DEFAULT_IGNORABLE_CODE_POINT) }.getOrNull()
+
+private fun isDefaultIgnorable(cp: Int): Boolean = cp in IGNORABLE_FALLBACK || icuDefaultIgnorable(cp) == true
 
 /**
- * Round 8: the whole card's display budget: the path rows (each path's shown text counted once,
- * read then write, in request order) may add up to [CARD_PATH_BUDGET] characters. The count is the
- * escaped, quoted, isolated text ([showPath]), not the zero-width break points `breakAnywhere` adds
- * when drawing. A card at exactly the budget is shown whole; one character more and the row that
- * crosses it is left out. Past it, the rest
- * is summarised ("+N more paths not shown") and, like an incomplete path, the card offers no grant.
- * The confirmation's words name only shown paths, and only on a grantable card (every row shown), so
- * the rows plus the summary stay within twice the budget. Measured in Robolectric (w412dp, round 8):
- * the worst legal card (64 + 64 paths of 4096 tag-character code points), relative or not, draws in
- * ~0.4-0.75 s run alone (up to ~1.3 s inside the full, parallel gate); the largest grantable one
- * (15 relative paths at the cap, rows + summary ~32k characters) likewise. The tests hold all three
- * under 5 s.
+ * The grant card's rows as shown: the shown text of each requested path, in request order. EVERY
+ * requested path is a row (the web lists them all); the only bounds are the reducer's own (a path of
+ * at most 4096 code points, at most 64 paths a list), which the web enforces too.
  */
-internal const val CARD_PATH_BUDGET = 16_000
-
-// Round 9: what is true. Only the GRANTS are withdrawn; Deny and the provider's non-granting choices stay.
-internal const val TOO_LONG_COPY = "A requested path is too long to show in full, so these permissions can't be granted from this card."
-internal const val TOO_MANY_COPY = "Not every requested path can be shown, so these permissions can't be granted from this card."
-
-/** The grant card's rows as shown: the shown text of each path, how many were left out, and whether a grant may be offered. */
 @Immutable
 internal data class GrantRows(
     val read: List<Pair<String, String>>,
     val write: List<Pair<String, String>>,
-    /** Requested rows not shown (past [CARD_PATH_BUDGET]). */
-    val hidden: Int,
-    /** A shown path is incomplete ([ShownPath.complete] false). */
-    val tooLong: Boolean,
 ) {
-    /**
-     * Only then may a grant be offered (fail closed): no row is left out and no RELATIVE path is
-     * shortened. A plain path longer than [DISPLAY_PATH_MAX] code points is still cut in the middle
-     * (rounds 5/6: its head and its scope-deciding tail stay visible) and does not stop a grant.
-     */
-    val grantable: Boolean get() = hidden == 0 && !tooLong
-
     /** Raw path -> its shown text (for the confirmation's words). */
     val shown: Map<String, String> by lazy { (read + write).toMap() }
-
-    val refusal: String? get() = when {
-        tooLong -> TOO_LONG_COPY
-        hidden > 0 -> TOO_MANY_COPY
-        else -> null
-    }
 }
 
 internal fun grantRows(requested: RequestedPermissionsView): GrantRows {
-    var used = 0
-    var hidden = 0
-    var tooLong = false
-    val cache = HashMap<String, ShownPath>()
-    fun take(list: List<String>): List<Pair<String, String>> = buildList {
-        for (path in list) {
-            if (used >= CARD_PATH_BUDGET) {
-                hidden++
-                continue
-            }
-            val shown = cache.getOrPut(path) { showPath(path) }
-            if (used + shown.text.length > CARD_PATH_BUDGET) {
-                hidden++
-                used = CARD_PATH_BUDGET
-                continue
-            }
-            used += shown.text.length
-            if (!shown.complete) tooLong = true
-            add(path to shown.text)
-        }
-    }
-    val read = take(requested.read)
-    val write = take(requested.write)
-    return GrantRows(read, write, hidden, tooLong)
+    val cache = HashMap<String, String>()
+    fun take(list: List<String>): List<Pair<String, String>> = list.map { path -> path to cache.getOrPut(path) { displayPath(path) } }
+    return GrantRows(take(requested.read), take(requested.write))
 }
 
 /** What one choice key sends: its id and (for a permission-granting choice) the grant, or null when it is disabled. */
@@ -380,19 +360,6 @@ internal data class ApprovalPick(val choiceId: String, val granted: GrantedPermi
 
 /** The ApprovalCard's `disabled` + `choose` rules for [choice] (chat-view.tsx:1190-1205, 1276-1280). */
 internal fun pickFor(
-    view: ApprovalView,
-    choice: ApprovalChoiceView,
-    confirmed: Boolean,
-    subset: GrantedPermissions?,
-    /** Round 8: false when not every requested path can be shown in full ([GrantRows.grantable]). */
-    grantable: Boolean = true,
-): ApprovalPick? = when {
-    // Round 8 (fail closed): a grant the operator cannot read in full is not offered at all.
-    choice.permissionGrant != null && !grantable -> null
-    else -> pickGrant(view, choice, confirmed, subset)
-}
-
-private fun pickGrant(
     view: ApprovalView,
     choice: ApprovalChoiceView,
     confirmed: Boolean,

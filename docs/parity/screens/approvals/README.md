@@ -68,31 +68,12 @@ Divergences from the web, on purpose:
   around it (the web shows them raw). The grant itself carries the raw path. Round 5 re-recorded the 8
   `approval-grants` goldens for the quotes. Round 7 adds: default-ignorable code points, the braille blank,
   every Pi/Pf quote and quote look-alike and the ellipsis are escaped too; each shown path (and each context
-  value) is its own bidi island (FSI…PDI), so right-to-left letters cannot reorder the separators around it; a
+  value) is its own bidi island (LRI…PDI for paths, FSI…PDI for prose), so right-to-left letters cannot reorder the separators around it; a
   path with a `.` or `..` segment is never cut and carries "(contains relative segments (..))"; and the reason,
   working directory and network host lines go through the same escaping (the working directory quoted like a
   path). Round 7 re-recorded `approval-grants` (the isolation marks shift the label's line breaks) and
   `approval-choices` (the quoted working directory), 14 goldens.
-- Round 8 bounds what a card draws and fails closed past the bound (the web draws everything). A path with a
-  `.` or `..` segment is shown whole up to 1024 characters after escaping. Past that it is shown as its first
-  400 and last 600 escaped characters around a "…", still quoted, isolated and marked, and the card says "A
-  requested path is too long to show in full, so these permissions can't be granted from this card." Every
-  card also has a budget of 16,000 shown characters for its path rows. The count is the escaped, quoted text,
-  not the zero-width break points added for line wrapping. A card at exactly 16,000 is shown whole. Rows past
-  the budget are summarised as "+N more paths not shown", and the card says "Not every requested path can be
-  shown, so these permissions can't be granted from this card." Either way the grant keys ("Allow all",
-  "Allow selected") are disabled, the confirmation box is not drawn, and the path boxes cannot be changed. On a
-  card with requested permissions but no provider choices, the plain "Approve" is disabled too (round 9), since
-  a bare "allow" may grant those permissions. Deny and the provider's non-granting choices still work. A card
-  can grant only when no row is left out and no relative path is shortened. A plain path over 160 code points
-  is still cut in the middle (rounds 5/6), with its head and its scope-deciding tail visible, and does not stop
-  a grant. The confirmation names only shown paths, so rows plus confirmation stay within twice the budget. In
-  Robolectric the worst legal card (64 + 64 paths of 4096 tag characters, relative or not) draws in about
-  0.4–0.75 s on its own and up to about 1.3 s during the full parallel gate. The largest card that can still
-  grant draws in about the same time. The reason, working directory and network lines are escaped first, then
-  cut. The reason and host keep up to 2000 escaped characters and then a real "…". The working directory is
-  cut like a path, so a trailing `/../..` stays visible and marked. Every cut lands on a code-point boundary.
-  No golden changed.
+- The app matches the web on path limits: every requested path is a row and every choice acts on the raw paths, bounded only by the reducer's own caps (4096 code points a path, 64 paths a list).
 - The confirmation only ever refers to words that were on screen: ticking it counts only if the ticks have not
   changed since the card was drawn, so a tick change, the confirmation and a grant key in the same instant
   send nothing; after the redraw the operator confirms the set now shown.

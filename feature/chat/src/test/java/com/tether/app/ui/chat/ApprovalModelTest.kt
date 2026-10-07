@@ -256,28 +256,31 @@ class ApprovalModelTest {
     }
 
     @Test fun displayPathEscapesCutsAndQuotes() {
-        assertEquals(iso("“/a\\u000Ab”"), displayPath("/a\nb"))
-        assertEquals(iso("“\\u202Egnp.exe”"), displayPath("\u202Egnp.exe"))
-        assertEquals(iso("“\\u2028\\u2066\\u0085”"), displayPath("\u2028\u2066\u0085"))
+        assertEquals(isoPath("“/a\\u000Ab”"), displayPath("/a\nb"))
+        assertEquals(isoPath("“\\u202Egnp.exe”"), displayPath("\u202Egnp.exe"))
+        assertEquals(isoPath("“\\u2028\\u2066\\u0085”"), displayPath("\u2028\u2066\u0085"))
         // L-B: the middle goes; the head AND the scope-deciding tail stay.
         val long = displayPath("/srv/" + "p".repeat(500) + "/tail/etc")
-        assertTrue(long, long.startsWith(FSI + "“/srv/ppp"))
+        assertTrue(long, long.startsWith(LRI + "“/srv/ppp"))
         assertTrue(long, long.endsWith("pp/tail/etc”" + PDI))
         assertTrue(long, long.contains("…"))
-        assertEquals(DISPLAY_PATH_MAX + 4, long.length) // + the two quotes and FSI / PDI
-        assertEquals(iso("“/x; no network access”"), displayPath("/x; no network access"))
+        assertEquals(DISPLAY_PATH_MAX + 4, long.length) // + the two quotes and LRI / PDI
+        assertEquals(isoPath("“/x; no network access”"), displayPath("/x; no network access"))
         // L-C: by category, plus the listed look-alikes.
-        assertEquals(iso("“data\\u200B”"), displayPath("data\u200B")) // FORMAT (zero-width space)
-        assertEquals(iso("“a\\u{E0041}b”"), displayPath("a\uDB40\uDC41b")) // a tag character (FORMAT, astral)
-        assertEquals(iso("“a\\u00A0b”"), displayPath("a\u00A0b")) // a space that is not U+0020
-        assertEquals(iso("“a b”"), displayPath("a b"))
-        assertEquals(iso("“/fake\\u201D; network access; read \\u201C/y”"), displayPath("/fake\u201D; network access; read \u201C/y"))
-        assertEquals(iso("“a\\u005Cu0041”"), displayPath("a\\u0041")) // a literal backslash cannot fake an escape
-        assertEquals(iso("“\\u3164x\\uFE0F\\uE000”"), displayPath("\u3164x\uFE0F\uE000")) // Hangul filler, variation selector, private use
-        assertEquals(iso("“\\uD800”"), displayPath("\uD800")) // a lone surrogate
+        assertEquals(isoPath("“data\\u200B”"), displayPath("data\u200B")) // FORMAT (zero-width space)
+        assertEquals(isoPath("“a\\u{E0041}b”"), displayPath("a\uDB40\uDC41b")) // a tag character (FORMAT, astral)
+        assertEquals(isoPath("“a\\u00A0b”"), displayPath("a\u00A0b")) // a space that is not U+0020
+        assertEquals(isoPath("“a b”"), displayPath("a b"))
+        assertEquals(isoPath("“/fake\\u201D; network access; read \\u201C/y”"), displayPath("/fake\u201D; network access; read \u201C/y"))
+        assertEquals(isoPath("“a\\u005Cu0041”"), displayPath("a\\u0041")) // a literal backslash cannot fake an escape
+        assertEquals(isoPath("“\\u3164x\\uFE0F\\uE000”"), displayPath("\u3164x\uFE0F\uE000")) // Hangul filler, variation selector, private use
+        assertEquals(isoPath("“\\uD800”"), displayPath("\uD800")) // a lone surrogate
     }
 
     private fun iso(s: String) = "$FSI$s$PDI"
+
+    /** A shown PATH is an LRI island. */
+    private fun isoPath(s: String) = "$LRI$s$PDI"
 
     @Test fun aPathWithRelativeSegmentsIsShownWholeAndMarked() {
         // Round 7: elided, this would read as a deep directory under /work/proj/src.
@@ -288,7 +291,7 @@ class ApprovalModelTest {
         assertTrue(shown, shown.endsWith(RELATIVE_MARKER))
         assertTrue(displayPath("./x").endsWith(RELATIVE_MARKER))
         assertTrue(displayPath("a\\..\\b").endsWith(RELATIVE_MARKER))
-        assertTrue(!displayPath("/a/..b/c.d/...").endsWith(RELATIVE_MARKER)) // not a . or .. segment
+        assertTrue(!displayPath("/a/..b/c.d/.e").endsWith(RELATIVE_MARKER)) // not a . or .. segment
     }
 
     @Test fun roundSevenEscapeClasses() {
@@ -297,48 +300,25 @@ class ApprovalModelTest {
         assertTrue(needsEscape(0x00AB) && needsEscape(0x00BB) && needsEscape(0x2039)) // Pi / Pf quotes
         for (cp in listOf(0x02EE, 0x2033, 0x201E, 0x201F, 0xFF02)) assertTrue("U+%04X quote look-alike".format(cp), needsEscape(cp))
         assertTrue(needsEscape(0x2026)) // a fake elision mark
-        assertEquals(iso("“a\\u2026b”"), displayPath("a…b"))
+        assertEquals(isoPath("“a\\u2026b”"), displayPath("a…b"))
         assertTrue(!needsEscape('a'.code) && !needsEscape('/'.code) && !needsEscape(' '.code) && !needsEscape('é'.code))
     }
 
     @Test fun eachPathIsItsOwnBidiIsland() {
         // RTL letters inside a path cannot reorder the separators around it.
-        assertEquals(iso("“/\u05D0\u05D1/x”"), displayPath("/\u05D0\u05D1/x"))
+        assertEquals(isoPath("“/\u05D0\u05D1/x”"), displayPath("/\u05D0\u05D1/x"))
         assertEquals(iso("host\\u202E.example"), displayText("host\u202E.example"))
     }
 
-    // ---- Round 8: a bounded display, and a grant only for what is shown in full ----
+    // ---- ta-57l: nothing limits a card but the reducer; display hardening ----
 
     private val tag = "󠁁" // U+E0041, escaped as the 9 characters \u{E0041}
-
-    @Test fun aRelativePathIsWholeUpToTheCapMeasuredAfterEscaping() {
-        // "../" (3) + 113 tag characters (1017) + "aaaa" (4) = 1024 escaped characters: shown whole.
-        val under = "../" + tag.repeat(113) + "aaaa"
-        val atCap = showPath(under)
-        assertTrue(atCap.complete)
-        assertTrue(!atCap.text.contains("…"))
-        assertEquals(iso("“../" + "\\u{E0041}".repeat(113) + "aaaa”") + RELATIVE_MARKER, atCap.text)
-        // One more character: over the cap, head…tail, still quoted, isolated and marked; incomplete.
-        val over = showPath(under + "b")
-        assertTrue(!over.complete)
-        assertTrue(over.text, over.text.startsWith("$FSI“../\\u{E0041}"))
-        assertTrue(over.text, over.text.endsWith("\\u{E0041}aaaab”$PDI$RELATIVE_MARKER"))
-        assertTrue(over.text, over.text.contains("…"))
-        // Cut at escape boundaries: every escape shown is whole.
-        val body = over.text.removePrefix("$FSI“").substringBefore("”$PDI")
-        for (half in body.split("…")) assertTrue(half, half.replace("\\u{E0041}", "").replace("../", "").replace("aaaab", "").isEmpty())
-        assertTrue(body.length <= DISPLAY_PATH_RELATIVE_HEAD + 1 + DISPLAY_PATH_RELATIVE_TAIL)
-        // In plain characters too (the cap is not in code points).
-        assertTrue(showPath("../" + "a".repeat(1_021)).complete)
-        assertTrue(!showPath("../" + "a".repeat(1_022)).complete)
-    }
 
     @Test fun aLongWorkingDirectoryKeepsItsRelativeTail() {
         val cwd = "/w/" + "d".repeat(4_000) + "/../.."
         val shown = displayPath(cwd)
-        assertTrue(shown, shown.endsWith("dd/../..”$PDI$RELATIVE_MARKER"))
-        assertTrue(shown, shown.startsWith("$FSI“/w/ddd"))
-        assertTrue(shown.length < DISPLAY_PATH_RELATIVE_MAX + 100)
+        // A relative path is never cut: the whole directory and its tail are shown.
+        assertEquals(isoPath("“$cwd”") + RELATIVE_MARKER, shown)
     }
 
     @Test fun contextTextIsEscapedFirstThenCutWithARealEllipsis() {
@@ -375,70 +355,109 @@ class ApprovalModelTest {
     private fun requested(read: List<String>, write: List<String> = emptyList()) =
         RequestedPermissionsView(read = read, write = write, network = false, exact = GrantedPermissions())
 
-    @Test fun rowsWithinTheBudgetAreAllShownAndGrantable() {
-        val rows = grantRows(requested((0 until 64).map { "/srv/data/file-$it" }, (0 until 64).map { "/w/out/report-$it" }))
-        assertEquals(64, rows.read.size)
-        assertEquals(64, rows.write.size)
-        assertEquals(0, rows.hidden)
-        assertTrue(rows.grantable)
-        assertEquals(null, rows.refusal)
-        assertEquals(displayPath("/srv/data/file-3"), rows.shown["/srv/data/file-3"])
-    }
-
-    @Test fun rowsPastTheBudgetAreCountedAndTheCardIsDenyOnly() {
-        // Plain (non-relative) 4096-tag-character paths: each is elided to 160 escapes (~1.6k characters).
-        val paths = (0 until 64).map { "/p$it/" + tag.repeat(4_090) }
-        val rows = grantRows(requested(paths, paths.map { "/w$it" + it }))
-        val shownChars = (rows.read + rows.write).sumOf { it.second.length }
-        assertTrue(shownChars <= CARD_PATH_BUDGET)
-        assertEquals(128, rows.read.size + rows.write.size + rows.hidden)
-        assertTrue(rows.hidden > 0)
-        assertTrue(!rows.grantable)
-        assertEquals(TOO_MANY_COPY, rows.refusal)
-    }
-
-    @Test fun theBudgetBoundaryIsExact() {
-        // Round 9: 128 plain paths of 121 characters, each shown as 125 (+ quotes, FSI, PDI): exactly 16,000.
-        fun paths(side: Char, extra: Int = 0) = (0 until 64).map { i ->
-            val head = "/$side${"%03d".format(i)}/"
-            head + "a".repeat(121 - head.length + if (i == 63) extra else 0)
-        }
-        val at = grantRows(requested(paths('r'), paths('w')))
-        assertEquals(CARD_PATH_BUDGET, (at.read + at.write).sumOf { it.second.length })
-        assertEquals(0, at.hidden)
-        assertTrue(at.grantable)
-        // One character more, on the last row: that row crosses the budget and is left out.
-        val over = grantRows(requested(paths('r'), paths('w', extra = 1)))
-        assertEquals(1, over.hidden)
-        assertEquals(127, over.read.size + over.write.size)
-        assertTrue(!over.grantable)
-        assertEquals(TOO_MANY_COPY, over.refusal)
-    }
-
     @Test fun aDenialTargetIsNeverCutInsideASurrogatePair() {
         val target = denialTarget(com.tether.app.protocol.tree.JsStr("a".repeat(DENIAL_TARGET_MAX - 1) + "😀" + "b"))!!
         assertEquals("a".repeat(DENIAL_TARGET_MAX - 1) + "…", target.value)
         assertEquals("abc", denialTarget(com.tether.app.protocol.tree.JsStr("abc"))!!.value)
     }
 
-    @Test fun anIncompleteRelativePathMakesTheCardDenyOnly() {
-        val rows = grantRows(requested(listOf("/srv/a", "../" + "a".repeat(1_022))))
-        assertEquals(2, rows.read.size)
-        assertEquals(0, rows.hidden)
-        assertTrue(!rows.grantable)
-        assertEquals(TOO_LONG_COPY, rows.refusal)
+    @Test fun everyRequestedPathIsARowWhateverItsLength() {
+        // Past the old 1024-escaped-character cap and the old 16,000-character budget: all 128 rows.
+        val read = (0 until 64).map { "/r$it/../" + tag.repeat(4_000) }
+        val write = (0 until 64).map { "/w$it/" + tag.repeat(4_000) }
+        val rows = grantRows(requested(read, write))
+        assertEquals(read, rows.read.map { it.first })
+        assertEquals(write, rows.write.map { it.first })
+        // A relative path is whole (no elision); a plain one keeps the usual head...tail.
+        assertTrue(!rows.read.first().second.contains("…"))
+        assertEquals(displayPath(read[0]), rows.shown[read[0]])
+        assertEquals(displayPath(write[5]), rows.shown[write[5]])
+        assertEquals(displayPath("/srv/data/file-3"), grantRows(requested(listOf("/srv/data/file-3"))).shown["/srv/data/file-3"])
     }
 
-    @Test fun aGrantChoiceIsNotOfferedWhenNotGrantable() {
+    @Test fun aRelativePathIsNeverCutHoweverLong() {
+        val path = "../" + "a".repeat(4_000) + "/../etc"
+        assertEquals(isoPath("“$path”") + RELATIVE_MARKER, displayPath(path))
+    }
+
+    @Test fun everyChoiceIsOfferedWhateverThePaths() {
         val view = pendingApprovals(ApprovalFixtures.grants.tree).single()
         val exact = view.choices.first { it.permissionGrant == "exact" }
         val subset = view.choices.first { it.permissionGrant == "subset" }
         val deny = view.choices.first { it.permissionGrant == null }
-        val all = GrantedPermissions(fileSystemRead = listOf("/srv/fixtures", "/srv/schema.sql"), fileSystemWrite = listOf("/w/report"), networkEnabled = true)
-        assertTrue(pickFor(view, exact, confirmed = true, subset = all) != null)
-        assertEquals(null, pickFor(view, exact, confirmed = true, subset = all, grantable = false))
-        assertEquals(null, pickFor(view, subset, confirmed = true, subset = all, grantable = false))
-        assertEquals("deny", pickFor(view, deny, confirmed = false, subset = null, grantable = false)?.choiceId)
+        val all = GrantedPermissions(fileSystemRead = listOf("/srv/fixtures", "../" + "a".repeat(4_000)), fileSystemWrite = listOf("/w/report"), networkEnabled = true)
+        assertEquals(ApprovalPick(exact.choiceId, view.requested!!.exact), pickFor(view, exact, confirmed = true, subset = all))
+        assertEquals(ApprovalPick(subset.choiceId, all), pickFor(view, subset, confirmed = true, subset = all))
+        assertEquals("deny", pickFor(view, deny, confirmed = false, subset = null)?.choiceId)
+    }
+
+    // ---- Low-3: stacked combining marks ----
+
+    private fun shownIn(s: String) = displayPath(s).removePrefix("$LRI“").removeSuffix("”$PDI")
+
+    @Test fun anNfdVietnamesePathStaysUnescaped() {
+        // macOS stores NFD: a base with a dot below AND a circumflex is two marks.
+        val nfd = java.text.Normalizer.normalize("/Users/an/Tiếng Việt/phở-ệ-ữ-ặ.txt", java.text.Normalizer.Form.NFD)
+        assertTrue("fixture is decomposed", nfd.length > "/Users/an/Tiếng Việt/phở-ệ-ữ-ặ.txt".length)
+        assertEquals(nfd, shownIn(nfd))
+        val path = "/e\u0323\u0302/o\u0302\u0309"
+        assertEquals(path, shownIn(path))
+    }
+
+    @Test fun aHindiClusterStaysUnescaped() {
+        // Mc and Mn marks (a vowel sign with an anusvara, a virama): never three in a row.
+        for (path in listOf("/home/\u0939\u093F\u0928\u094D\u0926\u0940/f", "/d/\u0915\u094D\u0937\u0924\u094D\u0930\u093F\u092F", "/d/\u0938\u094D\u0924\u094D\u0930\u0940\u0902")) {
+            assertEquals(path, shownIn(path))
+        }
+    }
+
+    @Test fun aStackOfMarksIsEscapedFromTheThird() {
+        val marks = "\u0301\u0302\u0303\u0304\u0305\u0306" // six combining marks on one base
+        assertEquals("/a\u0301\u0302\\u0303\\u0304\\u0305\\u0306", shownIn("/a$marks"))
+        // A new base starts a new run.
+        assertEquals("a\u0301\u0302\\u0303b\u0301\u0302", shownIn("a\u0301\u0302\u0303b\u0301\u0302"))
+    }
+
+    @Test fun everyEnclosingMarkIsEscaped() {
+        assertEquals("a\\u20DD", shownIn("a\u20DD"))
+        assertEquals("a\\u20DD\\u20DE", shownIn("a\u20DD\u20DE"))
+    }
+
+    @Test fun aMarkRunIsCountedAcrossACut() {
+        // A path long enough to be elided: the tail starts inside the run and the run still counts.
+        val path = "/" + "x".repeat(300) + "e" + "\u0301".repeat(6)
+        val shown = shownIn(path)
+        assertTrue(shown, shown.endsWith("e\u0301\u0301" + "\\u0301".repeat(4)))
+    }
+
+    @Test fun theLookAlikesAreEscaped() {
+        for (cp in listOf(0x2036, 0x02DD, 0x02BA, 0x05F4, 0x301D, 0x301E, 0x301F, 0x3003, 0x2025, 0x22EF, 0xFE19, 0x1D159)) {
+            assertTrue("U+%04X".format(cp), needsEscape(cp))
+        }
+        assertEquals(isoPath("“a\\u2025b”"), displayPath("a\u2025b"))
+        assertEquals(isoPath("“\\u{1D159}”"), displayPath(String(Character.toChars(0x1D159))))
+    }
+
+    @Test fun anRtlFirstPathIsAnLriIslandSoItsQuotesDoNotFlip() {
+        val shown = displayPath("\u05D0\u05D1/x")
+        assertTrue(shown, shown.startsWith("$LRI“") && shown.endsWith("”$PDI"))
+        assertTrue(!shown.contains(FSI))
+        assertEquals('\u2066', LRI)
+    }
+
+    @Test fun windowsRelativeFormsCountAsRelative() {
+        for (p in listOf("C:..", "C:..\\x", "d:.\\x", "/a/.../b", "/a/.. /b", "..\\x", "/a/c:../b")) {
+            assertTrue(p, hasRelativeSegment(p))
+            assertTrue(p, displayPath(p).endsWith(RELATIVE_MARKER))
+        }
+        for (p in listOf("/a/..b/c.d", "C:\\x", "C:/dir", "/a/b..c", "/a/.hidden", "/a/b.", "/a/ ..x")) assertTrue(p, !hasRelativeSegment(p))
+    }
+
+    @Test fun displayLineEscapesThenCutsWithNoIsolate() {
+        assertEquals("Ba\\u202Esh", displayLine("Ba\u202Esh"))
+        assertEquals("a".repeat(200), displayLine("a".repeat(200), 200))
+        assertEquals("a".repeat(200) + "…", displayLine("a".repeat(201), 200))
+        assertEquals("\\u{E0041}".repeat(22) + "…", displayLine(tag.repeat(50), 200))
     }
 
     private companion object {

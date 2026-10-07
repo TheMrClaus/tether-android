@@ -38,6 +38,7 @@ enum class ApprovalShot(val id: String) {
     Write("approval-write"),
     Choices("approval-choices"),
     Grants("approval-grants"),
+    LongPaths("approval-long-paths"),
     Locked("approval-locked"),
     Sent("approval-sent"),
     Question("question"),
@@ -52,6 +53,7 @@ private fun fixtureFor(shot: ApprovalShot): ChatFixtures.Folded = when (shot) {
     ApprovalShot.Write, ApprovalShot.Locked, ApprovalShot.Sent -> ApprovalFixtures.write
     ApprovalShot.Choices -> ApprovalFixtures.choices
     ApprovalShot.Grants -> ApprovalFixtures.grants
+    ApprovalShot.LongPaths -> ApprovalFixtures.longPaths
     ApprovalShot.Question, ApprovalShot.QuestionValidation -> ApprovalFixtures.question
     ApprovalShot.Answered -> ApprovalFixtures.answered
     ApprovalShot.Denials -> ApprovalFixtures.denials
@@ -87,7 +89,7 @@ fun ComposeContentTestRule.snapApproval(shot: ApprovalShot, skin: TetherSkin, na
                     onFetchTurns = { _, _ -> },
                     zone = ChatFixtures.zone,
                     listState = listState,
-                    richCodex = shot == ApprovalShot.Choices || shot == ApprovalShot.Grants,
+                    richCodex = shot == ApprovalShot.Choices || shot == ApprovalShot.Grants || shot == ApprovalShot.LongPaths,
                     consent = consent,
                 )
             }

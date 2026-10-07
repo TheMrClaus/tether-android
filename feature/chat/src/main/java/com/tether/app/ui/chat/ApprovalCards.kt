@@ -257,10 +257,8 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     val readPaths = readList.filter { readList.indexOf(it) !in selection.offRead }.distinct()
     val writePaths = writeList.filter { writeList.indexOf(it) !in selection.offWrite }.distinct()
     val network = requested?.network == true && !selection.networkOff
-    // Round 8: the rows as shown, within the card's display budget. A path that cannot be shown in
-    // full, or a row left out, makes the card Deny-only (grants fail closed in [pickFor]).
+    // Every requested path is a row, as on the web (the reducer bounds a path to 4096 code points and a list to 64).
     val rows = remember(view.request) { requested?.let(::grantRows) }
-    val grantable = rows?.grantable ?: true
     // The web's "exact" confirmation (chat-view.tsx 90fbb9f :1173, :1270-1279; ta-coik.5): a tick that
     // stands for the complete request, so a path box changing does not clear it. Never saved.
     var confirmed by remember(store, cfp) { mutableStateOf(false) }
@@ -296,7 +294,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
         val liveRead = readList.filter { readList.indexOf(it) !in live.offRead }.distinct()
         val liveWrite = writeList.filter { writeList.indexOf(it) !in live.offWrite }.distinct()
         val liveNetwork = requested?.network == true && !live.networkOff
-        val pick = pickFor(view, choice, confirmed = confirmed, subset = subsetGrant(liveRead, liveWrite, liveNetwork), grantable = grantable) ?: return
+        val pick = pickFor(view, choice, confirmed = confirmed, subset = subsetGrant(liveRead, liveWrite, liveNetwork)) ?: return
         send(pick.choiceId, null, pick.granted)
     }
 
@@ -341,7 +339,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                     val tokens = tokenStyle(t)
                     withStyle(SpanStyle(fontFamily = type.mono, background = t.tintMd)) {
                         append(" ")
-                        appendSafe(view.name, SafeText.Rule.Line, tokens)
+                        appendSafe(view.shownName, SafeText.Rule.Line, tokens)
                         append(" ")
                     }
                     append(".")
@@ -364,7 +362,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                     rows.read.forEach { (path, shown) ->
                         GrantCheckbox(
                             checked = readList.indexOf(path) !in selection.offRead,
-                            enabled = !frozen && view.allowsSubset && grantable,
+                            enabled = !frozen && view.allowsSubset,
                             onChange = { toggle(read = true, path = path) },
                             tag = "grant-read",
                             onBlocked = blocked,
@@ -373,24 +371,16 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                     rows.write.forEach { (path, shown) ->
                         GrantCheckbox(
                             checked = writeList.indexOf(path) !in selection.offWrite,
-                            enabled = !frozen && view.allowsSubset && grantable,
+                            enabled = !frozen && view.allowsSubset,
                             onChange = { toggle(read = false, path = path) },
                             tag = "grant-write",
                             onBlocked = blocked,
                         ) { GrantPathText("Write", shown) }
                     }
-                    if (rows.hidden > 0) {
-                        Text(
-                            "+${rows.hidden} more ${if (rows.hidden == 1) "path" else "paths"} not shown",
-                            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
-                            color = t.muted,
-                            modifier = Modifier.testTag("grant-hidden"),
-                        )
-                    }
                     if (requested.network) {
                         GrantCheckbox(
                             checked = network,
-                            enabled = !frozen && view.allowsSubset && grantable,
+                            enabled = !frozen && view.allowsSubset,
                             onChange = { store.setGrant(cfp, store.grant(cfp).let { it.copy(networkOff = !it.networkOff) }) },
                             tag = "grant-network",
                             onBlocked = blocked,
@@ -398,8 +388,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                             Text("Network access", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)), color = t.muted)
                         }
                     }
-                    rows.refusal?.let { StatusLine(it, t.ink, "grant-refused") }
-                    if (view.needsConfirm && grantable) {
+                    if (view.needsConfirm) {
                         Box(Modifier.fillMaxWidth().padding(top = t.css.spaceXs).topRule(t.line)) {
                             GrantCheckbox(
                                 checked = confirmed,
@@ -433,7 +422,7 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
             ) {
                 if (view.choices.isNotEmpty()) {
                     view.choices.forEach { choice ->
-                        val pick = pickFor(view, choice, confirmed, subset, grantable)
+                        val pick = pickFor(view, choice, confirmed, subset)
                         TetherKey(
                             // The captured [pick] only draws the key; the tap re-reads the store (F1).
                             onClick = { if (pick != null) choose(choice) },
@@ -447,15 +436,12 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                         )
                     }
                 } else {
-                    // Round 9 (Low-1): with requested permissions and no provider choices, a plain "allow"
-                    // may grant them server-side; it is offered only when every one of them can be shown.
-                    val canApprove = requested == null || grantable
                     TetherKey(
-                        onClick = { if (canApprove) send(null, "allow", null) },
+                        onClick = { send(null, "allow", null) },
                         classes = KeyClasses.ButtonPrimary,
                         label = "Approve",
                         icon = TetherIcons.Check,
-                        enabled = armed && canApprove,
+                        enabled = armed,
                         modifier = Modifier.refuseObscuredTouches(blocked).testTag("approval-allow"),
                     )
                     TetherKey(

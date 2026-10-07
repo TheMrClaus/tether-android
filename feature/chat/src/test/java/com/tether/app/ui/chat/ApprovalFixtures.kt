@@ -97,6 +97,34 @@ object ApprovalFixtures {
         )
     }
 
+    /**
+     * ta-57l: a permission request the app used to refuse (a relative path past 1,024 escaped
+     * characters): it is shown whole and every key grants, as on the web.
+     */
+    val longPaths: ChatFixtures.Folded by lazy {
+        val deep = "../" + "shared/fixtures/archive/2026/".repeat(40) + "../../etc/tether"
+        ChatFixtures.fold(
+            *prompt("t1", "Run the migration against the shared fixtures.", null).toTypedArray(),
+            approval("t1", "req-g", "perm-1", "permissions") {
+                putJsonArray("choices") {
+                    addJsonObject { put("choiceId", "all"); put("label", "Allow all"); put("permissionGrant", "exact") }
+                    addJsonObject { put("choiceId", "some"); put("label", "Allow selected"); put("permissionGrant", "subset") }
+                    addJsonObject { put("choiceId", "deny"); put("label", "Deny") }
+                }
+                putJsonObject("metadata") {
+                    put("provider", "codex"); put("kind", "permissions")
+                    put("reason", "The migration reads fixtures from a deep relative path and writes its report.")
+                    putJsonObject("requestedPermissions") {
+                        putJsonObject("fileSystem") {
+                            putJsonArray("read") { add("/srv/fixtures"); add(deep) }
+                            putJsonArray("write") { add("/w/report") }
+                        }
+                    }
+                }
+            },
+        )
+    }
+
     const val Q_DB = "Which database should the service use?"
     const val Q_ENV = "Which environments should the migration run in?"
 
