@@ -24,10 +24,10 @@
 
 ## ▶ RESUME HERE
 
-**Resume point (2026-10-06, after 1.0):** `main` @ `0c9466e8` + tracker commits; gate 7074/0/5 incl. :app:assembleRelease. **Nothing in flight; no worktrees.**
-**Releases** (cert SHA-256 `4f8c22de...b74d`): **v1.0.0 Latest** (code 42, asset tether-1.0.0.apk + R8 mapping). Next: 1.1.0 (code 43). The workflow appends extra_notes after Changes: put Highlights (and Known gaps) above Changes and rename the asset before publishing.
-**Closed for 1.0:** P14 (T14.1-T14.5 verified), MATRIX (311 verified / 6 dropped at PARITY_BASE 29537e0; corpora/tokens/screens stay 887c222). Owner phone checks: ta-b32, ta-qsk, ta-coik.62 verified; ta-coik.35 TalkBack skipped by the owner (revisit on demand); ta-dfzn closed obsolete.
-**Next (post-1.0, `bd ready`):** ta-1u4 (video/SVG preview, promised for 1.1), then ta-nrq (Firebase-free push), P13 (proper sync), and the backlog: ta-coik.61, ta-coik.57, ta-rv0o, ta-v4e1, ta-0qtp, ta-002k (CSS ease sweep), ta-uchk L1/L2, ta-coik .37/.28/.29/.34/.54, ta-d8oy, ta-gmyi (Baseline Profiles).
+**Resume point (2026-10-07, after 1.1.1):** `main` @ `413ead14`; dependency verification ON (gradle/verification-metadata.xml: any dependency change regenerates it from an EMPTY Gradle home); last gate 7309 (w15-A). **One lane open:** W3-C inline tool-media video (ta-coik.68, ta-8p4l, ta-2hv) in `~/git/tether-android-wt/w13-C` @ `c97a2e27` (unmerged; device rounds in progress — handover /tmp/ta-runs/HANDOVER-2026-10-07.md).
+**Releases** (cert SHA-256 `4f8c22de...b74d`): **v1.1.1 Latest** (code 44), v1.1.0 (code 43), v1.0.0 (code 42). Next: 1.1.2 (code 45) when W3-C lands. Highlights + Known gaps above Changes; rename the asset tether-<v>.apk before publishing.
+**Merged 2026-10-07:** M3, ta-coik.69/.70, ta-0qtp + ta-gmyi, ta-6z4/ta-0lv/ta-55u, ta-57l (approval card's app-only long-path refusal removed), ta-705 (items 1/3/4/5), ta-jkaw (CI TLS test hermetic). tether PR #253 (ta-6d5c) merged.
+**Next (`bd ready`):** W3-C device re-check -> merge -> 1.1.2; then ta-4za3 (approval path list scroll cue), ta-jyj0 (transcript jumps on phone<->expanded rotation), ta-d2cx, ta-izzw (mirror control-column auth: needs a non-destructive migration plan), flaky ta-ez0c/ta-sw5n/ta-2pda, ta-oe6u, ta-002k, ta-nrq, P13.
 **Lessons:** seed every golden synchronously and run the full gate twice for UI slices; behaviour tests use the v2 compose rule and waitUntil; a verifier probe must assert and have a positive control, and probes break when a fix adds a seam (clock, drawnFor): adapt them, do not count them; rebase docs-only and check `git diff <gated> <head> -- . ':!docs'` is empty before merging on an earlier gate; stale test-result XML hides a compile failure: check the log and timestamps.
 Tether S* work happens only in standalone clones or worktrees under `~/git/tether-wt/`; **never** touch `~/git/tether` (production). Refresh this board with `python3 tools/parity/refresh-tracker.py`.
 
