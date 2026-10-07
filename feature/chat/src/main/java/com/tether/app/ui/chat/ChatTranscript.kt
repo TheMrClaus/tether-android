@@ -67,6 +67,7 @@ import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 
@@ -108,6 +109,8 @@ internal fun ChatTranscript(
     roster: (@Composable () -> Unit)? = null,
     zone: ZoneId = ZoneId.systemDefault(),
     listState: LazyListState = rememberLazyListState(),
+    /** ta-jyj0: the follow mode, hoisted with [listState] so a shell switch keeps both. */
+    follow: FollowState = remember { FollowState() },
     showTimeline: Boolean = true,
     /** T5.3: the in-chat find over this transcript (null: the bar is closed). */
     find: TranscriptFind? = null,
@@ -135,7 +138,7 @@ internal fun ChatTranscript(
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends)
     }
 }
 
@@ -149,6 +152,7 @@ private fun ChatTranscriptBody(
     roster: (@Composable () -> Unit)?,
     zone: ZoneId,
     listState: LazyListState,
+    follow: FollowState,
     showTimeline: Boolean,
     find: TranscriptFind?,
     richCodex: Boolean,
@@ -220,7 +224,7 @@ private fun ChatTranscriptBody(
     // mobile one right; here the layout class decides (the expanded layout is the web's desktop).
     val timelineSide = if (phone) TimelineSide.Right else TimelineSide.Left
 
-    var sticky by remember { mutableStateOf(true) }
+    var sticky by follow::sticky
     val followGuard = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -248,6 +252,8 @@ private fun ChatTranscriptBody(
     LaunchedEffect(listState) {
         snapshotFlow { listState.lastScrolledBackward }
             .distinctUntilChanged()
+            // ta-jyj0: a carried list state still holds its last direction; only a move seen here counts.
+            .drop(1)
             .collect { backward -> if (backward && !ownScroll[0]) sticky = false }
     }
     // ta-coik.19: the send bubbles are the list's last rows; following the newest content follows them.

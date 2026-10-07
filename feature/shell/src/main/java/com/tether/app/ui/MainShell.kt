@@ -94,6 +94,8 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import com.tether.app.protocol.model.SessionView
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.chat.LocalCardStates
+import com.tether.app.ui.chat.LocalTranscriptScrollStore
+import com.tether.app.ui.chat.TranscriptScrollStore
 import com.tether.app.ui.chat.CardStateStore
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -164,6 +166,9 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // card of the new server reads it.
     val configuredServer by vm.client.serverUrl.collectAsStateWithLifecycle()
     cardStates.bindTo(configuredServer)
+    // ta-jyj0: and ONE transcript scroll position, above the same switch: a rotation that swaps PhoneShell
+    // for ExpandedShell keeps the reader's place (the activity handles the configuration change itself).
+    val transcriptScroll = remember { TranscriptScrollStore() }
     val windowWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
     val layout = shellLayoutFor(windowWidthDp)
     val persisted = rememberPersistedPanels(prefs, vm.client.serverUrl)
@@ -273,6 +278,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
         if (history.current == DashboardView.Sessions) viewHistorySaved = history.withSession(shown).encode()
     }
     val mountedChat = session?.takeUnless { draftLaunching }?.id
+    SideEffect { transcriptScroll.retainOnly(mountedChat) }
     LaunchedEffect(mountedChat) { vm.chatViewShown(mountedChat) }
     // ta-coik.41: the web's remembered-chat restore, one-time pick and last-opened record.
     WebSelectionEffects(
@@ -534,7 +540,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
                     )
                 },
                 chat = {
-                    CompositionLocalProvider(LocalCardStates provides cardStates) {
+                    CompositionLocalProvider(LocalCardStates provides cardStates, LocalTranscriptScrollStore provides transcriptScroll) {
                         ChatScreen(
                             vm = vm,
                             session = session,

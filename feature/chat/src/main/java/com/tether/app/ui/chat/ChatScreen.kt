@@ -437,7 +437,9 @@ fun ChatScreen(
                 // ta-coik.33: one transcript per conversation, as the web remounts its ChatView per session
                 // (dashboard.tsx `key={activeSession.id}`): the scroll position and the follow mode never
                 // carry over from the chat opened before, so a chat always opens at its latest message.
-                else -> CompositionLocalProvider(LocalOlderTurnsUnavailable provides ChatFreshness.olderTurnsUnavailable(sync)) { key(session.id) { ChatTranscript(
+                else -> CompositionLocalProvider(LocalOlderTurnsUnavailable provides ChatFreshness.olderTurnsUnavailable(sync)) { key(session.id) { val scroll = rememberTranscriptScroll(session.id); ChatTranscript(
+                    listState = scroll.listState,
+                    follow = scroll.follow,
                     find = transcriptFind,
                     projection = projection,
                     tree = trees[session.id],
