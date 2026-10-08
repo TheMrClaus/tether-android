@@ -77,6 +77,7 @@ import com.tether.app.ui.components.dialogScrim
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
+import com.tether.app.ui.components.windowWidthDp
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
@@ -245,7 +246,10 @@ fun SettingsDialog(
         GitHubConnectionViewModel(client.githubConnection, GitHubConnectionViewModel.identityOf(client), GitHubConnectionViewModel.identitiesOf(client))
     }
     val githubBinding = GitHubBinding(github.controller, opener = loginOpener)
-    val layout = currentLayoutClass()
+    // ta-09ca E1: the narrow settings metrics (header 76, padding 20/18, h2 20, tabs 12/10) are studio.css:957's
+    // `(max-width: 640px)` block, not the shell's 48rem: they apply to a window of 640 dp or less, the
+    // class is not what decides here.
+    val layout = if (windowWidthDp() <= 640) TetherLayoutClass.Phone else TetherLayoutClass.Expanded
     // T8.2: the home "Browse folders" picker (settings-dialog.tsx 90fbb9f :2457-2480).
     val homePicker = remember(client) { HomeFolderPicker.of(client) }
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {

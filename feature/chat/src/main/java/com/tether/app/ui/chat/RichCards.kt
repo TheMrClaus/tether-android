@@ -52,11 +52,10 @@ import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.components.TetherExpandableBlock
 import com.tether.app.ui.components.TetherExpandablePre
-import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.cssSurface
-import com.tether.app.ui.components.currentLayoutClass
 import com.tether.app.ui.components.maxWidthFraction
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.components.windowWidthDp
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTypography
@@ -555,7 +554,8 @@ internal fun CodexUnifiedDiff(unifiedDiff: String, label: String = "Turn changes
 internal fun CodexPlanCard(plan: PlanView) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val narrow = currentLayoutClass() == TetherLayoutClass.Phone
+    // ta-09ca E3: codex-rich-renderers.module.css:397 `(max-width: 42rem)` = 672 dp, not the shell's 48rem.
+    val narrow = windowWidthDp() <= 672
     RichCard(false, "Codex plan") {
         RichHead("Plan", planCount(plan), false) { HeadIcon(TetherIcons.ClipboardCheck, t.muted, 15.dp) }
         plan.explanation?.let { RichCopy(it) }

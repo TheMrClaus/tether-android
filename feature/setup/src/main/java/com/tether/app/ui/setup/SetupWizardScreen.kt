@@ -57,10 +57,9 @@ import com.tether.app.ui.components.BrandMark
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
-import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.cssSurface
-import com.tether.app.ui.components.currentLayoutClass
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.components.windowWidthDp
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.Manrope
 
@@ -150,7 +149,9 @@ fun SetupWizardScreen(
     claudeStep: (@Composable () -> Unit)? = null,
 ) {
     val t = LocalTetherTokens.current
-    val phone = currentLayoutClass() == TetherLayoutClass.Phone
+    // ta-09ca E2: the phone form is studio.css:957/1031's `(max-width: 640px)` block (the studio `:root .setup-*`
+    // rules beat globals.css's 52rem ones), so 640 dp and below, not the shell's 48rem.
+    val phone = windowWidthDp() <= 640
     val finish = model.finish
     // page.tsx :222: once the server is restarting by itself, watch for it to come back.
     LaunchedEffect(finish) { if (finish != null) model.pollRestart() }
