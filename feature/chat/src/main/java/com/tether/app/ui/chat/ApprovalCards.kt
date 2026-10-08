@@ -536,8 +536,9 @@ private fun ApprovalHead(c: ApprovalController, modifier: Modifier) {
             )
             // Round 7: server text on the card goes through the same display escaping as the paths.
             view.reason?.let { ContextLine(null, displayText(it)) }
-            // Round 8 (Low-2): escaped FIRST, then bounded (head…tail for the directory, a trailing "…" for text).
-            view.cwd?.let { ContextLine("Working directory", displayPath(it)) }
+            // The directory is shown whole like the web's (no server length limit): escaped, then drawn in pieces
+            // of at most GRANT_CHUNK_CHARS so a huge one stays composable; one piece is the line it always was.
+            view.cwd?.let { cwd -> ContextLine("Working directory", displayPathChunks(cwd)) }
             view.network?.let { ContextLine("Network", displayText(it)) }
             if (view.input != null) {
                 Column(Modifier.fillMaxWidth()) { ToolInputView(view.name, view.input) }
@@ -682,21 +683,29 @@ private fun ApprovalTail(c: ApprovalController, modifier: Modifier) {
 
 /** `.chat-approval-reason` / `.chat-approval-context`: muted 0.8rem/1.5, the value in ink mono 0.76rem. */
 @Composable
-private fun ContextLine(label: String?, value: String) {
+private fun ContextLine(label: String?, value: String) = ContextLine(label, listOf(value))
+
+/** [values] are drawn one [Text] each (the first carries the [label]); a single value is the one-line form. */
+@Composable
+private fun ContextLine(label: String?, values: List<String>) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    Text(
-        if (label == null) {
-            buildAnnotatedString { append(value) }
-        } else {
-            buildAnnotatedString {
-                append("$label · ")
-                withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(value.breakAnywhere()) }
-            }
-        },
-        style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f), lineHeight = rem(0.8f) * 1.5f),
-        color = t.muted,
-    )
+    val style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f), lineHeight = rem(0.8f) * 1.5f)
+    Column(Modifier.fillMaxWidth()) { values.forEachIndexed { i, value ->
+        Text(
+            if (label == null) {
+                buildAnnotatedString { append(value) }
+            } else {
+                buildAnnotatedString {
+                    if (i == 0) append("$label · ")
+                    withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(value.breakAnywhere()) }
+                }
+            },
+            style = style,
+            color = t.muted,
+            modifier = if (label == null) Modifier else Modifier.testTag("approval-context-piece"),
+        )
+    } }
 }
 
 /**

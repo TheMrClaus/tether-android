@@ -1285,10 +1285,9 @@ class ApprovalCardBehaviourTest {
     private val tagChar = "\udb40\udc41" // U+E0041: a FORMAT code point, escaped as \u{E0041}
 
     /**
-     * 64 + 64 paths of the reducer's maximum 4096 code points. A plain path is elided to 160 code
-     * points when drawn, so it may be all tag characters (the worst escape cost); a RELATIVE path is
-     * drawn whole, so it is ordinary characters (4096 drawn characters a row; see the receipt for the
-     * escape-heavy relative card, which no layout can draw in seconds).
+     * 64 + 64 paths of the reducer's maximum 4096 code points, every one drawn whole (ta-coik.76: a plain
+     * path is no longer elided). A plain card here is all tag characters (the worst escape cost), a
+     * RELATIVE one ordinary characters; the escape-heavy relative card below is the same worst case.
      */
     private fun worstPaths(relative: Boolean): Pair<List<String>, List<String>> {
         fun path(side: String, i: Int): String {
@@ -1469,6 +1468,38 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithText("Allow\\u202E\\u200B now", ignoreCase = true).performClick()
         rule.waitForIdle()
         assertTrue(calls.single(), calls.single().startsWith("approval:req-n:go:"))
+    }
+
+    @Test fun aLongAbsoluteWorkingDirectoryAndRequestedPathAreShownWhole() {
+        // ta-coik.76: like the web (chat-view.tsx cwd / read rows), nothing is cut in the middle.
+        val cwd = "/w/" + (0 until 400).joinToString("") { "k" } + "/tail"
+        val path = "/srv/" + "p".repeat(395) + "/etc"
+        show(permissionCard(listOf(path), emptyList(), cwd = cwd))
+        scrollTo("approval-card")
+        val shownCwd = displayPath(cwd)
+        assertTrue(shownCwd, !shownCwd.contains("…") && shownCwd.contains(cwd))
+        rule.onNodeWithText(shownCwd.breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
+        assertEquals(1, rule.onAllNodesWithTag("approval-context-piece", useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertEquals(listOf(displayPath(path)), pieces())
+        assertTrue(pieces().single(), !pieces().single().contains("…") && pieces().single().contains(path))
+    }
+
+    @Test fun aWorkingDirectoryOf36kEscapedCharactersComposesAndIsFullyReachable() {
+        // 4096 tag characters: each a 9-character escape (~36k drawn characters), no server limit on a cwd.
+        val cwd = "/w/" + tagChar.repeat(4_093)
+        val expected = displayPathChunks(cwd)
+        assertTrue(expected.size > 25)
+        val started = System.nanoTime()
+        show(permissionCard(listOf("/srv/a"), emptyList(), cwd = cwd))
+        scrollTo("approval-card")
+        val ms = (System.nanoTime() - started) / 1_000_000
+        assertTrue("cwd card took $ms ms (bound 5000)", ms < 5_000)
+        val drawn = rule.onAllNodesWithTag("approval-context-piece", useUnmergedTree = true).fetchSemanticsNodes()
+            .map { n -> n.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text }.filterNot { it == '\u2060' || it == '\u200B' } }
+        assertEquals(expected.size, drawn.size)
+        // Every piece is there, in order, in full: the pieces joined are the whole directory, escapes whole.
+        assertEquals(expected.joinToString(""), drawn.joinToString("").removePrefix("Working directory · "))
+        assertEquals(4_093, drawn.joinToString("").split("\\u{E0041}").size - 1)
     }
 
     @Test fun aLongWorkingDirectoryShowsItsRelativeTail() {

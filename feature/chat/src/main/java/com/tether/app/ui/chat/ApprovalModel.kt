@@ -155,11 +155,6 @@ internal fun subsetGrant(read: Collection<String>, write: Collection<String>, ne
     )
 }
 
-/** L-3 / L-B: a shown path keeps its first [DISPLAY_PATH_HEAD] and last [DISPLAY_PATH_TAIL] code points. */
-internal const val DISPLAY_PATH_HEAD = 60
-internal const val DISPLAY_PATH_TAIL = 99
-internal const val DISPLAY_PATH_MAX = DISPLAY_PATH_HEAD + 1 + DISPLAY_PATH_TAIL
-
 /**
  * LRI / PDI: each shown path is its own LEFT-TO-RIGHT isolate, so RTL text cannot reorder what is
  * around it and a path that STARTS with RTL letters (which FSI would resolve to right-to-left)
@@ -169,7 +164,7 @@ internal const val LRI = '\u2066'
 internal const val FSI = '\u2068'
 internal const val PDI = '\u2069'
 
-/** Round 7: the marker a path with a `.` or `..` segment carries (such a path is never elided). */
+/** Round 7: the marker a path with a `.` or `..` segment carries. */
 internal const val RELATIVE_MARKER = " (contains relative segments (..))"
 
 /**
@@ -178,10 +173,9 @@ internal const val RELATIVE_MARKER = " (contains relative segments (..))"
  *   the quotes or fake the elision mark is written out as a visible `\uXXXX` (`\u{XXXXX}` above
  *   the BMP), see [needsEscape]; so is the backslash itself, so an escape cannot be faked. A
  *   combining mark is escaped from the third in a row, and every enclosing mark: see [escapeTokens].
- * - Cut in the MIDDLE (L-B): the head and the TAIL (which decides the scope) both stay, with "…"
- *   between them; but a path with a `.` or `..` segment is NEVER cut (the segments decide where it
- *   really points) and says so: [RELATIVE_MARKER]. Nothing else limits it: the reducer already holds a
- *   path to 4096 code points and a list to 64 paths (the web enforces the same), and every row is shown.
+ * - Never cut, like the web's `<code>{path}</code>`: every code point of the path is shown; a path with a
+ *   `.` or `..` segment also says so: [RELATIVE_MARKER]. Nothing limits it here: the reducer already holds
+ *   a path to 4096 code points and a list to 64 paths (the web enforces the same), and every row is shown.
  * - Quoted with curly quotes (always escaped inside), and isolated LRI…PDI, so a path cannot pose as
  *   part of the sentence ("/x; no network access", `/fake”; network access; read “/y`) nor let RTL
  *   letters reorder the separators around it.
@@ -201,17 +195,9 @@ internal const val GRANT_CHUNK_CHARS = 1_200
 internal fun displayPathChunks(path: String, chunk: Int = GRANT_CHUNK_CHARS): List<String> {
     val cps = path.codePoints().toArray()
     val relative = hasRelativeSegment(path)
-    val body = ArrayList<String>(cps.size + 3)
+    val body = ArrayList<String>(cps.size + 2)
     body += "“"
-    if (relative || cps.size <= DISPLAY_PATH_MAX) {
-        // A relative path is NEVER cut (the segments decide where it really points).
-        body += escapeTokens(cps, 0, cps.size)
-    } else {
-        // Round 5/6: a plain path is cut by CODE POINTS in the middle (its tail decides the scope and stays).
-        body += escapeTokens(cps, 0, DISPLAY_PATH_HEAD)
-        body += "…"
-        body += escapeTokens(cps, cps.size - DISPLAY_PATH_TAIL, cps.size)
-    }
+    body += escapeTokens(cps, 0, cps.size)
     body += "”"
     val pieces = ArrayList<String>()
     val sb = StringBuilder()

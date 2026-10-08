@@ -257,16 +257,18 @@ class ApprovalModelTest {
         assertEquals("abc", cutCodePoints("abc", 4_000))
     }
 
-    @Test fun displayPathEscapesCutsAndQuotes() {
+    @Test fun displayPathEscapesAndQuotesAndNeverCuts() {
         assertEquals(isoPath("“/a\\u000Ab”"), displayPath("/a\nb"))
         assertEquals(isoPath("“\\u202Egnp.exe”"), displayPath("\u202Egnp.exe"))
         assertEquals(isoPath("“\\u2028\\u2066\\u0085”"), displayPath("\u2028\u2066\u0085"))
-        // L-B: the middle goes; the head AND the scope-deciding tail stay.
-        val long = displayPath("/srv/" + "p".repeat(500) + "/tail/etc")
-        assertTrue(long, long.startsWith(LRI + "“/srv/ppp"))
-        assertTrue(long, long.endsWith("pp/tail/etc”" + PDI))
-        assertTrue(long, long.contains("…"))
-        assertEquals(DISPLAY_PATH_MAX + 4, long.length) // + the two quotes and LRI / PDI
+        // Like the web's <code>{path}</code>: a long absolute path is shown whole, every code point, no "…".
+        val path = "/srv/" + "p".repeat(500) + "/tail/etc"
+        assertEquals(isoPath("“$path”"), displayPath(path))
+        val mixed = "/srv/" + (0 until 400).joinToString("") { ('a' + it % 26).toString() } + "/\uD83D\uDE00/end"
+        val shownMixed = displayPath(mixed)
+        assertTrue(shownMixed, !shownMixed.contains("…"))
+        assertEquals(mixed.codePointCount(0, mixed.length) + 4, shownMixed.codePointCount(0, shownMixed.length)) // + the two quotes and LRI / PDI
+        assertTrue(shownMixed.contains(mixed))
         assertEquals(isoPath("“/x; no network access”"), displayPath("/x; no network access"))
         // L-C: by category, plus the listed look-alikes.
         assertEquals(isoPath("“data\\u200B”"), displayPath("data\u200B")) // FORMAT (zero-width space)
@@ -385,9 +387,10 @@ class ApprovalModelTest {
         val view = pendingApprovals(tree).single().requested!!
         assertEquals(read, view.read)
         assertEquals(write, view.write)
-        // A relative path is shown whole (no elision); a plain one keeps the usual head...tail.
+        // Every path is shown whole (no elision), relative or plain.
         assertTrue(!displayPath(read[0]).contains("…"))
-        assertTrue(displayPath(write[5]).contains("…"))
+        assertTrue(!displayPath(write[5]).contains("…"))
+        assertEquals(isoPath("“${write[5].replace("\uDB40\uDC41", "\\u{E0041}")}”"), displayPath(write[5]))
     }
 
     @Test fun aPathInPiecesHoldsExactlyTheTextOfDisplayPath() {
@@ -407,13 +410,19 @@ class ApprovalModelTest {
             if (hasRelativeSegment(path)) assertTrue(pieces.last().endsWith(RELATIVE_MARKER))
         }
         assertEquals(1, displayPathChunks("/srv/data/file-1").size)
-        assertTrue(displayPathChunks("/" + tag.repeat(4_000)).size <= 2) // plain: elided to 160 escapes (1,440 characters)
+        assertTrue(displayPathChunks("/" + tag.repeat(4_000)).size > 25) // plain: whole too, ~36k characters
         assertTrue(displayPathChunks("/p/../" + tag.repeat(4_000)).size > 25) // relative: whole, ~36k characters
         // No escape is split across pieces: strip the islands, quotes, marker and the head, only whole escapes are left.
         for (p in displayPathChunks("/p/../" + tag.repeat(4_000))) {
             val left = p.removePrefix("$LRI").removeSuffix(RELATIVE_MARKER).removeSuffix("$PDI").replace("“", "").replace("”", "").replace("/p/../", "")
             assertTrue(p, left.replace("\\u{E0041}", "").isEmpty())
         }
+    }
+
+    @Test fun aPlainPathIsNeverCutHoweverLongEither() {
+        val path = "/w/" + "d".repeat(4_000) + "/etc"
+        assertEquals(isoPath("“$path”"), displayPath(path))
+        assertEquals(path, displayPathChunks(path).joinToString("") { it.removePrefix("$LRI").removeSuffix("$PDI") }.removePrefix("“").removeSuffix("”"))
     }
 
     @Test fun aRelativePathIsNeverCutHoweverLong() {
