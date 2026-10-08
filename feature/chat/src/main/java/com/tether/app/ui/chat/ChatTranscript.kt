@@ -355,13 +355,17 @@ private fun ChatTranscriptBody(
     val reportMark: (androidx.compose.ui.geometry.Rect) -> Unit = { mark[0] = it }
 
     // ta-8h5k (C2): from 48rem to 63.99rem the web's `.chat-scroll` pads 32 / 32 / 32 / 48 (top, right, bottom, left) and
-    // the right-docked rail overlays that 32; it is not added beside it (the phone's 16 + rail stays as it is).
+    // the right-docked rail overlays that 32; it is not added beside it.
+    // ta-xxda: the phone's is the same. The web's `.chat-scroll` pads 16 / 16 (studio.css:461) and the right-docked rail is
+    // an absolute overlay (conversation-timeline.module.css:5-7: `position: absolute`, z 18, the page reserves no width for
+    // it), so the card, bubbles and tool cards all end at W - 16 and the rail lies over the gutter and the right part of the
+    // rows, as the app's own rail already does (it is a full-height overlay). Only the Left gutter (the desktop stage's
+    // 3.4rem, globals.css:1446) is added beside the rows.
     val midBand = !phone && narrow
     val layoutPadding = PaddingValues(
         start = spacing.padding.calculateLeftPadding(LayoutDirection.Ltr) +
             if (midBand) 16.dp else if (hasTimeline && timelineSide == TimelineSide.Left) timelineColumnWidth(timelineSide) else 0.dp,
-        end = spacing.padding.calculateRightPadding(LayoutDirection.Ltr) +
-            if (!midBand && hasTimeline && timelineSide == TimelineSide.Right) timelineColumnWidth(timelineSide) else 0.dp,
+        end = spacing.padding.calculateRightPadding(LayoutDirection.Ltr),
         top = spacing.padding.calculateTopPadding(),
         bottom = spacing.padding.calculateBottomPadding(),
     )

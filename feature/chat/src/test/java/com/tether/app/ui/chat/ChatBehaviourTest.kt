@@ -18,8 +18,10 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.AnnotatedString
 import com.tether.app.ui.theme.TetherSkin
@@ -74,7 +76,7 @@ class ChatBehaviourTest {
     @Test
     fun copyPutsTheExactFenceBodyOnTheClipboardAndSaysCopied() {
         show(ChatFixtures.markdown)
-        rule.onAllNodesWithContentDescription("Copy code").onFirst().performClick()
+        rule.onAllNodesWithContentDescription("Copy code").onFirst().clickLeftOfRail()
         val clipboard = rule.activity.getSystemService(ClipboardManager::class.java)
         assertEquals(
             "export function retry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {\n" +
@@ -92,7 +94,7 @@ class ChatBehaviourTest {
     fun theSecondFenceCopiesItsOwnBody() {
         show(ChatFixtures.markdown)
         val keys = rule.onAllNodesWithContentDescription("Copy code")
-        keys[1].performClick()
+        keys[1].clickLeftOfRail()
         val clipboard = rule.activity.getSystemService(ClipboardManager::class.java)
         assertEquals("npm run test:unit && npm run lint", clipboard.primaryClip!!.getItemAt(0).text.toString())
     }
@@ -205,3 +207,10 @@ class ChatBehaviourTest {
         assertNotNull(rule.onNodeWithText("That's everything for this release.").fetchSemanticsNode())
     }
 }
+
+/**
+ * ta-xxda: the phone's rows run to W - 16 and the right-docked rail (z 18, 53.6 dp) overlays them, as the web's does, so a control
+ * at a row's right end is under the rail from its middle on: a touch takes the part of it left of the rail (4 dp in from its edge).
+ */
+private fun androidx.compose.ui.test.SemanticsNodeInteraction.clickLeftOfRail() =
+    performTouchInput { click(androidx.compose.ui.geometry.Offset(4.dp.toPx(), height / 2f)) }

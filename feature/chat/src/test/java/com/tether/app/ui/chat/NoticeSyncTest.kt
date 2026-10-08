@@ -19,6 +19,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.core.app.ApplicationProvider
@@ -119,7 +120,7 @@ class NoticeSyncTest {
         for ((name, sync) in notLiveCopies("s1")) {
             rule.runOnIdle { client.sync.value = sync }
             arm()
-            rule.onNodeWithContentDescription(x).assertIsEnabled().performClick()
+            rule.onNodeWithContentDescription(x).assertIsEnabled().clickLeftOfRail()
             rule.waitForIdle()
             expected += "s1:ext-1@$TEST_ORIGIN"
             assertEquals("$name: the tap reached the client", expected, client.dismissCalls.toList())
@@ -135,7 +136,7 @@ class NoticeSyncTest {
         client.sync.value = mapOf("s1" to SessionSync(Freshness.Saved, 1L))
         rule.hostChat(client, session)
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("notice-dismiss"))
-        rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsEnabled().performClick()
+        rule.onNodeWithContentDescription("Dismiss external-advancement notice").assertIsEnabled().clickLeftOfRail()
         rule.waitForIdle()
         assertEquals(listOf("s1:ext-1@$TEST_ORIGIN"), client.dismissCalls.toList())
     }
@@ -360,3 +361,10 @@ internal fun androidx.compose.ui.test.SemanticsNodeInteractionsProvider.tapScree
     val origin = root.fetchSemanticsNode().positionOnScreen
     root.performTouchInput { click(screen - origin) }
 }
+
+/**
+ * ta-xxda: the phone's rows run to W - 16 and the right-docked rail (z 18, 53.6 dp) overlays them, as the web's does, so a control
+ * at a row's right end is under the rail from its middle on: a touch takes the part of it left of the rail (4 dp in from its edge).
+ */
+private fun androidx.compose.ui.test.SemanticsNodeInteraction.clickLeftOfRail() =
+    performTouchInput { click(androidx.compose.ui.geometry.Offset(4.dp.toPx(), height / 2f)) }

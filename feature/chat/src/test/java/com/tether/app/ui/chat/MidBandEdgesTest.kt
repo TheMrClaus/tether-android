@@ -27,7 +27,7 @@ import org.robolectric.annotation.Config
  * ta-8h5k: the band's edges, so an off-by-one in a gate is caught. The shell switches at 768 dp, the web's 48rem (Phone below, Expanded
  * from it; ta-09ca); the composer's sheet key becomes the options row at 1024 dp (the web's 64rem); the rail side flips at 1024 dp.
  *
- *  w767: Phone         - one row (the 44 dp key shares the footer's row), rail right, transcript pads 16 + the rail's 54 on the right.
+ *  w767: Phone         - one row (the 44 dp key shares the footer's row), rail right, transcript pads 16 / 16 (the rail overlays the right 16 and the rows under it, ta-xxda).
  *  w768: Expanded<1024 - the 36 dp pill row above the footer, rail right, pads 48 left / 32 right (rail overlays).
  *  w1023: the same.
  *  w1024: Expanded wide - no sheet key (the options row above the footer), rail LEFT, pads 32 + the rail's 54.4 on the left, 32 right.
@@ -81,7 +81,7 @@ class MidBandEdgesTest {
         assertTrue("phone rail is on the right", dp(rail.right) > width - 2f && dp(rail.left) > width / 2f)
         val text = replyBounds()
         near("phone content left", 16.0, dp(text.left), 0.75)
-        near("phone content right (16 + the rail's 54)", (width - 16 - 54).toDouble(), dp(text.right), 0.75)
+        near("phone content right (16: the rail overlays it, ta-xxda)", (width - 16).toDouble(), dp(text.right), 0.75)
     }
 
     private fun assertMidBand(width: Int) {
