@@ -197,7 +197,6 @@ private fun ChatTranscriptBody(
     // ta-4za3: an approval card is several host items (head, one per path entry, tail), so the host list is the
     // flat run of them; every index below (story points, find, the follow pin) is an index into this list.
     val host = remember(items) { hostRows(items) }
-    val cardStore = rememberCardStates()
     val onToggleGroup: (ChatItem.ToolGroup) -> Unit = remember(groupToggles) { { group -> groupToggles.toggle(group) } }
     val toolRender = remember(richCodex, richOpencode, showThinking) { ToolRenderFlags(richCodex, richOpencode, showThinking) }
     val leading = if (roster != null) 1 else 0
@@ -343,7 +342,8 @@ private fun ChatTranscriptBody(
 
     val copyNotices = remember { CopyNotices() }
     Box(modifier.fillMaxSize().background(chatWellColor(t))) {
-        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices, LocalCardStates provides cardStore) {
+        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices) {
+        ProvideApprovalState {
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -396,6 +396,7 @@ private fun ChatTranscriptBody(
                 val first = host.rows.size + leading == 0 && sends.pending.isEmpty() && row === sends.failed.first()
                 FailedSendBubble(row, { sends.onDismiss(row.key) }, Modifier.padding(top = if (first) 0.dp else spacing.scrollGap))
             }
+        }
         }
         }
 

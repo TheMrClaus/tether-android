@@ -37,11 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -311,10 +308,12 @@ internal object GrantLayouts {
 }
 
 /**
- * ta-4za3: a card's local, never-saved state, shared by all its segments and keyed by [ApprovalView.contentFp]
- * in the [CardStateStore] (a segment leaving composition clears nothing): the web's "exact" confirmation tick,
+ * ta-4za3: a card's local, never-saved state, shared by all its segments: the web's "exact" confirmation tick,
  * the send latch (closes the double-tap window; "sent" itself comes from the client's ledger) and the overlay
- * notice. After process death the store is new, so the operator may tap again.
+ * notice. The host list holds one per card in an [ApprovalLocals], keyed by [ApprovalView.contentFp], so a segment
+ * scrolling out of composition clears nothing; the holder is the host's own composition (a layout switch or a
+ * server switch builds a new one, as it always did), so the state is never saved and after process death the
+ * operator may tap again.
  */
 @Stable
 internal class ApprovalLocal {
@@ -333,6 +332,28 @@ internal class ApprovalLocal {
         if (have != null && fpOrigin == origin && fpTurn == activeTurnId && (fpRequest === request || fpRequest == request)) return have
         wireFingerprint(origin, activeTurnId, request).also { fpValue = it; fpOrigin = origin; fpTurn = activeTurnId; fpRequest = request }
     }
+}
+
+/** The [ApprovalLocal] of each card a host list draws, by contentFp (newest use last; the oldest go past 64). */
+@Stable
+internal class ApprovalLocals {
+    private val held = LinkedHashMap<String, ApprovalLocal>(16, 0.75f, true)
+
+    fun of(contentFp: String): ApprovalLocal = synchronized(held) {
+        val local = held.getOrPut(contentFp) { ApprovalLocal() }
+        while (held.size > CardStateStore.MAX_RECORDS) held.remove(held.keys.first())
+        local
+    }
+}
+
+internal val LocalApprovalLocals = compositionLocalOf<ApprovalLocals?> { null }
+
+/** What a host list provides around its lazy list: the card store and one [ApprovalLocals], so every segment of a card shares both. */
+@Composable
+internal fun ProvideApprovalState(content: @Composable () -> Unit) {
+    val store = rememberCardStates()
+    val locals = remember(store) { ApprovalLocals() }
+    androidx.compose.runtime.CompositionLocalProvider(LocalCardStates provides store, LocalApprovalLocals provides locals, content = content)
 }
 
 /** Everything a segment reads and does for its card; built per composition from the shared holders. */
@@ -414,7 +435,8 @@ private fun rememberApprovalController(view: ApprovalView, layout: GrantLayout):
     // origin); they survive a scroll, a tab switch, a layout switch, a drop and reconnect, backgrounding; a
     // re-raised request is another identity and starts fully ticked.
     val store = rememberCardStates()
-    val local = remember(store, view.contentFp) { store.local(view.contentFp) }
+    val locals = LocalApprovalLocals.current ?: error("an approval segment is drawn inside ProvideApprovalState (its host list)")
+    val local = locals.of(view.contentFp)
     return ApprovalController(view, layout, store, local, consent)
 }
 
@@ -439,7 +461,7 @@ internal fun ApprovalSegmentView(view: ApprovalView, segment: ApprovalSegment, m
 @Composable
 internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     val layout = GrantLayouts.of(view)
-    Column(modifier.fillMaxWidth()) { layout.segments.forEach { ApprovalSegmentView(view, it) } }
+    ProvideApprovalState { Column(modifier.fillMaxWidth()) { layout.segments.forEach { ApprovalSegmentView(view, it) } } }
 }
 
 private val CARD_PADDING = 20.dp
@@ -461,19 +483,22 @@ private fun CardSegment(top: Boolean, bottom: Boolean, modifier: Modifier, conte
     )
 }
 
-/** A rounded outline (and optional fill) of which only the sides [top] / [bottom] close; see [CardSegment]. */
-private fun Modifier.framed(top: Boolean, bottom: Boolean, radius: Dp, stroke: Color, width: Dp = 1.dp, fill: Color? = null): Modifier =
-    clipToBounds().drawBehind {
-        val r = radius.toPx()
-        val w = width.toPx()
-        val over = 2f * r + w
-        val y0 = if (top) 0f else -over
-        val y1 = size.height + if (bottom) 0f else over
-        val outer = RoundRect(0f, y0, size.width, y1, CornerRadius(r))
-        val inner = RoundRect(w, y0 + w, size.width - w, y1 - w, CornerRadius((r - w).coerceAtLeast(0f)))
-        if (fill != null) drawPath(Path().apply { addRoundRect(outer) }, fill)
-        drawPath(Path().apply { fillType = PathFillType.EvenOdd; addRoundRect(outer); addRoundRect(inner) }, stroke)
+/**
+ * A rounded outline (and optional fill) of which only the sides [top] / [bottom] close; see [CardSegment]. It is the
+ * same [cssSurface] the whole card used, over a shape taller than the segment on a continuing side.
+ */
+private fun Modifier.framed(top: Boolean, bottom: Boolean, radius: Dp, stroke: Color, width: Dp = 1.dp, fill: Color? = null): Modifier {
+    val shape = object : androidx.compose.ui.graphics.Shape {
+        override fun createOutline(size: androidx.compose.ui.geometry.Size, layoutDirection: androidx.compose.ui.unit.LayoutDirection, density: androidx.compose.ui.unit.Density): androidx.compose.ui.graphics.Outline {
+            val r = with(density) { radius.toPx() }
+            val over = 2f * r + with(density) { width.toPx() }
+            val y0 = if (top) 0f else -over
+            val y1 = size.height + if (bottom) 0f else over
+            return androidx.compose.ui.graphics.Outline.Rounded(RoundRect(0f, y0, size.width, y1, CornerRadius(r)))
+        }
     }
+    return clipToBounds().cssSurface(shape, background = fill ?: Color.Transparent, border = CssBorder(width, stroke), shadows = emptyList())
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

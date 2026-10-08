@@ -508,7 +508,6 @@ internal fun SubagentRunTab(
     val approvalSegments = remember(pending) { pending.map { GrantLayouts.of(it).segments } }
     val cardCount = approvalSegments.sumOf { it.size } + pendingQuestions.size
     val lastIndex = rows.size + cardCount - 1
-    val cardStore = rememberCardStates()
     val focusKey = focus?.takeIf { it.runId == run.runId }
     val running = run.status == RUN_RUNNING
 
@@ -555,7 +554,7 @@ internal fun SubagentRunTab(
     // The 12dp between the items is each item's own top padding (not an arrangement), so the segments of an
     // approval card sit flush and the card paints its own seams.
     val gap = t.css.spaceMd
-    androidx.compose.runtime.CompositionLocalProvider(LocalCardStates provides cardStore) {
+    ProvideApprovalState {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize().background(chatWellColor(t)).nestedScroll(followGuard).testTag("subrun-panel"),
