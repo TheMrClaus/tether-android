@@ -68,6 +68,7 @@ import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.WaitingPingDot
+import com.tether.app.ui.components.WholeWordText
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.icons.TetherIcons
@@ -428,13 +429,13 @@ internal fun SessionRow(
                         if (unseen) {
                             Box(Modifier.padding(top = 0.45f.rem).size(7.dp).background(t.violet, RoundedCornerShape(50)))
                         }
-                        Text(
+                        // `.session-item-head strong`: -webkit-line-clamp 2, whole words (globals.css 10917-10923, ta-z4c1).
+                        WholeWordText(
                             name,
                             style = (css(type.ui, 0.78f, 600, lineHeight = 1.45f))
                                 .copy(textDirection = proseDirection),
                             color = (if (active) Color.White else t.ink),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            maxLines = 2,
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         if (live?.handedOffTo != null) SmallIcon(TetherIcons.ArrowRightLeft, ink, 12.dp, Modifier.padding(top = 0.2f.rem))
