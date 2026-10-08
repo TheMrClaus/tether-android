@@ -243,7 +243,9 @@ private fun ChatTranscriptBody(
     if (!restored[0] && restore != null && items.isNotEmpty()) {
         restored[0] = true
         val at = if (restore.key == "subagent-roster") 0 else lazyKeys.indexOf(restore.key).takeIf { it >= 0 }?.plus(leading)
-        if (at != null) listState.requestScrollToItem(at, restore.offset)
+        // ta-gvyf: a place that names no row any more (trimmed, a pending-send / failed-send row, no key at all) puts the
+        // reader at the latest message, as a chat opens; a list left at index 0 would open a non-following reader at the top.
+        if (at != null) listState.requestScrollToItem(at, restore.offset) else sticky = true
     }
     val followGuard = remember {
         object : NestedScrollConnection {
