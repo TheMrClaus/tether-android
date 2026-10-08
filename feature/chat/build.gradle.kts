@@ -44,6 +44,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
+    // ta-daw9: virtual time for a picture slower than the old 60 s limit.
+    testImplementation(libs.kotlinx.coroutines.test)
     // The v128 fold + event builders, so transcript tests read real folded projections.
     testImplementation(testFixtures(project(":core:reducer")))
     testImplementation(libs.kotlinx.serialization.json)

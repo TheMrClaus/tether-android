@@ -190,9 +190,6 @@ object MediaLimits {
      */
     const val MAX_TILES: Int = 12
 
-    /** One picture may take this long end to end, then it fails. */
-    const val IMAGE_TIMEOUT_MS: Long = 60_000
-
     /** The image types a `data:` URI may carry (lib/tool-media-store.mjs IMAGE_MEDIA_TYPES). */
     val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
 }
@@ -444,7 +441,8 @@ internal fun sha256OfFile(file: File): String {
  * their source), clips under the server's [ToolMediaCache] directory. Fetched bytes must hash to
  * the sha256 their path names, and every file's magic bytes must be its format, else it is
  * dropped: a server cannot swap content under a name the transcript already holds. Pictures stream
- * to a temporary file (no in-memory copy), two at a time app-wide, each within a timeout; any
+ * to a temporary file (no in-memory copy), two at a time app-wide, with no end-to-end time limit (the web's
+ * <img> has none); any
  * OutOfMemoryError on the way is "too large", never a crash.
  */
 class ToolMediaRepository(
@@ -455,8 +453,6 @@ class ToolMediaRepository(
     // `http(s)` with none). The defaults reach nothing (previews and tests).
     private val files: com.tether.app.client.WorkspaceFiles = com.tether.app.client.WorkspaceFiles.Unavailable,
     private val remote: com.tether.app.client.PublicImageSource = com.tether.app.client.PublicImageSource.Unavailable,
-    // L4: the picture's end-to-end timeout (a parameter only so tests need not wait). A clip has none: the web's <video> waits.
-    private val imageTimeoutMs: Long = MediaLimits.IMAGE_TIMEOUT_MS,
 ) : ToolMediaLoader {
     private val cache = object : LruCache<String, MediaImage.Ok>(MediaLimits.CACHE_BYTES) {
         override fun sizeOf(key: String, value: MediaImage.Ok): Int = value.bitmap.asAndroidBitmap().allocationByteCount
@@ -476,10 +472,9 @@ class ToolMediaRepository(
             // The key is computed once, off the main thread.
             val key = withContext(Dispatchers.IO) { cacheKey(item.src, tier) }
             cache.get(key)?.let { return it }
-            // The timeout starts once a load slot is held (a queued picture is not "slow").
-            val result = MediaGates.images.withPermit {
-                kotlinx.coroutines.withTimeoutOrNull(imageTimeoutMs) { withContext(Dispatchers.IO) { loadImage(item.src, tier) } }
-            } ?: MediaImage.Failed
+            // ta-daw9: no end-to-end limit. The web's <img> has none, so a slow picture keeps loading; only a real
+            // failure (an HTTP error, a connect failure, a dropped socket, an undecodable body) ends it as Failed.
+            val result = MediaGates.images.withPermit { withContext(Dispatchers.IO) { loadImage(item.src, tier) } }
             if (result is MediaImage.Ok) cache.put(key, result)
             result
         } catch (e: kotlinx.coroutines.CancellationException) {

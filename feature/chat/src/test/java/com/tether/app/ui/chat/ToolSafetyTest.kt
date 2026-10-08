@@ -200,7 +200,7 @@ class ToolSafetyTest {
         assertEquals(listOf("${sha256Hex(clip)}.mp4"), dir.list()!!.toList())
     }
 
-    @Test fun aCancelledOrTimedOutDownloadLeavesNothingBehind() = runBlocking {
+    @Test fun aCancelledDownloadLeavesNothingBehind() = runBlocking {
         val started = CompletableDeferred<Unit>()
         val source = object : ToolMediaSource {
             override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
@@ -210,19 +210,15 @@ class ToolSafetyTest {
             }
         }
         val other = ByteArray(2048).also { clip.copyInto(it) ; it[2047] = 1 }
-        val repo = ToolMediaRepository(source, cache, origin, imageTimeoutMs = 300)
+        val repo = ToolMediaRepository(source, cache, origin)
         // Cancelled by the caller.
         val job = launch(Dispatchers.Default) { repo.video(ToolMediaItem("video", "video/mp4", url(clip, "mp4"))) }
         withTimeout(20_000) { started.await() }
         job.cancelAndJoin()
         val dir = ToolMediaCache.dirFor(cache, origin)
         assertTrue("no .part after a cancellation: ${dir.list()?.toList()}", dir.list().isNullOrEmpty())
-        // Timed out (L4): a picture that never finishes fails on its own.
-        withTimeout(20_000) {
-            assertEquals(MediaImage.Failed, repo.image(ToolMediaItem("image", "image/png", url(png, "png"))))
-        }
-        // A clip has no timer, like the web's <video>: one that never finishes keeps waiting (well past the
-        // picture's 300 ms) until the caller walks away, and then leaves nothing behind.
+        // Neither a clip nor a picture has a timer (the web's <video> and <img> wait): one that never finishes
+        // keeps waiting until the caller walks away, and then leaves nothing behind.
         val waiting = launch(Dispatchers.Default) { repo.video(ToolMediaItem("video", "video/mp4", url(other, "mp4"))) }
         kotlinx.coroutines.delay(1_200)
         assertTrue("the clip is still being waited for", waiting.isActive)
@@ -628,7 +624,49 @@ class ToolSafetyTest {
         assertEquals("refused before its key is hashed", before, ToolMediaRepository.keysComputed.get())
     }
 
-    @Test fun thePictureTimeoutStartsOnceALoadSlotIsHeld() = runBlocking {
+    // ta-daw9: the picture has no end-to-end limit (the web's <img> has none). Virtual time: the source holds the
+    // picture back past the old 60 s limit, and it still completes and shows.
+    @Test fun aPictureSlowerThanAMinuteStillLoads() = kotlinx.coroutines.test.runTest {
+        val held = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        val slow = object : ToolMediaSource {
+            override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
+                sink.write(png, 0, 10)
+                started.complete(Unit)
+                held.await()
+                sink.write(png, 10, png.size - 10)
+                return ToolMediaResult.Ok(png.size.toLong(), "image/png")
+            }
+        }
+        val repo = ToolMediaRepository(slow, cache, origin)
+        val got = async { repo.image(ToolMediaItem("image", "image/png", url(png, "png"))) }
+        realTime { started.await() }
+        testScheduler.advanceTimeBy(300_000)
+        testScheduler.runCurrent()
+        held.complete(Unit)
+        val result = realTime { got.await() }
+        assertTrue("a slow picture still shows: $result", result is MediaImage.Ok)
+    }
+
+    // The test scheduler's clock is virtual; the guard against a hang must run on the real one.
+    private suspend fun <T> realTime(block: suspend () -> T): T = kotlinx.coroutines.withContext(Dispatchers.Default) { withTimeout(20_000) { block() } }
+
+    @Test fun aPictureThatFailsOnTheWireStillShowsTheErrorState() = runBlocking {
+        val dropped = object : ToolMediaSource {
+            override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
+                sink.write(png, 0, 10)
+                throw java.io.IOException("socket dropped")
+            }
+        }
+        val refused = object : ToolMediaSource {
+            override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult = ToolMediaResult.Failed(500)
+        }
+        val item = ToolMediaItem("image", "image/png", url(png, "png"))
+        assertEquals(MediaImage.Failed, ToolMediaRepository(dropped, cache, origin).image(item))
+        assertEquals(MediaImage.Failed, ToolMediaRepository(refused, cache, origin).image(item))
+    }
+
+    @Test fun aQueuedPictureWaitsForALoadSlotAndIsServed() = runBlocking {
         val release = CompletableDeferred<Unit>()
         val holding = AtomicInteger()
         val slow = object : ToolMediaSource {
@@ -645,16 +683,16 @@ class ToolSafetyTest {
                 return ToolMediaResult.Ok(png.size.toLong(), "image/png")
             }
         }
-        val slowRepo = ToolMediaRepository(slow, cache, origin, imageTimeoutMs = 20_000)
-        val fastRepo = ToolMediaRepository(fast, cache, origin, imageTimeoutMs = 300)
+        val slowRepo = ToolMediaRepository(slow, cache, origin)
+        val fastRepo = ToolMediaRepository(fast, cache, origin)
         val holders = (0 until 2).map { i -> async(Dispatchers.Default) { slowRepo.image(ToolMediaItem("image", "image/png", url(png, "png")), full = i == 0) } }
         withTimeout(20_000) { while (holding.get() < 2) kotlinx.coroutines.delay(10) }
-        // Queued behind both slots for longer than its own timeout, then served.
+        // Queued behind both slots, then served.
         val queued = async(Dispatchers.Default) { fastRepo.image(ToolMediaItem("image", "image/png", "data:image/png;base64," + android.util.Base64.encodeToString(png, android.util.Base64.NO_WRAP))) }
         kotlinx.coroutines.delay(800)
         release.complete(Unit)
         holders.awaitAll()
-        assertTrue("a queued load is not timed out while it waits", queued.await() is MediaImage.Ok)
+        assertTrue("a queued load is served once a slot frees", queued.await() is MediaImage.Ok)
     }
 
     @Test fun theGitChangesCardCapsItsHunksAndFileLists() {
