@@ -14,6 +14,16 @@ import androidx.compose.ui.platform.LocalWindowInfo
  * the web's MOBILE layout; 768 dp or wider renders the web's DESKTOP layout. Width only: the web
  * has no height, orientation or device condition, so neither does this. Primitives that change at
  * the web's mobile breakpoint (the docked sheet, the expand toggle) key off this one switch.
+ *
+ * Font scale (ta-7njx, W23): no breakpoint in the app has a font-scale term, as on the web. Verified against Chrome
+ * Android 156.0.8078.25 (stable, 2026-10; also 155.0.8059.40): Chrome hands the Android font size
+ * (Configuration.fontScale) to Blink only as accessibilityFontScaleFactor; HostZoomMapImpl.shouldAdjustForOSLevel() is
+ * false (no page zoom), the text autosizer is gone, and tether 29537e0 declares no <meta name="text-scale">. So the
+ * web console lays out at fontScale 2.0 exactly as at 1.0: innerWidth, rem and every px/rem @media stay put. Android
+ * Display size (density) is the page-zoom analogue and already moves every dp breakpoint here.
+ * Re-open ta-7njx if (1) the web adds <meta name="text-scale" content="scale">: rem breakpoints would then scale,
+ * 48rem = 768 x fontScale, px ones would not; or (2) Chrome ships AdjustForOSLevel=true: page zoom, so px and rem
+ * would both scale.
  */
 enum class TetherLayoutClass { Phone, Expanded }
 

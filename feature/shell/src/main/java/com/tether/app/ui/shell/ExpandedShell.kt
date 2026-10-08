@@ -123,6 +123,8 @@ fun ExpandedShell(
         val inspectorColumn = columnLayout && session != null
         // r2: what the bar could not fit, listed by its menu.
         val fold = remember { TopbarFold() }
+        // ta-7njx: the header cluster's yield, shared with the "Session links" menu's Pin row.
+        val headerFit = remember { HeaderFit() }
         val topbarState = TopbarState(
             current = current,
             link = link,
@@ -146,6 +148,7 @@ fun ExpandedShell(
                         session = session,
                         emptyStage = emptyStage,
                         header = header,
+                        headerFit = headerFit,
                         slots = slots,
                         viewport = viewport,
                         columnLayout = columnLayout,
@@ -207,6 +210,7 @@ fun ExpandedShell(
                 expanded = true,
                 endInset = if (inspectorColumn) inspectorWidth.dp + t.css.spaceLg else null,
                 showStatusline = !columnLayout,
+                pinInMenu = headerFit.pinInMenu,
             )
         }
 
@@ -258,6 +262,7 @@ private fun WorkspaceColumn(
     session: AgentSession?,
     emptyStage: EmptyStage,
     header: WorkspaceHeaderActions,
+    headerFit: HeaderFit,
     slots: PhoneShellSlots,
     viewport: Int,
     columnLayout: Boolean,
@@ -289,6 +294,7 @@ private fun WorkspaceColumn(
                     gaugeIsHandle = !columnLayout,
                     dial = slots.dial,
                     badge = slots.headerBadge?.let { badge -> { badge(session) } },
+                    fit = headerFit,
                 )
                 val left = 0.dp
                 val edge = 0.dp

@@ -16,7 +16,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.TextStyle
@@ -105,6 +109,37 @@ data class GaugeHost(val open: Boolean?, val onToggle: (() -> Unit)?, val showLa
 /** The context-gauge slot in the header's action cluster (T4.3's `ContextGauge`). */
 typealias GaugeSlot = @Composable (host: GaugeHost) -> Unit
 
+/**
+ * ta-7njx (W23, ruling B1-B3): how far the expanded header's action cluster has yielded to keep End session whole in the
+ * window at an Android font size above 1.0. The web never yields at 48rem and up (its cluster is `flex: 0 0 auto` and
+ * overruns the edge), and its text does not grow with the Android font size, so this ladder is inert at font scale 1.0 and
+ * is not a breakpoint: it keys on the one variable that makes the app's text wider than the web's. Each step is a state
+ * the web itself ships below 48rem; the order gives up the least reach first.
+ *
+ *  * [STEP_FULL] (0): the web's desktop cluster.
+ *  * [STEP_TELEMETRY_WORDLESS] (1): "Telemetry" stops printing its word (globals.css 1410-1413); the gauge stays the handle.
+ *  * [STEP_PIN_IN_MENU] (2): Pin moves into the "Session links" menu (globals.css 11068-11070).
+ *  * [STEP_END_WORDLESS] (3): End session stops printing its word (the brick key keeps its glyph and name).
+ *
+ * The header measures the cluster at each step in turn and keeps the first whose width fits [HeaderFit.room]; the menu
+ * ([SessionLinksPopover]) reads [pinInMenu] from the same hoisted state.
+ */
+@Stable
+class HeaderFit {
+    var step: Int by mutableIntStateOf(STEP_FULL)
+        internal set
+
+    /** Whether the bar's Pin has moved into the "Session links" menu. */
+    val pinInMenu: Boolean get() = step >= STEP_PIN_IN_MENU
+
+    companion object {
+        const val STEP_FULL = 0
+        const val STEP_TELEMETRY_WORDLESS = 1
+        const val STEP_PIN_IN_MENU = 2
+        const val STEP_END_WORDLESS = 3
+    }
+}
+
 /** The elapsed-dial slot, first in the expanded header's rail (T4.3's `SessionDial`). */
 typealias DialSlot = @Composable (session: AgentSession) -> Unit
 
@@ -159,6 +194,8 @@ fun WorkspaceHeader(
     dial: DialSlot? = null,
     /** T9.2 (workspace-header.tsx:113): the DeepSeek peak badge after the status pill (nothing when it does not apply). */
     badge: (@Composable () -> Unit)? = null,
+    /** ta-7njx: the cluster's yield state, shared with the "Session links" menu (the shell hoists it). */
+    fit: HeaderFit = remember { HeaderFit() },
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -194,6 +231,8 @@ fun WorkspaceHeader(
         mainGap = if (!expanded) 8.dp else t.css.spaceLg,
         titleGap = titleGap,
         hasBadge = badge != null,
+        yields = expanded && LocalDensity.current.fontScale > 1.0f,
+        fit = fit,
         title = {
             // ta-28i: the session's title by the label rule, in its content's direction.
             SessionTitle(
@@ -214,7 +253,7 @@ fun WorkspaceHeader(
             TetherStatusPill(label = pillLabel, tone = pillTone, modifier = Modifier.testTag(ShellTags.StatusPill))
         },
         badge = badge,
-        cluster = {
+        cluster = { step ->
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
@@ -225,7 +264,7 @@ fun WorkspaceHeader(
                     GaugeHost(
                         open = if (handle) telemetryOpen else null,
                         onToggle = if (handle) onToggleTelemetry else null,
-                        showLabel = expanded,
+                        showLabel = expanded && step < HeaderFit.STEP_TELEMETRY_WORDLESS,
                     ),
                 )
                 ChromeIconKey(
@@ -239,7 +278,7 @@ fun WorkspaceHeader(
                     iconSize = 18.dp,
                     modifier = Modifier.testTag(ShellTags.LinksKey),
                 )
-                if (expanded) PinKey(session.pinned, actions.onTogglePinned)
+                if (expanded && step < HeaderFit.STEP_PIN_IN_MENU) PinKey(session.pinned, actions.onTogglePinned)
                 // `.end-session`: the brick key, glyph only below 48rem; Studio's rail forces 2.75rem
                 // (studio.css 362). Disabled once the session has exited, like the web. From 48rem it
                 // prints "End session" at 0.66rem (4117-4121, 11196). ta-coik.22: only that, as on the web
@@ -248,10 +287,10 @@ fun WorkspaceHeader(
                 TetherKey(
                     onClick = { if (endable) actions.onEndSession() },
                     classes = KeyClasses.EndSession,
-                    label = if (expanded) "End session" else null,
+                    label = if (expanded && step < HeaderFit.STEP_END_WORDLESS) "End session" else null,
                     icon = TetherIcons.CircleStop,
                     iconSize = 16.dp,
-                    fontSize = if (expanded) 10.56.sp else TextUnit.Unspecified,
+                    fontSize = if (expanded && step < HeaderFit.STEP_END_WORDLESS) 10.56.sp else TextUnit.Unspecified,
                     contentDescription = "End session",
                     enabled = endable,
                     minHeight = 44.dp,
@@ -281,23 +320,15 @@ private fun HeaderMainRow(
     mainGap: Dp,
     titleGap: Dp,
     hasBadge: Boolean,
+    yields: Boolean,
+    fit: HeaderFit,
     title: @Composable () -> Unit,
     rename: @Composable () -> Unit,
     pill: @Composable () -> Unit,
     badge: (@Composable () -> Unit)?,
-    cluster: @Composable () -> Unit,
+    cluster: @Composable (step: Int) -> Unit,
 ) {
-    Layout(
-        content = {
-            Box(Modifier.layoutId(HeaderSlot.Title)) { title() }
-            Box(Modifier.layoutId(HeaderSlot.Rename)) { rename() }
-            Box(Modifier.layoutId(HeaderSlot.Pill)) { pill() }
-            if (badge != null) Box(Modifier.layoutId(HeaderSlot.Badge)) { badge() }
-            Box(Modifier.layoutId(HeaderSlot.Cluster)) { cluster() }
-        },
-        modifier = Modifier.fillMaxWidth(),
-    ) { measurables, constraints ->
-        fun slot(s: HeaderSlot) = measurables.firstOrNull { it.layoutId == s }
+    SubcomposeLayout(modifier = Modifier.fillMaxWidth()) { constraints ->
         val unbounded = Constraints(0, Constraints.Infinity, 0, Constraints.Infinity)
         val padPx = sidePadding.roundToPx()
         val gapPx = mainGap.roundToPx()
@@ -305,30 +336,50 @@ private fun HeaderMainRow(
         // The pencil pulls in by half a space-md: the gap before it is titleGap - 6.
         val renameGapPx = (titleGap - 6.dp).roundToPx()
         val width = constraints.maxWidth
-        val cluster = slot(HeaderSlot.Cluster)!!.measure(unbounded)
-        val rename = slot(HeaderSlot.Rename)!!.measure(unbounded)
-        val pill = slot(HeaderSlot.Pill)!!.measure(unbounded)
-        val badgeP = slot(HeaderSlot.Badge)?.measure(unbounded)
         val contentL = padPx
         val contentR = width - padPx
-        val clusterX = maxOf(contentL + gapPx, contentR - cluster.width)
+        // ta-7njx: the cluster at the first step whose width fits `room`, from its own floor to 8 dp inside the edge. Only
+        // above font scale 1.0 (see [HeaderFit]); at 1.0 the web's one state, overrun and all.
+        val room = width - 8.dp.roundToPx() - (contentL + gapPx)
+        // The slots compose in DOM order (title, pencil, pill, badge, cluster), so reading and draw order match the web's.
+        val titleM = subcompose(HeaderSlot.Title) { Box(Modifier.layoutId(HeaderSlot.Title)) { title() } }.first()
+        val renameM = subcompose(HeaderSlot.Rename) { Box(Modifier.layoutId(HeaderSlot.Rename)) { rename() } }.first()
+        val pillM = subcompose(HeaderSlot.Pill) { Box(Modifier.layoutId(HeaderSlot.Pill)) { pill() } }.first()
+        val badgeM = if (badge != null) subcompose(HeaderSlot.Badge) { Box(Modifier.layoutId(HeaderSlot.Badge)) { badge() } }.first() else null
+        // A step measured on the way to the kept one stays composed (never placed) until the next pass drops it; its
+        // semantics are cleared meanwhile, so the tree only ever carries the kept step's keys.
+        fun measureCluster(s: Int) = subcompose(s) {
+            val kept = fit.step == s
+            Box(Modifier.layoutId(HeaderSlot.Cluster).then(if (kept) Modifier else Modifier.clearAndSetSemantics {})) { cluster(s) }
+        }.first().measure(unbounded)
+        var step = HeaderFit.STEP_FULL
+        var clusterP = measureCluster(step)
+        while (yields && clusterP.width > room && step < HeaderFit.STEP_END_WORDLESS) {
+            step++
+            clusterP = measureCluster(step)
+        }
+        if (fit.step != step) fit.step = step
+        val renameP = renameM.measure(unbounded)
+        val pillP = pillM.measure(unbounded)
+        val badgeP = badgeM?.measure(unbounded)
+        val clusterX = maxOf(contentL + gapPx, contentR - clusterP.width)
         val rowW = maxOf(0, clusterX - gapPx - contentL)
-        val kids = renameGapPx + rename.width + titleGapPx + pill.width + (if (badgeP != null) titleGapPx + badgeP.width else 0)
-        val titleP = slot(HeaderSlot.Title)!!.measure(Constraints(0, maxOf(0, rowW - kids), 0, Constraints.Infinity))
+        val kids = renameGapPx + renameP.width + titleGapPx + pillP.width + (if (badgeP != null) titleGapPx + badgeP.width else 0)
+        val titleP = titleM.measure(Constraints(0, maxOf(0, rowW - kids), 0, Constraints.Infinity))
         // Two-level centring, as the web's nested flex rows: the title row inside the main row, its items inside it.
-        val titleRowH = maxOf(titleP.height, rename.height, pill.height, badgeP?.height ?: 0)
-        val height = maxOf(titleRowH, cluster.height)
+        val titleRowH = maxOf(titleP.height, renameP.height, pillP.height, badgeP?.height ?: 0)
+        val height = maxOf(titleRowH, clusterP.height)
         val rowY = Alignment.CenterVertically.align(titleRowH, height)
         layout(width, height) {
             var x = contentL
             titleP.placeRelative(x, rowY + Alignment.CenterVertically.align(titleP.height, titleRowH))
             x += titleP.width + renameGapPx
-            rename.placeRelative(x, rowY + Alignment.CenterVertically.align(rename.height, titleRowH))
-            x += rename.width + titleGapPx
-            pill.placeRelative(x, rowY + Alignment.CenterVertically.align(pill.height, titleRowH))
-            x += pill.width
+            renameP.placeRelative(x, rowY + Alignment.CenterVertically.align(renameP.height, titleRowH))
+            x += renameP.width + titleGapPx
+            pillP.placeRelative(x, rowY + Alignment.CenterVertically.align(pillP.height, titleRowH))
+            x += pillP.width
             if (badgeP != null) badgeP.placeRelative(x + titleGapPx, rowY + Alignment.CenterVertically.align(badgeP.height, titleRowH))
-            cluster.placeRelative(clusterX, Alignment.CenterVertically.align(cluster.height, height))
+            clusterP.placeRelative(clusterX, Alignment.CenterVertically.align(clusterP.height, height))
         }
     }
 }
@@ -497,6 +548,8 @@ fun SessionLinksPopover(
     showStatusline: Boolean = true,
     /** The resume-command control's confirmation: "Copied resume command" for 1.5 s after a copy. */
     copiedResumeCommand: Boolean = false,
+    /** ta-7njx: the expanded header's bar Pin has yielded into this menu ([HeaderFit.pinInMenu]). */
+    pinInMenu: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -591,7 +644,7 @@ fun SessionLinksPopover(
                 )
                 if (showStatusline) statusline(expanded)
             }
-            if (!expanded) {
+            if (!expanded || pinInMenu) {
                 // `.workspace-pin-mobile`: flex, 2.75rem, margin-top space-sm; pinned = violet wash.
                 val pinned = session.pinned
                 Row(

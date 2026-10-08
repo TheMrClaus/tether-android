@@ -108,6 +108,18 @@ class WidthSourceAgreementTest {
     @Test @Config(qualifiers = "w769dp-h1000dp-440dpi") fun at769dp440dpiEverythingIsExpanded() = agree(TetherLayoutClass.Expanded)
 
     /**
+     * ta-7njx (W23): the Android font size never enters a breakpoint (Chrome Android lays the web out the same at every
+     * font scale, so 48rem stays 768 dp). The cells are the 48rem edge (767 / 768), 63rem (1007 / 1008) and 96rem (1535 / 1536) at 1.3 and 2.0.
+     */
+    @Test @Config(qualifiers = "w767dp-h1000dp-420dpi", fontScale = 2.0f) fun at767dpFontScale2IsPhoneEverywhere() = agree(TetherLayoutClass.Phone)
+    @Test @Config(qualifiers = "w768dp-h1000dp-420dpi", fontScale = 1.3f) fun at768dpFontScale1_3IsExpandedEverywhere() = agree(TetherLayoutClass.Expanded)
+    @Test @Config(qualifiers = "w768dp-h1000dp-420dpi", fontScale = 2.0f) fun at768dpFontScale2IsExpandedEverywhere() = agree(TetherLayoutClass.Expanded)
+    @Test @Config(qualifiers = "w1007dp-h1000dp-420dpi", fontScale = 1.3f) fun at1007dpFontScale1_3IsExpandedEverywhere() = agree(TetherLayoutClass.Expanded)
+    @Test @Config(qualifiers = "w1008dp-h1000dp-420dpi", fontScale = 1.3f) fun at1008dpFontScale1_3IsExpandedEverywhere() = agree(TetherLayoutClass.Expanded)
+    @Test @Config(qualifiers = "w1535dp-h1000dp-420dpi", fontScale = 2.0f) fun at1535dpFontScale2IsExpandedEverywhere() = agree(TetherLayoutClass.Expanded)
+    @Test @Config(qualifiers = "w1536dp-h1000dp-420dpi", fontScale = 2.0f) fun at1536dpFontScale2IsExpandedEverywhere() = agree(TetherLayoutClass.Expanded)
+
+    /**
      * The injected window (the ~20 MainShell tests) stops at the Dialog: its own window reports the real display (412 dp
      * here). The provided width carries the shell's measurement across, so a Dialog still follows the shell.
      */

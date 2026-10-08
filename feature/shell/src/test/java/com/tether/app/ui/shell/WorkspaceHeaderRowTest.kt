@@ -45,10 +45,15 @@ import org.robolectric.annotation.Config
  * content spans x 300 to W - 28) at W = 768 / 772 / 780 / 800, at text scale 1.0 / 1.3 / 2.0, Ready and Needs you, with
  * a second header at W = 1280 on the same screen as the reference for every intrinsic width. dp = px (mdpi).
  *
- * The web: only the title shrinks (to 0); the pencil, the pill and the badge keep their size and run under the action
+ * The web: only the title shrinks (to 0) at text scale 1.0, and so does the app; the pencil, the pill and the badge keep their size and run under the action
  * cluster, which keeps its own width at x = max(contentL + 16, contentR - clusterW) and draws over them. The pencil's
  * centre is under the dial where the web's is (768-773 dp at 1.0x, to 800+ at 1.3x / 2.0x); the web keeps 10 dp of it
  * visible and tappable, so does the app.
+ *
+ * ta-7njx (W23, ruling B1-B3): above text scale 1.0 the cluster yields (S1 Telemetry drops its word, S2 Pin moves into the
+ * "Session links" menu, S3 End session drops its word) so that End session stays whole in the window; at 1.0 it never
+ * does. The step at each (width, scale) is HARD-CODED below ([stepAt]) from the ruled table, never read from the header's
+ * own [HeaderFit], so a wrong yield cannot switch its own check off. The 1.0 checks stay unconditional.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w1400dp-h900dp-mdpi")
@@ -124,6 +129,16 @@ class WorkspaceHeaderRowTest(
         return maxOf(300f + 16f, (w - 28f) - clusterW)
     }
 
+    /**
+     * The ruled step for this (width, scale) at the 272 rail, hard-coded (L4 ruling Rev 2, B2): the cluster's room is
+     * W - 324 dp; 1.0 never yields; 1.3 is S1 up to ~798 and whole above; 2.0 is S2 across 768-800.
+     */
+    private fun stepAt(): Int = when {
+        fontScale == 1.0f -> 0
+        fontScale == 1.3f -> if (w < 798) 1 else 0
+        else -> 2
+    }
+
     @Test fun thePencilIsWholeAndItsVisibleStripTakesATouchAndNothingElseDoes() {
         show()
         val key = here(ShellTags.RenameKey)
@@ -135,8 +150,6 @@ class WorkspaceHeaderRowTest(
         if (fontScale == 1.0f) {
             val web = mapOf(768 to 327f, 772 to 331f, 780 to 339f, 800 to 359f).getValue(w)
             assertEquals("L_web at 1.0x", web, dialLeft, 0.5f)
-        } else {
-            assertEquals("pinned at contentL + 16 at large text", 316f, dialLeft, 0.5f)
         }
         val strip = dialLeft - key.left
         assertTrue("visible strip $strip >= 9.5", strip >= 9.5f)
@@ -153,11 +166,25 @@ class WorkspaceHeaderRowTest(
 
     @Test fun thePillAndTheBadgeKeepTheirSizeAndTheClusterItsWidth() {
         show(withBadge = true)
+        val step = stepAt()
+        val yielded = buildList {
+            if (step >= HeaderFit.STEP_PIN_IN_MENU) add(ShellTags.PinKey)
+            if (step >= HeaderFit.STEP_END_WORDLESS) add(ShellTags.EndSessionKey)
+        }
+        // Pin is off the bar from S2: the harness has none (index 0 would be the reference's), so it is asserted absent.
+        if (step >= HeaderFit.STEP_PIN_IN_MENU) {
+            assertEquals("no bar Pin in the harness header at step $step", 1, rule.onAllNodesWithTag(ShellTags.PinKey).fetchSemanticsNodes().size)
+        }
         for (tag in listOf(ShellTags.StatusPill, "badge", ShellTags.Dial, ShellTags.LinksKey, ShellTags.PinKey, ShellTags.EndSessionKey, ShellTags.RenameKey)) {
+            if (tag in yielded) continue
             assertEquals("$tag width equals its width at 1280", ref(tag).width, here(tag).width, 0.5f)
         }
-        assertEquals("cluster width", ref(ShellTags.EndSessionKey).right - ref(ShellTags.Dial).left, here(ShellTags.EndSessionKey).right - here(ShellTags.Dial).left, 0.5f)
-        if (fontScale == 1.0f) assertTrue("End session ends inside the window", here(ShellTags.EndSessionKey).right <= w + 0.5f)
+        if (step == 0) {
+            assertEquals("cluster width", ref(ShellTags.EndSessionKey).right - ref(ShellTags.Dial).left, here(ShellTags.EndSessionKey).right - here(ShellTags.Dial).left, 0.5f)
+        }
+        val endRight = here(ShellTags.EndSessionKey).right
+        if (fontScale == 1.0f) assertTrue("End session ends inside the window", endRight <= w + 0.5f)
+        else assertTrue("End session ends inside [0, W - 8] above 1.0: $endRight", endRight <= w - 8f + 0.5f)
         println("W21-RECORD end-session w=$w x$fontScale $status left=${here(ShellTags.EndSessionKey).left} right=${here(ShellTags.EndSessionKey).right} width=${here(ShellTags.EndSessionKey).width}")
     }
 

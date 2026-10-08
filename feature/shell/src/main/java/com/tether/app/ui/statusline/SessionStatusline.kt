@@ -18,7 +18,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -108,15 +107,15 @@ fun StatuslineSegments(
 ) {
     if (segments.isEmpty()) return
     val t = LocalTetherTokens.current
-    val fontScale = LocalDensity.current.fontScale
     BoxWithConstraints(
         modifier
             // `.statusline { min-width: 4.5rem }`
             .widthIn(min = (4.5f * TetherTypography.SP_PER_REM).dp)
             .semantics { isTraversalGroup = true; contentDescription = if (stale == null) "Session telemetry" else "Session telemetry, $stale" },
     ) {
-        // Container queries read the strip's own width in rem (1rem = 16sp: scales with the font).
-        val widthRem = if (constraints.hasBoundedWidth) maxWidth.value / (TetherTypography.SP_PER_REM * fontScale) else Float.MAX_VALUE
+        // Container queries read the strip's own width in rem: 1rem = 16 dp at every font scale (Chrome on Android never
+        // scales rem with the Android font size; ta-7njx).
+        val widthRem = if (constraints.hasBoundedWidth) maxWidth.value / TetherTypography.SP_PER_REM else Float.MAX_VALUE
         val fit = statuslineFit(widthRem)
         val shown = segments.take(fit.visibleRanks)
         val gap = Arrangement.spacedBy(t.css.spaceMd, horizontalArrangementAlignment(horizontalArrangement))
