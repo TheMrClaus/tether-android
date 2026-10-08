@@ -98,6 +98,34 @@ object ApprovalFixtures {
     }
 
     /**
+     * ta-nm8u: an exact-only permission request (the fixture 4293's shape: an exact choice plus a decline, read / write /
+     * network requested): the grant rows are disabled and ticked (nothing to narrow), the confirm row is enabled and not
+     * ticked.
+     */
+    val grantsExactOnly: ChatFixtures.Folded by lazy {
+        ChatFixtures.fold(
+            *prompt("t1", "Run the migration against the shared fixtures.", null).toTypedArray(),
+            approval("t1", "req-g", "perm-1", "permissions") {
+                putJsonArray("choices") {
+                    addJsonObject { put("choiceId", "all"); put("label", "Allow all"); put("permissionGrant", "exact") }
+                    addJsonObject { put("choiceId", "deny"); put("label", "Deny") }
+                }
+                putJsonObject("metadata") {
+                    put("provider", "codex"); put("kind", "permissions")
+                    put("reason", "The migration reads the shared fixtures and writes its report.")
+                    putJsonObject("requestedPermissions") {
+                        putJsonObject("fileSystem") {
+                            putJsonArray("read") { add("/srv/fixtures"); add("/srv/schema.sql") }
+                            putJsonArray("write") { add("/w/report") }
+                        }
+                        putJsonObject("network") { put("enabled", true) }
+                    }
+                }
+            },
+        )
+    }
+
+    /**
      * ta-57l: a permission request the app used to refuse (a relative path past 1,024 escaped
      * characters): it is shown whole and every key grants, as on the web.
      */
@@ -124,6 +152,22 @@ object ApprovalFixtures {
             },
         )
     }
+
+    /** ta-nm8u: a request reading the one [path] (a path past [GRANT_CHUNK_CHARS] escaped characters is drawn in several pieces). */
+    fun readPath(path: String): ChatFixtures.Folded = ChatFixtures.fold(
+        *prompt("t1", "Run the migration against the shared fixtures.", null).toTypedArray(),
+        approval("t1", "req-g", "perm-1", "permissions") {
+            putJsonArray("choices") {
+                addJsonObject { put("choiceId", "all"); put("label", "Allow all"); put("permissionGrant", "exact") }
+                addJsonObject { put("choiceId", "some"); put("label", "Allow selected"); put("permissionGrant", "subset") }
+                addJsonObject { put("choiceId", "deny"); put("label", "Deny") }
+            }
+            putJsonObject("metadata") {
+                put("provider", "codex"); put("kind", "permissions")
+                putJsonObject("requestedPermissions") { putJsonObject("fileSystem") { putJsonArray("read") { add(path) } } }
+            }
+        },
+    )
 
     const val Q_DB = "Which database should the service use?"
     const val Q_ENV = "Which environments should the migration run in?"

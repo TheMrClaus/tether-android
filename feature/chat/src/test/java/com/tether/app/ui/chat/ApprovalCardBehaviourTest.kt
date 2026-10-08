@@ -889,7 +889,7 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("grant-confirm").assertIsOn()
         rule.onNodeWithTag("grant-network").performClick()
         rule.onNodeWithTag("grant-confirm").assertIsOn()
-        rule.onNodeWithText("Confirm the complete permission expansion shown above.").assertExists()
+        rule.onNodeWithText("Confirm the complete permission expansion shown above.", useUnmergedTree = true).assertExists()
         rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled()
         assertTrue(calls.isEmpty())
     }
@@ -1217,10 +1217,8 @@ class ApprovalCardBehaviourTest {
     @Test fun pathsAreShownEscapedQuotedAndWhole() {
         show(trickyPaths)
         scrollTo("grant-read")
-        val label = listOf("grant-read", "grant-write").flatMap { tag -> rule.onAllNodesWithTag(tag).fetchSemanticsNodes() }
-            .joinToString(" | ") { n -> n.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text } }
-            // The break-anywhere joiners between characters are layout, not text.
-            .filterNot { it == '\u2060' || it == '\u200B' }
+        // The break-anywhere joiners between characters are layout, not text (rowTexts drops them).
+        val label = rowTexts("grant-read", "grant-write").joinToString(" | ")
         assertTrue(label, label.contains("“/x\\u000A/etc/shadow”"))
         assertTrue(label, label.contains("“/safe\\u202Etxt.exe”"))
         assertTrue(label, label.contains("“/x; no network access”"))
@@ -1300,8 +1298,18 @@ class ApprovalCardBehaviourTest {
     }
 
     /** The text of every composed path piece (the break-anywhere joiners are layout, not text). */
-    private fun shownRows(): List<String> = listOf("grant-read", "grant-write", "grant-path-piece").flatMap { tag -> rule.onAllNodesWithTag(tag).fetchSemanticsNodes() }
-        .map { n -> n.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text }.filterNot { it == '\u2060' || it == '\u200B' } }
+    private fun shownRows(): List<String> = rowTexts("grant-read", "grant-write", "grant-path-piece")
+
+    /**
+     * The text drawn in each composed row of [tags] (ta-nm8u: a row's name is its content description and its words are
+     * no accessibility node of their own, so they are read from the unmerged tree, where they still are).
+     */
+    private fun rowTexts(vararg tags: String): List<String> {
+        fun words(n: androidx.compose.ui.semantics.SemanticsNode): String =
+            n.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text } + n.children.joinToString("") { words(it) }
+        return tags.flatMap { tag -> rule.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes() }
+            .map { n -> words(n).filterNot { it == '\u2060' || it == '\u200B' } }
+    }
 
     /**
      * ta-4za3: the path rows are items of the transcript's own list (head, one item per entry, tail; the card is

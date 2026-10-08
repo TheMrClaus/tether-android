@@ -44,11 +44,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -567,6 +569,7 @@ private fun ApprovalEntry(c: ApprovalController, segment: ApprovalSegment, modif
                     enabled = !c.frozen && c.view.allowsSubset,
                     onChange = { c.toggle(read = true, path = e.path) },
                     tag = "grant-read",
+                    name = grantRowName("Read", e.path),
                     onBlocked = c.blocked,
                 ) { GrantPathText("Read", e.text) }
                 else -> GrantCheckbox(
@@ -574,6 +577,7 @@ private fun ApprovalEntry(c: ApprovalController, segment: ApprovalSegment, modif
                     enabled = !c.frozen && c.view.allowsSubset,
                     onChange = { c.toggle(read = false, path = e.path) },
                     tag = "grant-write",
+                    name = grantRowName("Write", e.path),
                     onBlocked = c.blocked,
                 ) { GrantPathText("Write", e.text) }
             }
@@ -605,6 +609,7 @@ private fun ApprovalTail(c: ApprovalController, modifier: Modifier) {
                             enabled = !c.frozen && view.allowsSubset,
                             onChange = { c.toggleNetwork() },
                             tag = "grant-network",
+                            name = "Network access",
                             onBlocked = c.blocked,
                         ) {
                             Text("Network access", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)), color = t.muted)
@@ -617,6 +622,7 @@ private fun ApprovalTail(c: ApprovalController, modifier: Modifier) {
                                 enabled = !c.frozen,
                                 onChange = { c.local.confirmed = !c.local.confirmed },
                                 tag = "grant-confirm",
+                                name = EXACT_CONFIRM_COPY,
                                 onBlocked = c.blocked,
                             ) {
                                 Text(
@@ -787,21 +793,28 @@ private fun GrantPathPiece(shown: String) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val wrapped = remember(shown) { shown.breakAnywhere() }
-    Text(
-        buildAnnotatedString { withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(wrapped) } },
-        style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
-        color = t.muted,
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp + t.css.spaceSm).testTag("grant-path-piece"),
-    )
+    // ta-nm8u: the row's name already carries the whole path (as the web's one label does): a piece is no node of its own.
+    Box(Modifier.fillMaxWidth().padding(start = 16.dp + t.css.spaceSm).clearAndSetSemantics { testTag = "grant-path-piece" }) {
+        Text(
+            buildAnnotatedString { withStyle(SpanStyle(fontFamily = type.mono, fontSize = rem(0.76f), color = t.ink)) { append(wrapped) } },
+            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)),
+            color = t.muted,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 /**
  * A `<label><input type="checkbox">…</label>` row: at least 2.75rem (44dp) tall, `space-sm` gap.
  * The box is drawn with tokens (`--line-strong` edge, `--accent` fill + check when ticked); the whole
- * row is the toggle, announced as a checkbox with its words.
+ * row is the toggle, announced as a checkbox named [name] (the web's label text, `labelwrapped`).
+ *
+ * ta-nm8u (W24, the web at 29537e0): a disabled row fades its BOX only (`input:disabled { opacity: .48 }`,
+ * globals.css:88); the label keeps its colour at full opacity (`--muted`, :5601). A disabled box is not violet: Chrome
+ * draws its disabled palette ([DisabledBoxColors], measured), ticked or not.
  */
 @Composable
-private fun GrantCheckbox(checked: Boolean, enabled: Boolean, onChange: () -> Unit, tag: String, onBlocked: () -> Unit = {}, label: @Composable () -> Unit) {
+internal fun GrantCheckbox(checked: Boolean, enabled: Boolean, onChange: () -> Unit, tag: String, name: String, onBlocked: () -> Unit = {}, label: @Composable () -> Unit) {
     val t = LocalTetherTokens.current
     Row(
         Modifier
@@ -809,25 +822,57 @@ private fun GrantCheckbox(checked: Boolean, enabled: Boolean, onChange: () -> Un
             .heightIn(min = TetherDimens.touchTargetDp)
             .refuseObscuredTouches(onBlocked)
             .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = { onChange() })
-            .alpha(if (enabled) 1f else 0.65f)
+            .semantics { contentDescription = name }
             .testTag(tag),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
         val box = RoundedCornerShape(3.dp)
+        val off = if (t.skin.isDark) DisabledBoxColors.Dark else DisabledBoxColors.Light
+        val fill = when {
+            enabled -> if (checked) t.accent else t.mineralDeep
+            checked -> off.checkedFill
+            else -> off.uncheckedFill
+        }
+        val edge = when {
+            enabled -> if (checked) t.accentSide else t.lineStrong
+            checked -> off.checkedFill
+            else -> off.uncheckedBorder
+        }
         Box(
             Modifier
                 .size(16.dp)
-                .background(if (checked) t.accent else t.mineralDeep, box)
-                .border(1.dp, if (checked) t.accentSide else t.lineStrong, box),
+                .then(if (enabled) Modifier else Modifier.alpha(DISABLED_BOX_ALPHA))
+                .background(fill, box)
+                .border(1.dp, edge, box),
             contentAlignment = Alignment.Center,
         ) {
-            if (checked) Icon(TetherIcons.Check, contentDescription = null, tint = t.accentInk, modifier = Modifier.size(12.dp))
+            if (checked) Icon(TetherIcons.Check, contentDescription = null, tint = if (enabled) t.accentInk else off.check, modifier = Modifier.size(12.dp))
         }
-        // ta-coik.22: a control in a selectable card: its words never join a selection.
-        Box(Modifier.weight(1f)) { androidx.compose.foundation.text.selection.DisableSelection { label() } }
+        // ta-coik.22: a control in a selectable card: its words never join a selection. The name above is the row's.
+        Box(Modifier.weight(1f).clearAndSetSemantics { }) { androidx.compose.foundation.text.selection.DisableSelection { label() } }
     }
 }
+
+/** `input:disabled { opacity: 0.48 }` (globals.css:88), applied to the box alone. */
+internal const val DISABLED_BOX_ALPHA = 0.48f
+
+/**
+ * Chrome's disabled checkbox palette, the colours before the box's own 0.48: measured in a standalone page in the same
+ * Chromium as the captures (`color-scheme` and `accent-color` as served, DPR 2.625) on the card's fill (#fff9ec / #312a21),
+ * the composites read off the pixels and divided back by the alpha (ta-nm8u, ~/ta-runs/w24/nm8u-palette.txt). The checked
+ * cells reproduced the served capture within 1 per channel.
+ */
+internal class DisabledBoxColors(val checkedFill: Color, val check: Color, val uncheckedFill: Color, val uncheckedBorder: Color) {
+    companion object {
+        val Light = DisabledBoxColors(Color(0xFFD1CFCD), Color(0xFFEEEDEC), Color(0xFFF9F7F2), Color(0xFFD1CFCD))
+        val Dark = DisabledBoxColors(Color(0xFF747574), Color(0xFF393B3A), Color(0xFF393B3A), Color(0xFF616062))
+    }
+}
+
+/** The row's name as the web's wrapping `<label>` gives it: the verb and the whole escaped path, no break characters between. */
+@Composable
+private fun grantRowName(verb: String, path: String): String = remember(verb, path) { "$verb ${displayPath(path)}" }
 
 // --- QuestionCard -----------------------------------------------------------------------------------
 

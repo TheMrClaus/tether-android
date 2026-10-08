@@ -28,7 +28,8 @@ import org.robolectric.annotation.Config
  * (a Write approval on the Approve / Deny fallback, its running call above it); the rest have no
  * web reference (the fake engine emits neither provider choices, grants, questions nor denials):
  * `approval-choices` (Codex choices, reason, working directory, network), `approval-grants` (the
- * requested permission expansion), `approval-locked` (a saved copy: "Connect to answer"),
+ * requested permission expansion), `approval-grants-disabled` (an exact-only request: the grant rows are
+ * disabled and ticked, the confirm row is not; ta-nm8u), `approval-locked` (a saved copy: "Connect to answer"),
  * `approval-sent` (after the tap), `question` (page 1 of 2), `question-validation` (page 2 with
  * the ask for an answer or a skip), `answered` (the settled records) and `denials` (both groups
  * open: a main-agent refusal after its call, a sub-agent's with its run link, an abort's words,
@@ -39,6 +40,7 @@ enum class ApprovalShot(val id: String) {
     Choices("approval-choices"),
     Grants("approval-grants"),
     LongPaths("approval-long-paths"),
+    GrantsDisabled("approval-grants-disabled"),
     Locked("approval-locked"),
     Sent("approval-sent"),
     Question("question"),
@@ -54,6 +56,7 @@ private fun fixtureFor(shot: ApprovalShot): ChatFixtures.Folded = when (shot) {
     ApprovalShot.Choices -> ApprovalFixtures.choices
     ApprovalShot.Grants -> ApprovalFixtures.grants
     ApprovalShot.LongPaths -> ApprovalFixtures.longPaths
+    ApprovalShot.GrantsDisabled -> ApprovalFixtures.grantsExactOnly
     ApprovalShot.Question, ApprovalShot.QuestionValidation -> ApprovalFixtures.question
     ApprovalShot.Answered -> ApprovalFixtures.answered
     ApprovalShot.Denials -> ApprovalFixtures.denials
@@ -89,7 +92,7 @@ fun ComposeContentTestRule.snapApproval(shot: ApprovalShot, skin: TetherSkin, na
                     onFetchTurns = { _, _ -> },
                     zone = ChatFixtures.zone,
                     listState = listState,
-                    richCodex = shot == ApprovalShot.Choices || shot == ApprovalShot.Grants || shot == ApprovalShot.LongPaths,
+                    richCodex = shot == ApprovalShot.Choices || shot == ApprovalShot.Grants || shot == ApprovalShot.LongPaths || shot == ApprovalShot.GrantsDisabled,
                     consent = consent,
                 )
             }
