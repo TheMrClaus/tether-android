@@ -181,4 +181,36 @@ class WorkspaceFilesRangeTest {
         // The default body: the fakes that do not know about ranges (tests elsewhere) fail the read.
         assertTrue(WorkspaceFiles.Unavailable.readRange("/w/a.mp4", 0, 1) is FilesResult.Failed)
     }
+
+    /** The paired client as production builds it: no redirects, a short read timeout, an interceptor on the credential. */
+    private fun pairedClient(readTimeoutMs: Long) = noRedirects.newBuilder()
+        .readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS)
+        .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("X-Probe", "kept").build()) }
+        .build()
+
+    // ta-daw9: the web's <video> / fetch waits on a stalled byte stream; the paired client's short read timeout
+    // (10 s in production, 250 ms here) must not end a Range read, a download or a preview.
+    @Test fun aRangeReadADownloadAndAPreviewThatStallPastTheReadTimeoutStillComplete() = runBlocking {
+        val slow = HttpWorkspaceFiles(pairedClient(250), { authority })
+        val body = ByteArray(2048) { it.toByte() }
+        server.enqueue(partial(body, start = 0, total = 5000).setHeadersDelay(900, TimeUnit.MILLISECONDS).setBodyDelay(900, TimeUnit.MILLISECONDS))
+        val read = (slow.readRange("/w/a.mp4", 0, 2048) as FilesResult.Ok).value
+        assertArrayEquals(body, read.bytes)
+        assertEquals("kept", take().getHeader("X-Probe"))
+        server.enqueue(MockResponse().setBody(Buffer().write(body)).setHeadersDelay(900, TimeUnit.MILLISECONDS).setBodyDelay(900, TimeUnit.MILLISECONDS))
+        val sink = java.io.ByteArrayOutputStream()
+        assertEquals(FilesResult.Ok(2048L), slow.download("/w/a.bin", 1024 * 1024, sink))
+        assertArrayEquals(body, sink.toByteArray())
+        server.enqueue(MockResponse().setBody("hello").setHeadersDelay(900, TimeUnit.MILLISECONDS).setBodyDelay(900, TimeUnit.MILLISECONDS))
+        assertEquals(FilesResult.Ok("hello"), slow.readText("/w/a.txt", 0))
+    }
+
+    @Test fun aStreamingReadKeepsNoRedirectAndStillFailsOnADroppedConnection() = runBlocking {
+        val derived = HttpWorkspaceFiles(pairedClient(250), { authority })
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", elsewhere.url("/x").toString()))
+        assertTrue(derived.readRange("/w/a.mp4", 0, 16) is FilesResult.Failed)
+        assertEquals(0, elsewhere.requestCount)
+        server.enqueue(partial(ByteArray(4096), start = 0, total = 5000).setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY))
+        assertTrue(derived.readRange("/w/a.mp4", 0, 4096) is FilesResult.Failed)
+    }
 }

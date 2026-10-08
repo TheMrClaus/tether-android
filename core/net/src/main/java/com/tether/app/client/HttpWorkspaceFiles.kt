@@ -63,6 +63,15 @@ class HttpWorkspaceFiles(
     private val listingCap: Long = WorkspaceFiles.MAX_LISTING_BYTES,
 ) : WorkspaceFiles {
 
+    /**
+     * ta-daw9: the paired client with only its read timeout lifted, for the reads that move a file's bytes (a
+     * preview, a download, a Range read for the video player). The web's fetch / `<video>` has no stall limit: a
+     * stalled byte stream just waits. Redirect rules, interceptors, the connect timeout and the rest stay the
+     * paired client's; a dead connection still ends the call (a socket error is an IOException). Listings and
+     * mutations keep [http] as is.
+     */
+    private val streamHttp: OkHttpClient by lazy { http.newBuilder().readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS).build() }
+
     init {
         require(!http.followRedirects && !http.followSslRedirects) {
             "HttpWorkspaceFiles needs a client that never follows redirects (the credential must stay on its origin)"
@@ -136,7 +145,7 @@ class HttpWorkspaceFiles(
                 // Metadata can race a growing file: bound the response too (web selectFile).
                 if (listedSize > 0) header("Range", "bytes=0-${cap - 1}")
             }
-        }) { response ->
+        }, streaming = true) { response ->
             // The web reads no error body here: a failed preview always says the same thing.
             if (!response.isSuccessful) return@call FilesResult.Failed(fallback, response.code)
             FilesResult.Ok(readPrefix(response, cap).readUtf8())
@@ -145,7 +154,7 @@ class HttpWorkspaceFiles(
 
     override suspend fun download(path: String, maxBytes: Long, sink: OutputStream): FilesResult<Long> {
         val fallback = FilesCopy.FILE_FALLBACK
-        return call(fallback, { route("/api/files", "path" to path) }) { response ->
+        return call(fallback, { route("/api/files", "path" to path) }, streaming = true) { response ->
             if (!response.isSuccessful) return@call FilesResult.Failed(fallback, response.code)
             val declared = response.header("Content-Length")?.toLongOrNull()
             if (declared != null && declared > maxBytes) return@call FilesResult.Failed(FilesCopy.DOWNLOAD_TOO_LARGE, response.code, tooLarge = true)
@@ -173,7 +182,7 @@ class HttpWorkspaceFiles(
                 .header("Range", "bytes=$offset-${offset + length - 1}")
                 // A compressed answer would not be the bytes of the range.
                 .header("Accept-Encoding", "identity")
-        }, pinnedOrigin) { response ->
+        }, pinnedOrigin, streaming = true) { response ->
             val origin = originKey(response.request.url)
             when (response.code) {
                 206 -> {
@@ -244,6 +253,7 @@ class HttpWorkspaceFiles(
         fallback: String,
         build: RouteBuilder.() -> Request.Builder,
         pinnedOrigin: String? = null,
+        streaming: Boolean = false,
         handle: (Response) -> FilesResult<T>,
     ): FilesResult<T> {
         val paired = when (val a = authority()) {
@@ -258,7 +268,7 @@ class HttpWorkspaceFiles(
         // Defence in depth: the credential only ever travels to the origin it belongs to. A request
         // that would leave it is refused before anything is sent.
         if (!sameOrigin(request.url, paired.origin)) return FilesResult.Failed(fallback)
-        val call = http.newCall(request)
+        val call = (if (streaming) streamHttp else http).newCall(request)
         return try {
             callCancellably(call) { response ->
                 // A redirect is never followed (see the class doc) — and never trusted either.

@@ -36,8 +36,14 @@ interface PublicImageSource {
 
 /** [PublicImageSource] over OkHttp. [http] must carry no credential (the default has none). */
 class HttpPublicImages(
-    private val http: OkHttpClient = defaultClient(),
+    http: OkHttpClient = defaultClient(),
 ) : PublicImageSource {
+    /**
+     * ta-daw9: [http] with only its read timeout lifted. The browser's `<img>` has no stall limit: a stalled byte
+     * stream just waits. Redirects, interceptors and the connect timeout stay [http]'s; a dead connection still
+     * ends the call (a socket error is an IOException).
+     */
+    private val http: OkHttpClient = http.newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).build()
 
     override suspend fun fetch(url: String, maxBytes: Long, sink: OutputStream): ToolMediaResult {
         val target = try {
@@ -95,10 +101,9 @@ class HttpPublicImages(
     companion object {
         private const val COPY_CHUNK = 64 * 1024
 
-        /** No credential, no end-to-end call limit (the browser's `<img>` has none); a connect failure and a stalled socket still end the call. */
+        /** No credential, no call or read limit (the browser's `<img>` has none); a connect failure (15 s) and a dropped socket still end the call. */
         internal fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
             // ta-daw9: was callTimeout(60 s), an app-only end-to-end limit: a slow picture now keeps loading.
             .callTimeout(0, TimeUnit.MILLISECONDS)
             .build()
