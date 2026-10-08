@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layoutId
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -172,20 +175,22 @@ fun WorkspaceHeader(
             .cssSurface(RectangleShape, t.graphite, shadows = shadows)
             .drawBehind { drawRect(edge, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx())) }
             .padding(bottom = 1.dp)
-            .padding(horizontal = padH, vertical = padV)
+            // The side padding is the row's own (below): the action cluster may run over it, as on the web,
+            // and a touch there must still reach the cluster.
+            .padding(vertical = padV)
             .testTag(ShellTags.WorkspaceHeader),
     ) {
     // `.workspace-header` is a flex COLUMN: under Studio's 5rem min-height the row sits at the top.
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        // `.workspace-header-main`: space-between, gap space-lg (Studio phone 0.5rem).
-        horizontalArrangement = Arrangement.spacedBy(if (!expanded) 8.dp else t.css.spaceLg),
-    ) {
-        // `.workspace-title-row`: gap space-md (Studio phone 0.4rem); the pencil pulls in by
-        // `calc(var(--space-md) * -0.5)`.
-        val titleGap = if (!expanded) 6.4.dp else t.css.spaceMd
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+    // `.workspace-header-main`: space-between, gap space-lg (Studio phone 0.5rem).
+    // `.workspace-title-row`: gap space-md (Studio phone 0.4rem); the pencil pulls in by
+    // `calc(var(--space-md) * -0.5)`.
+    val titleGap = if (!expanded) 6.4.dp else t.css.spaceMd
+    HeaderMainRow(
+        sidePadding = padH,
+        mainGap = if (!expanded) 8.dp else t.css.spaceLg,
+        titleGap = titleGap,
+        hasBadge = badge != null,
+        title = {
             // ta-28i: the session's title by the label rule, in its content's direction.
             Text(
                 LabelText.title(session.name),
@@ -196,69 +201,138 @@ fun WorkspaceHeader(
                     expanded -> cssText(type.ui, 1.12f, 740, trackingEm = -0.025f, lineHeight = 1.45f)
                     else -> cssText(type.ui, 0.925f, 740, trackingEm = -0.025f, lineHeight = 1.45f)
                 }.copy(textDirection = proseDirection),
-                modifier = Modifier.weight(1f, fill = false).semantics { heading() },
+                modifier = Modifier.semantics { heading() },
             )
-            Spacer(Modifier.width(titleGap - 6.dp))
-            RenameKey(actions.onRename)
-            Spacer(Modifier.width(titleGap))
+        },
+        rename = { RenameKey(actions.onRename) },
+        pill = {
             // T13.2: from a list that is not live the pill says "Was running" on a faint still dot,
             // never the spinner or the violet waiting ping (SYNC_DESIGN §4.2). The age is the
             // freshness chip's, under the row: here it would crowd out the name at a large font.
             val (pillLabel, pillTone) = FreshnessCopy.statusPill(session.status, freshness.listLive, null, freshness.now)
             TetherStatusPill(label = pillLabel, tone = pillTone, modifier = Modifier.testTag(ShellTags.StatusPill))
-            if (badge != null) {
-                Spacer(Modifier.width(titleGap))
-                Box(Modifier.weight(1f, fill = false)) { badge() }
+        },
+        badge = badge,
+        cluster = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+            ) {
+                if (expanded && dial != null) Box(Modifier.testTag(ShellTags.Dial)) { dial(session) }
+                val handle = !expanded || gaugeIsHandle
+                gauge(
+                    GaugeHost(
+                        open = if (handle) telemetryOpen else null,
+                        onToggle = if (handle) onToggleTelemetry else null,
+                        showLabel = expanded,
+                    ),
+                )
+                ChromeIconKey(
+                    onClick = onToggleLinks,
+                    icon = TetherIcons.Ellipsis,
+                    contentDescription = "Session links",
+                    stateDescription = if (linksOpen) "Open" else null,
+                    look = rememberIconLook(t.ink, t.radiusSm),
+                    width = 44.dp,
+                    height = 44.dp,
+                    iconSize = 18.dp,
+                    modifier = Modifier.testTag(ShellTags.LinksKey),
+                )
+                if (expanded) PinKey(session.pinned, actions.onTogglePinned)
+                // `.end-session`: the brick key, glyph only below 48rem; Studio's rail forces 2.75rem
+                // (studio.css 362). Disabled once the session has exited, like the web. From 48rem it
+                // prints "End session" at 0.66rem (4117-4121, 11196). ta-coik.22: only that, as on the web
+                // (workspace-header.tsx 90fbb9f :133): live on a saved or catching-up copy too.
+                val endable = session.status != "exited"
+                TetherKey(
+                    onClick = { if (endable) actions.onEndSession() },
+                    classes = KeyClasses.EndSession,
+                    label = if (expanded) "End session" else null,
+                    icon = TetherIcons.CircleStop,
+                    iconSize = 16.dp,
+                    fontSize = if (expanded) 10.56.sp else TextUnit.Unspecified,
+                    contentDescription = "End session",
+                    enabled = endable,
+                    minHeight = 44.dp,
+                    modifier = Modifier.testTag(ShellTags.EndSessionKey),
+                )
             }
-        }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
-        ) {
-            if (expanded && dial != null) Box(Modifier.testTag(ShellTags.Dial)) { dial(session) }
-            val handle = !expanded || gaugeIsHandle
-            gauge(
-                GaugeHost(
-                    open = if (handle) telemetryOpen else null,
-                    onToggle = if (handle) onToggleTelemetry else null,
-                    showLabel = expanded,
-                ),
-            )
-            ChromeIconKey(
-                onClick = onToggleLinks,
-                icon = TetherIcons.Ellipsis,
-                contentDescription = "Session links",
-                stateDescription = if (linksOpen) "Open" else null,
-                look = rememberIconLook(t.ink, t.radiusSm),
-                width = 44.dp,
-                height = 44.dp,
-                iconSize = 18.dp,
-                modifier = Modifier.testTag(ShellTags.LinksKey),
-            )
-            if (expanded) PinKey(session.pinned, actions.onTogglePinned)
-            // `.end-session`: the brick key, glyph only below 48rem; Studio's rail forces 2.75rem
-            // (studio.css 362). Disabled once the session has exited, like the web. From 48rem it
-            // prints "End session" at 0.66rem (4117-4121, 11196). ta-coik.22: only that, as on the web
-            // (workspace-header.tsx 90fbb9f :133): live on a saved or catching-up copy too.
-            val endable = session.status != "exited"
-            TetherKey(
-                onClick = { if (endable) actions.onEndSession() },
-                classes = KeyClasses.EndSession,
-                label = if (expanded) "End session" else null,
-                icon = TetherIcons.CircleStop,
-                iconSize = 16.dp,
-                fontSize = if (expanded) 10.56.sp else TextUnit.Unspecified,
-                contentDescription = "End session",
-                enabled = endable,
-                minHeight = 44.dp,
-                modifier = Modifier.testTag(ShellTags.EndSessionKey),
-            )
-        }
-    }
+        },
+    )
     // T13.2: how current this session's copy is (nothing while Live).
-    FreshnessChip(sync, freshness.now, Modifier.padding(top = t.css.spaceXs).testTag(ShellTags.FreshnessChip))
+    FreshnessChip(sync, freshness.now, Modifier.padding(start = padH, end = padH, top = t.css.spaceXs).testTag(ShellTags.FreshnessChip))
     }
 }
+
+/**
+ * `.workspace-header-main` with the web's flex (ta-0af6; globals.css 1107-1149, 2635; the web at 29537e0, measured):
+ * the session title is the only thing that shrinks, down to 0 (`h1 { min-width: 0; overflow: hidden }`). The pencil, the
+ * status pill and the badge are `flex: 0 0 auto`, so they keep their size and run on past the title row, under the
+ * action cluster (`.workspace-actions`, `flex: 0 0 auto`, intrinsic width), which is later in the DOM and draws over them.
+ * The cluster starts at `max(contentLeft + gap, contentRight - clusterWidth)`; when it is wider than the room it
+ * overruns the right padding (and, at large text, the window), as the web's does. Nothing is hidden, folded or moved.
+ * The row spans the header's full width and applies [sidePadding] itself so that the overrun stays inside its bounds
+ * (a touch there still reaches the cluster).
+ */
+@Composable
+private fun HeaderMainRow(
+    sidePadding: Dp,
+    mainGap: Dp,
+    titleGap: Dp,
+    hasBadge: Boolean,
+    title: @Composable () -> Unit,
+    rename: @Composable () -> Unit,
+    pill: @Composable () -> Unit,
+    badge: (@Composable () -> Unit)?,
+    cluster: @Composable () -> Unit,
+) {
+    Layout(
+        content = {
+            Box(Modifier.layoutId(HeaderSlot.Title)) { title() }
+            Box(Modifier.layoutId(HeaderSlot.Rename)) { rename() }
+            Box(Modifier.layoutId(HeaderSlot.Pill)) { pill() }
+            if (badge != null) Box(Modifier.layoutId(HeaderSlot.Badge)) { badge() }
+            Box(Modifier.layoutId(HeaderSlot.Cluster)) { cluster() }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) { measurables, constraints ->
+        fun slot(s: HeaderSlot) = measurables.firstOrNull { it.layoutId == s }
+        val unbounded = Constraints(0, Constraints.Infinity, 0, Constraints.Infinity)
+        val padPx = sidePadding.roundToPx()
+        val gapPx = mainGap.roundToPx()
+        val titleGapPx = titleGap.roundToPx()
+        // The pencil pulls in by half a space-md: the gap before it is titleGap - 6.
+        val renameGapPx = (titleGap - 6.dp).roundToPx()
+        val width = constraints.maxWidth
+        val cluster = slot(HeaderSlot.Cluster)!!.measure(unbounded)
+        val rename = slot(HeaderSlot.Rename)!!.measure(unbounded)
+        val pill = slot(HeaderSlot.Pill)!!.measure(unbounded)
+        val badgeP = slot(HeaderSlot.Badge)?.measure(unbounded)
+        val contentL = padPx
+        val contentR = width - padPx
+        val clusterX = maxOf(contentL + gapPx, contentR - cluster.width)
+        val rowW = maxOf(0, clusterX - gapPx - contentL)
+        val kids = renameGapPx + rename.width + titleGapPx + pill.width + (if (badgeP != null) titleGapPx + badgeP.width else 0)
+        val titleP = slot(HeaderSlot.Title)!!.measure(Constraints(0, maxOf(0, rowW - kids), 0, Constraints.Infinity))
+        // Two-level centring, as the web's nested flex rows: the title row inside the main row, its items inside it.
+        val titleRowH = maxOf(titleP.height, rename.height, pill.height, badgeP?.height ?: 0)
+        val height = maxOf(titleRowH, cluster.height)
+        val rowY = Alignment.CenterVertically.align(titleRowH, height)
+        layout(width, height) {
+            var x = contentL
+            titleP.placeRelative(x, rowY + Alignment.CenterVertically.align(titleP.height, titleRowH))
+            x += titleP.width + renameGapPx
+            rename.placeRelative(x, rowY + Alignment.CenterVertically.align(rename.height, titleRowH))
+            x += rename.width + titleGapPx
+            pill.placeRelative(x, rowY + Alignment.CenterVertically.align(pill.height, titleRowH))
+            x += pill.width
+            if (badgeP != null) badgeP.placeRelative(x + titleGapPx, rowY + Alignment.CenterVertically.align(badgeP.height, titleRowH))
+            cluster.placeRelative(clusterX, Alignment.CenterVertically.align(cluster.height, height))
+        }
+    }
+}
+
+private enum class HeaderSlot { Title, Rename, Pill, Badge, Cluster }
 
 /**
  * `.pin-session` in the expanded header rail (hidden below 48rem, globals.css 11882): 2.75rem,
