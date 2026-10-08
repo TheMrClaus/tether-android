@@ -10,7 +10,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -82,9 +86,9 @@ class MainShellTranscriptScrollTest {
 
     private lateinit var vm: TetherViewModel
 
-    private fun host() {
+    private fun host(aTree: JsObj = conversation("a", 60)) {
         val client = ShellConsentClient()
-        client.show(session("a"), conversation("a", 60))
+        client.show(session("a"), aTree)
         client.show(session("b"), conversation("b", 60))
         vm = TetherViewModel(client)
         vm.selectSession("a")
@@ -135,6 +139,46 @@ class MainShellTranscriptScrollTest {
         resize(PORTRAIT)
         assertEquals("portrait (PhoneShell) keeps it too", place, firstShownReply("a"))
         assertFalse(shown("a reply 60"))
+    }
+
+    /** ta-twjm: a few turns, then one that ran a shell command (its activity group is collapsed once finished). */
+    private fun withATool(): JsObj = foldTree(
+        conversation("a", 3),
+        ev("turn_started", "tool1", ts = 9_000L) { put("idempotencyKey", "k-tool1") },
+        ev("user_message_accepted", "tool1", ts = 9_000L) { put("text", "run it") },
+        ev("tool_start", "tool1", ts = 9_000L) { put("toolId", "b"); put("name", "Bash"); put("input", kotlinx.serialization.json.buildJsonObject { put("command", "seq 3") }) },
+        ev("tool_end", "tool1", ts = 9_000L) { put("toolId", "b"); put("output", "1\n2\n3") },
+        ev("message_started", "tool1", ts = 9_000L) { put("blockId", "tool1:m0") },
+        ev("message_completed", "tool1", ts = 9_000L) { put("blockId", "tool1:m0"); put("text", "Done.") },
+        ev("turn_end", "tool1", ts = 9_000L) { put("outcome", "ok") },
+    )
+
+    private fun group() = rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("tool-activity-group")).let { rule.onNodeWithTag("tool-activity-group") }
+
+    private fun groupIs(state: String) = group().assert(androidx.compose.ui.test.SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, state))
+
+    /** ta-twjm: the browser keeps a `<details>` open across a resize; so does an activity group the reader opened. */
+    @Test fun anOpenedActivityGroupStaysOpenAcrossTheShellSwitchAndARecreation() {
+        host(withATool())
+        groupIs("Collapsed")
+        group().performClick()
+        settle()
+        groupIs("Expanded")
+
+        resize(LANDSCAPE)
+        groupIs("Expanded")
+        resize(PORTRAIT)
+        groupIs("Expanded")
+        resize(914, 411, recreate = true)
+        groupIs("Expanded")
+        resize(412, 914, recreate = true)
+        groupIs("Expanded")
+        // Closing it is kept the same way.
+        group().performClick()
+        settle()
+        groupIs("Collapsed")
+        resize(LANDSCAPE)
+        groupIs("Collapsed")
     }
 
     @Test fun aReaderAtTheBottomStaysAtTheBottomAcrossTheShellSwitch() {

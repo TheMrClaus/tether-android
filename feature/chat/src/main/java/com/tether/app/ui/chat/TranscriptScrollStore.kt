@@ -9,7 +9,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -24,8 +27,18 @@ class FollowState {
 class TranscriptAnchor(val key: String, val offset: Int)
 
 /** Where one session's transcript is: its list position (first visible row by key) and its follow mode. */
-class TranscriptScroll internal constructor(sticky: Boolean = true, private var restore: TranscriptAnchor? = null) {
+class TranscriptScroll internal constructor(
+    sticky: Boolean = true,
+    private var restore: TranscriptAnchor? = null,
+    toggles: GroupToggles = GroupToggles(),
+) {
     val listState: LazyListState = LazyListState()
+
+    /**
+     * ta-twjm: the reader's activity-group toggles, held with the scroll so a shell switch and an activity recreation
+     * keep them as the browser keeps its `<details>` open across a resize.
+     */
+    internal val groupToggles: GroupToggles = toggles
     val follow: FollowState = FollowState().also { it.sticky = sticky }
 
     /** The place a recreated activity left, to be put back once rows exist; handed out once. */
@@ -84,6 +97,7 @@ class TranscriptScrollStore {
         return buildJsonObject {
             put("id", id)
             put("sticky", sticky)
+            put("toggles", buildJsonArray { scroll.groupToggles.snapshot().forEach { (k, v) -> add(JsonPrimitive(GroupToggles.encodeEntry(k, v))) } })
             if (place != null) {
                 put("key", place.key)
                 put("offset", place.offset)
@@ -100,7 +114,8 @@ class TranscriptScrollStore {
                 val key = o["key"]?.jsonPrimitive?.content
                 val offset = o["offset"]?.jsonPrimitive?.int ?: 0
                 store.heldId = id
-                store.held = TranscriptScroll(sticky, key?.let { TranscriptAnchor(it, offset) })
+                val toggles = GroupToggles(o["toggles"]?.jsonArray?.associate { GroupToggles.decodeEntry(it.jsonPrimitive.content) } ?: emptyMap())
+                store.held = TranscriptScroll(sticky, key?.let { TranscriptAnchor(it, offset) }, toggles)
             } // an unreadable record is no record: the chat opens at its latest message
         }
 

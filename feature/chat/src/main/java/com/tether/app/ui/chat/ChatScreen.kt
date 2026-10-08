@@ -441,6 +441,7 @@ fun ChatScreen(
                 else -> CompositionLocalProvider(LocalOlderTurnsUnavailable provides ChatFreshness.olderTurnsUnavailable(sync)) { key(session.id) { val scroll = rememberTranscriptScroll(session.id); ChatTranscript(
                     listState = scroll.listState,
                     follow = scroll.follow,
+                    groupToggles = scroll.groupToggles,
                     restore = remember(scroll) { scroll.takeRestore() },
                     find = transcriptFind,
                     projection = projection,

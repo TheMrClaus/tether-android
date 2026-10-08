@@ -114,6 +114,8 @@ internal fun ChatTranscript(
     follow: FollowState = remember { FollowState() },
     /** ta-jyj0: where a recreated activity left the reader; put back once rows exist. */
     restore: TranscriptAnchor? = null,
+    /** ta-twjm: the reader's activity-group toggles, hoisted with [listState] so a shell switch keeps them. */
+    groupToggles: GroupToggles = rememberSaveable(saver = GroupToggles.Saver) { GroupToggles() },
     showTimeline: Boolean = true,
     /** T5.3: the in-chat find over this transcript (null: the bar is closed). */
     find: TranscriptFind? = null,
@@ -141,7 +143,7 @@ internal fun ChatTranscript(
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends)
     }
 }
 
@@ -157,6 +159,7 @@ private fun ChatTranscriptBody(
     listState: LazyListState,
     follow: FollowState,
     restore: TranscriptAnchor?,
+    groupToggles: GroupToggles,
     showTimeline: Boolean,
     find: TranscriptFind?,
     richCodex: Boolean,
@@ -175,7 +178,6 @@ private fun ChatTranscriptBody(
     // reset is applied where the default is READ: the build reads a snapshot and reports each stale read,
     // and GroupToggles.resolve replays it on the main thread right after that build (builds run one at a
     // time, each from a fresh snapshot), so a toggle whose default changed is gone before any later build.
-    val groupToggles = rememberSaveable(saver = GroupToggles.Saver) { GroupToggles() }
     // ta-coik.37: the rows, the timeline's prompts and every other per-change derivation are built OFF
     // the main thread (the last result shows meanwhile); the first build for a session is synchronous.
     // Everything the build reads is captured here, on the main thread, as immutable values: the toggles
@@ -672,11 +674,15 @@ internal class GroupToggles(initial: Map<String, GroupToggle> = emptyMap()) {
     fun snapshot(): Map<String, GroupToggle> = HashMap(map)
 
     companion object {
+        /** One toggle as plain text: the default it overrode, whether it is open, then the group's key. */
+        fun encodeEntry(key: String, v: GroupToggle): String = "${if (v.default) 1 else 0}${if (v.open) 1 else 0}$key"
+        fun decodeEntry(raw: String): Pair<String, GroupToggle> = raw.substring(2) to GroupToggle(raw[0] == '1', raw[1] == '1')
+
         val Saver: Saver<GroupToggles, Any> = Saver(
-            save = { store -> ArrayList(store.snapshot().map { (k, v) -> "${if (v.default) 1 else 0}${if (v.open) 1 else 0}$k" }) },
+            save = { store -> ArrayList(store.snapshot().map { (k, v) -> encodeEntry(k, v) }) },
             restore = { saved ->
                 @Suppress("UNCHECKED_CAST")
-                GroupToggles((saved as List<String>).associate { it.substring(2) to GroupToggle(it[0] == '1', it[1] == '1') })
+                GroupToggles((saved as List<String>).associate { decodeEntry(it) })
             },
         )
     }
