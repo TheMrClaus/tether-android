@@ -8,6 +8,7 @@ import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -81,6 +82,11 @@ class MainShellEndSessionTest {
             TetherTheme { CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, prefs) } }
         }
         rule.waitForIdle()
+        // MainShell paints the session (and so its header) only once the stored preferences have arrived (`showEnded` is
+        // null until then), and that DataStore read hops through Dispatchers.IO, which waitForIdle() does not wait for:
+        // under load the first assertion could run before the header existed (ta-7njx: it flaked on 3adb3899 too).
+        // So wait for the header itself, as MainShellNavigationTest's awaitTag does for its own async precondition.
+        rule.waitUntil(5_000) { rule.onAllNodesWithTag(ShellTags.EndSessionKey).fetchSemanticsNodes().isNotEmpty() }
     }
 
     /** T6.7: the web's words; ta-coik.13: the key ends the session on its first tap (dashboard.tsx 90fbb9f :1909). */
