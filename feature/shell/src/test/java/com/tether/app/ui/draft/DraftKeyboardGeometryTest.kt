@@ -66,7 +66,7 @@ class DraftKeyboardGeometryTest {
         rule.setContent {
             TetherTheme {
                 CompositionLocalProvider(LocalKeyboardInset provides FixedKeyboardInset(keyboard)) {
-                    Box(Modifier.size(w, h)) { DraftComposerFrame(i, DraftSheetActions(), layout = layout) }
+                    Box(Modifier.size(w, h)) { DraftComposerFrame(i, DraftSheetActions(), layout = layout, sheet = layout == TetherLayoutClass.Phone) }
                 }
             }
         }
@@ -106,7 +106,7 @@ class DraftKeyboardGeometryTest {
         rule.setContent {
             TetherTheme {
                 CompositionLocalProvider(LocalKeyboardInset provides FixedKeyboardInset(5_000.dp)) {
-                    Box(Modifier.size(412.dp, 915.dp)) { DraftComposerFrame(inputs(true), DraftSheetActions(), layout = TetherLayoutClass.Phone) }
+                    Box(Modifier.size(412.dp, 915.dp)) { DraftComposerFrame(inputs(true), DraftSheetActions(), layout = TetherLayoutClass.Phone, sheet = true) }
                 }
             }
         }

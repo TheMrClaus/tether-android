@@ -116,6 +116,7 @@ import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.currentLayoutClass
 import com.tether.app.ui.components.dialogScrim
 import com.tether.app.ui.components.originalWords
+import com.tether.app.ui.components.windowWidthDp
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
@@ -184,9 +185,14 @@ object DraftComposerTags {
     const val Input = "draft-input"
     const val Attach = "draft-attach"
     const val Send = "draft-send"
+    /** The sheet's foot (inside its padding): the sheet's bottom less this one's is the composer's bottom padding. */
+    const val Composer = "draft-composer"
     const val Launching = "draft-launching"
     fun quickPick(path: String) = "draft-quick-pick:$path"
 }
+
+/** globals.css:8884 `@media (max-width: 40rem)`: the draft dialog docks at 640 dp and under. */
+internal const val DRAFT_SHEET_MAX_WIDTH_DP = 640
 
 /** dashboard.tsx `.draft-dialog-head`. */
 internal const val DRAFT_TITLE = "New session"
@@ -533,6 +539,11 @@ fun DraftComposerFrame(
     focusOnOpen: Boolean = false,
     /** ta-xki: the live row (from 64rem) or, below, the settings sheet's trigger row. */
     wideRow: Boolean = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= LIVE_ROW_MIN_WIDTH_DP,
+    /**
+     * ta-ny88: the 40rem frame (globals.css:8884 `(max-width: 40rem)`): docked to the bottom, a top border only,
+     * no subtitle. It is not the 48rem Phone class: the inner metrics below key on [layout], this on the width.
+     */
+    sheet: Boolean = windowWidthDp() <= DRAFT_SHEET_MAX_WIDTH_DP,
 ) {
     val t = LocalTetherTokens.current
     val narrow = layout == TetherLayoutClass.Phone
@@ -550,25 +561,27 @@ fun DraftComposerFrame(
             .padding(bottom = keyboard),
         // globals.css (max-width: 40rem): the phone sheet docks to the bottom, "so the composer sits
         // where the thumb already is and the on-screen keyboard pushes nothing off-screen".
-        contentAlignment = if (narrow) Alignment.BottomCenter else Alignment.Center,
+        contentAlignment = if (sheet) Alignment.BottomCenter else Alignment.Center,
     ) {
-        val shape = if (narrow) RoundedCornerShape(topStart = t.radiusLg, topEnd = t.radiusLg) else RoundedCornerShape(t.radiusLg)
+        val shape = if (sheet) RoundedCornerShape(topStart = t.radiusLg, topEnd = t.radiusLg) else RoundedCornerShape(t.radiusLg)
         // `max-height: calc(100dvh - 3rem)`, of the space the keyboard leaves.
         val maxSheet = (maxHeight - 48.dp).coerceAtLeast(0.dp)
-        val case = if (narrow) {
+        val case = if (sheet) {
             Modifier.fillMaxWidth().heightIn(max = maxSheet)
         } else {
-            Modifier.width(minOf(736.dp, maxWidth - 24.dp).coerceAtLeast(0.dp)).heightIn(max = maxSheet)
+            // `min(46rem, 100vw - 1.5rem)` under the UA's `dialog:modal { max-width: calc(100% - 2em - 6px) }`:
+            // 100% - 38px wins up to 774 (globals.css:8800; the captures at 641-773).
+            Modifier.width(minOf(736.dp, maxWidth - 38.dp).coerceAtLeast(0.dp)).heightIn(max = maxSheet)
         }
-        // `.draft-dialog-head p` is hidden below 40rem (it wraps and pushes the composer down).
-        val subtitle = maxWidth >= 640.dp
+        // `.draft-dialog-head p` is hidden from 40rem down, 640 included (globals.css:8884-8906).
+        val subtitle = !sheet
         Column(
             case
                 .testTag(DraftComposerTags.Sheet)
                 .semantics { paneTitle = DRAFT_TITLE }
                 // Phone: `border-width: 1px 0 0` (a top edge only); desktop: the 1px case.
-                .cssSurface(shape, t.graphite, if (narrow) null else CssBorder(1.dp, t.lineStrong), if (narrow) emptyList() else StudioDialog.shadows)
-                .then(if (narrow) Modifier.drawBehind { drawRect(t.lineStrong, Offset.Zero, Size(size.width, 1.dp.toPx())) } else Modifier)
+                .cssSurface(shape, t.graphite, if (sheet) null else CssBorder(1.dp, t.lineStrong), if (sheet) emptyList() else StudioDialog.shadows)
+                .then(if (sheet) Modifier.drawBehind { drawRect(t.lineStrong, Offset.Zero, Size(size.width, 1.dp.toPx())) } else Modifier)
                 .clip(shape)
                 // The card swallows taps (only the scrim, Close and Back close it); a gesture sink,
                 // not a clickable, so its text is never merged into one node.
@@ -589,13 +602,15 @@ fun DraftComposerFrame(
             }
             // `.draft-dialog .chat-composer` (Studio) bottom: phone max(space-md, safe-area-bottom),
             // space-sm over the keyboard (the sheet already sits on it); desktop space-xl.
+            // The keyboard and the nav bar are the docked sheet's: the centred card (641+) keeps space-md (ta-ny88).
             val bottom = when {
                 !narrow -> t.css.spaceXl
-                keyboard > 0.dp -> t.css.spaceSm
-                else -> maxOf(t.css.spaceMd, navBottom)
+                sheet && keyboard > 0.dp -> t.css.spaceSm
+                sheet -> maxOf(t.css.spaceMd, navBottom)
+                else -> t.css.spaceMd
             }
-            Column(Modifier.fillMaxWidth().padding(start = side, end = side, bottom = bottom)) {
-                DraftComposerFoot(inputs, actions, narrow, keyboardOpen = keyboard > 0.dp, focusOnOpen = focusOnOpen)
+            Column(Modifier.fillMaxWidth().padding(start = side, end = side, bottom = bottom).testTag(DraftComposerTags.Composer)) {
+                DraftComposerFoot(inputs, actions, narrow, keyboardOpen = sheet && keyboard > 0.dp, focusOnOpen = focusOnOpen)
             }
         }
     }

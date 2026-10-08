@@ -39,6 +39,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.ParameterizedRobolectricTestRunner
+import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
@@ -258,6 +259,8 @@ fun ComposeContentTestRule.snapDraft(
     settings: SettingsShot? = null,
     /** T8.4: drawn over the sheet (the GitHub dialog's shots). */
     overlay: (@Composable () -> Unit)? = null,
+    /** ta-ny88: the file's size word when it is not the phone/tablet pair (the 640/641/700 band shots). */
+    size: String? = null,
 ) {
     mainClock.autoAdvance = false
     val seed = Seed(shot, browser, options ?: settings?.options)
@@ -296,7 +299,7 @@ fun ComposeContentTestRule.snapDraft(
     }
     mainClock.advanceTimeBy(600)
     waitForIdle()
-    onRoot().captureRoboImage("src/test/screenshots/$name/${skin.id}-${if (phone) "phone" else "tablet"}.png", roborazziOptions = exact)
+    onRoot().captureRoboImage("src/test/screenshots/$name/${skin.id}-${size ?: if (phone) "phone" else "tablet"}.png", roborazziOptions = exact)
     seed.close()
 }
 
@@ -450,5 +453,40 @@ class DraftOptionsFontScaleScreenshotTest(private val shot: String, private val 
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = listOf("options", "settings").flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+    }
+}
+
+/**
+ * ta-ny88: the draft dialog's two breakpoints (globals.css:8884 at 40rem, :11008 at 48rem), in the band
+ * between the docked sheet (640 and under) and the Expanded class (768 up): 640 docks, 641 and 700 are
+ * the centred card at `min(736, W - 38)` with its subtitle and the Phone class's inner metrics.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w640dp-h1024dp-mdpi")
+class DraftComposerBand640ScreenshotTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun sheet() = rule.snapDraft(DraftShot.Empty, TetherSkin.Studio, phone = true, DraftShot.Empty.id, size = "w640")
+}
+
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w641dp-h1024dp-mdpi")
+class DraftComposerBand641ScreenshotTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun sheet() = rule.snapDraft(DraftShot.Empty, TetherSkin.Studio, phone = true, DraftShot.Empty.id, size = "w641")
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w700dp-h1024dp-mdpi")
+class DraftComposerBand700ScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun sheet() = rule.snapDraft(DraftShot.Empty, skin, phone = true, DraftShot.Empty.id, size = "w700")
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
     }
 }
