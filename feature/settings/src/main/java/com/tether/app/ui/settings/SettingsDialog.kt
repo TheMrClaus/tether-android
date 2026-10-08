@@ -56,6 +56,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -249,7 +250,7 @@ fun SettingsDialog(
     // ta-09ca E1: the narrow settings metrics (header 76, padding 20/18, h2 20, tabs 12/10) are studio.css:957's
     // `(max-width: 640px)` block, not the shell's 48rem: they apply to a window of 640 dp or less, the
     // class is not what decides here.
-    val layout = if (windowWidthDp() <= 640) TetherLayoutClass.Phone else TetherLayoutClass.Expanded
+    val layout = settingsLayout()
     // T8.2: the home "Browse folders" picker (settings-dialog.tsx 90fbb9f :2457-2480).
     val homePicker = remember(client) { HomeFolderPicker.of(client) }
     Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
@@ -281,10 +282,15 @@ fun SettingsDialog(
     }
 }
 
+/** The settings dialog's own switch (studio.css 957 `(max-width: 640px)`), read from the one width source. */
+@Composable
+internal fun settingsLayout(): TetherLayoutClass = if (windowWidthDp() <= 640) TetherLayoutClass.Phone else TetherLayoutClass.Expanded
+
 /**
- * The dialog in place (the inline form the goldens shoot): on [TetherLayoutClass.Phone] the case
- * fills the window; on [TetherLayoutClass.Expanded] it sits centred on the skin's scrim at
- * `min(880px, 100vw - 48px)` (studio.css 556), at most `100dvh - 48px` tall (511).
+ * The dialog in place (the inline form the goldens shoot): the same card at every width, content-sized and centred on
+ * the skin's scrim. [TetherLayoutClass.Phone] (640 dp and under, studio.css 957-958) is `100vw - 24px` wide, at most
+ * `100dvh - 32px` tall, radius 14; [TetherLayoutClass.Expanded] is `min(880px, 100vw - 48px)` (556), at most
+ * `100dvh - 48px` (511), radius 16.
  */
 @Composable
 fun SettingsFrame(
@@ -343,32 +349,38 @@ fun SettingsFrame(
         }
     }
     val narrow = layout == TetherLayoutClass.Phone
-    val backdrop = if (narrow) t.graphite else dialogScrim(t)
+    // ta-v8dt: ONE shape at every width (studio.css 511-520, 556, 566, 957-958, the web at tether 29537e0): the scrim
+    // behind (never graphite), the studio shadow, a card sized to its content and centred, 12 in from the sides at
+    // 640 dp and under (24 above), at most 100dvh - 32 (48) tall, radius 14 (16); the body keeps min(460, half the
+    // height). Only these numbers switch at 640.
+    val backdrop = dialogScrim(t)
+    // globals.css 11014: the tab strip's inline margin is 12 below 48rem (768 dp) and 24 from it.
+    val tabsInset = if (windowWidthDp() < 768) 12.dp else 24.dp
     BoxWithConstraints(Modifier.fillMaxSize().background(backdrop).then(modifier), contentAlignment = Alignment.Center) {
-        val shape = RoundedCornerShape(if (narrow) 0.dp else StudioDialog.radius)
+        val shape = RoundedCornerShape(if (narrow) 14.dp else StudioDialog.radius)
         val caseModifier = if (narrow) {
-            Modifier.fillMaxSize()
+            Modifier.width(maxWidth - 24.dp).heightIn(max = maxHeight - 32.dp)
         } else {
             Modifier.width(minOf(880.dp, maxWidth - 48.dp)).heightIn(max = maxHeight - 48.dp)
         }
-        val bodyMin = if (narrow) 0.dp else minOf(460.dp, maxHeight * 0.5f)
+        val bodyMin = minOf(460.dp, maxHeight * 0.5f)
         Column(
             surfaceModifier
                 .testTag(SettingsDialogTags.Dialog)
                 .semantics { paneTitle = "Settings" }
                 .then(caseModifier)
-                .cssSurface(shape, t.graphite, null, if (narrow) emptyList() else StudioDialog.shadows)
+                .cssSurface(shape, t.graphite, null, StudioDialog.shadows)
                 .clip(shape)
                 // The <dialog> swallows taps: only Back, Close, Cancel and Save dismiss it. A plain
                 // gesture sink, not a clickable, so the panels' text is never merged into one node.
                 .pointerInput(Unit) { detectTapGestures { } },
         ) {
             SettingsHeader(narrow, onClose)
-            SettingsTabStrip(state.tab, narrow, onSelect = { state.tab = it })
+            SettingsTabStrip(state.tab, narrow, tabsInset, onSelect = { state.tab = it })
             Column(
                 Modifier
                     .testTag(SettingsDialogTags.Body)
-                    .weight(1f, fill = narrow)
+                    .weight(1f, fill = false)
                     .heightIn(min = bodyMin)
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
@@ -440,7 +452,7 @@ private fun SettingsHeader(narrow: Boolean, onClose: () -> Unit) {
  * with their selection.
  */
 @Composable
-private fun SettingsTabStrip(selected: SettingsTab, narrow: Boolean, onSelect: (SettingsTab) -> Unit) {
+private fun SettingsTabStrip(selected: SettingsTab, narrow: Boolean, inset: Dp, onSelect: (SettingsTab) -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusKey)
@@ -449,7 +461,7 @@ private fun SettingsTabStrip(selected: SettingsTab, narrow: Boolean, onSelect: (
     BoxWithConstraints(
         Modifier
             .fillMaxWidth()
-            .padding(start = if (narrow) 12.dp else 24.dp, end = if (narrow) 12.dp else 24.dp, top = 12.dp),
+            .padding(start = inset, end = inset, top = 12.dp),
     ) {
         val inner = maxWidth - 2.dp - padH * 2
         Layout(
