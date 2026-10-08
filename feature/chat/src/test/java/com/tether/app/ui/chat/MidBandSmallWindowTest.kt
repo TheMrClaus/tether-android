@@ -17,6 +17,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.core.app.ApplicationProvider
+import com.github.takahirom.roborazzi.RoborazziOptions
+import com.github.takahirom.roborazzi.captureRoboImage
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.theme.TetherSkin
@@ -89,6 +91,10 @@ class MidBandSmallWindowTest {
         near("composer height (web 207.58 less C4)", 207.58 - c4, dp(composer.height), 1.0)
         near("transcript height (216 - 207.58 = 8.4, plus C4)", 8.4 + c4, dp(transcript.height), 1.0)
         near("trigger height (the 36 pill row)", 36.0, dp(bounds("session-settings-trigger").height), 0.5)
+        rule.onNodeWithTag(CHAT_COMPOSER_TAG).captureRoboImage(
+            "src/test/screenshots/mid-band/composer-idle-w780dp-h360dp-420dpi.png",
+            roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),
+        )
         println("W20-MEASURE idle w780h360: composer=${dp(composer.height)} transcript=${dp(transcript.height)} c4=$c4 d=$d")
     }
 
