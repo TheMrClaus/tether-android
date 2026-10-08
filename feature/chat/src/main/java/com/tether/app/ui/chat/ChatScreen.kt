@@ -42,6 +42,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
@@ -385,7 +386,16 @@ fun ChatScreen(
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
         }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        // ta-4vun / ta-lz64 (the web at tether 29537e0, L1 spec section 4): the transcript's box cannot be shorter than its own
+        // vertical padding (`.chat-scroll`, 2rem x 2 on the desktop, 1.5rem x 2 on the phone), so where its region shrinks
+        // below that it overflows the region downward, painted over the composer's static top strip and under the well.
+        val transcriptShown = session != null && projection != null && projection.turnOrder.isNotEmpty() && activeRun == null
+        val spacingNow = transcriptSpacing(t, com.tether.app.ui.components.currentLayoutClass() == com.tether.app.ui.components.TetherLayoutClass.Phone)
+        TranscriptOverComposer(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            floor = if (transcriptShown) spacingNow.padding.calculateTopPadding() + spacingNow.padding.calculateBottomPadding() else 0.dp,
+            wellColor = if (transcriptShown) chatWellColor(t) else androidx.compose.ui.graphics.Color.Unspecified,
+            transcript = {
             CompositionLocalProvider(LocalToolMediaLoader provides mediaLoader, LocalToolClips provides toolClips.registry, LocalCardStates provides cardStates) {
             when {
                 session == null -> EmptyCentered(
@@ -467,65 +477,68 @@ fun ChatScreen(
                     richCodex = isRichCodexSession(session.provider, session.engineGeneration),
                     richOpencode = isRichOpencodeSession(session.provider, session.engineGeneration),
                     sends = sends,
+                    wellBackground = false,
                 ) } }
             }
             // ta-coik.68: the full-size viewer is hosted here, not in the tool card's row: a lazy transcript may
             // not compose that row at all after a shell switch, and the viewer must still be there.
             ToolViewerHost()
             }
-        }
-
-        // The composer deck draws its own top seam (`.chat-composer` border-top + lip, T7.1).
-        Composer(
-            modifier = Modifier.keepsIntrinsicHeight().testTag(CHAT_COMPOSER_TAG),
-            session = session,
-            projection = projection,
-            controls = session?.let { controlsMap[it.id] },
-            serverNow = { vm.serverNow(session?.id) },
-            onSend = { text, attachments -> session?.let { vm.sendOrQueue(it.id, text, attachments) } ?: false },
-            onInterrupt = onInterrupt,
-            onQueueEdit = { queueId, text -> session?.let { vm.client.queueEdit(it.id, queueId, text) } },
-            onQueueRemove = { queueId -> session?.let { vm.client.queueRemove(it.id, queueId) } },
-            onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
-            liveness = liveness,
-            attachments = attachments,
-            // A plain read, not a subscription: only the opening value matters here.
-            initialDraft = session?.let { vm.loadedDraft(it.id) },
-            awaitDraft = { session?.let { vm.awaitDraft(it.id) } ?: "" },
-            onDraftChange = { text -> session?.let { vm.setDraft(it.id, text) } },
-            // T11.2: text shared from another app into this session (taken once, appended to the draft).
-            inserts = remember(session?.id, vm) {
-                val id = session?.id
-                if (id == null) {
-                    kotlinx.coroutines.flow.emptyFlow()
-                } else {
-                    vm.composerInserts.filter { id in it }.mapNotNull { vm.takeComposerInsert(id) }
-                }
             },
-            tree = tree,
-            commandActions = commandActions,
-            controlActions = controlActions,
-            pinnedModels = pinnedModels,
-            // ta-coik.55: written to the record of the server this picker reads (chat-view.tsx 90fbb9f :2281-2286).
-            onToggleModelPin = { id -> prefsScope.launchPreferenceWrite { prefs.toggleModelPin(com.tether.app.client.serverOrigin(serverUrl), id) } },
-            handoffTarget = handoffTarget,
-            onOpenSession = { id -> vm.selectSession(id) },
-            runActions = runActions,
-            onWarmControls = { session?.let { vm.client.requestWarmSessionControls(it.id) } },
-            sendRows = sends.pending,
-            github = composerGitHub,
-            takeover = takeover,
-            browser = if (session != null) ComposerBrowser(browserOpen) { browserOpen = !browserOpen } else null,
-            browserPicks = if (session != null) {
-                ComposerPicks(
-                    items = browserPicks.filter { it.sessionId == session.id }.map { it.pick },
-                    pageUrl = browserPageUrl,
-                    onRemove = { pick -> browserPicks = browserPicks.filterNot { it.pick === pick } },
-                    onClear = { browserPicks = browserPicks.filter { it.sessionId != session.id } },
-                    send = { text, shots -> vm.sendAttachments(session.id, text, null, consentOrigin, shots) },
-                )
-            } else {
-                null
+            composer = {
+            // The composer deck draws its own top seam (`.chat-composer` border-top + lip, T7.1).
+            Composer(
+                modifier = Modifier.keepsIntrinsicHeight().testTag(CHAT_COMPOSER_TAG),
+                session = session,
+                projection = projection,
+                controls = session?.let { controlsMap[it.id] },
+                serverNow = { vm.serverNow(session?.id) },
+                onSend = { text, attachments -> session?.let { vm.sendOrQueue(it.id, text, attachments) } ?: false },
+                onInterrupt = onInterrupt,
+                onQueueEdit = { queueId, text -> session?.let { vm.client.queueEdit(it.id, queueId, text) } },
+                onQueueRemove = { queueId -> session?.let { vm.client.queueRemove(it.id, queueId) } },
+                onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
+                liveness = liveness,
+                attachments = attachments,
+                // A plain read, not a subscription: only the opening value matters here.
+                initialDraft = session?.let { vm.loadedDraft(it.id) },
+                awaitDraft = { session?.let { vm.awaitDraft(it.id) } ?: "" },
+                onDraftChange = { text -> session?.let { vm.setDraft(it.id, text) } },
+                // T11.2: text shared from another app into this session (taken once, appended to the draft).
+                inserts = remember(session?.id, vm) {
+                    val id = session?.id
+                    if (id == null) {
+                        kotlinx.coroutines.flow.emptyFlow()
+                    } else {
+                        vm.composerInserts.filter { id in it }.mapNotNull { vm.takeComposerInsert(id) }
+                    }
+                },
+                tree = tree,
+                commandActions = commandActions,
+                controlActions = controlActions,
+                pinnedModels = pinnedModels,
+                // ta-coik.55: written to the record of the server this picker reads (chat-view.tsx 90fbb9f :2281-2286).
+                onToggleModelPin = { id -> prefsScope.launchPreferenceWrite { prefs.toggleModelPin(com.tether.app.client.serverOrigin(serverUrl), id) } },
+                handoffTarget = handoffTarget,
+                onOpenSession = { id -> vm.selectSession(id) },
+                runActions = runActions,
+                onWarmControls = { session?.let { vm.client.requestWarmSessionControls(it.id) } },
+                sendRows = sends.pending,
+                github = composerGitHub,
+                takeover = takeover,
+                browser = if (session != null) ComposerBrowser(browserOpen) { browserOpen = !browserOpen } else null,
+                browserPicks = if (session != null) {
+                    ComposerPicks(
+                        items = browserPicks.filter { it.sessionId == session.id }.map { it.pick },
+                        pageUrl = browserPageUrl,
+                        onRemove = { pick -> browserPicks = browserPicks.filterNot { it.pick === pick } },
+                        onClear = { browserPicks = browserPicks.filter { it.sessionId != session.id } },
+                        send = { text, shots -> vm.sendAttachments(session.id, text, null, consentOrigin, shots) },
+                    )
+                } else {
+                    null
+                },
+            )
             },
         )
     }
@@ -863,3 +876,62 @@ private fun WorkspaceHeader(vm: TetherViewModel, session: AgentSession, workspac
 
 /** A picked element and the session it was picked for (dashboard.tsx :235 `BrowserPick & { sessionId }`). */
 private class SessionPick(val sessionId: String, val pick: com.tether.app.client.BrowserPick)
+
+private enum class RegionSlot { Well, Transcript, Composer }
+
+/** The visible part of a transcript box that overflows its region: the top [height] px of it (a rectangle, so hit-testing follows). */
+private class TopBandShape(private val height: Float) : androidx.compose.ui.graphics.Shape {
+    override fun createOutline(size: androidx.compose.ui.geometry.Size, layoutDirection: androidx.compose.ui.unit.LayoutDirection, density: androidx.compose.ui.unit.Density) =
+        androidx.compose.ui.graphics.Outline.Rectangle(androidx.compose.ui.geometry.Rect(0f, 0f, size.width, minOf(height, size.height)))
+}
+
+/**
+ * ta-4vun + ta-lz64: the transcript and the composer under it, laid out as the web's flex column with its positioned layers
+ * (the web at tether 29537e0; L1 spec section 4, ruling R2). The composer keeps its intrinsic height and its place
+ * ([keepsIntrinsicHeight]: whatever is still too tall is cut from its bottom padding); the transcript's REGION is what is
+ * left above it, down to 0. The transcript's BOX is never shorter than [floor] (twice its vertical content padding: 64 dp
+ * on the desktop, 48 dp on the phone), so when the region is shorter it overflows downward over the composer's top strip
+ * (the deck's top padding, the waiting line), is clipped (paint and touch) at the top edge of the composer's well, and is
+ * transparent outside its rows. The well, the pill rows and the keys are never covered. The well is painted over the
+ * region only ([wellColor]); no height or orientation term decides any of it.
+ */
+@Composable
+private fun TranscriptOverComposer(
+    floor: androidx.compose.ui.unit.Dp,
+    wellColor: androidx.compose.ui.graphics.Color,
+    transcript: @Composable () -> Unit,
+    composer: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.ui.layout.Layout(
+        content = {
+            if (wellColor != androidx.compose.ui.graphics.Color.Unspecified) Box(Modifier.layoutId(RegionSlot.Well).background(wellColor))
+            Box(Modifier.layoutId(RegionSlot.Transcript)) { transcript() }
+            Box(Modifier.layoutId(RegionSlot.Composer)) { composer() }
+        },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        fun slot(s: RegionSlot) = measurables.firstOrNull { it.layoutId == s }
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        val composerP = slot(RegionSlot.Composer)!!.measure(androidx.compose.ui.unit.Constraints(0, width, 0, height))
+        val composerH = minOf(composerP.height, height)
+        val region = height - composerH
+        val boxH = maxOf(region, floor.roundToPx())
+        val transcriptP = slot(RegionSlot.Transcript)!!.measure(androidx.compose.ui.unit.Constraints.fixed(width, boxH))
+        val wellOffset = composerP[ComposerWellTop].takeIf { it != androidx.compose.ui.layout.AlignmentLine.Unspecified }
+        // Where the box stops being painted: its own end, or the well's top edge when it reaches into the composer.
+        val visible = if (boxH <= region) boxH else minOf(boxH, region + (wellOffset ?: 0), height)
+        val well = slot(RegionSlot.Well)?.measure(androidx.compose.ui.unit.Constraints.fixed(width, region))
+        layout(width, height) {
+            well?.place(0, 0)
+            composerP.place(0, region)
+            transcriptP.placeWithLayer(0, 0, zIndex = 1f) {
+                if (visible < boxH) {
+                    clip = true
+                    shape = TopBandShape(visible.toFloat())
+                }
+            }
+        }
+    }
+}

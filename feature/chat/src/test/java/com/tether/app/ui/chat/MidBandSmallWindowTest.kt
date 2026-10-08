@@ -55,6 +55,15 @@ class MidBandSmallWindowTest {
     private fun near(what: String, expected: Double, actual: Float, tolerance: Double) =
         assertEquals("$what (expected $expected, got $actual)", expected, actual.toDouble(), tolerance)
 
+
+    /** ta-4vun (R2): the transcript's visible band = min(box, region + strip); region = transcript top to the composer's top, strip = the composer's top to the well's top. */
+    private fun band(box: Rect, composer: Rect): Triple<Double, Double, Double> {
+        val well = bounds(CHAT_COMPOSER_WELL_TAG)
+        val region = dp(composer.top - box.top).toDouble()
+        val strip = dp(well.top - composer.top).toDouble()
+        return Triple(region, strip, minOf(dp(box.height).toDouble(), region + strip))
+    }
+
     private val longReply = "A reply that is long enough to wrap across the whole transcript column so that its right edge is the column's. ".repeat(6)
 
     private fun host(folded: ChatFixtures.Folded) {
@@ -89,7 +98,11 @@ class MidBandSmallWindowTest {
         val composer = bounds(CHAT_COMPOSER_TAG)
         val transcript = bounds("chat-transcript")
         near("composer height (web 207.58 less C4)", 207.58 - c4, dp(composer.height), 1.0)
-        near("transcript height (216 - 207.58 = 8.4, plus C4)", 8.4 + c4, dp(transcript.height), 1.0)
+        // ta-4vun (R2): the box is max(region, 64): the region is 216 - 207.58 = 8.4 plus C4, under the floor.
+        near("transcript box (the 64 dp floor over the 8.4 + C4 region)", 64.0, dp(transcript.height), 1.0)
+        val (region, strip, band) = band(transcript, composer)
+        near("region (216 - 207.58 = 8.4, plus C4)", 8.4 + c4, region.toFloat(), 1.0)
+        near("visible band = min(box, region + strip)", minOf(64.0, region + strip), band.toFloat(), 0.01)
         near("trigger height (the 36 pill row)", 36.0, dp(bounds("session-settings-trigger").height), 0.5)
         rule.onNodeWithTag(CHAT_COMPOSER_TAG).captureRoboImage(
             "src/test/screenshots/mid-band/composer-idle-w780dp-h360dp-420dpi.png",
@@ -103,7 +116,12 @@ class MidBandSmallWindowTest {
         val composer = bounds(CHAT_COMPOSER_TAG)
         val transcript = bounds("chat-transcript")
         near("composer keeps its intrinsic height (web 233.58 less C4)", 233.58 - c4, dp(composer.height), 1.0)
-        assertTrue("the transcript gave way to 0 first: ${dp(transcript.height)}", dp(transcript.height) < 1f)
+        // ta-4vun (R2): the region still gives way to 0 first; the box is the 64 dp floor, over the composer's top strip.
+        val (region, strip, band) = band(transcript, composer)
+        assertTrue("the region gave way to 0 first: $region", region < 1.0)
+        near("transcript box (the 64 dp floor)", 64.0, dp(transcript.height), 1.0)
+        near("visible band = min(box, region + strip)", minOf(64.0, region + strip), band.toFloat(), 0.01)
+        near("band (the strip: deck 16 + waiting line + gap)", 42.0, band.toFloat(), 2.0)
         near("trigger height", 36.0, dp(bounds("session-settings-trigger").height), 0.5)
         val footer = boundsOfDescription("Add attachment")
         near("footer row height", 44.0, dp(footer.height), 0.5)

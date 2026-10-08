@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.onFocusChanged
@@ -218,8 +219,30 @@ internal fun ComposerWell(
             listOf(shadow),
         )
     }
-    Column(modifier.fillMaxWidth().then(surface)) { content() }
+    Column(
+        Modifier
+            // ta-4vun: the well's top edge, for the host that lays the transcript over the strip above it.
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                layout(placeable.width, placeable.height, mapOf(ComposerWellTop to 0)) { placeable.place(0, 0) }
+            }
+            .then(modifier)
+            .fillMaxWidth()
+            .testTag(CHAT_COMPOSER_WELL_TAG)
+            .then(surface),
+    ) { content() }
 }
+
+/** ta-4vun: the composer's well (its box starts where the transcript's overflow stops). */
+internal const val CHAT_COMPOSER_WELL_TAG = "chat-composer-well"
+
+/**
+ * ta-4vun: where the composer's well begins (its top edge), as an alignment line: everything above it in the composer
+ * (the deck's top padding, the waiting or question line, the rows above the well) is the `.chat-composer`'s static
+ * strip, which the web paints UNDER the transcript's overflow, while the well (`.chat-composer-shell`, positioned) paints
+ * over it. The nearest line wins when several wells are present.
+ */
+internal val ComposerWellTop = androidx.compose.ui.layout.HorizontalAlignmentLine(merger = { a, b -> minOf(a, b) })
 
 /** T13.2 r2: a queued row's "Interrupt now". */
 internal const val QUEUE_INTERRUPT_TAG = "queue-interrupt-now"

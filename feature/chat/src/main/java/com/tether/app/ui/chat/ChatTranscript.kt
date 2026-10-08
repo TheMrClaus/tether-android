@@ -117,6 +117,8 @@ internal fun ChatTranscript(
     /** ta-twjm: the reader's activity-group toggles, hoisted with [listState] so a shell switch keeps them. */
     groupToggles: GroupToggles = rememberSaveable(saver = GroupToggles.Saver) { GroupToggles() },
     showTimeline: Boolean = true,
+    /** ta-4vun: false where the host paints the well itself (only over its own region), so the part of this box that overflows the region over the composer's strip stays transparent, as the web's `.chat-scroll` is. */
+    wellBackground: Boolean = true,
     /** T5.3: the in-chat find over this transcript (null: the bar is closed). */
     find: TranscriptFind? = null,
     richCodex: Boolean = false,
@@ -143,7 +145,7 @@ internal fun ChatTranscript(
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground)
     }
 }
 
@@ -169,6 +171,7 @@ private fun ChatTranscriptBody(
     onOpenCommand: (String) -> Unit,
     liveCopy: Boolean,
     sends: SendBubbles,
+    wellBackground: Boolean,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -352,7 +355,7 @@ private fun ChatTranscriptBody(
     )
 
     val copyNotices = remember { CopyNotices() }
-    Box(modifier.fillMaxSize().background(chatWellColor(t))) {
+    Box(modifier.fillMaxSize().then(if (wellBackground) Modifier.background(chatWellColor(t)) else Modifier)) {
         CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices) {
         ProvideApprovalState {
         LazyColumn(

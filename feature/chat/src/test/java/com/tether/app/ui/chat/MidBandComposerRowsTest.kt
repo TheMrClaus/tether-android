@@ -59,6 +59,15 @@ class MidBandComposerRowsTest {
     private fun bounds(tag: String): Rect = rule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
     private fun boundsOfDescription(text: String): Rect = rule.onNodeWithContentDescription(text).fetchSemanticsNode().boundsInRoot
 
+
+    /** ta-4vun (R2): the transcript's visible band = min(box, region + strip); region = transcript top to the composer's top, strip = the composer's top to the well's top. */
+    private fun band(box: Rect, composer: Rect): Triple<Double, Double, Double> {
+        val well = bounds(CHAT_COMPOSER_WELL_TAG)
+        val region = dp(composer.top - box.top).toDouble()
+        val strip = dp(well.top - composer.top).toDouble()
+        return Triple(region, strip, minOf(dp(box.height).toDouble(), region + strip))
+    }
+
     private val longReply = "A reply that is long enough to wrap across the whole transcript column so that its right edge is the column's. ".repeat(6)
 
     private fun host(folded: ChatFixtures.Folded, windowHeightDp: Int = 411) {
@@ -107,7 +116,11 @@ class MidBandComposerRowsTest {
         val input = boundsOfDescription("Message the agent")
         println("W19-MEASURE idle rows: composerTop=0 inputTop=${dp(input.top - composer.top)} inputH=${dp(input.height)} inputBottom=${dp(input.bottom - composer.top)} composerH=${dp(composer.height)} d=$d")
         near("composer height (web 207.58 less C4)", 207.58 - c4, dp(composer.height), 1.0)
-        near("transcript height (web-less-floor 59.4 plus C4)", 59.4 + c4, dp(transcript.height), 1.0)
+        // ta-4vun (R2): the box is max(region, 64); the region is the web-less-floor 59.4 plus C4, just under the floor.
+        near("transcript box (the 64 dp floor over the 59.4 + C4 region)", 64.0, dp(transcript.height), 1.0)
+        val (region, strip, band) = band(transcript, composer)
+        near("region (web-less-floor 59.4 plus C4)", 59.4 + c4, region.toFloat(), 1.0)
+        near("visible band = min(box, region + strip)", minOf(64.0, region + strip), band.toFloat(), 0.01)
         // The trigger is its own 36 dp pill row, 44 above the footer row's top (36 + the 8 gap).
         val trigger = bounds("session-settings-trigger")
         near("trigger height", 36.0, dp(trigger.height), 0.5)
@@ -152,7 +165,12 @@ class MidBandComposerRowsTest {
         host(ApprovalFixtures.write)
         val composer = bounds(CHAT_COMPOSER_TAG)
         near("composer height with the waiting row (web 233.58 less C4)", 233.58 - c4, dp(composer.height), 1.0)
-        near("transcript height (33.4 plus C4)", 33.4 + c4, dp(bounds("chat-transcript").height), 1.0)
+        // ta-4vun (R2): the box is max(region, 64); the region is 33.4 plus C4.
+        val transcriptBox = bounds("chat-transcript")
+        near("transcript box (the 64 dp floor over the 33.4 + C4 region)", 64.0, dp(transcriptBox.height), 1.0)
+        val (region, strip, band) = band(transcriptBox, composer)
+        near("region (33.4 plus C4)", 33.4 + c4, region.toFloat(), 1.0)
+        near("visible band = min(box, region + strip)", minOf(64.0, region + strip), band.toFloat(), 0.01)
         rule.onNode(hasText("Waiting for your approval", substring = true)).assertIsDisplayed()
         val queue = boundsOfDescription("Queue message")
         val interrupt = bounds(INTERRUPT_KEY_TAG)
@@ -179,8 +197,12 @@ class MidBandComposerRowsTest {
         val transcript = bounds("chat-transcript")
         // 359 - 144 = 215 dp is left; the composer needs 233.6, so the transcript is 0 and the bottom padding is what is cut.
         near("composer keeps its intrinsic height (web 233.58 less C4)", 233.58 - c4, dp(composer.height), 1.0)
-        assertTrue("the transcript is 0 or more: ${dp(transcript.height)}", transcript.height >= 0f)
-        assertTrue("the transcript gave way first: ${dp(transcript.height)}", dp(transcript.height) < 1f)
+        // ta-4vun (R2): the region gives way to 0; the box is the 64 dp floor, its visible band the composer's top strip.
+        val (region, strip, band) = band(transcript, composer)
+        assertTrue("the region gave way first: $region", region < 1.0)
+        near("transcript box (the 64 dp floor)", 64.0, dp(transcript.height), 1.0)
+        near("visible band = min(box, region + strip)", minOf(64.0, region + strip), band.toFloat(), 0.01)
+        near("band (the strip: deck 16 + waiting line + gap)", 42.0, band.toFloat(), 2.0)
         val trigger = bounds("session-settings-trigger")
         near("trigger height", 36.0, dp(trigger.height), 0.5)
         for (key in listOf(boundsOfDescription("Add attachment"), bounds(BrowserPaneTags.Toggle), boundsOfDescription("Queue message"), bounds(INTERRUPT_KEY_TAG))) {
