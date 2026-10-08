@@ -194,7 +194,7 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
             )
         }
         Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (narrow) {
+            if (LocalSettingsRowsStack.current) {
                 field(Modifier.fillMaxWidth())
                 addKey(Modifier.fillMaxWidth())
             } else {
@@ -238,6 +238,7 @@ private fun PasskeyRow(
     val type = LocalTetherTypography.current
     val label = DevicesRules.label(passkey.label, "Passkey")
     SettingsRow(
+        kind = RowKind.Device,
         narrow = narrow,
         modifier = Modifier.testTag(DevicesTags.passkey(passkey.id)),
         text = { m ->
@@ -277,7 +278,7 @@ private fun PasskeyRow(
                     modifier = k.testTag(DevicesTags.remove(passkey.id)),
                 )
             }
-            if (narrow) Column(m, verticalArrangement = Arrangement.spacedBy(8.dp)) { keys(Modifier.fillMaxWidth()) }
+            if (LocalSettingsRowsStack.current) Column(m, verticalArrangement = Arrangement.spacedBy(8.dp)) { keys(Modifier.fillMaxWidth()) }
             else Row(m, horizontalArrangement = Arrangement.spacedBy(8.dp)) { keys(Modifier) }
         },
     )
@@ -381,6 +382,7 @@ private fun SessionRow(session: SecuritySession, now: Long, narrow: Boolean, bus
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     SettingsRow(
+        kind = RowKind.Device,
         narrow = narrow,
         modifier = Modifier.testTag(DevicesTags.session(session.id)),
         text = { m ->
@@ -458,6 +460,7 @@ private fun DeviceRow(device: PairedDevice, self: Boolean, now: Long, narrow: Bo
     val type = LocalTetherTypography.current
     val label = DevicesRules.label(device.label, "Paired device")
     SettingsRow(
+        kind = RowKind.Device,
         narrow = narrow,
         modifier = Modifier.testTag(DevicesTags.device(device.id)),
         text = { m ->

@@ -530,6 +530,7 @@ private fun NodeRow(node: NodeSummary, binding: NodesBinding, actions: NodesActi
         if (node.lastSeenAt > 0) append(" · " + NodesCopy.lastSeen(relativeTime(node.lastSeenAt, binding.now())))
     }
     SettingsRow(
+        kind = RowKind.Device,
         narrow = narrow,
         modifier = Modifier.testTag(NodeTags.row(node.nodeId)),
         text = { m ->
@@ -583,7 +584,7 @@ private fun NodeRow(node: NodeSummary, binding: NodesBinding, actions: NodesActi
                     modifier = k.testTag(NodeTags.remove(node.nodeId)),
                 )
             }
-            if (narrow) {
+            if (LocalSettingsRowsStack.current) {
                 Column(m, verticalArrangement = Arrangement.spacedBy(8.dp)) { keys(Modifier.fillMaxWidth()) }
             } else {
                 Row(m, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { keys(Modifier) }

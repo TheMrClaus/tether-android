@@ -203,6 +203,7 @@ private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding
             val detected = ServerSettingsPatch.detectedHome(view, engine)
             if (detected != null) {
                 SettingsRow(
+                    kind = RowKind.Server,
                     narrow = narrow,
                     text = { m ->
                         val caption = buildAnnotatedString { withStyle(SpanStyle(color = t.running)) { append(codeLabel(detected)) } }
@@ -267,6 +268,7 @@ private fun EngineValueRow(
     // T8.2 (settings-dialog.tsx 90fbb9f :2178-2188): the home's "Browse folders", unless the environment sets it.
     val browsable = setting == engine.home && !forced
     SettingsRow(
+        kind = RowKind.Server,
         narrow = narrow,
         rule = !first,
         modifier = Modifier.testTag(ServerSettingsTags.row(setting)),

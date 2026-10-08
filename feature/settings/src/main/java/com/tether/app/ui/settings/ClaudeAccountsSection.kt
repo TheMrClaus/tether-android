@@ -270,6 +270,7 @@ private fun ListNotice(notice: ClaudeAccountsPresentation.Notice, narrow: Boolea
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     SettingsRow(
+        kind = RowKind.Server,
         narrow = narrow,
         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         text = { m ->
@@ -890,6 +891,7 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
     val accounts = c.state.accounts.orEmpty()
     Column(Modifier.testTag(ClaudeAccountsTags.Sync).padding(top = 20.dp)) {
         SettingsRow(
+            kind = RowKind.Server,
             narrow = narrow,
             text = { m -> SettingsRowText("Sync across accounts", AnnotatedString("Share plugins, skills, MCP servers, and hooks between your Claude accounts"), m) },
             control = { m ->
@@ -902,12 +904,13 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
                     placeholder = ClaudeAccountsPresentation.modeLabel(config.mode),
                     // The chosen value is said with the row's name (the trigger's own label is not read out).
                     contentDescription = "Sync across accounts: ${ClaudeAccountsPresentation.modeLabel(config.mode)}",
-                    modifier = (if (narrow) m.fillMaxWidth() else m).testTag(ClaudeAccountsTags.SyncMode),
+                    modifier = (if (LocalSettingsRowsStack.current) m.fillMaxWidth() else m.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ClaudeAccountsTags.SyncMode),
                 )
             },
         )
         if (config.mode == ClaudeSyncMode.Selected) {
             SettingsRow(
+                kind = RowKind.Server,
                 narrow = narrow,
                 text = { m -> SettingsRowText("Categories", AnnotatedString("Only these are kept in sync"), m) },
                 control = { m ->
@@ -955,6 +958,7 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
             }
             val primaryMissing = config.primaryAccountId == null
             SettingsRow(
+                kind = RowKind.Server,
                 narrow = narrow,
                 text = { m -> SettingsRowText("Primary account", AnnotatedString("Its plugins/skills/hooks/MCP servers are what the others receive"), m) },
                 control = { m ->
@@ -966,7 +970,7 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
                         enabled = editable,
                         placeholder = sync.rows.lastOrNull { it.title == "Primary account" }?.value.orEmpty(),
                         contentDescription = "Primary account for sync: " + sync.rows.lastOrNull { it.title == "Primary account" }?.value.orEmpty(),
-                        modifier = (if (narrow) m.fillMaxWidth() else m).testTag(ClaudeAccountsTags.SyncPrimary),
+                        modifier = (if (LocalSettingsRowsStack.current) m.fillMaxWidth() else m.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ClaudeAccountsTags.SyncPrimary),
                     )
                 },
             )
@@ -976,6 +980,7 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
             Text(it, color = t.warning, style = settingsText(type.ui, 12f, 400, lineHeight = 1.6f), modifier = Modifier.padding(vertical = 14.dp))
         }
         SettingsRow(
+            kind = RowKind.Server,
             narrow = narrow,
             text = { m ->
                 val summary = if (c.syncSaves > 0) ClaudeAccountsCopy.SAVING else sync.summary

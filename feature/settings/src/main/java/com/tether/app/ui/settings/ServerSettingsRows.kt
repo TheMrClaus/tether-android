@@ -493,6 +493,7 @@ internal fun ServerTextRow(row: ServerRow, view: ServerSettingsView, binding: Se
     val forced = view.forced(s)
     val shown = remember(view.text(s)) { LabelText.withoutHidden(view.text(s)) }
     SettingsRow(
+        kind = RowKind.Server,
         narrow = narrow,
         modifier = Modifier.testTag(ServerSettingsTags.row(s)),
         text = { m -> SettingsRowText(row.label, caption(forced, row.description), m, tip = row.tip, locked = forced) },
@@ -532,6 +533,7 @@ internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: 
     var revealed by remember { mutableStateOf(false) }
     val open = revealed && !forced
     SettingsRow(
+        kind = RowKind.Server,
         narrow = narrow,
         modifier = Modifier.testTag(ServerSettingsTags.row(s)),
         text = { m -> SettingsRowText(row.label, caption(forced, row.description), m, tip = row.tip, locked = forced) },
@@ -578,6 +580,7 @@ internal fun ServerNumberRow(row: ServerRow, view: ServerSettingsView, binding: 
     val forced = view.forced(s)
     val shown = view.numberText(s)
     SettingsRow(
+        kind = RowKind.Server,
         narrow = narrow,
         modifier = Modifier.testTag(ServerSettingsTags.row(s)),
         text = { m -> SettingsRowText(row.label, caption(forced, row.description), m, tip = row.tip, locked = forced) },
@@ -643,6 +646,7 @@ internal fun ServerSelectRow(
     val forced = view.forced(s)
     val current = view.choice(s)
     SettingsRow(
+        kind = RowKind.Server,
         narrow = narrow,
         modifier = Modifier.testTag(ServerSettingsTags.row(s)),
         text = { m -> SettingsRowText(label, caption(forced, description), m, tip = tip, locked = forced) },
@@ -655,7 +659,7 @@ internal fun ServerSelectRow(
                     enabled = !forced,
                     placeholder = LabelText.visibleValue(current),
                     contentDescription = label,
-                    modifier = (if (narrow) Modifier.fillMaxWidth(0.52f) else Modifier).testTag(ServerSettingsTags.input(s)),
+                    modifier = (if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth(0.52f) else Modifier.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ServerSettingsTags.input(s)),
                 )
             }
         },
@@ -674,6 +678,7 @@ internal fun ServerRootsRow(row: AdvancedRows.RootsRow, view: ServerSettingsView
     val forced = view.forced(s)
     val roots = view.paths(s)
     SettingsRow(
+        kind = RowKind.Server,
         narrow = narrow,
         modifier = Modifier.testTag(ServerSettingsTags.row(s)),
         text = { m -> SettingsRowText(row.title, caption(forced, row.description(roots.size)), m, tip = row.tip, locked = forced) },
@@ -824,7 +829,7 @@ internal fun ClaudeCliSection(binding: ServerSettingsBinding, narrow: Boolean) {
                             enabled = advanced != null,
                             placeholder = LabelText.visibleValue(advanced?.claudeCliVersion),
                             contentDescription = ClaudeCliCopy.PICKER_TITLE,
-                            modifier = (if (narrow) Modifier.fillMaxWidth(0.52f) else Modifier).testTag(ServerSettingsTags.CliPicker),
+                            modifier = (if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth(0.52f) else Modifier.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ServerSettingsTags.CliPicker),
                         )
                     }
                 },

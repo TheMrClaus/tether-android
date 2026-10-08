@@ -333,6 +333,7 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
                 ProfileRows.outcome(latest.send(p.id, ProfileEdit.Rename(p.id, it), quiet = true))
             }
             SettingsRow(
+                kind = RowKind.Server,
                 narrow = narrow,
                 modifier = Modifier.testTag(ProfileTags.row(p.id, ProfileTags.EXTENDS)),
                 text = { m -> SettingsRowText(ProfileRows.EXTENDS, AnnotatedString(ProfileRows.EXTENDS_CAPTION), m) },
@@ -345,7 +346,7 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
                             onSelect = { choice -> latest.send(p.id, ProfileEdit.Extends(p.id, choice.value)) },
                             placeholder = LabelText.visibleValue(p.extends),
                             contentDescription = ProfileRows.field(p, ProfileTags.EXTENDS),
-                            modifier = (if (narrow) Modifier.fillMaxWidth(0.52f) else Modifier).testTag(ProfileTags.field(p.id, ProfileTags.EXTENDS)),
+                            modifier = (if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth(0.52f) else Modifier.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ProfileTags.field(p.id, ProfileTags.EXTENDS)),
                         )
                     }
                 },
@@ -389,6 +390,7 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
             }
             SettingsRow(
                 narrow = true,
+                kind = RowKind.Field,
                 modifier = Modifier.testTag(ProfileTags.row(p.id, ProfileTags.ENV)),
                 text = { m -> SettingsRowText(ProfileRows.ENV, AnnotatedString(ProfileRows.ENV_CAPTION), m) },
                 control = { m -> EnvEditor(p, actions, narrow, m) },
@@ -423,6 +425,7 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
             for (list in ModelList.entries) {
                 SettingsRow(
                     narrow = true,
+                    kind = RowKind.Field,
                     modifier = Modifier.testTag(ProfileTags.row(p.id, list.key)),
                     text = { m ->
                         val (title, caption) = if (list == ModelList.Models) ProfileRows.MODELS to ProfileRows.MODELS_CAPTION else ProfileRows.ADDITIONAL to ProfileRows.ADDITIONAL_CAPTION
@@ -468,6 +471,7 @@ private fun ProfileTextRow(
 ) {
     val shown = remember(value) { LabelText.withoutHidden(value) }
     SettingsRow(
+        kind = RowKind.Server,
         narrow = narrow,
         rule = !first,
         modifier = Modifier.testTag(ProfileTags.row(p.id, what)),

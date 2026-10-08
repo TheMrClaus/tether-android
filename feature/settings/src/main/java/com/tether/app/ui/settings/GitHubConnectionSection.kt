@@ -122,6 +122,7 @@ private fun GitHubRows(c: GitHubConnectionController, narrow: Boolean, opener: L
             )
         })
         error != null -> SettingsRow(
+            kind = RowKind.Server,
             narrow = narrow,
             text = { m -> SettingsRowText(GitHubCopy.STATUS, AnnotatedString(error), m.testTag(GitHubTags.Status).semantics { liveRegion = LiveRegionMode.Polite }) },
             control = { m ->
@@ -143,6 +144,7 @@ private fun GitHubRows(c: GitHubConnectionController, narrow: Boolean, opener: L
                 TetherKey(onClick = c::loadStatus, enabled = !c.busy, classes = KeyClasses.ButtonSecondary, label = GitHubCopy.RECHECK, icon = TetherIcons.RefreshCw, iconSize = 14.dp, modifier = m.testTag(GitHubTags.Recheck))
             }
             SettingsRow(
+                kind = RowKind.Server,
                 narrow = narrow,
                 text = { m -> SettingsRowText(GitHubCopy.STATUS, AnnotatedString(GitHubCopy.statusLine(status)), m.testTag(GitHubTags.Status).semantics { liveRegion = LiveRegionMode.Polite }) },
                 control = when {
@@ -157,6 +159,7 @@ private fun GitHubRows(c: GitHubConnectionController, narrow: Boolean, opener: L
 
     if (c.connected) return
     SettingsRow(
+        kind = RowKind.Server,
         narrow = narrow,
         text = { m -> SettingsRowText(GitHubCopy.CONNECT_TITLE, AnnotatedString(GitHubCopy.CONNECT_CAPTION), m) },
         control = { m ->
@@ -189,6 +192,7 @@ private fun GitHubRows(c: GitHubConnectionController, narrow: Boolean, opener: L
     }
     SettingsRow(narrow = narrow, text = { m -> SettingsRowText(GitHubCopy.PAT_TITLE, patCaption, m.testTag(GitHubTags.Pat)) })
     SettingsRow(
+        kind = RowKind.Server,
         narrow = narrow,
         text = { m ->
             SettingsRowText(
@@ -253,6 +257,7 @@ private fun CodeRow(poll: GitHubDevicePoll, narrow: Boolean, opener: LoginLinkOp
     }
     Column(Modifier.testTag(GitHubTags.CodeRow)) {
         SettingsRow(
+            kind = RowKind.Server,
             narrow = narrow,
             text = { m ->
                 SelectionContainer(m) {

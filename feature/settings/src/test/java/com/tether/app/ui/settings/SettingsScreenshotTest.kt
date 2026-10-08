@@ -386,7 +386,15 @@ private object NeverAsked : ClaudeAccountsSource {
     override suspend fun alias(accountId: String): ClaudeAccountsResult<com.tether.app.client.ClaudeAccountAlias> = error("a seeded shot must not read an alias")
 }
 
-fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, skin: TetherSkin, size: String, name: String = shot.id) {
+fun ComposeContentTestRule.snapSettings(
+    store: PrefsStore,
+    shot: SettingsShot,
+    skin: TetherSkin,
+    size: String,
+    name: String = shot.id,
+    /** The shell's own switch: the existing shots say it by their size name; the band shots (ta-smj8) by the width. */
+    layout: TetherLayoutClass = if (size == "tablet") TetherLayoutClass.Expanded else TetherLayoutClass.Phone,
+) {
     // The stored mode is the skin shown (the web reference's seeded state), so Appearance agrees.
     store.seed(PreferenceKeys.THEME_MODE to skin.mode.id)
     // Timing-free by construction (T10.1 r4): the stored preferences are read HERE, and the frame
@@ -409,7 +417,7 @@ fun ComposeContentTestRule.snapSettings(store: PrefsStore, shot: SettingsShot, s
             store.prefs,
             state,
             mode = skin.mode,
-            layout = if (size == "tablet") TetherLayoutClass.Expanded else TetherLayoutClass.Phone,
+            layout = layout,
             restartRequired = shot.restart,
             initialPreferences = stored,
             claudeAccounts = shot.accounts?.binding() ?: ClaudeAccountsBinding.None,
@@ -504,4 +512,49 @@ class SettingsFontScaleScreenshotTest(private val shot: SettingsShot, private va
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = listOf(SettingsShot.General, SettingsShot.Appearance, SettingsShot.Engines, SettingsShot.EnginesLogin, SettingsShot.Advanced, SettingsShot.AdvancedGitHubDevice, SettingsShot.Metadata, SettingsShot.EnginesCards, SettingsShot.Profiles, SettingsShot.Nodes, SettingsShot.NodesAdding, SettingsShot.Devices, SettingsShot.DevicesPaired, SettingsShot.DevicesCode).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
+}
+
+/**
+ * ta-smj8 (W22): the rows at the web's two row breakpoints, 35rem (560) and 640px, either side of each: 560 and 561,
+ * 640 and 641 dp, 900 tall, mdpi, Studio only (layout does not vary by skin). The shell's layout class mirrors
+ * `settingsLayout()` (Phone at 640 and under); the 35rem row switch is left to its default, which reads the same width.
+ */
+abstract class SettingsBandShotBase(private val shot: SettingsShot, private val width: Int) : SettingsShotBase() {
+    @Test fun settings() = rule.snapSettings(
+        store, shot, TetherSkin.Studio, "w$width",
+        name = shot.id, layout = if (width <= 640) TetherLayoutClass.Phone else TetherLayoutClass.Expanded,
+    )
+}
+
+object SettingsBandShots {
+    val shots = listOf(
+        SettingsShot.General, SettingsShot.Devices, SettingsShot.DevicesPaired, SettingsShot.Nodes,
+        SettingsShot.AdvancedCli, SettingsShot.Metadata, SettingsShot.EnginesCards,
+    )
+
+    @JvmStatic fun params(): List<Array<Any>> = shots.map { arrayOf<Any>(it) }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w560dp-h900dp-mdpi")
+class SettingsBand560ScreenshotTest(shot: SettingsShot) : SettingsBandShotBase(shot, 560) {
+    companion object { @JvmStatic @ParameterizedRobolectricTestRunner.Parameters(name = "{0}") fun params() = SettingsBandShots.params() }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w561dp-h900dp-mdpi")
+class SettingsBand561ScreenshotTest(shot: SettingsShot) : SettingsBandShotBase(shot, 561) {
+    companion object { @JvmStatic @ParameterizedRobolectricTestRunner.Parameters(name = "{0}") fun params() = SettingsBandShots.params() }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w640dp-h900dp-mdpi")
+class SettingsBand640ScreenshotTest(shot: SettingsShot) : SettingsBandShotBase(shot, 640) {
+    companion object { @JvmStatic @ParameterizedRobolectricTestRunner.Parameters(name = "{0}") fun params() = SettingsBandShots.params() }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w641dp-h900dp-mdpi")
+class SettingsBand641ScreenshotTest(shot: SettingsShot) : SettingsBandShotBase(shot, 641) {
+    companion object { @JvmStatic @ParameterizedRobolectricTestRunner.Parameters(name = "{0}") fun params() = SettingsBandShots.params() }
 }

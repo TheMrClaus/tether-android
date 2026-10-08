@@ -29,11 +29,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -45,6 +49,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -58,6 +63,7 @@ import com.tether.app.ui.theme.CssLineHeight
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
+import kotlin.math.roundToInt
 
 // The dialog's shared parts (globals.css 3039-3092 under the Studio finish, studio.css 556-637):
 // a section's heading and caption, the `.settings-row` (title over caption, a control beside it),
@@ -206,10 +212,39 @@ internal fun RowRule() {
 }
 
 /**
+ * Which web row class a [SettingsRow] is (globals.css 3217-3226 and studio.css 957-987 treat them apart):
+ * [Plain] `.settings-row`, [Server] `.settings-server-row` (it also stacks its control at 561-640, studio.css 975),
+ * [Device] `.settings-row.settings-device` (its keys wrap under the text only when text and keys do not fit,
+ * studio.css 985) and [Field] (a row that is a stacked field at every width).
+ */
+internal enum class RowKind { Plain, Server, Device, Field }
+
+/**
+ * globals.css 3217 / 8729 / 8785 `(max-width: 35rem)`: true at 560 dp and under (REM based, unlike the 640px switch
+ * that [settingsLayout] reads). Provided once by SettingsFrame; a settings part composed outside it fails loudly
+ * instead of drawing the 561-640 layout at a phone width.
+ */
+internal val LocalSettingsRowsStack = staticCompositionLocalOf<Boolean> {
+    error("LocalSettingsRowsStack: a settings part was composed outside SettingsFrame")
+}
+
+/**
+ * `max-width: <fraction>` of the width the parent offers (CSS resolves a percentage max-width against the flex
+ * container's content width): the child is measured against at most that share, never forced to it.
+ */
+internal fun Modifier.maxWidthFraction(fraction: Float): Modifier = layout { measurable, constraints ->
+    val cap = if (constraints.hasBoundedWidth) (constraints.maxWidth * fraction).roundToInt() else constraints.maxWidth
+    val placeable = measurable.measure(constraints.copy(minWidth = minOf(constraints.minWidth, cap), maxWidth = cap))
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+}
+
+/**
  * `.settings-row`: at least 78dp, 17dp above and below, the text beside its control 24dp apart
- * (16 on a phone). On a phone (globals.css 3219) the control drops under the text and fills the
- * row, unless [inline] (the `.settings-toggle` switch keeps its row, globals.css 3224). [rule]:
- * the rule above it (ta-dh1: an engine card's first row has none, studio.css 645).
+ * (16 below 641). At 560 dp and under (globals.css 3221, the 35rem rule) the control drops under the text and fills
+ * the row, unless [inline] (the `.settings-toggle` switch keeps its row, globals.css 3226). A [RowKind.Server] row
+ * also stacks at 561-640 ([narrow], studio.css 975), its control at its own width; a [RowKind.Device] row there
+ * wraps its keys under the text only when both do not fit (studio.css 985). [rule]: the rule above it (ta-dh1: an
+ * engine card's first row has none, studio.css 645).
  */
 @Composable
 internal fun SettingsRow(
@@ -217,19 +252,25 @@ internal fun SettingsRow(
     modifier: Modifier = Modifier,
     inline: Boolean = false,
     rule: Boolean = true,
+    kind: RowKind = RowKind.Plain,
     text: @Composable (Modifier) -> Unit,
     control: (@Composable (Modifier) -> Unit)? = null,
 ) {
+    val rows35 = LocalSettingsRowsStack.current
+    val stacked = !inline && (rows35 || (kind == RowKind.Server && narrow) || kind == RowKind.Field)
     Column(Modifier.fillMaxWidth()) {
         if (rule) RowRule()
-        if (narrow && !inline) {
+        if (stacked) {
+            val fill = rows35 || kind == RowKind.Field
             Column(
                 modifier.fillMaxWidth().heightIn(min = 78.dp).padding(vertical = 17.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 text(Modifier.fillMaxWidth())
-                control?.invoke(Modifier.fillMaxWidth())
+                control?.invoke(if (fill) Modifier.fillMaxWidth() else Modifier)
             }
+        } else if (kind == RowKind.Device && narrow && control != null && !inline) {
+            DeviceWrapRow(modifier.fillMaxWidth().heightIn(min = 78.dp).padding(vertical = 17.dp), text, control)
         } else {
             Row(
                 modifier.fillMaxWidth().heightIn(min = 78.dp).padding(vertical = 17.dp),
@@ -238,6 +279,48 @@ internal fun SettingsRow(
             ) {
                 text(Modifier.weight(1f))
                 control?.invoke(Modifier)
+            }
+        }
+    }
+}
+
+private enum class DeviceSlot { Text, Keys }
+
+/**
+ * studio.css 985, `.settings-device { flex-wrap: wrap }` at 561-640: text and keys share a line (16 apart, the text
+ * taking what the keys leave) while the text's unwrapped width, the gap and the keys fit the row; otherwise the keys
+ * go on their own line at their own width, 16 under the text, starting at its left edge.
+ */
+@Composable
+private fun DeviceWrapRow(modifier: Modifier, text: @Composable (Modifier) -> Unit, control: @Composable (Modifier) -> Unit) {
+    Layout(
+        content = {
+            text(Modifier.layoutId(DeviceSlot.Text))
+            control(Modifier.layoutId(DeviceSlot.Keys))
+        },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val textM = measurables.first { it.layoutId == DeviceSlot.Text }
+        val keysM = measurables.first { it.layoutId == DeviceSlot.Keys }
+        val width = constraints.maxWidth
+        val gap = 16.dp.roundToPx()
+        val keys = keysM.measure(Constraints(maxWidth = width))
+        val inline = textM.maxIntrinsicWidth(Constraints.Infinity) + gap + keys.width <= width
+        if (inline) {
+            val body = textM.measure(Constraints.fixedWidth((width - gap - keys.width).coerceAtLeast(0)).copy(minHeight = 0))
+            val h = maxOf(body.height, keys.height, constraints.minHeight)
+            layout(width, h) {
+                body.place(0, (h - body.height) / 2)
+                keys.place(width - keys.width, (h - keys.height) / 2)
+            }
+        } else {
+            val body = textM.measure(Constraints.fixedWidth(width))
+            val content = body.height + gap + keys.height
+            val h = maxOf(content, constraints.minHeight)
+            val top = (h - content) / 2
+            layout(width, h) {
+                body.place(0, top)
+                keys.place(0, top + body.height + gap)
             }
         }
     }

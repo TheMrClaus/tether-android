@@ -29,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
@@ -287,6 +288,17 @@ fun SettingsDialog(
 internal fun settingsLayout(): TetherLayoutClass = if (windowWidthDp() <= 640) TetherLayoutClass.Phone else TetherLayoutClass.Expanded
 
 /**
+ * globals.css 3217 / 8729 / 8785 `(max-width: 35rem)`: REM based (35 x the 16 px root = 560 dp), unlike the 640px
+ * switch above. Same truncated window width as [settingsLayout]. No font-scale term here: ta-7njx (W23) owns how
+ * rem thresholds scale.
+ */
+internal const val SETTINGS_ROWS_STACK_REM = 35
+internal const val SETTINGS_ROWS_STACK_MAX_DP = SETTINGS_ROWS_STACK_REM * 16
+
+@Composable
+internal fun settingsRowsStack(): Boolean = windowWidthDp() <= SETTINGS_ROWS_STACK_MAX_DP
+
+/**
  * The dialog in place (the inline form the goldens shoot): the same card at every width, content-sized and centred on
  * the skin's scrim. [TetherLayoutClass.Phone] (640 dp and under, studio.css 957-958) is `100vw - 24px` wide, at most
  * `100dvh - 32px` tall, radius 14; [TetherLayoutClass.Expanded] is `min(880px, 100vw - 48px)` (556), at most
@@ -302,6 +314,8 @@ fun SettingsFrame(
     modifier: Modifier = Modifier,
     surfaceModifier: Modifier = Modifier,
     layout: TetherLayoutClass = currentLayoutClass(),
+    /** The 35rem row switch (globals.css 3217): the rows' own width source, apart from [layout]'s 640px terms. */
+    rowsStack: Boolean = settingsRowsStack(),
     /**
      * The stored preferences when the caller has already read them (the screenshot harness, with
      * a [state] seeded from the same read): the first frame is then the loaded dialog. Null (the
@@ -377,7 +391,7 @@ fun SettingsFrame(
         ) {
             SettingsHeader(narrow, onClose)
             SettingsTabStrip(state.tab, narrow, tabsInset, onSelect = { state.tab = it })
-            Column(
+            CompositionLocalProvider(LocalSettingsRowsStack provides rowsStack) { Column(
                 Modifier
                     .testTag(SettingsDialogTags.Body)
                     .weight(1f, fill = false)
@@ -404,7 +418,7 @@ fun SettingsFrame(
                         github = github,
                     )
                 }
-            }
+            } }
             SettingsFooter(narrow, saving || !state.ready, onCancel = onClose, onSave = save)
         }
     }
