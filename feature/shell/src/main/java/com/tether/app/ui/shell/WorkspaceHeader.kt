@@ -19,6 +19,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.semantics.invisibleToUser
+import androidx.compose.ui.semantics.text
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -192,16 +196,13 @@ fun WorkspaceHeader(
         hasBadge = badge != null,
         title = {
             // ta-28i: the session's title by the label rule, in its content's direction.
-            Text(
-                LabelText.title(session.name),
+            SessionTitle(
+                name = LabelText.title(session.name),
                 color = t.white,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
                 style = when {
                     expanded -> cssText(type.ui, 1.12f, 740, trackingEm = -0.025f, lineHeight = 1.45f)
                     else -> cssText(type.ui, 0.925f, 740, trackingEm = -0.025f, lineHeight = 1.45f)
                 }.copy(textDirection = proseDirection),
-                modifier = Modifier.semantics { heading() },
             )
         },
         rename = { RenameKey(actions.onRename) },
@@ -330,6 +331,61 @@ private fun HeaderMainRow(
             cluster.placeRelative(clusterX, Alignment.CenterVertically.align(cluster.height, height))
         }
     }
+}
+
+/**
+ * `h1 { overflow: hidden; text-overflow: ellipsis }` (ta-m5sy): CSS Overflow 3 never ellipses away the first character of a
+ * line ("the first character or atomic inline-level element on a line must be clipped rather than ellipsed"), so a box
+ * narrower than "A…" shows the first letter and a clipped "…", never a bare "…" (the web at 914 x 411 draws "A" and the
+ * start of "…" in 19.75 px). Wider boxes keep the ordinary end ellipsis. The heading's text stays the full name, as the
+ * h1's textContent does; the first grapheme is a grapheme cluster (a decomposed "é" or a ZWJ emoji is one), from the
+ * start edge, so right-to-left names follow the same rule.
+ */
+@Composable
+internal fun SessionTitle(name: String, color: Color, style: TextStyle, modifier: Modifier = Modifier) {
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(modifier) {
+        val available = constraints.maxWidth
+        val lead = remember(name) { firstGrapheme(name) }
+        val clipped = remember(name, style) { lead + "…" }
+        val needsClip = available in 1 until Constraints.Infinity && lead.length < name.length &&
+            measurer.measure(name, style, softWrap = false, maxLines = 1).size.width > available &&
+            measurer.measure(clipped, style, softWrap = false, maxLines = 1).size.width > available
+        if (needsClip) {
+            Box(Modifier.semantics { heading(); text = AnnotatedString(name) }) {
+                Text(
+                    clipped,
+                    color = color,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                    style = style,
+                    modifier = Modifier.semantics { invisibleToUser() }.testTag(HeaderTitleTextTag),
+                )
+            }
+        } else {
+            Text(
+                name,
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = style,
+                modifier = Modifier.semantics { heading() }.testTag(HeaderTitleTextTag),
+            )
+        }
+    }
+}
+
+/** The title's drawn text (ta-m5sy), apart from its full-name heading. */
+internal const val HeaderTitleTextTag = "shell-header-title-text"
+
+/** The name's first extended grapheme cluster (UAX #29), so a combining mark or a ZWJ sequence stays whole. */
+internal fun firstGrapheme(name: String): String {
+    if (name.isEmpty()) return name
+    val it = android.icu.text.BreakIterator.getCharacterInstance()
+    it.setText(name)
+    val end = it.next()
+    return if (end == android.icu.text.BreakIterator.DONE) name else name.substring(0, end)
 }
 
 private enum class HeaderSlot { Title, Rename, Pill, Badge, Cluster }
