@@ -1214,7 +1214,7 @@ class ApprovalCardBehaviourTest {
         assertTrue(!store.grant(com.tether.app.client.ConsentGuard.cardIdentity("zz", turn, request)).networkOff)
     }
 
-    @Test fun pathsAreShownEscapedCutAndQuoted() {
+    @Test fun pathsAreShownEscapedQuotedAndWhole() {
         show(trickyPaths)
         scrollTo("grant-read")
         val label = listOf("grant-read", "grant-write").flatMap { tag -> rule.onAllNodesWithTag(tag).fetchSemanticsNodes() }
@@ -1224,7 +1224,8 @@ class ApprovalCardBehaviourTest {
         assertTrue(label, label.contains("“/x\\u000A/etc/shadow”"))
         assertTrue(label, label.contains("“/safe\\u202Etxt.exe”"))
         assertTrue(label, label.contains("“/x; no network access”"))
-        assertTrue(label, label.contains("…d"))
+        assertTrue(label, label.contains("“/" + "d".repeat(300) + "”")) // whole, no middle cut (ta-coik.76)
+        assertTrue(label, !label.contains("…"))
         assertTrue("no raw control reaches the screen", label.none { it == '\n' || it == '\u202E' })
     }
     // ---- round 7: a confirmation refers to the words that were on screen -----------------------
@@ -1506,9 +1507,13 @@ class ApprovalCardBehaviourTest {
         val cwd = "/w/" + "d".repeat(4_000) + "/../.."
         show(permissionCard(listOf("/srv/a"), emptyList(), cwd = cwd))
         scrollTo("approval-card")
-        val shown = displayPath(cwd)
-        assertTrue(shown, shown.endsWith("/../..\u201d$PDI$RELATIVE_MARKER"))
-        rule.onNodeWithText(shown.breakAnywhere(), substring = true, useUnmergedTree = true).assertExists()
+        val pieces = displayPathChunks(cwd)
+        assertTrue(pieces.last(), pieces.last().endsWith("/../..\u201d$PDI$RELATIVE_MARKER"))
+        // The whole directory is drawn, piece by piece (4,000+ characters: several pieces), the tail marked.
+        val drawn = rule.onAllNodesWithTag("approval-context-piece", useUnmergedTree = true).fetchSemanticsNodes()
+            .map { n -> n.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text }.filterNot { it == '\u2060' || it == '\u200B' } }
+        assertEquals(pieces.size, drawn.size)
+        assertEquals(pieces.joinToString(""), drawn.joinToString("").removePrefix("Working directory · "))
         // The directory is context, not a grant.
         scrollTo("grant-confirm")
         rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
