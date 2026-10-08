@@ -41,6 +41,9 @@ enum class ApprovalShot(val id: String) {
     Grants("approval-grants"),
     LongPaths("approval-long-paths"),
     GrantsDisabled("approval-grants-disabled"),
+
+    /** ta-xhs4: the grants card holding the review focus by keyboard: the web's `:focus-visible` ring (Studio light only). */
+    FocusRing("approval-focus-ring"),
     Locked("approval-locked"),
     Sent("approval-sent"),
     Question("question"),
@@ -54,7 +57,7 @@ private const val CaptureAtMs = 600L
 private fun fixtureFor(shot: ApprovalShot): ChatFixtures.Folded = when (shot) {
     ApprovalShot.Write, ApprovalShot.Locked, ApprovalShot.Sent -> ApprovalFixtures.write
     ApprovalShot.Choices -> ApprovalFixtures.choices
-    ApprovalShot.Grants -> ApprovalFixtures.grants
+    ApprovalShot.Grants, ApprovalShot.FocusRing -> ApprovalFixtures.grants
     ApprovalShot.LongPaths -> ApprovalFixtures.longPaths
     ApprovalShot.GrantsDisabled -> ApprovalFixtures.grantsExactOnly
     ApprovalShot.Question, ApprovalShot.QuestionValidation -> ApprovalFixtures.question
@@ -83,6 +86,9 @@ fun ComposeContentTestRule.snapApproval(shot: ApprovalShot, skin: TetherSkin, na
         decided = if (shot == ApprovalShot.Sent) setOf(consentKey("s1", "req-w", pendingApprovals(fixture.tree).single().let { wireFingerprint(TEST_ORIGIN, it.activeTurnId, it.request) })) else emptySet(),
     )
     setContent {
+        // The keyboard route of "Review request": the card takes the focus, by keyboard, once the page has drawn.
+        val input = androidx.compose.ui.platform.LocalInputModeManager.current
+        if (shot == ApprovalShot.FocusRing) androidx.compose.runtime.SideEffect { input.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard) }
         ChatHost(skin, wellHeight, wellWidth) {
             CompositionLocalProviderForMedia {
                 ChatTranscript(
@@ -94,6 +100,7 @@ fun ComposeContentTestRule.snapApproval(shot: ApprovalShot, skin: TetherSkin, na
                     listState = listState,
                     richCodex = shot == ApprovalShot.Choices || shot == ApprovalShot.Grants || shot == ApprovalShot.LongPaths || shot == ApprovalShot.GrantsDisabled,
                     consent = consent,
+                    reviewFocus = if (shot == ApprovalShot.FocusRing) "req-g" else null,
                 )
             }
         }
@@ -149,8 +156,17 @@ class ApprovalCardsPhoneScreenshotTest(private val shot: ApprovalShot, private v
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = ApprovalShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = ApprovalShot.entries.filter { it != ApprovalShot.FocusRing }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
+}
+
+/** ta-xhs4: the focus ring, one golden: Studio light at the phone viewport, in keyboard mode. */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class ApprovalFocusRingScreenshotTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun ring() = rule.snapApproval(ApprovalShot.FocusRing, TetherSkin.Studio, ApprovalShot.FocusRing.id, "phone", WellHeightPhone)
 }
 
 /** The web's desktop layout: the approval and question cards span the column, a denial is 94% wide. */

@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
@@ -40,6 +41,11 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.draw.drawWithCache
+import com.tether.app.ui.components.focusRing
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -324,6 +330,9 @@ internal class ApprovalLocal {
     var latched by mutableStateOf(false)
     var overlayBlocked by mutableStateOf(false)
 
+    /** ta-xhs4: whether the focused card draws the keyboard focus ring; shared by every segment of the card. */
+    val ring = ReviewRing()
+
     private var fpValue: String? = null
     private var fpOrigin: String? = null
     private var fpTurn: String? = null
@@ -475,16 +484,50 @@ private val CARD_PADDING = 20.dp
  * and clipped to the segment, so the side strokes run on and no horizontal stroke shows at a seam.
  */
 @Composable
-private fun CardSegment(top: Boolean, bottom: Boolean, modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
+private fun CardSegment(top: Boolean, bottom: Boolean, modifier: Modifier, ring: ReviewRing, content: @Composable ColumnScope.() -> Unit) {
     val t = LocalTetherTokens.current
-    Column(
-        modifier
-            .fillMaxWidth()
-            .framed(top, bottom, 14.dp, t.attentionBorder, fill = t.attentionBg)
-            .padding(start = CARD_PADDING, end = CARD_PADDING, top = if (top) CARD_PADDING else 0.dp, bottom = if (bottom) CARD_PADDING else 0.dp),
-        content = content,
-    )
+    CompositionLocalProvider(LocalReviewRing provides ring) {
+        Column(
+            modifier
+                .fillMaxWidth()
+                .segmentFocusRing(ring.drawn, top, bottom, 14.dp, t.violet)
+                .framed(top, bottom, 14.dp, t.attentionBorder, fill = t.attentionBg)
+                .padding(start = CARD_PADDING, end = CARD_PADDING, top = if (top) CARD_PADDING else 0.dp, bottom = if (bottom) CARD_PADDING else 0.dp),
+            content = content,
+        )
+    }
 }
+
+/**
+ * ta-xhs4: the web's `:focus-visible` outline on the whole card (2px solid `--violet`, offset 2px, globals.css:83-86) as it
+ * runs over this segment: the rounded rectangle grown by the offset (its corner grown with it), only the sides where the card
+ * continues, the arc on the head's top and the tail's bottom. It is drawn beyond the segment's bounds and before [framed]'s
+ * clip, so neither the clip nor a seam stroke touches it: the ring of a continuing side is the same rectangle taller than the
+ * segment, clipped to it, so its sides run on into the next segment.
+ */
+private fun Modifier.segmentFocusRing(drawn: Boolean, top: Boolean, bottom: Boolean, radius: Dp, color: Color, width: Dp = 2.dp, offset: Dp = 2.dp): Modifier =
+    if (!drawn) this else drawWithCache {
+        val r = radius.toPx()
+        val o = offset.toPx()
+        val w = width.toPx()
+        val over = 2f * (r + o + w) + w
+        val y0 = if (top) 0f else -over
+        val y1 = size.height + if (bottom) 0f else over
+        fun grown(by: Float) = RoundRect(-by, y0 - (if (top) by else 0f), size.width + by, y1 + (if (bottom) by else 0f), CornerRadius(r + by))
+        val ringPath = Path().apply {
+            fillType = PathFillType.EvenOdd
+            addRoundRect(grown(o + w))
+            addRoundRect(grown(o))
+        }
+        onDrawBehind {
+            // Beyond the segment on the open ends, clipped to it there: the sides run on, no horizontal stroke at a seam.
+            val clipTop = if (top) -(o + w) else 0f
+            val clipBottom = size.height + if (bottom) o + w else 0f
+            clipRect(left = -(o + w), top = clipTop, right = size.width + o + w, bottom = clipBottom) {
+                drawPath(ringPath, color)
+            }
+        }
+    }
 
 /**
  * A rounded outline (and optional fill) of which only the sides [top] / [bottom] close; see [CardSegment]. It is the
@@ -509,7 +552,7 @@ private fun ApprovalHead(c: ApprovalController, modifier: Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val view = c.view
-    CardSegment(top = true, bottom = false, modifier = modifier.reviewFocusTarget(view.requestId).semantics { paneTitle = "Tool approval required" }.testTag("approval-card")) {
+    CardSegment(top = true, bottom = false, ring = c.local.ring, modifier = modifier.reviewFocusTarget(view.requestId, c.local.ring).semantics { paneTitle = "Tool approval required" }.testTag("approval-card")) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
                 Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.attentionInk, modifier = Modifier.size(15.dp))
@@ -555,7 +598,7 @@ private fun ApprovalHead(c: ApprovalController, modifier: Modifier) {
 private fun ApprovalEntry(c: ApprovalController, segment: ApprovalSegment, modifier: Modifier) {
     val t = LocalTetherTokens.current
     val e = checkNotNull(segment.entry)
-    CardSegment(top = false, bottom = false, modifier = modifier) {
+    CardSegment(top = false, bottom = false, modifier = modifier, ring = c.local.ring) {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -595,7 +638,7 @@ private fun ApprovalTail(c: ApprovalController, modifier: Modifier) {
     val lock = c.lock
     val sent = c.sent
     val id = c.id
-    CardSegment(top = false, bottom = true, modifier = modifier) {
+    CardSegment(top = false, bottom = true, modifier = modifier, ring = c.local.ring) {
         // No fieldset: the card's own `space-sm` gap after the last line of the head.
         Column(
             Modifier.fillMaxWidth().padding(top = if (requested == null) t.css.spaceSm else 0.dp),
@@ -660,7 +703,7 @@ private fun ApprovalTail(c: ApprovalController, modifier: Modifier) {
                             enabled = c.armed && pick != null,
                             // The web's `title` hover text; spoken with the label here.
                             contentDescription = choice.description?.let { "${choice.label}. $it" },
-                            modifier = Modifier.refuseObscuredTouches(c.blocked).testTag("approval-choice"),
+                            modifier = Modifier.refuseObscuredTouches(c.blocked).clearsReviewRing().testTag("approval-choice"),
                         )
                     }
                 } else {
@@ -670,7 +713,7 @@ private fun ApprovalTail(c: ApprovalController, modifier: Modifier) {
                         label = "Approve",
                         icon = TetherIcons.Check,
                         enabled = c.armed,
-                        modifier = Modifier.refuseObscuredTouches(c.blocked).testTag("approval-allow"),
+                        modifier = Modifier.refuseObscuredTouches(c.blocked).clearsReviewRing().testTag("approval-allow"),
                     )
                     TetherKey(
                         onClick = { c.send(null, "deny", null) },
@@ -678,7 +721,7 @@ private fun ApprovalTail(c: ApprovalController, modifier: Modifier) {
                         label = "Deny",
                         icon = TetherIcons.Ban,
                         enabled = c.armed,
-                        modifier = Modifier.refuseObscuredTouches(c.blocked).testTag("approval-deny"),
+                        modifier = Modifier.refuseObscuredTouches(c.blocked).clearsReviewRing().testTag("approval-deny"),
                     )
                 }
             }
@@ -821,6 +864,7 @@ internal fun GrantCheckbox(checked: Boolean, enabled: Boolean, onChange: () -> U
             .fillMaxWidth()
             .heightIn(min = TetherDimens.touchTargetDp)
             .refuseObscuredTouches(onBlocked)
+            .clearsReviewRing()
             .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = { onChange() })
             .semantics { contentDescription = name }
             .testTag(tag),
@@ -968,152 +1012,157 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     }
 
     val frozen = !armed
-    StaleTapGuard(cfp to pageIndex) { _ ->
-        Column(
-            modifier
-                .reviewFocusTarget(view.requestId)
-                .fillMaxWidth()
-                .cssSurface(
-                    cardShape(t),
-                    background = t.questionBg,
-                    border = CssBorder(1.dp, t.questionBorder),
-                    shadows = emptyList(),
-                )
-                .padding(20.dp)
-                .semantics { paneTitle = "The agent is asking a question" }
-                .testTag("question-card"),
-            verticalArrangement = Arrangement.spacedBy(t.css.spaceMd),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
-                Icon(TetherIcons.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(15.dp))
-                Text(
-                    "The agent needs your input",
-                    style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.92f), fontWeight = FontWeight(700)),
-                    color = t.white,
-                    modifier = Modifier.weight(1f).semantics { heading(); liveRegion = LiveRegionMode.Polite },
-                )
-                if (total > 1) {
-                    // `.chat-question-page { margin-left: auto }`: pushed to the row's end.
-                    Text(
-                        "Question ${pageIndex + 1} of $total",
-                        style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), fontWeight = FontWeight(500)),
-                        color = t.muted,
-                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("question-page"),
+    val ring = remember { ReviewRing() }
+    CompositionLocalProvider(LocalReviewRing provides ring) {
+        StaleTapGuard(cfp to pageIndex) { _ ->
+            Column(
+                modifier
+                    .reviewFocusTarget(view.requestId, ring)
+                    .fillMaxWidth()
+                    .focusRing(ring.drawn, cardShape(t), t.violet)
+                    .cssSurface(
+                        cardShape(t),
+                        background = t.questionBg,
+                        border = CssBorder(1.dp, t.questionBorder),
+                        shadows = emptyList(),
                     )
-                }
-            }
-            if (question != null) {
-                val highlight = submitAttempted && !isAnswered(question) && slotOf(question) !in sel.skipped
-                // `.is-unanswered` pads the page in; its `--attention` rule names a token no skin defines,
-                // so (as on the web) no rule is drawn — the validation sentence below carries it.
-                Column(
-                    Modifier.fillMaxWidth().padding(start = if (highlight) t.css.spaceSm else 0.dp),
-                    verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
-                ) {
-                    // ta-28i: the agent's question, header and options are prose (SafeText), as on the answered card.
-                    question.header?.let {
+                    .padding(20.dp)
+                    .semantics { paneTitle = "The agent is asking a question" }
+                    .testTag("question-card"),
+                verticalArrangement = Arrangement.spacedBy(t.css.spaceMd),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
+                    Icon(TetherIcons.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(15.dp))
+                    Text(
+                        "The agent needs your input",
+                        style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.92f), fontWeight = FontWeight(700)),
+                        color = t.white,
+                        modifier = Modifier.weight(1f).semantics { heading(); liveRegion = LiveRegionMode.Polite },
+                    )
+                    if (total > 1) {
+                        // `.chat-question-page { margin-left: auto }`: pushed to the row's end.
                         Text(
-                            proseText(cut4k(it).uppercase()),
-                            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
+                            "Question ${pageIndex + 1} of $total",
+                            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), fontWeight = FontWeight(500)),
                             color = t.muted,
-                            modifier = Modifier.padding(vertical = pMargin(0.72f)).originalWords(proseText(cut4k(it)).text), // server text: the SafeText-drawn words, never the raw string
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("question-page"),
                         )
                     }
-                    Text(
-                        proseText(cut4k(question.question)),
-                        style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)),
-                        color = t.ink,
-                        modifier = Modifier.padding(vertical = pMargin(0.9f)),
-                    )
-                    Column(Modifier.fillMaxWidth().padding(top = t.css.spaceXs), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
-                        val slot = slotOf(question)
-                        val multi = slots.single[slot] != true
-                        question.options.forEach { option ->
-                            val labelAt = labelIndex(question, option.label)
-                            QuestionOption(
-                                option = option,
-                                active = labelAt in sel.picks[slot].orEmpty(),
-                                multi = multi,
-                                enabled = !frozen,
-                                // L-A: an option of a page that is no longer shown (a second finger after Next) is ignored.
-                                onToggle = {
-                                    if (onThisPage()) update { it.copy(picks = it.picks + (slot to togglePick(it.picks[slot].orEmpty(), multi, labelAt))) }
-                                },
-                                onBlocked = blocked,
+                }
+                if (question != null) {
+                    val highlight = submitAttempted && !isAnswered(question) && slotOf(question) !in sel.skipped
+                    // `.is-unanswered` pads the page in; its `--attention` rule names a token no skin defines,
+                    // so (as on the web) no rule is drawn — the validation sentence below carries it.
+                    Column(
+                        Modifier.fillMaxWidth().padding(start = if (highlight) t.css.spaceSm else 0.dp),
+                        verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+                    ) {
+                        // ta-28i: the agent's question, header and options are prose (SafeText), as on the answered card.
+                        question.header?.let {
+                            Text(
+                                proseText(cut4k(it).uppercase()),
+                                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
+                                color = t.muted,
+                                modifier = Modifier.padding(vertical = pMargin(0.72f)).originalWords(proseText(cut4k(it)).text), // server text: the SafeText-drawn words, never the raw string
                             )
                         }
-                    }
-                    TetherInputWell(
-                        value = sel.other[slotOf(question)].orEmpty(),
-                        // An HTML text input drops line breaks; so does this one. Capped at the guard's limit.
-                        onValueChange = { text ->
-                            if (onThisPage()) {
-                                val clean = cutCodePoints(text.replace("\r", "").replace("\n", ""), com.tether.app.client.ConsentGuard.MAX_OTHER_CHARS)
-                                update { it.copy(other = it.other + (slotOf(question) to clean)) }
+                        Text(
+                            proseText(cut4k(question.question)),
+                            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)),
+                            color = t.ink,
+                            modifier = Modifier.padding(vertical = pMargin(0.9f)),
+                        )
+                        Column(Modifier.fillMaxWidth().padding(top = t.css.spaceXs), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
+                            val slot = slotOf(question)
+                            val multi = slots.single[slot] != true
+                            question.options.forEach { option ->
+                                val labelAt = labelIndex(question, option.label)
+                                QuestionOption(
+                                    option = option,
+                                    active = labelAt in sel.picks[slot].orEmpty(),
+                                    multi = multi,
+                                    enabled = !frozen,
+                                    // L-A: an option of a page that is no longer shown (a second finger after Next) is ignored.
+                                    onToggle = {
+                                        if (onThisPage()) update { it.copy(picks = it.picks + (slot to togglePick(it.picks[slot].orEmpty(), multi, labelAt))) }
+                                    },
+                                    onBlocked = blocked,
+                                )
                             }
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(top = t.css.spaceXs).testTag("question-other"),
-                        placeholder = "Other (type your own answer)…",
-                        singleLine = true,
-                        enabled = !frozen,
-                    )
-                    if (slots.single[slotOf(question)] == false) {
-                        Text("Select all that apply.", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.74f)), color = t.muted)
-                    }
-                }
-            }
-            FlowRow(
-                Modifier.fillMaxWidth().padding(top = t.css.spaceXs),
-                horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm, Alignment.End),
-                verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
-                itemVerticalAlignment = Alignment.CenterVertically,
-            ) {
-                when {
-                    unavailable != null -> Box(Modifier.fillMaxWidth()) { StatusLine(unavailable, t.ink, "consent-lock") }
-                    overlayBlocked && !sent -> Box(Modifier.fillMaxWidth()) { StatusLine(OVERLAY_COPY, t.ink, "consent-overlay") }
-                    sent && consent.isUnconfirmed(id, fp) -> Box(Modifier.fillMaxWidth()) { StatusLine(UNCONFIRMED_COPY, t.muted, "consent-unconfirmed") }
-                    sent -> Box(Modifier.fillMaxWidth()) { StatusLine("Answer sent. Waiting for the agent.", t.muted, "consent-sent") }
-                    submitAttempted && !allAnswered -> Box(Modifier.fillMaxWidth().padding(vertical = pMargin(0.78f))) {
-                        StatusLine("Answer each highlighted question, or choose Skip to leave it unanswered.", t.ink, "question-validation")
-                    }
-                }
-                if (unavailable == null && question != null) {
-                    Box(
-                        Modifier
-                            .heightIn(min = TetherDimens.touchTargetDp)
-                            .refuseObscuredTouches(blocked)
-                            .clickable(enabled = armed, role = Role.Button, onClick = ::skip)
-                            .alpha(if (armed) 1f else 0.65f)
-                            .padding(horizontal = t.css.spaceSm)
-                            .testTag("question-skip"),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        androidx.compose.foundation.text.selection.DisableSelection {
-                            Text("Skip", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f), fontWeight = FontWeight(560)), color = t.muted)
+                        }
+                        TetherInputWell(
+                            value = sel.other[slotOf(question)].orEmpty(),
+                            // An HTML text input drops line breaks; so does this one. Capped at the guard's limit.
+                            onValueChange = { text ->
+                                if (onThisPage()) {
+                                    val clean = cutCodePoints(text.replace("\r", "").replace("\n", ""), com.tether.app.client.ConsentGuard.MAX_OTHER_CHARS)
+                                    update { it.copy(other = it.other + (slotOf(question) to clean)) }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = t.css.spaceXs).testTag("question-other"),
+                            placeholder = "Other (type your own answer)…",
+                            singleLine = true,
+                            enabled = !frozen,
+                        )
+                        if (slots.single[slotOf(question)] == false) {
+                            Text("Select all that apply.", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.74f)), color = t.muted)
                         }
                     }
                 }
-                if (isLastPage || unavailable != null) {
-                    TetherKey(
-                        onClick = { submit() },
-                        classes = KeyClasses.ButtonPrimary,
-                        label = when {
-                            unavailable != null -> "Answer unavailable"
-                            sent -> "Answer sent"
-                            else -> "Submit answer"
-                        },
-                        icon = TetherIcons.Check,
-                        enabled = armed,
-                        modifier = Modifier.refuseObscuredTouches(blocked).testTag("question-submit"),
-                    )
-                } else {
-                    TetherKey(
-                        onClick = ::next,
-                        classes = KeyClasses.ButtonPrimary,
-                        label = "Next",
-                        enabled = armed && question != null && isAnswered(question),
-                        modifier = Modifier.refuseObscuredTouches(blocked).testTag("question-next"),
-                    )
+                FlowRow(
+                    Modifier.fillMaxWidth().padding(top = t.css.spaceXs),
+                    horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    when {
+                        unavailable != null -> Box(Modifier.fillMaxWidth()) { StatusLine(unavailable, t.ink, "consent-lock") }
+                        overlayBlocked && !sent -> Box(Modifier.fillMaxWidth()) { StatusLine(OVERLAY_COPY, t.ink, "consent-overlay") }
+                        sent && consent.isUnconfirmed(id, fp) -> Box(Modifier.fillMaxWidth()) { StatusLine(UNCONFIRMED_COPY, t.muted, "consent-unconfirmed") }
+                        sent -> Box(Modifier.fillMaxWidth()) { StatusLine("Answer sent. Waiting for the agent.", t.muted, "consent-sent") }
+                        submitAttempted && !allAnswered -> Box(Modifier.fillMaxWidth().padding(vertical = pMargin(0.78f))) {
+                            StatusLine("Answer each highlighted question, or choose Skip to leave it unanswered.", t.ink, "question-validation")
+                        }
+                    }
+                    if (unavailable == null && question != null) {
+                        Box(
+                            Modifier
+                                .heightIn(min = TetherDimens.touchTargetDp)
+                                .refuseObscuredTouches(blocked)
+                                .clearsReviewRing()
+                                .clickable(enabled = armed, role = Role.Button, onClick = ::skip)
+                                .alpha(if (armed) 1f else 0.65f)
+                                .padding(horizontal = t.css.spaceSm)
+                                .testTag("question-skip"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            androidx.compose.foundation.text.selection.DisableSelection {
+                                Text("Skip", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f), fontWeight = FontWeight(560)), color = t.muted)
+                            }
+                        }
+                    }
+                    if (isLastPage || unavailable != null) {
+                        TetherKey(
+                            onClick = { submit() },
+                            classes = KeyClasses.ButtonPrimary,
+                            label = when {
+                                unavailable != null -> "Answer unavailable"
+                                sent -> "Answer sent"
+                                else -> "Submit answer"
+                            },
+                            icon = TetherIcons.Check,
+                            enabled = armed,
+                            modifier = Modifier.refuseObscuredTouches(blocked).clearsReviewRing().testTag("question-submit"),
+                        )
+                    } else {
+                        TetherKey(
+                            onClick = ::next,
+                            classes = KeyClasses.ButtonPrimary,
+                            label = "Next",
+                            enabled = armed && question != null && isAnswered(question),
+                            modifier = Modifier.refuseObscuredTouches(blocked).clearsReviewRing().testTag("question-next"),
+                        )
+                    }
                 }
             }
         }
@@ -1154,6 +1203,7 @@ private fun QuestionOption(option: QuestionOptionView, active: Boolean, multi: B
             .alpha(if (enabled) 1f else 0.65f)
             .cssSurface(shape, background = if (active) t.violetWash else t.keyFace, border = CssBorder(1.dp, border), shadows = shadows)
             .refuseObscuredTouches(onBlocked)
+            .clearsReviewRing()
             .toggleable(value = active, enabled = enabled, role = if (multi) Role.Checkbox else Role.RadioButton, onValueChange = { onToggle() })
             .padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm)
             .testTag("question-option"),
