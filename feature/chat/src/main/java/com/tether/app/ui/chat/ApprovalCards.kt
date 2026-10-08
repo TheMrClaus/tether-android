@@ -507,7 +507,7 @@ private fun ApprovalHead(c: ApprovalController, modifier: Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val view = c.view
-    CardSegment(top = true, bottom = false, modifier = modifier.semantics { paneTitle = "Tool approval required" }.testTag("approval-card")) {
+    CardSegment(top = true, bottom = false, modifier = modifier.reviewFocusTarget(view.requestId).semantics { paneTitle = "Tool approval required" }.testTag("approval-card")) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
                 Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.attentionInk, modifier = Modifier.size(15.dp))
@@ -926,6 +926,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     StaleTapGuard(cfp to pageIndex) { _ ->
         Column(
             modifier
+                .reviewFocusTarget(view.requestId)
                 .fillMaxWidth()
                 .cssSurface(
                     cardShape(t),

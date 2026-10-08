@@ -92,6 +92,13 @@ fun ChatScreen(
     onOpenDrawer: () -> Unit = {},
     /** False when a shell hosts the workspace header itself (T4.1's phone shell). */
     showWorkspaceHeader: Boolean = true,
+    /**
+     * ta-4711: the request the Overview's "Review request" asked this transcript to land on (passed only while the shown
+     * session is the target's, the web's `activeSession?.id ===` guard), and the one callback that says the card was
+     * brought to the centre and focused. The run panel never takes it: the card is in the session's own transcript.
+     */
+    reviewFocus: String? = null,
+    onReviewShown: () -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
     // ta-coik.52: every preference is the server's own (the web's localStorage is per origin).
@@ -478,6 +485,8 @@ fun ChatScreen(
                     richOpencode = isRichOpencodeSession(session.provider, session.engineGeneration),
                     sends = sends,
                     wellBackground = false,
+                    reviewFocus = reviewFocus,
+                    onReviewShown = onReviewShown,
                 ) } }
             }
             // ta-coik.68: the full-size viewer is hosted here, not in the tool card's row: a lazy transcript may

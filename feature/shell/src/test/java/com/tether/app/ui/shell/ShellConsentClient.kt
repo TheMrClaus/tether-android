@@ -28,7 +28,9 @@ class ShellConsentClient : TetherClient {
     override fun controlSchedule(scheduleId: String, action: String): Boolean = scheduleControls.add(scheduleId to action)
     override val connection: StateFlow<ConnectionState> get() = link
     override val sessions = MutableStateFlow<List<AgentSession>>(emptyList())
-    override val providers: StateFlow<List<ProviderInfo>> = MutableStateFlow(emptyList())
+    /** ta-4711: tests set it (a provider without `interactiveApprovals` draws no approval card). */
+    val providerList = MutableStateFlow<List<ProviderInfo>>(emptyList())
+    override val providers: StateFlow<List<ProviderInfo>> get() = providerList
     override val workspaceRoot: StateFlow<String?> = MutableStateFlow("/w")
     override val projections = MutableStateFlow<Map<String, SessionProjection>>(emptyMap())
     override val projectionTrees = MutableStateFlow<Map<String, JsObj>>(emptyMap())

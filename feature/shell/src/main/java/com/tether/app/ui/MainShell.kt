@@ -418,22 +418,39 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     // dashboard.tsx `writeStoredView`: remember the last top-level view for the next launch.
     val viewOrigin = com.tether.app.client.serverOrigin(vm.client.serverUrl.collectAsStateWithLifecycle().value)
     LaunchedEffect(view, viewOrigin) { view?.let { prefs.setLastView(viewOrigin, it.key) } }
-    // T15.2 (dashboard.tsx:1392-1443 reviewRequest): the hand-off lands in the session; once a
-    // snapshot on this connection has confirmed it, a request no longer pending is said so. A
-    // session that never confirms within the bound says it could not be found. Nothing is answered.
+    // T15.2 / ta-4711 (dashboard.tsx:1411-1461 reviewRequest): the hand-off lands in the session; once a snapshot on this
+    // connection has confirmed it, EVERY update of its projection re-checks the request (the web re-runs on each one):
+    // no longer pending says so, pending is handed to the session's transcript, which brings the card to the centre and
+    // focuses it, then says it is shown. One 8 s bound runs from the tap over all of it: a session that never confirms,
+    // or a card that is never drawn, says it could not be found. Nothing is answered.
+    var reviewHandoff by remember { mutableStateOf<String?>(null) }
+    var reviewShown by remember { mutableStateOf(false) }
     reviewTarget?.let { target ->
         LaunchedEffect(target) {
             val (sessionId, requestId) = target
-            val confirmed = kotlinx.coroutines.withTimeoutOrNull(com.tether.app.ui.overview.OverviewPresentation.REVIEW_WAIT_MS) {
-                vm.client.liveSessions.first { sessionId in it }
+            reviewShown = false
+            reviewHandoff = null
+            try {
+                val outcome = kotlinx.coroutines.withTimeoutOrNull(com.tether.app.ui.overview.OverviewPresentation.REVIEW_WAIT_MS) {
+                    vm.client.liveSessions.first { sessionId in it }
+                    kotlinx.coroutines.flow.combine(
+                        vm.client.projectionTrees.map { com.tether.app.ui.overview.OverviewPresentation.reviewStillPending(it[sessionId], requestId) }.distinctUntilChanged(),
+                        androidx.compose.runtime.snapshotFlow { reviewShown },
+                    ) { pending, shown -> pending to shown }
+                        .first { (pending, shown) ->
+                            if (pending == true) reviewHandoff = requestId
+                            shown || pending == false
+                        }
+                }
+                when {
+                    outcome == null -> vm.reportLocalError(com.tether.app.ui.overview.OverviewPresentation.REVIEW_NOT_FOUND)
+                    outcome.second -> Unit
+                    else -> vm.reportLocalError(com.tether.app.ui.overview.OverviewPresentation.REVIEW_RESOLVED)
+                }
+                reviewTarget = null
+            } finally {
+                reviewHandoff = null
             }
-            val pending = if (confirmed == null) null else com.tether.app.ui.overview.OverviewPresentation.reviewStillPending(vm.client.projectionTrees.value[sessionId], requestId)
-            when (pending) {
-                null -> vm.reportLocalError(com.tether.app.ui.overview.OverviewPresentation.REVIEW_NOT_FOUND)
-                false -> vm.reportLocalError(com.tether.app.ui.overview.OverviewPresentation.REVIEW_RESOLVED)
-                true -> Unit
-            }
-            reviewTarget = null
         }
     }
 
@@ -557,6 +574,9 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                             modifier = Modifier.fillMaxSize(),
                             onOpenDrawer = shell::openDrawer,
                             showWorkspaceHeader = false,
+                            // The web's `activeSession?.id ===` guard (dashboard.tsx:1424): only the target's session.
+                            reviewFocus = reviewHandoff?.takeIf { session?.id != null && session.id == reviewTarget?.first },
+                            onReviewShown = { reviewShown = true },
                         )
                     }
                 },

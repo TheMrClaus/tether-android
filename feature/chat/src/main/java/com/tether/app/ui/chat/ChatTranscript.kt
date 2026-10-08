@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -49,7 +50,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
@@ -141,11 +144,18 @@ internal fun ChatTranscript(
     liveCopy: Boolean = false,
     /** ta-coik.19: this session's unresolved and given-up sends, drawn at the foot of the list. */
     sends: SendBubbles = SendBubbles.None,
+    /**
+     * ta-4711 (dashboard.tsx:1424-1445): the id of the request the Overview's "Review request" asked for, while this
+     * session is the target's. The transcript brings that card to the viewport's centre, focuses it, and says so once
+     * through [onReviewShown]; it never answers anything.
+     */
+    reviewFocus: String? = null,
+    onReviewShown: () -> Unit = {},
 ) {
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground, reviewFocus, onReviewShown)
     }
 }
 
@@ -172,6 +182,8 @@ private fun ChatTranscriptBody(
     liveCopy: Boolean,
     sends: SendBubbles,
     wellBackground: Boolean,
+    reviewFocus: String?,
+    onReviewShown: () -> Unit,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -354,10 +366,116 @@ private fun ChatTranscriptBody(
         bottom = spacing.padding.calculateBottomPadding(),
     )
 
+    // The space above a row (a card's later segments sit flush: the card paints its own seams).
+    val gapAt: (Int, HostRow) -> androidx.compose.ui.unit.Dp = { index, r ->
+        when {
+            r.segment != null && r.segment.part != ApprovalPart.Head -> 0.dp
+            index + leading == 0 -> 0.dp
+            r.item.startsGroup -> spacing.scrollGap
+            r.item.tight -> t.css.spaceSm
+            else -> spacing.turnGap
+        }
+    }
+
+    // ta-4711 (dashboard.tsx:1424-1445): "Review request" lands on the exact card. The card is brought to the
+    // viewport's centre (`scrollIntoView({ block: "center" })`, instant: the web's scroll-behavior is auto, and the
+    // list's ends clamp it), then focused (`focus({ preventScroll: true })`: the card itself, never its Allow), once
+    // per request. Focus comes BEFORE the centring so the focused row stays pinned when the centring moves it off screen
+    // (no bring-into-view afterwards). The move is the transcript's own, and the follow mode takes the web's rule on the
+    // NET move: toward older rows it stops following (chat-view.tsx:1947-1955), a move down leaves it as it was.
+    val reviewRequester = remember { FocusRequester() }
+    val review = remember(reviewFocus, reviewRequester) { reviewFocus?.let { ReviewFocus(it, reviewRequester) } }
+    val reviewCentred = remember { arrayOfNulls<String>(1) }
+    val reviewShown by rememberUpdatedState(onReviewShown)
+    val reviewDensity = LocalDensity.current
+    LaunchedEffect(reviewFocus, items) {
+        val id = reviewFocus
+        if (id == null) {
+            reviewCentred[0] = null
+            return@LaunchedEffect
+        }
+        if (reviewCentred[0] == id) return@LaunchedEffect
+        val row = items.indexOfFirst {
+            (it is ChatItem.Approval && it.approval.requestId == id) || (it is ChatItem.Question && it.question.requestId == id)
+        }
+        // Not rendered yet: the next change of the rows runs this again (dashboard.tsx:1436-1438).
+        if (row < 0) return@LaunchedEffect
+        // Behind the follow code's own pin (declared above): the web's mount pin runs first, then the centring.
+        while (ownScroll[0]) withFrameNanos { }
+        val head = host.firstIndexOf[row] + leading
+        val last = head + (if (row + 1 < items.size) host.firstIndexOf[row + 1] else host.rows.size) - host.firstIndexOf[row] - 1
+        val gapHead = with(reviewDensity) { gapAt(head - leading, host.rows[head - leading]).toPx() }
+        val startIndex = listState.firstVisibleItemIndex
+        val startOffset = listState.firstVisibleItemScrollOffset
+        ownScroll[0] = true
+        try {
+            listState.scrollToItem(head)
+            withFrameNanos { }
+            var focused = false
+            var tries = 0
+            while (!focused && tries++ < 5) {
+                focused = try {
+                    reviewRequester.requestFocus()
+                } catch (_: IllegalStateException) {
+                    false
+                }
+                if (!focused) withFrameNanos { }
+            }
+            // Compose has no `preventScroll`: a gained focus asks the scroller to show the card, a frame or two later.
+            // Let that settle first, so the centring below is the last word.
+            repeat(3) { withFrameNanos { } }
+            while (listState.isScrollInProgress) withFrameNanos { }
+            // The card's extent in one frame of reference (the scrolled distance from the head at the top).
+            val tops = HashMap<Int, Float>()
+            val bottoms = HashMap<Int, Float>()
+            var travelled = 0f
+            fun note() {
+                for (info in listState.layoutInfo.visibleItemsInfo) {
+                    if (info.index in head..last) {
+                        tops[info.index] = info.offset + travelled
+                        bottoms[info.index] = info.offset + info.size + travelled
+                    }
+                }
+            }
+            note()
+            var steps = 0
+            while (last !in bottoms && steps++ < 400) {
+                val consumed = listState.scrollBy(listState.layoutInfo.viewportSize.height * 0.8f)
+                if (consumed == 0f) break
+                travelled += consumed
+                note()
+            }
+            val spanTop = (tops[head] ?: 0f) + gapHead
+            val spanBottom = bottoms[last] ?: bottoms.values.maxOrNull() ?: spanTop
+            val info = listState.layoutInfo
+            val viewportCentre = (info.viewportStartOffset + info.viewportEndOffset) / 2f
+            val want = (spanTop + spanBottom) / 2f - travelled - viewportCentre
+            listState.scrollBy(want)
+            // The focus's own bring-into-view may still be in flight: what it moves, the centring takes back.
+            val landedIndex = listState.firstVisibleItemIndex
+            val landedOffset = listState.firstVisibleItemScrollOffset
+            repeat(2) { withFrameNanos { } }
+            if (listState.firstVisibleItemIndex != landedIndex || listState.firstVisibleItemScrollOffset != landedOffset) {
+                listState.scrollToItem(landedIndex, landedOffset)
+            }
+            if (listState.firstVisibleItemIndex < startIndex ||
+                (listState.firstVisibleItemIndex == startIndex && listState.firstVisibleItemScrollOffset < startOffset)
+            ) {
+                sticky = false
+            }
+            withFrameNanos { }
+        } finally {
+            ownScroll[0] = false
+        }
+        reviewCentred[0] = id
+        reviewShown()
+    }
+
     val copyNotices = remember { CopyNotices() }
     Box(modifier.fillMaxSize().then(if (wellBackground) Modifier.background(chatWellColor(t)) else Modifier)) {
         CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices) {
         ProvideApprovalState {
+        ProvideReviewFocus(review) {
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -376,14 +494,7 @@ private fun ChatTranscriptBody(
                 contentType = { _, r -> r.segment?.contentType ?: r.item.contentType() },
             ) { index, r ->
                 val item = r.item
-                val gap = when {
-                    // The segments of a card after its head sit flush: the card paints its own seams.
-                    r.segment != null && r.segment.part != ApprovalPart.Head -> 0.dp
-                    index + leading == 0 -> 0.dp
-                    item.startsGroup -> spacing.scrollGap
-                    item.tight -> t.css.spaceSm
-                    else -> spacing.turnGap
-                }
+                val gap = gapAt(index, r)
                 val marks = if (find != null && item is ChatItem.Block) {
                     findMarksFor(find.results, find.needle, find.activeHit, item.turnId, item.block.blockId)
                 } else {
@@ -410,6 +521,7 @@ private fun ChatTranscriptBody(
                 val first = host.rows.size + leading == 0 && sends.pending.isEmpty() && row === sends.failed.first()
                 FailedSendBubble(row, { sends.onDismiss(row.key) }, Modifier.padding(top = if (first) 0.dp else spacing.scrollGap))
             }
+        }
         }
         }
         }
