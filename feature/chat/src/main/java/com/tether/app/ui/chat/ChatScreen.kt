@@ -43,6 +43,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -475,6 +476,7 @@ fun ChatScreen(
 
         // The composer deck draws its own top seam (`.chat-composer` border-top + lip, T7.1).
         Composer(
+            modifier = Modifier.keepsIntrinsicHeight().testTag(CHAT_COMPOSER_TAG),
             session = session,
             projection = projection,
             controls = session?.let { controlsMap[it.id] },

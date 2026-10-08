@@ -49,6 +49,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
@@ -228,7 +229,10 @@ private fun ChatTranscriptBody(
     val hasTimeline = showTimeline && storyPoints.isNotEmpty()
     // conversation-timeline.module.css: the desktop rail docks left in the stage's gutter, the
     // mobile one right; here the layout class decides (the expanded layout is the web's desktop).
-    val timelineSide = if (phone) TimelineSide.Right else TimelineSide.Left
+    // ta-8h5k (M2): the side is the web's own query, conversation-timeline.tsx:27 `(max-width: 63.99rem)`, which is
+    // independent of the shell breakpoint: right below 1024 dp (the Phone class is below 840 and so is inside it).
+    val narrow = phone || LocalConfiguration.current.screenWidthDp < 1024
+    val timelineSide = if (narrow) TimelineSide.Right else TimelineSide.Left
 
     var sticky by follow::sticky
     // ta-jyj0: the reader's place from before the activity was recreated, by row key, put back before the
@@ -331,11 +335,14 @@ private fun ChatTranscriptBody(
     }
     val reportMark: (androidx.compose.ui.geometry.Rect) -> Unit = { mark[0] = it }
 
+    // ta-8h5k (C2): from 48rem to 63.99rem the web's `.chat-scroll` pads 32 / 32 / 32 / 48 (top, right, bottom, left) and
+    // the right-docked rail overlays that 32; it is not added beside it (the phone's 16 + rail stays as it is).
+    val midBand = !phone && narrow
     val layoutPadding = PaddingValues(
         start = spacing.padding.calculateLeftPadding(LayoutDirection.Ltr) +
-            if (hasTimeline && timelineSide == TimelineSide.Left) timelineColumnWidth(timelineSide) else 0.dp,
+            if (midBand) 16.dp else if (hasTimeline && timelineSide == TimelineSide.Left) timelineColumnWidth(timelineSide) else 0.dp,
         end = spacing.padding.calculateRightPadding(LayoutDirection.Ltr) +
-            if (hasTimeline && timelineSide == TimelineSide.Right) timelineColumnWidth(timelineSide) else 0.dp,
+            if (!midBand && hasTimeline && timelineSide == TimelineSide.Right) timelineColumnWidth(timelineSide) else 0.dp,
         top = spacing.padding.calculateTopPadding(),
         bottom = spacing.padding.calculateBottomPadding(),
     )

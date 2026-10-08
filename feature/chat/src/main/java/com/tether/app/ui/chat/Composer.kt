@@ -38,6 +38,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -113,6 +115,8 @@ import kotlin.math.max
 import androidx.compose.runtime.saveable.rememberSaveable
 
 /** T13.2 r2: the composer's Interrupt key. */
+/** ta-8h5k: the composer as the chat screen stacks it (its intrinsic bounds, before any cut at the frame's bottom). */
+internal const val CHAT_COMPOSER_TAG = "chat-composer"
 internal const val INTERRUPT_KEY_TAG = "composer-interrupt"
 
 /** ta-ceo (#229): the Stop confirmation's keys. */
@@ -1095,6 +1099,8 @@ fun Composer(
                                         sheetAt = if (hasOther) SheetView.Root else SheetView.Model
                                     },
                                     modifier = mod,
+                                    // ta-8h5k (M1): 48rem-63.99rem draws the 36 dp pill in its own row above the footer.
+                                    pill = !metrics.phone,
                                 )
                             }
                         } else {
@@ -1188,6 +1194,20 @@ private fun composerDeckPadding(m: ComposerMetrics, width: Dp): DeckPadding {
 }
 
 /**
+ * ta-8h5k (A1): the web's `.chat-composer { flex: 0 0 auto }` over a `min-height: 0`, `overflow: hidden` frame: the
+ * composer keeps its intrinsic height and the transcript above it gives way first (down to 0); whatever is still
+ * too tall is cut from the composer's bottom edge (its bottom padding), never squeezed out of the key rows.
+ * Compose would otherwise hand a non-weighted child only the height left over and crush its last row.
+ */
+internal fun Modifier.keepsIntrinsicHeight(): Modifier = this
+    .layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = androidx.compose.ui.unit.Constraints.Infinity))
+        val height = placeable.height.coerceAtMost(constraints.maxHeight)
+        layout(placeable.width, height) { placeable.place(0, 0) }
+    }
+    .clipToBounds()
+
+/**
  * `.chat-composer-toolbar`: on a phone one row (attach · flexible options slot · actions); wider,
  * the footer row carries attach, the SESSION readout (only when the toolbar is at least 28rem
  * wide, its container query) and the actions on the right. The options row (Model / Effort /
@@ -1211,6 +1231,11 @@ private fun ComposerToolbar(
     val padding = Modifier.padding(start = 10.4.dp, top = 4.dp, end = 10.4.dp, bottom = 10.4.dp)
     Column(Modifier.fillMaxWidth().then(padding)) {
     options?.invoke()
+    // ta-8h5k (M1, globals.css 10547-10555 + studio.css:394): from 48rem the toolbar is a column with an 8 px gap, so
+    // below 64rem the sheet key is its own row (content width, 36 tall) above the footer, as `options` is from 64rem.
+    if (settingsKey != null && !metrics.phone) {
+        Row(Modifier.fillMaxWidth().padding(bottom = gap), verticalAlignment = Alignment.CenterVertically) { settingsKey(Modifier) }
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -1232,9 +1257,7 @@ private fun ComposerToolbar(
             if (browser != null) ComposerBrowserKey(browser, attachSize)
         }
         // Phone (globals.css:11936): the sheet key takes the free width; wider it sits at content width.
-        if (settingsKey != null) {
-            settingsKey(if (metrics.phone) Modifier.weight(1f) else Modifier.widthIn(max = 280.dp))
-        }
+        if (settingsKey != null && metrics.phone) settingsKey(Modifier.weight(1f))
         if (totals != null && !metrics.phone && width >= 448.dp) totals()
         if (settingsKey == null || !metrics.phone) Spacer(Modifier.weight(1f))
         Row(horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs), verticalAlignment = Alignment.CenterVertically, content = actions)

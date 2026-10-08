@@ -776,12 +776,17 @@ internal fun SessionSettingsTrigger(
     hasOtherSettings: Boolean,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * ta-8h5k (M1): the 48rem-63.99rem key (globals.css 6743-6785 + studio.css:400): its own row above the footer,
+     * a 36 dp pill (radius 999, padding 0 8, gap 4) at its content width. The phone key stays the 44 dp flexible one.
+     */
+    pill: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val shape = RoundedCornerShape(10.dp)
+    val shape = if (pill) RoundedCornerShape(percent = 50) else RoundedCornerShape(10.dp)
     val warn = autoOn || unknownMode
     val name = if (hasOtherSettings) {
         "Session settings: $label${if (autoOn) ", Auto approve on" else ""}${if (unknownMode) ", unknown mode" else ""}"
@@ -790,7 +795,7 @@ internal fun SessionSettingsTrigger(
     }
     Row(
         modifier
-            .heightIn(min = 44.dp)
+            .heightIn(min = if (pill) 36.dp else 44.dp)
             .clickable(interaction, indication = null, role = Role.Button, onClick = onOpen)
             .clearAndSetSemantics {
                 role = Role.Button
@@ -806,9 +811,9 @@ internal fun SessionSettingsTrigger(
                 null,
                 emptyList(),
             )
-            .padding(horizontal = t.css.spaceSm),
+            .padding(horizontal = if (pill) 8.dp else t.css.spaceSm),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+        horizontalArrangement = Arrangement.spacedBy(if (pill) 4.dp else t.css.spaceXs),
     ) {
         // `.provider-glyph.settings-sheet-trigger-glyph` (globals.css 6744-6754, studio.css 340): a 14px
         // tile, the mark at 58%; a verified mark takes its brand tile (globals.css 11204-11224).
@@ -828,7 +833,7 @@ internal fun SessionSettingsTrigger(
             color = t.white,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+            modifier = if (pill) Modifier.weight(1f, fill = false) else Modifier.weight(1f),
         )
         if (autoOn) Text("Auto", style = type.body.copy(fontSize = 9.92.sp, fontWeight = FontWeight(600)), color = t.warning)
         if (unknownMode) Text("Unknown", style = type.body.copy(fontSize = 9.92.sp, fontWeight = FontWeight(600)), color = t.warning)
