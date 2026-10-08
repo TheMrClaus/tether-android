@@ -158,3 +158,37 @@ class SidebarFontScaleScreenshotTest(private val shot: SidebarShot, private val 
         }
     }
 }
+
+/**
+ * ta-z4c1: the Status board at twice the text. The status line and the footer shrink like CSS flex
+ * items, so no line ends inside a word (the web: "Needs / you", "Private / runtime"). A synthetic
+ * stress, labelled so; the web's 1.0 board is the reference.
+ */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 2.0f)
+class SidebarFontScale2PhoneScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun sidebar() = rule.snapSidebar(SidebarShot.Status, skin, "sidebar-status-font-2.0x", "phone", TetherLayoutClass.Phone)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(it) }
+    }
+}
+
+/** The same at the rail (tablet 1280×800). */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi", fontScale = 2.0f)
+class SidebarFontScale2TabletScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun sidebar() = rule.snapSidebar(SidebarShot.Status, skin, "sidebar-status-font-2.0x", "tablet", TetherLayoutClass.Expanded)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(it) }
+    }
+}

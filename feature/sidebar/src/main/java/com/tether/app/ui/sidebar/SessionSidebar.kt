@@ -72,6 +72,9 @@ import androidx.compose.ui.window.PopupProperties
 import com.tether.app.protocol.helpers.Format
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.ui.components.CssBorder
+import com.tether.app.ui.components.CssFlexRow
+import com.tether.app.ui.components.FlexJustify
+import com.tether.app.ui.components.flexFloor
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherLayoutClass
@@ -1206,7 +1209,9 @@ private fun SidebarFooter(phone: Boolean, onOpenSettings: () -> Unit, onCollapse
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val line = t.line
-    Row(
+    // `.sidebar-footer` (globals.css 1065): flex, space-between; each side `0 1 auto`, so at a large text
+    // size the status span shrinks to its words and never splits one (ta-z4c1).
+    CssFlexRow(
         Modifier
             .fillMaxWidth()
             .drawBehind {
@@ -1214,16 +1219,17 @@ private fun SidebarFooter(phone: Boolean, onOpenSettings: () -> Unit, onCollapse
                 drawRect(line, Offset.Zero, androidx.compose.ui.geometry.Size(size.width, px))
             }
             .padding(top = 0.75f.rem, start = t.css.spaceXs, end = t.css.spaceXs),
-        verticalAlignment = Alignment.CenterVertically,
+        justify = FlexJustify.SpaceBetween,
     ) {
-        // Collapse is desktop-only: below 48rem the drawer has its own close.
-        if (!phone && onCollapse != null) {
-            FooterButton(TetherIcons.PanelLeftClose, "Collapse sidebar", onClick = onCollapse)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Collapse is desktop-only: below 48rem the drawer has its own close.
+            if (!phone && onCollapse != null) {
+                FooterButton(TetherIcons.PanelLeftClose, "Collapse sidebar", onClick = onCollapse)
+            }
+            FooterButton(TetherIcons.Settings, "Open settings", label = "Settings", onClick = onOpenSettings)
         }
-        FooterButton(TetherIcons.Settings, "Open settings", label = "Settings", onClick = onOpenSettings)
-        Spacer(Modifier.weight(1f))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
-            StatusDot(t.running, size = 0.4f.rem)
+        CssFlexRow(gap = t.css.spaceSm) {
+            StatusDot(t.running, size = 0.4f.rem, modifier = Modifier.flexFloor(0.dp))
             Text(
                 "Private runtime",
                 style = css(type.ui, 0.66f, 500),

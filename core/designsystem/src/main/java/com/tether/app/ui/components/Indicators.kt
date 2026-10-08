@@ -121,7 +121,11 @@ fun SpinningIcon(icon: ImageVector, tint: Color, size: Dp, modifier: Modifier = 
 /** Plain status dot (`.status-line i`: 0.4rem, currentColor). Never the only status signal. */
 @Composable
 fun StatusDot(color: Color, size: Dp = StatusDotSize, modifier: Modifier = Modifier) {
-    Canvas(modifier.size(size).clearAndSetSemantics { }) { drawCircle(color) }
+    // `.status-line i` / `.sidebar-footer i`: `border-radius: 50%` on a box that can flex-shrink (width only,
+    // the height stays): an oval once it is laid out narrower than it is tall (ta-z4c1).
+    Canvas(modifier.size(size).clearAndSetSemantics { }) {
+        if (this.size.width < this.size.height) drawOval(color, size = this.size) else drawCircle(color)
+    }
 }
 
 /**
@@ -167,7 +171,8 @@ fun WaitingPingDot(color: Color, dotSize: Dp = StatusDotSize, modifier: Modifier
                         radius = size.minDimension / 2f + spread,
                     )
                 }
-                drawCircle(color)
+                // Flex-shrunk narrower than tall: the box's `border-radius: 50%` is an oval (ta-z4c1).
+                if (this.size.width < this.size.height) drawOval(color, size = this.size) else drawCircle(color)
             },
     )
 }

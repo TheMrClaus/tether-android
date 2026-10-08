@@ -65,6 +65,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.tether.app.protocol.helpers.Format
 import com.tether.app.ui.components.CssBorder
+import com.tether.app.ui.components.CssFlexRow
+import com.tether.app.ui.components.flexFloor
 import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.StatusDot
 import com.tether.app.ui.components.WaitingPingDot
@@ -532,7 +534,7 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
         if (live != null && was != null) {
             // T13.2: a saved list never claims the agent is running or waiting on you now: the
             // words say "was", on a faint still dot (no spinner, no violet ping).
-            StatusDot(t.faint, size = 0.4f.rem)
+            StatusDot(t.faint, size = 0.4f.rem, modifier = Modifier.flexFloor(0.dp))
             Text(was, style = style, color = t.faint, softWrap = false)
             Text("· $rel", style = style, color = t.faint, softWrap = false)
         } else if (live != null) {
@@ -541,10 +543,11 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
                 "waiting" -> t.violet
                 else -> t.faint
             }
+            // Flex floors: the dot and the ping shrink to 0, the spinner to its two 1.5dp borders.
             when (live.status) {
-                "active" -> SpinnerRing(color, size = 0.65f.rem, stroke = 1.5.dp)
-                "waiting" -> WaitingPingDot(color, dotSize = 0.4f.rem)
-                else -> StatusDot(color, size = 0.4f.rem)
+                "active" -> SpinnerRing(color, size = 0.65f.rem, stroke = 1.5.dp, modifier = Modifier.flexFloor(3.dp))
+                "waiting" -> WaitingPingDot(color, dotSize = 0.4f.rem, modifier = Modifier.flexFloor(0.dp))
+                else -> StatusDot(color, size = 0.4f.rem, modifier = Modifier.flexFloor(0.dp))
             }
             // ta-28i r2: a status this build does not know is the server's word: the label rule.
             Text(Format.statusCopy[live.status] ?: LabelText.label(live.status), style = style, color = color)
@@ -563,7 +566,9 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
 @Composable
 private fun StatusFlow(wrap: Boolean, content: @Composable () -> Unit) {
     if (!wrap) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(0.35f.rem)) { content() }
+        // `.status-line` (globals.css 1003): flex, nowrap, every item `0 1 auto`: it shrinks like CSS, so a
+        // word never splits (ta-z4c1).
+        CssFlexRow(gap = 0.35f.rem) { content() }
         return
     }
     androidx.compose.foundation.layout.FlowRow(
