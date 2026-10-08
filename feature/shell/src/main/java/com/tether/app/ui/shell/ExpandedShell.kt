@@ -51,7 +51,7 @@ private data class PendingWidth(val width: Int?)
 
 /**
  * The web's DESKTOP layout (components/dashboard.tsx at ≥ 48rem; PLAN D10: windows at or above
- * the 840dp expanded width): the topbar across a grid of columns — the session rail, the
+ * the 768dp breakpoint, the web's 48rem): the topbar across a grid of columns — the session rail, the
  * workspace, and from 100rem the inspector — with draggable column edges and persisted widths.
  *
  * - Grid (globals.css 3957-3962, 4139-4143): `var(--rail-width) minmax(0, 1fr) [var(--inspector-width)]`

@@ -80,7 +80,7 @@ class ExpandedTabletScreenshotTest(private val shot: ExpandedShot, private val s
 }
 
 /**
- * A foldable-ish window just above the 840dp cutoff (900×700): no tool words (< 80rem), the
+ * A foldable-ish window just above the 768dp cutoff (900×700): no tool words (< 80rem), the
  * stage's narrow left gutter (< 64rem), the 40vw rail ceiling.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)

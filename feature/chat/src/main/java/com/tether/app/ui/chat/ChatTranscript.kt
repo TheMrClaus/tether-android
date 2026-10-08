@@ -232,7 +232,7 @@ private fun ChatTranscriptBody(
     // conversation-timeline.module.css: the desktop rail docks left in the stage's gutter, the
     // mobile one right; here the layout class decides (the expanded layout is the web's desktop).
     // ta-8h5k (M2): the side is the web's own query, conversation-timeline.tsx:27 `(max-width: 63.99rem)`, which is
-    // independent of the shell breakpoint: right below 1024 dp (the Phone class is below 840 and so is inside it).
+    // independent of the shell breakpoint: right below 1024 dp (the Phone class is below 768 and so is inside it).
     val narrow = phone || LocalConfiguration.current.screenWidthDp < 1024
     val timelineSide = if (narrow) TimelineSide.Right else TimelineSide.Left
 

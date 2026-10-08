@@ -9,10 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
@@ -20,6 +18,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.layoutClassFor
+import com.tether.app.ui.components.windowWidthDp
 import com.tether.app.ui.theme.LocalTetherTokens
 
 /** Test tags of the shell chrome (stable hooks for behaviour tests and screenshots). */
@@ -73,8 +72,8 @@ object ShellTags {
 }
 
 /**
- * Which shell a window gets (PLAN D10, TRACKER decision 2026-09-27): below the WindowSizeClass
- * expanded width (840dp) the web's MOBILE layout; at or above it the desktop layout (T4.2).
+ * Which shell a window gets (PLAN D10, ta-09ca): below the web's 48rem breakpoint (768dp) the web's
+ * MOBILE layout; at or above it the desktop layout (T4.2).
  */
 fun shellLayoutFor(widthDp: Int): TetherLayoutClass = layoutClassFor(widthDp)
 
@@ -164,7 +163,7 @@ fun PhoneShell(
     // ta-coik.31: so does opening the top bar's right-hand tools menu (tapping the key moves the
     // browser's focus off the textarea, which closes its keyboard).
     PutKeyboardAwayWhile(state.menuOpen)
-    val windowWidth = LocalWindowInfo.current.containerSize.width.let { with(LocalDensity.current) { it.toDp().value.toInt() } }
+    val windowWidth = windowWidthDp()
     val topbarState = TopbarState(
         current = current,
         link = link,

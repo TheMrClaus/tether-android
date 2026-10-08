@@ -24,11 +24,11 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * ta-8h5k: the band's edges, so an off-by-one in a gate is caught. The shell switches at 840 dp (Phone below, Expanded
- * from it); the composer's sheet key becomes the options row at 1024 dp (the web's 64rem); the rail side flips at 1024 dp.
+ * ta-8h5k: the band's edges, so an off-by-one in a gate is caught. The shell switches at 768 dp, the web's 48rem (Phone below, Expanded
+ * from it; ta-09ca); the composer's sheet key becomes the options row at 1024 dp (the web's 64rem); the rail side flips at 1024 dp.
  *
- *  w839: Phone         - one row (the 44 dp key shares the footer's row), rail right, transcript pads 16 + the rail's 54 on the right.
- *  w840: Expanded<1024 - the 36 dp pill row above the footer, rail right, pads 48 left / 32 right (rail overlays).
+ *  w767: Phone         - one row (the 44 dp key shares the footer's row), rail right, transcript pads 16 + the rail's 54 on the right.
+ *  w768: Expanded<1024 - the 36 dp pill row above the footer, rail right, pads 48 left / 32 right (rail overlays).
  *  w1023: the same.
  *  w1024: Expanded wide - no sheet key (the options row above the footer), rail LEFT, pads 32 + the rail's 54.4 on the left, 32 right.
  *
@@ -97,11 +97,11 @@ class MidBandEdgesTest {
         assertTrue("the rail overlays the right padding", dp(rail.left) < dp(text.right))
     }
 
-    @Test @Config(qualifiers = "w839dp-h800dp-420dpi")
-    fun at839TheComposerIsThePhonesOneRowAndTheRailAndInsetsAreThePhones() = assertPhoneBand(839)
+    @Test @Config(qualifiers = "w767dp-h800dp-420dpi")
+    fun at767TheComposerIsThePhonesOneRowAndTheRailAndInsetsAreThePhones() = assertPhoneBand(767)
 
-    @Test @Config(qualifiers = "w840dp-h800dp-420dpi")
-    fun at840TheComposerHasThePillRowAndTheRailIsOnTheRightWithTheBandsInsets() = assertMidBand(840)
+    @Test @Config(qualifiers = "w768dp-h800dp-420dpi")
+    fun at768TheComposerHasThePillRowAndTheRailIsOnTheRightWithTheBandsInsets() = assertMidBand(768)
 
     @Test @Config(qualifiers = "w1023dp-h800dp-420dpi")
     fun at1023TheBandIsStillTheMidBand() = assertMidBand(1023)

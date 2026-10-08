@@ -44,7 +44,7 @@ import org.robolectric.annotation.Config
 
 /**
  * T6.3 round 4 (H1) through MainShell: the attention cards' store lives above the phone / expanded
- * switch, so a window crossing 840dp (a rotation, a foldable, a resize) keeps what the operator
+ * switch, so a window crossing 768dp (a rotation, a foldable, a resize) keeps what the operator
  * unticked, and a grant still needs the unsaved confirmation made on the card now on screen.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -112,7 +112,7 @@ class MainShellCardStateTest {
         rule.onNodeWithTag("grant-network").performClick() // network off, in the phone layout
         rule.onNodeWithTag("grant-network").assertIsOff()
 
-        // The window grows past 840dp: MainShell swaps PhoneShell for ExpandedShell.
+        // The window grows past 768dp: MainShell swaps PhoneShell for ExpandedShell.
         rule.runOnIdle { widthDp = 900 }
         rule.waitForIdle()
         assertEquals(TetherLayoutClass.Expanded, shellLayoutFor(widthDp))

@@ -89,10 +89,10 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import com.tether.app.protocol.model.SessionView
+import com.tether.app.ui.components.ProvideWindowWidthDp
 import com.tether.app.ui.components.TetherLayoutClass
+import com.tether.app.ui.components.windowWidthDp
 import com.tether.app.ui.chat.LocalCardStates
 import com.tether.app.ui.chat.LocalTranscriptScrollStore
 import com.tether.app.ui.chat.TranscriptScrollStore
@@ -146,7 +146,7 @@ private const val CopiedFeedbackMs = 1_500L
 private data class EndTarget(val session: AgentSession, val drawnFor: String?)
 
 /**
- * The signed-in app wired to the view model: below the 840dp layout cutoff the phone shell (the
+ * The signed-in app wired to the view model: below the 768dp layout cutoff (the web's 48rem) the phone shell (the
  * web's mobile layout, [PhoneShell]); at or above it the expanded shell (the web's desktop layout,
  * [ExpandedShell]) with its column widths and collapsed rail persisted in [prefs] (the web's
  * per-device `sidebarWidth` / `inspectorWidth` / `sidebarCollapsed`). Both take the same slots
@@ -154,11 +154,19 @@ private data class EndTarget(val session: AgentSession, val drawnFor: String?)
  */
 @Composable
 fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
+    // ta-09ca: measure the window ONCE and provide it, so a Dialog or Popup (each with its own
+    // LocalWindowInfo) reads the same width as the shell. Measured before the provider, so this is
+    // the window's own container size.
+    ProvideWindowWidthDp { MainShellBody(vm, prefs) }
+}
+
+@Composable
+private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     val t = LocalTetherTokens.current
     val context = LocalContext.current
     val shell = rememberPhoneShellState()
     // T6.3 round 4 (H1): ONE store for every attention card, here above the phone / expanded switch
-    // and the no-session branch, so a rotation, a window resize across 840dp or a session switch
+    // and the no-session branch, so a rotation, a window resize across 768dp or a session switch
     // never drops what the operator ticked (ChatScreen falls back to its own only when unprovided).
     val cardStates = rememberSaveable(saver = CardStateStore.Saver) { CardStateStore() }
     // I-2: the records belong to the CONFIGURED server (not the socket's origin, so a drop keeps
@@ -169,8 +177,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
     // ta-jyj0: and ONE transcript scroll position, above the same switch: a rotation that swaps PhoneShell
     // for ExpandedShell keeps the reader's place (and saved across the activity's recreation: MainActivity handles no configuration change itself).
     val transcriptScroll = rememberSaveable(saver = TranscriptScrollStore.Saver) { TranscriptScrollStore() }
-    val windowWidthDp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp().value.toInt() }
-    val layout = shellLayoutFor(windowWidthDp)
+    val layout = shellLayoutFor(windowWidthDp())
     val persisted = rememberPersistedPanels(prefs, vm.client.serverUrl)
     val projectionTrees by vm.client.projectionTrees.collectAsStateWithLifecycle()
 

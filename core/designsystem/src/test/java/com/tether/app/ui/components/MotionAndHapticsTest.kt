@@ -61,8 +61,8 @@ class MotionAndHapticsTest {
 
     @Test fun layoutClassFollowsWindowSizeClassExpanded() {
         assertEquals(TetherLayoutClass.Phone, layoutClassFor(412))
-        assertEquals(TetherLayoutClass.Phone, layoutClassFor(839))
-        assertEquals(TetherLayoutClass.Expanded, layoutClassFor(840))
+        assertEquals(TetherLayoutClass.Phone, layoutClassFor(767))
+        assertEquals(TetherLayoutClass.Expanded, layoutClassFor(768))
         assertEquals(TetherLayoutClass.Expanded, layoutClassFor(1280))
     }
 

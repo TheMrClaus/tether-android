@@ -33,7 +33,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * ta-8h5k (W19 L2): the composer and the transcript at 840 to 1023 dp, row for row against the web at 914 px
+ * ta-8h5k (W19 L2): the composer and the transcript at 768 to 1023 dp, row for row against the web at 914 px
  * (tether 29537e0, spec ~/ta-runs/w19/L1-spec.md). The chat is hosted under 64 dp (topbar) + 80 dp (workspace header)
  * of spacer, so the chat's own height is the window minus 144, as in the Expanded shell.
  *

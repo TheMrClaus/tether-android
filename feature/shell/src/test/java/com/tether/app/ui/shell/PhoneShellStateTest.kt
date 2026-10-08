@@ -96,8 +96,8 @@ class PhoneShellStateTest {
 
     @Test fun phoneShellBelowTheExpandedCutoff() {
         assertEquals(com.tether.app.ui.components.TetherLayoutClass.Phone, shellLayoutFor(412))
-        assertEquals(com.tether.app.ui.components.TetherLayoutClass.Phone, shellLayoutFor(839))
-        assertEquals(com.tether.app.ui.components.TetherLayoutClass.Expanded, shellLayoutFor(840))
+        assertEquals(com.tether.app.ui.components.TetherLayoutClass.Phone, shellLayoutFor(767))
+        assertEquals(com.tether.app.ui.components.TetherLayoutClass.Expanded, shellLayoutFor(768))
         assertEquals(com.tether.app.ui.components.TetherLayoutClass.Expanded, shellLayoutFor(1280))
     }
 

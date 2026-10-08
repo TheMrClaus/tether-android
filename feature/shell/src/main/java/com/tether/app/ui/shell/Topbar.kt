@@ -180,7 +180,7 @@ enum class BarItem(val destination: TopBarDestination?) {
  * bar keeps the longest prefix of [BarItem] that fits whole and folds the rest (from the end:
  * Accounts first) into the utility menu, which lists exactly [folded]. So every destination and
  * tool is always either fully on the bar or in the menu, never clipped or hidden. (The web keeps
- * them all on its bar from 48rem; this layout starts at 840dp and honours the system font scale.)
+ * them all on its bar from 48rem; this layout starts at 768dp, where the web does and honours the system font scale.)
  * The phone bar folds everything, so it does not use this.
  */
 @androidx.compose.runtime.Stable

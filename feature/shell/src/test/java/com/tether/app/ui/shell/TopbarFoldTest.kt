@@ -35,7 +35,7 @@ import kotlin.math.roundToInt
 
 /**
  * T15.4 r2: the expanded bar never clips or hides a destination or tool. At every window width
- * (840 / 1023 / 1024 / 1280dp) and font scale (1.0 / 1.3 / 2.0) each of Overview, Sessions,
+ * (768 / 1023 / 1024 / 1280dp; 768 is the web's 48rem floor, ta-09ca) and font scale (1.0 / 1.3 / 2.0) each of Overview, Sessions,
  * Scheduled, Usage, Files and Accounts is EITHER fully on the bar (whole, between the brand and the
  * link state) OR listed in the open utility menu, never both and never neither; and the brand,
  * link state, Settings and menu trigger are whole on the bar. Also: the warning badge never covers
@@ -48,7 +48,7 @@ class TopbarFoldTest {
 
     private data class Case(val width: Int, val scale: Float, val wide: Boolean = true)
 
-    private var case by mutableStateOf(Case(840, 1f))
+    private var case by mutableStateOf(Case(768, 1f))
 
     private fun show() {
         rule.setContent {
@@ -100,7 +100,7 @@ class TopbarFoldTest {
 
     @Test fun everyControlIsWholeOnTheBarOrInTheMenu() {
         show()
-        for (width in listOf(840, 1023, 1024, 1280)) {
+        for (width in listOf(768, 1023, 1024, 1280)) {
             for (scale in listOf(1f, 1.3f, 2f)) {
                 rule.runOnIdle { case = Case(width, scale) }
                 rule.waitForIdle()
@@ -111,6 +111,10 @@ class TopbarFoldTest {
                 for (tag in listOf(ShellTags.Brand, ShellTags.ConnectionReadout, ShellTags.SettingsKey, ShellTags.ToolsMenuKey)) {
                     assertTrue("$name: $tag whole on the bar", whole(one(tag), bar))
                 }
+                // ta-09ca A4: the receipt line, which destinations stay on the bar and which fold into the menu.
+                val stay = items.filter { nodes(it.first).isNotEmpty() }.map { it.first.removePrefix("shell-") }
+                val folded = items.filter { nodes(it.second).isNotEmpty() }.map { it.second.removePrefix("shell-menu-") }
+                println("A4-FOLD $name: on the bar $stay; in the menu $folded; Settings and More tools whole on the bar")
                 for ((onBar, inMenu) in items) {
                     val barNode = nodes(onBar).singleOrNull()
                     val menuNode = nodes(inMenu).singleOrNull()
@@ -128,7 +132,7 @@ class TopbarFoldTest {
     /** r2: at 2× the badge keeps its 1× size, so most of the trigger's glyph stays visible. */
     @Test fun theWarningBadgeLeavesTheMenuGlyphVisible() {
         show()
-        for (c in listOf(Case(320, 2f, wide = false), Case(412, 1f, wide = false), Case(840, 2f), Case(1280, 1f))) {
+        for (c in listOf(Case(320, 2f, wide = false), Case(412, 1f, wide = false), Case(768, 2f), Case(1280, 1f))) {
             rule.runOnIdle { case = c }
             rule.waitForIdle()
             val trigger = one(ShellTags.ToolsMenuKey).boundsInRoot

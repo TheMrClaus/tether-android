@@ -95,7 +95,7 @@ abstract class ExpandedBehaviourBase {
 class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
 
     @Test fun expandedWidthsGetTheDesktopShell() {
-        assertEquals(TetherLayoutClass.Expanded, shellLayoutFor(840))
+        assertEquals(TetherLayoutClass.Expanded, shellLayoutFor(768))
         show()
         rule.onNodeWithTag(ShellTags.Sidebar).assertIsDisplayed()
         rule.onNodeWithTag(DrawerSlotTag).assertIsDisplayed() // the drawer's list IS the rail here

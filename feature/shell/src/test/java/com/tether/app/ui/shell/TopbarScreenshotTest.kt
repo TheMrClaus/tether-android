@@ -112,7 +112,7 @@ class TopbarTabletScreenshotTest(private val shot: TopbarShot, private val skin:
     }
 }
 
-/** Just above the 840dp cutoff (900dp): the expanded bar with Files and Accounts folded into the menu. */
+/** Above the 768dp cutoff (900dp): the expanded bar with Files and Accounts folded into the menu. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w900dp-h700dp-mdpi")
 class TopbarFoldableScreenshotTest(private val shot: TopbarShot, private val skin: TetherSkin) {
