@@ -194,6 +194,10 @@ private fun ChatTranscriptBody(
     // L2: lazy keys must be unique or Compose throws; a repeated block id, run id or a command id
     // that spells another row's key gets an ordinal (the first keeps its own key).
     val lazyKeys = remember(items) { uniqueLazyKeys(items.map { it.key }) }
+    // ta-4za3: an approval card is several host items (head, one per path entry, tail), so the host list is the
+    // flat run of them; every index below (story points, find, the follow pin) is an index into this list.
+    val host = remember(items) { hostRows(items) }
+    val cardStore = rememberCardStates()
     val onToggleGroup: (ChatItem.ToolGroup) -> Unit = remember(groupToggles) { { group -> groupToggles.toggle(group) } }
     val toolRender = remember(richCodex, richOpencode, showThinking) { ToolRenderFlags(richCodex, richOpencode, showThinking) }
     val leading = if (roster != null) 1 else 0
@@ -204,11 +208,11 @@ private fun ChatTranscriptBody(
     val storyPointIndex = remember(storyPoints) {
         storyPoints.withIndex().associate { (i, sp) -> "${sp.turnId}:${sp.blockId}" to i }
     }
-    val storyPointToLazyIndex = remember(items, storyPointIndex, leading) {
+    val storyPointToLazyIndex = remember(items, storyPointIndex, leading, host) {
         val m = HashMap<Int, Int>()
         items.forEachIndexed { i, item ->
             if (item is ChatItem.Block && item.block.kind == Vocab.BLOCK_USER_MESSAGE) {
-                storyPointIndex["${item.turnId}:${item.block.blockId}"]?.let { sp -> m[sp] = i + leading }
+                storyPointIndex["${item.turnId}:${item.block.blockId}"]?.let { sp -> m[sp] = host.firstIndexOf[i] + leading }
             }
         }
         m
@@ -269,7 +273,7 @@ private fun ChatTranscriptBody(
     }
     // ta-coik.19: the send bubbles are the list's last rows; following the newest content follows them.
     val sendRows = sends.pending.size + sends.failed.size
-    val lastIndex = items.size + leading + sendRows - 1
+    val lastIndex = host.rows.size + leading + sendRows - 1
     LaunchedEffect(items, sticky, sendRows) {
         if (sticky && lastIndex >= 0) pinToEnd(lastIndex)
     }
@@ -316,7 +320,7 @@ private fun ChatTranscriptBody(
         sticky = false
         val row = items.indexOfFirst { it is ChatItem.Block && it.turnId == hit.turnId && it.block.blockId == hit.blockId }
         if (row < 0) return@LaunchedEffect
-        val index = row + leading
+        val index = host.firstIndexOf[row] + leading
         if (listState.layoutInfo.visibleItemsInfo.none { it.index == index }) listState.scrollToItem(index)
         var frames = 0
         while (mark[0] == null && frames++ < FIND_REPORT_FRAMES) withFrameNanos { }
@@ -339,7 +343,7 @@ private fun ChatTranscriptBody(
 
     val copyNotices = remember { CopyNotices() }
     Box(modifier.fillMaxSize().background(chatWellColor(t))) {
-        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices) {
+        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices, LocalCardStates provides cardStore) {
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -352,8 +356,15 @@ private fun ChatTranscriptBody(
             if (roster != null) {
                 item(key = "subagent-roster", contentType = "roster") { roster() }
             }
-            itemsIndexed(items, key = { index, _ -> lazyKeys[index] }, contentType = { _, item -> item.contentType() }) { index, item ->
+            itemsIndexed(
+                host.rows,
+                key = { index, r -> if (r.segment == null) lazyKeys[r.itemIndex] else "${lazyKeys[r.itemIndex]}/${r.segment.key}" },
+                contentType = { _, r -> r.segment?.contentType ?: r.item.contentType() },
+            ) { index, r ->
+                val item = r.item
                 val gap = when {
+                    // The segments of a card after its head sit flush: the card paints its own seams.
+                    r.segment != null && r.segment.part != ApprovalPart.Head -> 0.dp
                     index + leading == 0 -> 0.dp
                     item.startsGroup -> spacing.scrollGap
                     item.tight -> t.css.spaceSm
@@ -373,15 +384,16 @@ private fun ChatTranscriptBody(
                     onToggleGroup = onToggleGroup,
                     onOpenCommand = onOpenCommand,
                     zone = zone,
+                    segment = r.segment,
                 )
             }
             // chat-view.tsx 90fbb9f :3730-3737 (issue #135): unresolved and abandoned sends at the foot of
             // the transcript, so a send is never invisible while in flight, reconnecting, or lost.
             items(sends.pending, key = { "pending-send:${it.key}" }, contentType = { "pending-send" }) { row ->
-                PendingSendBubble(row, Modifier.padding(top = if (items.size + leading == 0 && row === sends.pending.first()) 0.dp else spacing.scrollGap))
+                PendingSendBubble(row, Modifier.padding(top = if (host.rows.size + leading == 0 && row === sends.pending.first()) 0.dp else spacing.scrollGap))
             }
             items(sends.failed, key = { "failed-send:${it.key}" }, contentType = { "failed-send" }) { row ->
-                val first = items.size + leading == 0 && sends.pending.isEmpty() && row === sends.failed.first()
+                val first = host.rows.size + leading == 0 && sends.pending.isEmpty() && row === sends.failed.first()
                 FailedSendBubble(row, { sends.onDismiss(row.key) }, Modifier.padding(top = if (first) 0.dp else spacing.scrollGap))
             }
         }
@@ -422,6 +434,22 @@ private fun ChatTranscriptBody(
     }
 }
 
+/** One host-list row: an item, or one segment of an approval card (ta-4za3). */
+internal class HostRow(val itemIndex: Int, val item: ChatItem, val segment: ApprovalSegment?)
+
+/** The host list's rows for [items], and where each item's first row sits in them. */
+internal class HostRows(val rows: List<HostRow>, val firstIndexOf: IntArray)
+
+internal fun hostRows(items: List<ChatItem>): HostRows {
+    val rows = ArrayList<HostRow>(items.size)
+    val first = IntArray(items.size)
+    items.forEachIndexed { i, item ->
+        first[i] = rows.size
+        if (item is ChatItem.Approval) GrantLayouts.of(item.approval).segments.forEach { rows.add(HostRow(i, item, it)) } else rows.add(HostRow(i, item, null))
+    }
+    return HostRows(rows, first)
+}
+
 /** ta-coik.33: what the follow mode watches of the layout: the viewport, and the newest row when it is on screen. */
 private data class LastRowLayout(val viewport: androidx.compose.ui.unit.IntSize, val index: Int?, val size: Int?)
 
@@ -445,6 +473,7 @@ private fun ChatRow(
     onToggleGroup: (ChatItem.ToolGroup) -> Unit = {},
     onOpenCommand: (String) -> Unit = {},
     zone: ZoneId = ZoneId.systemDefault(),
+    segment: ApprovalSegment? = null,
 ) {
     val observer = LocalChatRowObserver.current
     if (observer != null) SideEffect { observer(item.key) }
@@ -455,9 +484,9 @@ private fun ChatRow(
         // reading, stay out of it. ta-coik.64: a copy is the exact source text, as the browser's
         // ([SafeCopyClipboard] decodes the drawn tokens; the copy notice only informs).
         if (item.selectableText) {
-            SelectableRow { ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone) }
+            SelectableRow { ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone, segment) }
         } else {
-            ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone)
+            ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone, segment)
         }
     }
 }
@@ -507,6 +536,7 @@ private fun ChatRowContent(
     onToggleGroup: (ChatItem.ToolGroup) -> Unit,
     onOpenCommand: (String) -> Unit,
     zone: ZoneId,
+    segment: ApprovalSegment? = null,
 ) {
     run {
         when (item) {
@@ -528,7 +558,7 @@ private fun ChatRowContent(
             is ChatItem.Denial -> PermissionDenialCard(item.denial, item.target, item.run, nested = item.nested)
             is ChatItem.Answered -> AnsweredQuestionCard(item.answered)
             is ChatItem.Retry -> item.turn.apiRetry?.let { ApiRetryMarker(it) }
-            is ChatItem.Approval -> ApprovalCard(item.approval)
+            is ChatItem.Approval -> if (segment != null) ApprovalSegmentView(item.approval, segment) else ApprovalCard(item.approval)
             is ChatItem.Question -> QuestionCard(item.question, answered = item.answered)
             is ChatItem.Outcome -> OutcomeBadge(item.turn, interrupt = item.interrupt, zone = zone)
             is ChatItem.ProviderNotice -> ProviderNoticeRow(item.notice)

@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -18,14 +19,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -36,6 +36,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -51,6 +57,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -59,6 +66,7 @@ import com.tether.app.client.ConsentResult
 import com.tether.app.client.consentKey
 import com.tether.app.protocol.GrantedPermissions
 import com.tether.app.protocol.model.AgentSession
+import com.tether.app.protocol.tree.JsObj
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherInputWell
@@ -227,9 +235,6 @@ private fun StatusLine(text: String, color: Color, tag: String) {
     )
 }
 
-/** The most height the path rows take inside a card; past it they scroll in place (every row stays reachable). */
-internal val GRANT_LIST_MAX_HEIGHT = 400.dp
-
 // --- ApprovalCard -----------------------------------------------------------------------------------
 
 /**
@@ -238,56 +243,140 @@ internal val GRANT_LIST_MAX_HEIGHT = 400.dp
  * 0.875rem card padded 1.25rem. Head: the warning triangle in `--attention-ink`, "Approval needed"
  * white 0.98rem/700. Then the tool, the reason and context lines, the call's input, the requested
  * permission expansion (T6.3 "permission paths") and the choice keys.
+ *
+ * ta-4za3: the card has no height of its own, as on the web (no `max-height`, no inner scroll box, no fade):
+ * every path row is part of the card and the card grows. It is drawn as contiguous SEGMENTS the host list
+ * emits as items of its own (a lazy list inside a lazy item cannot take unbounded height): the [ApprovalPart.Head]
+ * (card top, tool, reason, input, the fieldset's top edge and legend), one [ApprovalPart.Entry] per
+ * [GrantEntry] (a path, or a later piece of a long path) and the [ApprovalPart.Tail] (network, confirmation,
+ * the fieldset's bottom edge, status, the keys, the card's bottom edge). Each segment paints the card's and
+ * the fieldset's side strokes itself, so the seams show nothing; the host adds no spacing between them.
  */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    val consent = LocalConsent.current
-    val shape = cardShape(t)
+internal enum class ApprovalPart { Head, Entry, Tail }
+
+/** One host-list item of a card. [gapBefore]: the `space-xs` gap above a path's first piece (not the first path). */
+@Immutable
+internal class ApprovalSegment(val part: ApprovalPart, val key: String, val entry: GrantEntry? = null, val gapBefore: Boolean = false) {
+    val contentType: String get() = "approval-" + part.name.lowercase()
+}
+
+/** What the segments of one request are made of, computed once per request (see [GrantLayouts]). */
+@Immutable
+internal class GrantLayout(
+    val requested: RequestedPermissionsView?,
+    val entries: List<GrantEntry>,
+    val segments: List<ApprovalSegment>,
+    /** A path's canonical state index (M1): its first occurrence in the list. */
+    val firstRead: Map<String, Int>,
+    val firstWrite: Map<String, Int>,
+)
+
+internal fun grantLayout(view: ApprovalView): GrantLayout {
     val requested = view.requested
-    // The card's identity is [ApprovalView.contentFp] (session + turn + request, no origin). The
-    // ticks live in the shell's CardStateStore under it (they survive a scroll, a tab switch, a
-    // layout switch, a drop and reconnect, backgrounding); a re-raised request is another identity
-    // and starts fully ticked. The origin-bound fingerprint is only what the client checks at tap time.
+    val rows = requested?.let(::grantRows)
+    val entries = if (requested != null && rows != null) grantEntries(rows, requested.read, requested.write) else emptyList()
+    val firstRead = HashMap<String, Int>().also { m -> requested?.read?.forEachIndexed { i, p -> m.putIfAbsent(p, i) } }
+    val firstWrite = HashMap<String, Int>().also { m -> requested?.write?.forEachIndexed { i, p -> m.putIfAbsent(p, i) } }
+    val segments = buildList {
+        add(ApprovalSegment(ApprovalPart.Head, "head"))
+        entries.forEachIndexed { i, e -> add(ApprovalSegment(ApprovalPart.Entry, "e/${e.key}", e, gapBefore = e.piece == 0 && i > 0)) }
+        add(ApprovalSegment(ApprovalPart.Tail, "tail"))
+    }
+    return GrantLayout(requested, entries, segments, firstRead, firstWrite)
+}
+
+/**
+ * The layout cache: keyed by the request OBJECT (the reducer keeps an untouched request's identity), so the
+ * display escaping of up to 128 paths of 4096 code points runs once per request (the derivation warms it off
+ * the main thread), not per recomposition or per segment.
+ */
+internal object GrantLayouts {
+    private const val SIZE = 16
+    private val cache = object : LinkedHashMap<Any, GrantLayout>(SIZE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Any, GrantLayout>?): Boolean = size > SIZE
+    }
+
+    private class Key(val request: JsObj) {
+        override fun equals(other: Any?): Boolean = other is Key && other.request === request
+        override fun hashCode(): Int = System.identityHashCode(request)
+    }
+
+    fun of(view: ApprovalView): GrantLayout {
+        val key = Key(view.request)
+        synchronized(cache) { cache[key]?.takeIf { it.requested == view.requested }?.let { return it } }
+        val built = grantLayout(view)
+        synchronized(cache) { cache[key] = built }
+        return built
+    }
+}
+
+/**
+ * ta-4za3: a card's local, never-saved state, shared by all its segments and keyed by [ApprovalView.contentFp]
+ * in the [CardStateStore] (a segment leaving composition clears nothing): the web's "exact" confirmation tick,
+ * the send latch (closes the double-tap window; "sent" itself comes from the client's ledger) and the overlay
+ * notice. After process death the store is new, so the operator may tap again.
+ */
+@Stable
+internal class ApprovalLocal {
+    var confirmed by mutableStateOf(false)
+    var latched by mutableStateOf(false)
+    var overlayBlocked by mutableStateOf(false)
+
+    private var fpValue: String? = null
+    private var fpOrigin: String? = null
+    private var fpTurn: String? = null
+    private var fpRequest: JsObj? = null
+
+    /** The origin-bound fingerprint the client checks, computed once per (origin, turn, request). */
+    fun fingerprint(origin: String?, activeTurnId: String, request: JsObj): String = synchronized(this) {
+        val have = fpValue
+        if (have != null && fpOrigin == origin && fpTurn == activeTurnId && (fpRequest === request || fpRequest == request)) return have
+        wireFingerprint(origin, activeTurnId, request).also { fpValue = it; fpOrigin = origin; fpTurn = activeTurnId; fpRequest = request }
+    }
+}
+
+/** Everything a segment reads and does for its card; built per composition from the shared holders. */
+@Stable
+internal class ApprovalController(
+    val view: ApprovalView,
+    val layout: GrantLayout,
+    val store: CardStateStore,
+    val local: ApprovalLocal,
+    val consent: ConsentActions,
+) {
     val id = view.requestId
     val cfp = view.contentFp
-    val store = rememberCardStates()
-    val selection = store.grant(cfp)
-    // M1: a path's state is its CANONICAL index (its first occurrence): a path listed twice is one
-    // permission, ticked or not as one.
+    val requested = view.requested
     val readList = requested?.read.orEmpty()
     val writeList = requested?.write.orEmpty()
-    val readPaths = readList.filter { readList.indexOf(it) !in selection.offRead }.distinct()
-    val writePaths = writeList.filter { writeList.indexOf(it) !in selection.offWrite }.distinct()
-    val network = requested?.network == true && !selection.networkOff
-    // Every requested path is a row, as on the web (the reducer bounds a path to 4096 code points and a list to 64);
-    // the rows live in a height-bounded lazy list, so only the visible ones are laid out (the lazy list below).
-    val rows = remember(view.request) { requested?.let(::grantRows) }
-    val entries = remember(rows) { rows?.let { grantEntries(it, readList, writeList) }.orEmpty() }
-    // The web's "exact" confirmation (chat-view.tsx 90fbb9f :1173, :1270-1279; ta-coik.5): a tick that
-    // stands for the complete request, so a path box changing does not clear it. Never saved.
-    var confirmed by remember(store, cfp) { mutableStateOf(false) }
-    val fp = remember(view.request, view.activeTurnId, consent.origin) { wireFingerprint(consent.origin, view.activeTurnId, view.request) }
-    // L3: "sent" comes from the client's ledger; this latch only closes the double-tap window and is
-    // never saved (after process death the ledger is gone, so the operator may tap again).
-    var latched by remember(cfp) { mutableStateOf(false) }
-    var overlayBlocked by remember(cfp) { mutableStateOf(false) }
-    val sent = latched || consent.isDecided(id, fp)
+    val selection: GrantSelection = store.grant(cfp)
+    val fp = local.fingerprint(consent.origin, view.activeTurnId, view.request)
+
+    // L3: "sent" comes from the client's ledger; the latch only closes the double-tap window.
+    val sent = local.latched || consent.isDecided(id, fp)
     val lock = consent.lock
     // ta-coik.13: answerable on the first tap, as on the web (chat-view.tsx 90fbb9f :1291-1326, no
-    // arm delay); a press across a change of request is dropped ([StaleTapGuard] on [cfp] below).
+    // arm delay); a press across a change of request is dropped ([StaleTapGuard] on [cfp]).
     val armed = !sent && lock == null
     val frozen = !armed
-    val subset = subsetGrant(readPaths, writePaths, network)
-    val blocked = { overlayBlocked = true }
+    val blocked: () -> Unit = { local.overlayBlocked = true }
+
+    // M1: a path's state is its CANONICAL index (its first occurrence): a path listed twice is one permission.
+    private fun off(read: Boolean, path: String, now: GrantSelection): Boolean =
+        if (read) layout.firstRead[path] in now.offRead else layout.firstWrite[path] in now.offWrite
+
+    fun ticked(read: Boolean, path: String): Boolean = !off(read, path, selection)
+
+    val readPaths: List<String> by lazy(LazyThreadSafetyMode.NONE) { readList.filter { !off(true, it, selection) }.distinct() }
+    val writePaths: List<String> by lazy(LazyThreadSafetyMode.NONE) { writeList.filter { !off(false, it, selection) }.distinct() }
+    val network: Boolean get() = requested?.network == true && !selection.networkOff
+    val subset: GrantedPermissions? by lazy(LazyThreadSafetyMode.NONE) { subsetGrant(readPaths, writePaths, network) }
 
     fun send(choiceId: String?, decision: String?, granted: GrantedPermissions?) {
         // One decision per card: a second tap (or a tap after a lock) never reaches the client.
-        if (latched || !armed || consent.lock != null || consent.isDecided(id, fp)) return
-        latched = true
-        if (!consent.onApproval(id, fp, choiceId, decision, granted).settles()) latched = false
+        if (local.latched || !armed || consent.lock != null || consent.isDecided(id, fp)) return
+        local.latched = true
+        if (!consent.onApproval(id, fp, choiceId, decision, granted).settles()) local.latched = false
     }
 
     /**
@@ -298,15 +387,15 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
     fun choose(choice: ApprovalChoiceView) {
         if (choice.permissionGrant == null) return send(choice.choiceId, null, null)
         val live = store.grant(cfp)
-        val liveRead = readList.filter { readList.indexOf(it) !in live.offRead }.distinct()
-        val liveWrite = writeList.filter { writeList.indexOf(it) !in live.offWrite }.distinct()
+        val liveRead = readList.filter { !off(true, it, live) }.distinct()
+        val liveWrite = writeList.filter { !off(false, it, live) }.distinct()
         val liveNetwork = requested?.network == true && !live.networkOff
-        val pick = pickFor(view, choice, confirmed = confirmed, subset = subsetGrant(liveRead, liveWrite, liveNetwork)) ?: return
+        val pick = pickFor(view, choice, confirmed = local.confirmed, subset = subsetGrant(liveRead, liveWrite, liveNetwork)) ?: return
         send(pick.choiceId, null, pick.granted)
     }
 
     fun toggle(read: Boolean, path: String) {
-        val index = if (read) readList.indexOf(path) else writeList.indexOf(path)
+        val index = (if (read) layout.firstRead[path] else layout.firstWrite[path]) ?: return
         val now = store.grant(cfp)
         store.setGrant(
             cfp,
@@ -315,21 +404,85 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
         )
     }
 
-    StaleTapGuard(cfp) { _ ->
-        Column(
-            modifier
-                .fillMaxWidth()
-                .cssSurface(
-                    shape,
-                    background = t.attentionBg,
-                    border = CssBorder(1.dp, t.attentionBorder),
-                    shadows = emptyList(),
-                )
-                .padding(20.dp)
-                .semantics { paneTitle = "Tool approval required" }
-                .testTag("approval-card"),
-            verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
-        ) {
+    fun toggleNetwork() = store.setGrant(cfp, store.grant(cfp).let { it.copy(networkOff = !it.networkOff) })
+}
+
+@Composable
+private fun rememberApprovalController(view: ApprovalView, layout: GrantLayout): ApprovalController {
+    val consent = LocalConsent.current
+    // The ticks live in the shell's CardStateStore under [ApprovalView.contentFp] (session + turn + request, no
+    // origin); they survive a scroll, a tab switch, a layout switch, a drop and reconnect, backgrounding; a
+    // re-raised request is another identity and starts fully ticked.
+    val store = rememberCardStates()
+    val local = remember(store, view.contentFp) { store.local(view.contentFp) }
+    return ApprovalController(view, layout, store, local, consent)
+}
+
+/**
+ * One segment of the card [view]: the host list emits [GrantLayouts.of]`(view).segments` as consecutive items
+ * and draws each through this (every interactive one under its own [StaleTapGuard] on the card's identity).
+ */
+@Composable
+internal fun ApprovalSegmentView(view: ApprovalView, segment: ApprovalSegment, modifier: Modifier = Modifier) {
+    val layout = GrantLayouts.of(view)
+    val c = rememberApprovalController(view, layout)
+    StaleTapGuard(c.cfp) { _ ->
+        when (segment.part) {
+            ApprovalPart.Head -> ApprovalHead(c, modifier)
+            ApprovalPart.Entry -> ApprovalEntry(c, segment, modifier)
+            ApprovalPart.Tail -> ApprovalTail(c, modifier)
+        }
+    }
+}
+
+/** The whole card as one column (previews and tests; the hosts emit the segments as list items instead). */
+@Composable
+internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
+    val layout = GrantLayouts.of(view)
+    Column(modifier.fillMaxWidth()) { layout.segments.forEach { ApprovalSegmentView(view, it) } }
+}
+
+private val CARD_PADDING = 20.dp
+
+/**
+ * `.chat-approval` for one segment: the card's fill and 1dp `--attention-border`, the corners rounded only
+ * where the card really starts or ends. The outline is drawn taller than the segment on a side that continues
+ * and clipped to the segment, so the side strokes run on and no horizontal stroke shows at a seam.
+ */
+@Composable
+private fun CardSegment(top: Boolean, bottom: Boolean, modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val t = LocalTetherTokens.current
+    Column(
+        modifier
+            .fillMaxWidth()
+            .framed(top, bottom, 14.dp, t.attentionBorder, fill = t.attentionBg)
+            .padding(start = CARD_PADDING, end = CARD_PADDING, top = if (top) CARD_PADDING else 0.dp, bottom = if (bottom) CARD_PADDING else 0.dp),
+        content = content,
+    )
+}
+
+/** A rounded outline (and optional fill) of which only the sides [top] / [bottom] close; see [CardSegment]. */
+private fun Modifier.framed(top: Boolean, bottom: Boolean, radius: Dp, stroke: Color, width: Dp = 1.dp, fill: Color? = null): Modifier =
+    clipToBounds().drawBehind {
+        val r = radius.toPx()
+        val w = width.toPx()
+        val over = 2f * r + w
+        val y0 = if (top) 0f else -over
+        val y1 = size.height + if (bottom) 0f else over
+        val outer = RoundRect(0f, y0, size.width, y1, CornerRadius(r))
+        val inner = RoundRect(w, y0 + w, size.width - w, y1 - w, CornerRadius((r - w).coerceAtLeast(0f)))
+        if (fill != null) drawPath(Path().apply { addRoundRect(outer) }, fill)
+        drawPath(Path().apply { fillType = PathFillType.EvenOdd; addRoundRect(outer); addRoundRect(inner) }, stroke)
+    }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ApprovalHead(c: ApprovalController, modifier: Modifier) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val view = c.view
+    CardSegment(top = true, bottom = false, modifier = modifier.semantics { paneTitle = "Tool approval required" }.testTag("approval-card")) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
                 Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.attentionInk, modifier = Modifier.size(15.dp))
                 Text(
@@ -363,42 +516,69 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
             if (view.input != null) {
                 Column(Modifier.fillMaxWidth()) { ToolInputView(view.name, view.input) }
             }
+            if (c.requested != null) GrantFieldsetTop()
+        }
+    }
+}
 
+/** One path row (or a later piece of a long path) inside the fieldset's side strokes. */
+@Composable
+private fun ApprovalEntry(c: ApprovalController, segment: ApprovalSegment, modifier: Modifier) {
+    val t = LocalTetherTokens.current
+    val e = checkNotNull(segment.entry)
+    CardSegment(top = false, bottom = false, modifier = modifier) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .framed(top = false, bottom = false, radius = t.radiusSm, stroke = t.line)
+                .padding(start = t.css.spaceSm, end = t.css.spaceSm, top = if (segment.gapBefore) t.css.spaceXs else 0.dp),
+        ) {
+            when {
+                e.piece > 0 -> GrantPathPiece(e.text)
+                e.read -> GrantCheckbox(
+                    checked = c.ticked(read = true, path = e.path),
+                    enabled = !c.frozen && c.view.allowsSubset,
+                    onChange = { c.toggle(read = true, path = e.path) },
+                    tag = "grant-read",
+                    onBlocked = c.blocked,
+                ) { GrantPathText("Read", e.text) }
+                else -> GrantCheckbox(
+                    checked = c.ticked(read = false, path = e.path),
+                    enabled = !c.frozen && c.view.allowsSubset,
+                    onChange = { c.toggle(read = false, path = e.path) },
+                    tag = "grant-write",
+                    onBlocked = c.blocked,
+                ) { GrantPathText("Write", e.text) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ApprovalTail(c: ApprovalController, modifier: Modifier) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val view = c.view
+    val requested = c.requested
+    val lock = c.lock
+    val sent = c.sent
+    val id = c.id
+    CardSegment(top = false, bottom = true, modifier = modifier) {
+        // No fieldset: the card's own `space-sm` gap after the last line of the head.
+        Column(
+            Modifier.fillMaxWidth().padding(top = if (requested == null) t.css.spaceSm else 0.dp),
+            verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+        ) {
             if (requested != null) {
-                GrantFieldset {
-                    // EVERY path is a row with its full text; the list scrolls inside the card and composes
-                    // only the rows in view (128 rows of 4096 code points would otherwise lay out ~500k+ characters).
-                    if (entries.isNotEmpty()) LazyColumn(Modifier.fillMaxWidth().heightIn(max = GRANT_LIST_MAX_HEIGHT).testTag("grant-paths")) {
-                        itemsIndexed(entries, key = { _, e -> e.key }) { index, e ->
-                            // The gap between PATHS (not between the pieces of one path).
-                            Box(Modifier.padding(top = if (e.piece == 0 && index > 0) t.css.spaceXs else 0.dp)) {
-                                when {
-                                    e.piece > 0 -> GrantPathPiece(e.text)
-                                    e.read -> GrantCheckbox(
-                                        checked = readList.indexOf(e.path) !in selection.offRead,
-                                        enabled = !frozen && view.allowsSubset,
-                                        onChange = { toggle(read = true, path = e.path) },
-                                        tag = "grant-read",
-                                        onBlocked = blocked,
-                                    ) { GrantPathText("Read", e.text) }
-                                    else -> GrantCheckbox(
-                                        checked = writeList.indexOf(e.path) !in selection.offWrite,
-                                        enabled = !frozen && view.allowsSubset,
-                                        onChange = { toggle(read = false, path = e.path) },
-                                        tag = "grant-write",
-                                        onBlocked = blocked,
-                                    ) { GrantPathText("Write", e.text) }
-                                }
-                            }
-                        }
-                    }
+                GrantFieldsetBottom(gapAbove = c.layout.entries.isNotEmpty(), hasRows = requested.network || view.needsConfirm) {
                     if (requested.network) {
                         GrantCheckbox(
-                            checked = network,
-                            enabled = !frozen && view.allowsSubset,
-                            onChange = { store.setGrant(cfp, store.grant(cfp).let { it.copy(networkOff = !it.networkOff) }) },
+                            checked = c.network,
+                            enabled = !c.frozen && view.allowsSubset,
+                            onChange = { c.toggleNetwork() },
                             tag = "grant-network",
-                            onBlocked = blocked,
+                            onBlocked = c.blocked,
                         ) {
                             Text("Network access", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.8f)), color = t.muted)
                         }
@@ -406,11 +586,11 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
                     if (view.needsConfirm) {
                         Box(Modifier.fillMaxWidth().padding(top = t.css.spaceXs).topRule(t.line)) {
                             GrantCheckbox(
-                                checked = confirmed,
-                                enabled = !frozen,
-                                onChange = { confirmed = !confirmed },
+                                checked = c.local.confirmed,
+                                enabled = !c.frozen,
+                                onChange = { c.local.confirmed = !c.local.confirmed },
                                 tag = "grant-confirm",
-                                onBlocked = blocked,
+                                onBlocked = c.blocked,
                             ) {
                                 Text(
                                     EXACT_CONFIRM_COPY,
@@ -425,8 +605,8 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
 
             when {
                 lock != null && !sent -> StatusLine(lock.copy, t.muted, "consent-lock")
-                overlayBlocked && !sent -> StatusLine(OVERLAY_COPY, t.ink, "consent-overlay")
-                sent && consent.isUnconfirmed(id, fp) -> StatusLine(UNCONFIRMED_COPY, t.muted, "consent-unconfirmed")
+                c.local.overlayBlocked && !sent -> StatusLine(OVERLAY_COPY, t.ink, "consent-overlay")
+                sent && c.consent.isUnconfirmed(id, c.fp) -> StatusLine(UNCONFIRMED_COPY, t.muted, "consent-unconfirmed")
                 sent -> StatusLine("Decision sent. Waiting for the agent.", t.muted, "consent-sent")
             }
 
@@ -437,41 +617,42 @@ internal fun ApprovalCard(view: ApprovalView, modifier: Modifier = Modifier) {
             ) {
                 if (view.choices.isNotEmpty()) {
                     view.choices.forEach { choice ->
-                        val pick = pickFor(view, choice, confirmed, subset)
+                        val pick = pickFor(view, choice, c.local.confirmed, c.subset)
                         TetherKey(
                             // The captured [pick] only draws the key; the tap re-reads the store (F1).
-                            onClick = { if (pick != null) choose(choice) },
+                            onClick = { if (pick != null) c.choose(choice) },
                             classes = if (choice.permissionGrant != null) KeyClasses.ButtonPrimary else KeyClasses.ButtonSecondary,
                             label = choice.label,
                             icon = if (choice.permissionGrant != null) TetherIcons.Check else TetherIcons.Ban,
-                            enabled = armed && pick != null,
+                            enabled = c.armed && pick != null,
                             // The web's `title` hover text; spoken with the label here.
                             contentDescription = choice.description?.let { "${choice.label}. $it" },
-                            modifier = Modifier.refuseObscuredTouches(blocked).testTag("approval-choice"),
+                            modifier = Modifier.refuseObscuredTouches(c.blocked).testTag("approval-choice"),
                         )
                     }
                 } else {
                     TetherKey(
-                        onClick = { send(null, "allow", null) },
+                        onClick = { c.send(null, "allow", null) },
                         classes = KeyClasses.ButtonPrimary,
                         label = "Approve",
                         icon = TetherIcons.Check,
-                        enabled = armed,
-                        modifier = Modifier.refuseObscuredTouches(blocked).testTag("approval-allow"),
+                        enabled = c.armed,
+                        modifier = Modifier.refuseObscuredTouches(c.blocked).testTag("approval-allow"),
                     )
                     TetherKey(
-                        onClick = { send(null, "deny", null) },
+                        onClick = { c.send(null, "deny", null) },
                         classes = KeyClasses.ApprovalDeny,
                         label = "Deny",
                         icon = TetherIcons.Ban,
-                        enabled = armed,
-                        modifier = Modifier.refuseObscuredTouches(blocked).testTag("approval-deny"),
+                        enabled = c.armed,
+                        modifier = Modifier.refuseObscuredTouches(c.blocked).testTag("approval-deny"),
                     )
                 }
             }
         }
     }
 }
+
 
 /** `.chat-approval-reason` / `.chat-approval-context`: muted 0.8rem/1.5, the value in ink mono 0.76rem. */
 @Composable
@@ -493,23 +674,21 @@ private fun ContextLine(label: String?, value: String) {
 }
 
 /**
- * `.chat-permission-grants`: a `--line` fieldset (`--radius-sm`, `space-sm` padding, `space-xs`
- * gaps) whose legend, "Requested permission expansion" (ink 0.78rem/650), sits on its top edge.
+ * `.chat-permission-grants`, top edge: a `--line` fieldset (`--radius-sm`, `space-sm` padding) whose legend,
+ * "Requested permission expansion" (ink 0.78rem/650), sits on its top edge. The rows follow as the host's items.
  */
 @Composable
-private fun GrantFieldset(content: @Composable () -> Unit) {
+private fun GrantFieldsetTop() {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val legendSize = rem(0.78f)
     Box(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        Column(
+        Box(
             Modifier
                 .fillMaxWidth()
-                .border(1.dp, t.line, RoundedCornerShape(t.radiusSm))
-                .padding(t.css.spaceSm)
-                .padding(top = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
-        ) { content() }
+                .framed(top = true, bottom = false, radius = t.radiusSm, stroke = t.line)
+                .padding(start = t.css.spaceSm, end = t.css.spaceSm, top = t.css.spaceSm + 4.dp),
+        )
         Text(
             "Requested permission expansion",
             style = TextStyle(fontFamily = type.body.fontFamily, fontSize = legendSize, fontWeight = FontWeight(650)),
@@ -520,6 +699,23 @@ private fun GrantFieldset(content: @Composable () -> Unit) {
                 .padding(horizontal = t.css.spaceXs)
                 .semantics { heading() },
         )
+    }
+}
+
+/** The fieldset's bottom edge around the network row and the confirmation ([gapAbove]: a path row precedes, `space-xs` gaps). */
+@Composable
+private fun GrantFieldsetBottom(gapAbove: Boolean, hasRows: Boolean, content: @Composable () -> Unit) {
+    val t = LocalTetherTokens.current
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .framed(top = false, bottom = true, radius = t.radiusSm, stroke = t.line)
+            .padding(start = t.css.spaceSm, end = t.css.spaceSm, bottom = t.css.spaceSm),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(top = if (gapAbove && hasRows) t.css.spaceXs else 0.dp),
+            verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+        ) { content() }
     }
 }
 

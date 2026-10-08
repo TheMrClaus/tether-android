@@ -1303,6 +1303,16 @@ class ApprovalCardBehaviourTest {
     private fun shownRows(): List<String> = listOf("grant-read", "grant-write", "grant-path-piece").flatMap { tag -> rule.onAllNodesWithTag(tag).fetchSemanticsNodes() }
         .map { n -> n.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text }.filterNot { it == '\u2060' || it == '\u200B' } }
 
+    /**
+     * ta-4za3: the path rows are items of the transcript's own list (head, one item per entry, tail; the card is
+     * the list's last item here), so a path is reached by scrolling THAT list, never an inner one.
+     */
+    private fun scrollToEntry(index: Int, entries: Int = pieces().size) {
+        val total = rule.runOnIdle { listState.layoutInfo.totalItemsCount }
+        rule.onNodeWithTag("chat-transcript").performScrollToIndex(total - 1 - entries + index)
+        rule.waitForIdle()
+    }
+
     /** The lazy list's entries of the shown card: every piece of every path, reads first (the card's own [grantRows]). */
     private fun pieces(): List<String> = grantRows(pendingApprovals(fixture.tree).single().requested!!).let { r -> (r.read + r.write).flatten() }
 
@@ -1311,8 +1321,7 @@ class ApprovalCardBehaviourTest {
      * quotes and escapes whole) is composed. No refusal and no "not shown" line anywhere.
      */
     private fun assertEntryReachable(index: Int, all: List<String> = pieces()) {
-        rule.onNodeWithTag("grant-paths").performScrollToIndex(index)
-        rule.waitForIdle()
+        scrollToEntry(index, all.size)
         assertTrue("entry $index not composed with its full text", shownRows().any { it.contains(all[index]) })
         rule.onAllNodesWithTag("grant-hidden").assertCountEquals(0)
         rule.onAllNodesWithTag("grant-refused").assertCountEquals(0)
@@ -1336,6 +1345,7 @@ class ApprovalCardBehaviourTest {
         val ms = (System.nanoTime() - started) / 1_000_000
         println("ta-57l: $label (64+64 x 4096 code points, ${all.size} lazy entries, first and last composed) in $ms ms")
         assertTrue("$label took $ms ms (bound 5000)", ms < 5_000)
+        scrollTo("grant-confirm") // the path rows are the host's items: the confirmation left composition with the scroll
         rule.onNodeWithTag("grant-confirm").performClick()
         rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("Allow all", ignoreCase = true))
         rule.onNodeWithText("ALLOW ALL", ignoreCase = true).assertIsEnabled().performClick()
@@ -1374,8 +1384,9 @@ class ApprovalCardBehaviourTest {
         scrollTo("grant-confirm")
         for (i in pieces().indices) assertEntryReachable(i)
         assertTrue(pieces().size > 2) // 3,000 characters: several pieces, every one reachable above
-        rule.onNodeWithTag("grant-paths").performScrollToIndex(0)
+        scrollToEntry(0)
         rule.onAllNodesWithTag("grant-read").onFirst().assertIsEnabled()
+        scrollTo("grant-confirm")
         rule.onNodeWithTag("grant-confirm").assertIsEnabled().performClick()
         rule.onNodeWithText("ALLOW ALL", ignoreCase = true).performScrollTo().assertIsEnabled().performClick()
         rule.waitForIdle()
@@ -1386,8 +1397,9 @@ class ApprovalCardBehaviourTest {
         val path = "../" + "a".repeat(3_000)
         show(permissionCard(listOf("/srv/a", path), listOf("/w/b")))
         scrollTo("grant-confirm")
-        rule.onNodeWithTag("grant-paths").performScrollToIndex(0)
+        scrollToEntry(0)
         rule.onAllNodesWithTag("grant-read")[0].performClick() // untick /srv/a
+        scrollTo("approval-choice")
         rule.onNodeWithText("ALLOW SELECTED", ignoreCase = true).performScrollTo().assertIsEnabled().performClick()
         rule.waitForIdle()
         val call = calls.single()
@@ -1398,6 +1410,7 @@ class ApprovalCardBehaviourTest {
         show(permissionCard(listOf("/srv/a", "../" + "a".repeat(3_000)), emptyList(), choices = false))
         scrollTo("approval-allow")
         for (i in pieces().indices) assertEntryReachable(i)
+        scrollTo("approval-allow")
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:req-b:allow"), calls)
@@ -1408,6 +1421,7 @@ class ApprovalCardBehaviourTest {
         show(permissionCard(read, write, choices = false))
         scrollTo("approval-allow")
         assertEntryReachable(127)
+        scrollTo("approval-allow")
         rule.onNodeWithTag("approval-allow").assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("approval:req-b:allow"), calls)
@@ -1420,6 +1434,7 @@ class ApprovalCardBehaviourTest {
         scrollTo("grant-confirm")
         assertEquals(128, pieces().size) // one piece a short path
         for (i in 0 until 128) assertEntryReachable(i)
+        scrollTo("grant-confirm")
         rule.onNodeWithTag("grant-confirm").performClick()
         // Studio's roomier card puts the choice keys below the confirmation's fold: bring them in.
         rule.onNodeWithText("ALLOW ALL", ignoreCase = true).performScrollTo().assertIsEnabled().performClick()

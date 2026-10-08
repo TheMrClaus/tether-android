@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -503,8 +504,11 @@ internal fun SubagentRunTab(
     val listState = rememberLazyListState()
     val entries = remember(run.thread, showThinking) { subagentRunEntries(run, showThinking) }
     val rows = remember(run, entries) { panelRows(run, entries) }
-    val cardCount = pending.size + pendingQuestions.size
+    // ta-4za3: an approval card is several items of this list (head, a path entry each, tail).
+    val approvalSegments = remember(pending) { pending.map { GrantLayouts.of(it).segments } }
+    val cardCount = approvalSegments.sumOf { it.size } + pendingQuestions.size
     val lastIndex = rows.size + cardCount - 1
+    val cardStore = rememberCardStates()
     val focusKey = focus?.takeIf { it.runId == run.runId }
     val running = run.status == RUN_RUNNING
 
@@ -548,20 +552,39 @@ internal fun SubagentRunTab(
         onFocusShown()
     }
 
+    // The 12dp between the items is each item's own top padding (not an arrangement), so the segments of an
+    // approval card sit flush and the card paints its own seams.
+    val gap = t.css.spaceMd
+    androidx.compose.runtime.CompositionLocalProvider(LocalCardStates provides cardStore) {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize().background(chatWellColor(t)).nestedScroll(followGuard).testTag("subrun-panel"),
         contentPadding = spacing.padding,
-        verticalArrangement = Arrangement.spacedBy(t.css.spaceMd),
     ) {
-        items(rows, key = { it.key }, contentType = { row -> if (row is PanelRow.Step) "step/" + ((row.entry["kind"] as? JsStr)?.value ?: "") else row::class.java.simpleName }) { row ->
+        itemsIndexed(rows, key = { _, row -> row.key }, contentType = { _, row -> if (row is PanelRow.Step) "step/" + ((row.entry["kind"] as? JsStr)?.value ?: "") else row::class.java.simpleName }) { index, row ->
             val f = flash
             val flashing = row is PanelRow.Step && f != null && (row.entry["key"] as? JsStr)?.value == f.toolId
-            PanelRowView(row, showThinking, flashing, if (flashing) f?.nonce else null)
+            Box(Modifier.padding(top = if (index > 0) gap else 0.dp)) {
+                PanelRowView(row, showThinking, flashing, if (flashing) f?.nonce else null)
+            }
         }
         // ta-coik.22: the cards' words are selectable here too, as in the transcript and on the web.
-        items(pending, key = { "approval/${it.requestId}/${it.contentFp}" }) { SelectableRow { ApprovalCard(it) } }
-        items(pendingQuestions, key = { "question/${it.requestId}/${it.contentFp}" }) { SelectableRow { QuestionCard(it, answered = it.requestId in answeredIds) } }
+        pending.forEachIndexed { pi, view ->
+            items(
+                approvalSegments[pi],
+                key = { "approval/${view.requestId}/${view.contentFp}/${it.key}" },
+                contentType = { it.contentType },
+            ) { seg ->
+                val top = if (seg.part == ApprovalPart.Head && (rows.isNotEmpty() || pi > 0)) gap else 0.dp
+                Box(Modifier.padding(top = top)) { SelectableRow { ApprovalSegmentView(view, seg) } }
+            }
+        }
+        itemsIndexed(pendingQuestions, key = { _, q -> "question/${q.requestId}/${q.contentFp}" }) { qi, q ->
+            Box(Modifier.padding(top = if (rows.isNotEmpty() || pending.isNotEmpty() || qi > 0) gap else 0.dp)) {
+                SelectableRow { QuestionCard(q, answered = q.requestId in answeredIds) }
+            }
+        }
+    }
     }
 }
 

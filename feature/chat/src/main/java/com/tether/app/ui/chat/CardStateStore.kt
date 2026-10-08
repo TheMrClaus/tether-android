@@ -40,7 +40,7 @@ internal fun cutCodePoints(s: String, max: Int): String = ConsentGuard.cutCodePo
  * and bound to the configured server (round 5, I-2), keyed by that identity; ChatScreen falls back to
  * its own only when nobody provides one. Only indices and the operator's own
  * "Other" text are saved, never server text (a huge question cannot overflow the Bundle). What is NOT
- * stored: the web's "exact" confirmation tick and the send latch (see ApprovalCard).
+ * saved: the web's "exact" confirmation tick and the send latch (see ApprovalLocal; in memory only).
  *
  * A grant key re-reads the store at tap time (round 5, F1), so it sends the ticks as they are then.
  */
@@ -95,6 +95,17 @@ class CardStateStore internal constructor(
     private var counter = 0L
     private val generations = mutableStateMapOf<String, Long>().apply { grants.keys.forEach { put(it, ++counter) } }
     private var absentEpoch by androidx.compose.runtime.mutableLongStateOf(0L)
+
+    // ta-4za3: the approval card's local state (the confirmation tick, the send latch, the overlay notice) is never
+    // saved; it lives here, in memory, under the card's contentFp, shared by all the segments the host list draws it
+    // in, so a segment scrolling out of composition clears nothing. Newest use last; the oldest go past MAX_RECORDS.
+    private val locals = LinkedHashMap<String, ApprovalLocal>(16, 0.75f, true)
+
+    internal fun local(contentFp: String): ApprovalLocal = synchronized(locals) {
+        val held = locals.getOrPut(contentFp) { ApprovalLocal() }
+        while (locals.size > MAX_RECORDS) locals.remove(locals.keys.first())
+        held
+    }
 
     internal fun grant(contentFp: String): GrantSelection = grantStates[contentFp] ?: GrantSelection()
 
@@ -151,6 +162,7 @@ class CardStateStore internal constructor(
         generations.clear()
         grantOrder.clear()
         questionOrder.clear()
+        synchronized(locals) { locals.clear() }
         absentEpoch += 1
     }
 

@@ -404,7 +404,8 @@ internal fun buildChatItems(
     placement.homeless.forEach { d -> items.add(denialItem(null, null, d, nested = false, startsGroup = true, tight = false)) }
     // T6.6 (chat-view.tsx:3555-3604): external advancement / background loss.
     sessionNotices(state).forEachIndexed { i, n -> items.add(ChatItem.SessionNotice(scope, n, i)) }
-    if (showApprovals) pendingApprovals(state, consentSessionId).forEach { items.add(ChatItem.Approval(it)) }
+    // ta-4za3: the card's host rows are built here, off the main thread (the layout cache), not when it composes.
+    if (showApprovals) pendingApprovals(state, consentSessionId).forEach { GrantLayouts.of(it); items.add(ChatItem.Approval(it)) }
     // T6.6 (chat-view.tsx:3628-3652): the limit card or its scheduled row, before the questions.
     rateLimitPrompt(state)?.let { items.add(ChatItem.RateLimit(scope, it)) }
     val answeredIds = answeredRequestIds(state)
