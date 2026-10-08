@@ -70,7 +70,13 @@ class VideoPlayerBlockingTest {
      * lock is held by the call that is waiting on the data source), and nothing else about it is modelled.
      */
     private class StuckPlatform(private val source: WaitingSource) : MediaPlayer() {
-        val calls = java.util.Collections.synchronizedList(mutableListOf<String>())
+        private val recorded = java.util.Collections.synchronizedList(mutableListOf<String>())
+
+        /**
+         * A copy taken under the list's lock. The player thread appends while the test thread reads; a synchronizedList
+         * only locks single calls, so iterating it directly (filter, count) can throw ConcurrentModificationException.
+         */
+        val calls: List<String> get() = synchronized(recorded) { recorded.toList() }
         @Volatile var prepared: MediaPlayer.OnPreparedListener? = null
         @Volatile var released = false
 
@@ -88,7 +94,7 @@ class VideoPlayerBlockingTest {
 
         private fun native(name: String) {
             if (!ready) return
-            calls += name
+            recorded += name
             val limit = System.nanoTime() + 30_000_000_000L
             while (source.reading.get() && System.nanoTime() < limit) Thread.sleep(2)
         }
