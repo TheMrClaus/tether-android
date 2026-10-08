@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -51,7 +50,10 @@ import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.tether.app.client.ClaudeAccount
 import com.tether.app.client.ClaudeLoginStatus
@@ -63,6 +65,7 @@ import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSelect
 import com.tether.app.ui.components.TetherSelectOption
+import com.tether.app.ui.components.WholeWordText
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.SafeText
@@ -98,6 +101,8 @@ object ClaudeAccountsTags {
     const val SyncLine = "claude-accounts-sync-line"
     fun syncCategory(key: String) = "claude-accounts-sync-category:$key"
     fun card(id: String) = "claude-account:$id"
+    fun glyph(id: String) = "claude-account-glyph:$id"
+    fun head(id: String) = "claude-account-head:$id"
     fun plan(id: String) = "claude-account-plan:$id"
     fun organization(id: String) = "claude-account-org:$id"
     fun status(id: String) = "claude-account-status:$id"
@@ -300,10 +305,56 @@ private fun ListNotice(notice: ClaudeAccountsPresentation.Notice, narrow: Boolea
 }
 
 /**
+ * `.engine-card-head`: one nowrap, centre-aligned flex row with a 12 gap (globals.css:3128-3129 under
+ * studio.css:643). Three items, in order: the glyph (`flex: 0 1 32px`, its floor the C's min-content
+ * width), the title column (`flex: 1 1 auto; min-width: 0`, basis [titleBasis], its max-content width)
+ * and the keys (one item here, frozen at their max-content width: a key's label is nowrap, so its
+ * min-content is its max-content).
+ *
+ * When glyph and title do not fit beside the keys, the shortfall comes off the two in proportion to
+ * their bases (CSS Flexbox 9.7): the glyph narrows (it stays 32 tall), the title with it; a glyph
+ * that reaches its floor is frozen there and the title takes the rest. With room, the title takes the
+ * free space (grow 1), so the keys end at the content edge.
+ */
+@Composable
+private fun AccountHeadRow(titleBasis: Int, content: @Composable () -> Unit) {
+    Layout(content) { measurables, constraints ->
+        val (glyph, title, keys) = measurables
+        val gap = 12.dp.roundToPx()
+        val glyphBasis = 32.dp.roundToPx()
+        val keysP = keys.measure(Constraints())
+        val avail = (constraints.maxWidth - keysP.width - 2 * gap).coerceAtLeast(0)
+        val glyphFloor = glyph.minIntrinsicWidth(32.dp.roundToPx()).coerceIn(0, glyphBasis)
+        val glyphW: Int
+        if (glyphBasis + titleBasis <= avail) {
+            glyphW = glyphBasis
+        } else {
+            val deficit = glyphBasis + titleBasis - avail
+            glyphW = Math.round(glyphBasis - deficit.toFloat() * glyphBasis / (glyphBasis + titleBasis)).coerceAtLeast(glyphFloor)
+        }
+        val titleW = (avail - glyphW).coerceAtLeast(0)
+        val glyphP = glyph.measure(Constraints(minWidth = glyphW, maxWidth = glyphW, minHeight = 32.dp.roundToPx(), maxHeight = 32.dp.roundToPx()))
+        val titleP = title.measure(Constraints(minWidth = titleW, maxWidth = titleW))
+        val height = maxOf(glyphP.height, titleP.height, keysP.height)
+        layout(constraints.maxWidth, height) {
+            // The same rounding as a Row's CenterVertically.
+            val center = Alignment.CenterVertically
+            glyphP.place(0, center.align(glyphP.height, height))
+            titleP.place(glyphW + gap, center.align(titleP.height, height))
+            keysP.place(glyphW + gap + titleW + gap, center.align(keysP.height, height))
+        }
+    }
+}
+
+/**
  * One `.engine-card` (settings-dialog.tsx:1680-1836; studio.css 638-645): the C glyph, the title
- * with its plan and Pre-existing tags, the status and organization lines, Rename and Check; then the
- * rename row, the Sign-in row (the CLAUDE_CONFIG_DIR, by the path rule) with the login panel, and
- * the Remove row. On a phone the keys drop under the title so the title keeps the width.
+ * with the status and organization lines, Rename and Check; then the rename row, the Sign-in row
+ * (the CLAUDE_CONFIG_DIR, by the path rule) with the login panel, and the Remove row.
+ *
+ * The head is one nowrap, centre-aligned row with a 12 gap at every width (studio.css:643
+ * `:root .engine-card-head { gap: 12px }` over globals.css:3128-3129): the keys keep their intrinsic
+ * width beside the title, which shrinks and wraps (`flex: 1 1 auto; min-width: 0`). There is no
+ * narrow fold. The plan and Pre-existing tags are hidden (studio.css:344), so they are not drawn.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -345,59 +396,73 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
                 modifier = Modifier.testTag(ClaudeAccountsTags.check(id)),
             )
         }
-        Row(verticalAlignment = if (narrow) Alignment.Top else Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        val titleStyle = settingsText(type.ui, 15f, 700, lineHeight = 1.4f)
+        val idStyle = settingsText(type.mono, 11.5f, 400, lineHeight = 1.5f)
+        val smallStyle = settingsText(type.ui, 12f, 400, lineHeight = 1.5f)
+        val idText = card.idLine?.let { accountIdText(it) }
+        // The column's max-content width (its flex basis) is its widest line unwrapped.
+        val measurer = rememberTextMeasurer()
+        val basis = remember(card.title, idText, card.status, card.organization, titleStyle, idStyle, smallStyle, measurer) {
+            listOfNotNull(
+                AnnotatedString(card.title) to titleStyle,
+                idText?.let { it to idStyle },
+                AnnotatedString(card.status) to smallStyle,
+                card.organization?.let { AnnotatedString(it) to smallStyle },
+            ).maxOf { (text, style) -> measurer.measure(text, style, softWrap = false).size.width }
+        }
+        AccountHeadRow(titleBasis = basis) {
             // `.provider-glyph.provider-claude` with the letter C (aria-hidden), Studio's raised square
-            // (studio.css 340: 0.45rem corner, no border).
+            // (studio.css 340: 0.45rem corner, no border): flex 0 1 32px, 32 tall, its floor the C.
             Box(
-                Modifier.size(32.dp).background(t.graphiteRaised, RoundedCornerShape(7.2.dp)),
+                Modifier.testTag(ClaudeAccountsTags.glyph(id)).height(32.dp).background(t.graphiteRaised, RoundedCornerShape(7.2.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("C", color = t.ink, style = settingsText(type.mono, 12.8f, 750))
+                Text("C", color = t.ink, style = settingsText(type.mono, 12.8f, 750), softWrap = false)
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.testTag(ClaudeAccountsTags.head(id)), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                // The web hides `.mode-tag` (the plan and Pre-existing tags) under every finish
+                // (studio.css:344, `:root .mode-tag { display: none }`, imported unconditionally), so
+                // the head draws the title alone: display:none is absent from the accessibility tree too.
+                // The title and each small line wrap at their spaces only; a word wider than the column
+                // is drawn whole and overflows it (overflow-wrap: normal), the keys painting over it.
+                WholeWordText(
+                    card.title,
+                    style = titleStyle,
+                    color = t.white,
+                    clamp = false,
+                    modifier = Modifier.semantics { heading() },
+                )
+                if (idText != null) {
+                    // r2 (app-only, not on the web's head): this title could pass for another's: the
+                    // profile id tells them apart.
                     Text(
-                        card.title,
-                        color = t.white,
-                        style = settingsText(type.ui, 15f, 700, lineHeight = 1.4f),
-                        modifier = Modifier.semantics { heading() }.align(Alignment.CenterVertically),
-                    )
-                    card.planTag?.let {
-                        Tag(it, Modifier.testTag(ClaudeAccountsTags.plan(id)).align(Alignment.CenterVertically).semantics { contentDescription = "Plan: $it" })
-                    }
-                    if (card.preExisting) {
-                        Tag(ClaudeAccountsPresentation.PRE_EXISTING, Modifier.align(Alignment.CenterVertically).semantics { contentDescription = ClaudeAccountsPresentation.PRE_EXISTING_TIP })
-                    }
-                }
-                card.idLine?.let { line ->
-                    // r2: this title could pass for another's: the profile id tells them apart.
-                    Text(
-                        accountIdText(line),
-                        style = settingsText(type.mono, 11.5f, 400, lineHeight = 1.5f),
+                        idText,
+                        style = idStyle,
                         color = t.faint,
                         modifier = Modifier
                             .testTag(ClaudeAccountsTags.id(id))
-                            .semantics { contentDescription = "profile ${LabelText.visibleValue(line)}" },
+                            .semantics { contentDescription = "profile ${LabelText.visibleValue(card.idLine)}" },
                     )
                 }
-                Text(
+                WholeWordText(
                     card.status,
+                    style = smallStyle,
                     color = t.muted,
-                    style = settingsText(type.ui, 12f, 400, lineHeight = 1.5f),
+                    clamp = false,
                     modifier = Modifier.testTag(ClaudeAccountsTags.status(id)).semantics { liveRegion = LiveRegionMode.Polite },
                 )
                 card.organization?.let {
-                    Text(
+                    WholeWordText(
                         it,
+                        style = smallStyle,
                         color = t.muted,
-                        style = settingsText(type.ui, 12f, 400, lineHeight = 1.5f),
+                        clamp = false,
                         modifier = Modifier.testTag(ClaudeAccountsTags.organization(id)),
                     )
                 }
             }
-            if (!narrow) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { keys() }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) { keys() }
         }
-        if (narrow) Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) { keys() }
         // `.engine-card-body`: a rule, then the rows (the first without its own rule).
         Box(Modifier.padding(top = 12.dp).fillMaxWidth().height(1.dp).background(t.line))
         if (renaming) {
@@ -853,24 +918,6 @@ private fun CardRow(
             }
         }
     }
-}
-
-/**
- * A tag after a card's title. The web's `.mode-tag` is hidden under the Studio finish
- * (studio.css:344, a rail rule); the plan name is this section's point (#231), so it is drawn in
- * Studio's own tag idiom (`.passkey-tag`, studio.css: 11px on the mineral wash, no border).
- */
-@Composable
-private fun Tag(text: String, modifier: Modifier = Modifier) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    Text(
-        text,
-        color = t.ink,
-        maxLines = 1,
-        style = settingsText(type.ui, 11f, 600, lineHeight = 1.4f),
-        modifier = modifier.background(t.mineral, CircleShape).padding(horizontal = 8.dp, vertical = 3.dp),
-    )
 }
 
 private val SYNC_CATEGORIES = listOf("plugins" to "Plugins", "skills" to "Skills", "mcp" to "MCP servers", "hooks" to "Hooks")

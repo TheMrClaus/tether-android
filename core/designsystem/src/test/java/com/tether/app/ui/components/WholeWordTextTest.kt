@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +85,55 @@ class WholeWordTextTest {
     @Test fun aShortNameWrapsAtItsSpaceAtTwiceTheText() {
         render("Video fixture 2")
         assertEquals(listOf("Video", "fixture 2"), lines())
+    }
+
+    private fun renderUnclamped(text: String, widthDp: Float) {
+        rule.setContent {
+            TetherTheme {
+                val style = TextStyle(fontFamily = LocalTetherTypography.current.ui, fontSize = 12.sp)
+                Box(Modifier.width(widthDp.dp)) { WholeWordText(text, style, Color.Black, clamp = false) }
+            }
+        }
+        rule.waitForIdle()
+    }
+
+    /** The drawn layouts only: the unclamped lines path also has one node carrying the whole text. */
+    private fun drawn(): List<TextLayoutResult> =
+        rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .map { node ->
+                val out = ArrayList<TextLayoutResult>()
+                node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(out)
+                out[0]
+            }
+
+    @Test fun unclampedTextHasNoLineLimitAndNoEllipsis() {
+        val name = "Summarize the README in one line, then open the release pull request and merge it"
+        renderUnclamped(name, 100f)
+        val ls = drawn()
+        assertEquals("the ordinary Text path draws one node", 1, ls.size)
+        assertTrue("more than the clamp's two lines", ls[0].lineCount > 2)
+        assertTrue((0 until ls[0].lineCount).none { ls[0].isLineEllipsized(it) })
+        val boundaries = lineBoundaries(name)
+        assertTrue((0 until ls[0].lineCount - 1).all { ls[0].getLineEnd(it) in boundaries })
+    }
+
+    @Test fun unclampedOverlongSegmentIsDrawnWholeOnItsOwnLineAndUnclipped() {
+        renderUnclamped("Logged in \u2014 work@example.com and more words after it", 60f)
+        val ls = drawn()
+        val email = ls.single { it.layoutInput.text.text.trim() == "work@example.com" }
+        assertEquals(1, email.lineCount)
+        assertTrue("not cut with an ellipsis", !email.isLineEllipsized(0))
+        val wide = email.getLineRight(0) - email.getLineLeft(0)
+        assertTrue("drawn at its unwrapped width, wider than the 60 dp box", wide >= email.multiParagraph.maxIntrinsicWidth - 0.5f && wide > 60f * 2.625f)
+        // No node ends inside a word: every layout's line ends are break opportunities.
+        for (r in ls) {
+            val t = r.layoutInput.text.text
+            val ok = lineBoundaries(t)
+            assertTrue((0 until r.lineCount - 1).all { r.getLineEnd(it) in ok })
+        }
+        // One semantics node carries the whole text, so a title still reads as one string.
+        rule.onNodeWithText("Logged in \u2014 work@example.com and more words after it", useUnmergedTree = true).assertExists()
     }
 
     @Test fun theGreedyPlanBreaksOnlyAtOpportunities() {

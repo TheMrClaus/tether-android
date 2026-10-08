@@ -106,12 +106,17 @@ class ClaudeAccountsBehaviourTest {
         show(FakeAccounts().binding())
         waitFor("Claude Code (work)")
         val all = everything()
-        for (text in listOf("Claude Code (default)", "Claude Code (work)", "Claude Code (fresh)", "Team Premium 5x", "Team Standard", "Brainrocket", "Pre-existing")) {
+        for (text in listOf("Claude Code (default)", "Claude Code (work)", "Claude Code (fresh)", "Brainrocket")) {
             assertTrue(text, all.contains(text))
         }
+        // The web hides `.mode-tag` (studio.css:344, display:none), so neither the plan nor Pre-existing is drawn,
+        // and display:none is absent from the accessibility tree: no tag node and no "Plan:" description.
+        for (text in listOf("Team Premium 5x", "Team Standard", "Pre-existing")) {
+            assertTrue(text, all.none { it.contains(text) })
+        }
+        assertTrue(all.none { it.startsWith("Plan:") })
         assertEquals(3, all.count { it == "Status unknown" })
-        tag(ClaudeAccountsTags.plan("claude-default")).assertExists()
-        tag(ClaudeAccountsTags.plan("claude-fresh")).assertDoesNotExist()
+        for (id in listOf("claude-default", "claude-work", "claude-fresh")) tag(ClaudeAccountsTags.plan(id)).assertDoesNotExist()
         tag(ClaudeAccountsTags.organization("claude-default")).assertExists()
         tag(ClaudeAccountsTags.organization("claude-work")).assertDoesNotExist()
         // The CLAUDE_CONFIG_DIR, only in the Sign-in row and only when the server says there is one.
@@ -132,7 +137,7 @@ class ClaudeAccountsBehaviourTest {
     @Test fun theRawSentinelIsNowhere() {
         ShadowLog.clear()
         show(FakeAccounts().binding())
-        waitFor("Team Premium 5x")
+        waitFor("Claude Code (work)")
         compose.onNodeWithTag(ClaudeAccountsTags.check("claude-work"), useUnmergedTree = true).performScrollTo().performClick()
         waitFor("Logged in — work@example.com")
         val drawn = everything()
@@ -472,7 +477,8 @@ class ClaudeAccountsBehaviourTest {
         show(FakeAccounts(lists = listOf(ClaudeAccountsResult.Ok(AccountsFixtures.decode(json), ORIGIN))).binding())
         waitFor("Claude Code (krow)")
         val all = everything()
-        assertTrue(all.contains("Max 20x"))
+        // The plan name is a `.mode-tag`, hidden on the web (studio.css:344): it is not drawn at all.
+        assertTrue(all.none { it.contains("Max") })
         assertTrue(all.contains("Acme Corp"))
         // The path's controls are drawn as visible tokens, never applied.
         val path = all.single { it.contains("evil") }
