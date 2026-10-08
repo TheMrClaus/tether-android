@@ -86,10 +86,10 @@ class MainShellTranscriptScrollTest {
 
     private lateinit var vm: TetherViewModel
 
-    private fun host(aTree: JsObj = conversation("a", 60)) {
+    private fun host(aTree: JsObj = conversation("a", 60), bTree: JsObj = conversation("b", 60)) {
         val client = ShellConsentClient()
         client.show(session("a"), aTree)
-        client.show(session("b"), conversation("b", 60))
+        client.show(session("b"), bTree)
         vm = TetherViewModel(client)
         vm.selectSession("a")
         val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
@@ -142,8 +142,8 @@ class MainShellTranscriptScrollTest {
     }
 
     /** ta-twjm: a few turns, then one that ran a shell command (its activity group is collapsed once finished). */
-    private fun withATool(): JsObj = foldTree(
-        conversation("a", 3),
+    private fun withATool(prefix: String = "a"): JsObj = foldTree(
+        conversation(prefix, 3),
         ev("turn_started", "tool1", ts = 9_000L) { put("idempotencyKey", "k-tool1") },
         ev("user_message_accepted", "tool1", ts = 9_000L) { put("text", "run it") },
         ev("tool_start", "tool1", ts = 9_000L) { put("toolId", "b"); put("name", "Bash"); put("input", kotlinx.serialization.json.buildJsonObject { put("command", "seq 3") }) },
@@ -155,7 +155,19 @@ class MainShellTranscriptScrollTest {
 
     private fun group() = rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("tool-activity-group")).let { rule.onNodeWithTag("tool-activity-group") }
 
-    private fun groupIs(state: String) = group().assert(androidx.compose.ui.test.SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, state))
+    private fun groupState(): String? = runCatching<String?> { group().fetchSemanticsNode().config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsProperties.StateDescription) { null } }.getOrNull()
+
+    /**
+     * The transcript's rows are rebuilt OFF the main thread after a change (ChatDerivation.kt: a toggle bumps the rows'
+     * inputs; the last rows show until the build publishes), and the compose test clock does not wait for that thread.
+     * So after a toggle the header's state is awaited, not read once (a single read raced the publish under load).
+     * A first build for a session or a shell is synchronous, so a read right after a switch needs no wait; awaiting is harmless there.
+     */
+    private fun groupIs(state: String) {
+        // Default 1 s timeout: the measured wait under load was 0-157 ms over five runs of the class.
+        rule.waitUntil { groupState() == state }
+        assertEquals(state, groupState())
+    }
 
     /** ta-twjm: the browser keeps a `<details>` open across a resize; so does an activity group the reader opened. */
     @Test fun anOpenedActivityGroupStaysOpenAcrossTheShellSwitchAndARecreation() {
@@ -178,6 +190,34 @@ class MainShellTranscriptScrollTest {
         settle()
         groupIs("Collapsed")
         resize(LANDSCAPE)
+        groupIs("Collapsed")
+    }
+
+    /**
+     * ta-twjm: a group the reader opened in A is not A's alone to keep: B (same row, same default) opens as it came,
+     * and a toggle in B is B's. Like the scroll place, the store holds the ONE open session (the web remounts its ChatView per
+     * session), so going back to A opens A afresh at its defaults: no toggle crosses from one session to the other.
+     */
+    @Test fun twoSessionsGroupTogglesAreIndependent() {
+        host(withATool("a"), withATool("b"))
+        groupIs("Collapsed")
+        group().performClick()
+        settle()
+        groupIs("Expanded")
+        resize(LANDSCAPE)
+        groupIs("Expanded")
+
+        rule.runOnIdle { vm.selectSession("b") }
+        settle()
+        groupIs("Collapsed")
+        group().performClick()
+        settle()
+        groupIs("Expanded")
+        resize(PORTRAIT)
+        groupIs("Expanded")
+
+        rule.runOnIdle { vm.selectSession("a") }
+        settle()
         groupIs("Collapsed")
     }
 
