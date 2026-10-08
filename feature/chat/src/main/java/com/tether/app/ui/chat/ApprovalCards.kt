@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
@@ -719,6 +720,8 @@ private fun GrantFieldsetTop() {
             style = TextStyle(fontFamily = type.body.fontFamily, fontSize = legendSize, fontWeight = FontWeight(650)),
             color = t.ink,
             modifier = Modifier
+                // The legend takes no height of its own: the fieldset's padding sets where the rows start.
+                .layout { m, c -> m.measure(c).let { pl -> layout(pl.width, 0) { pl.place(0, 0) } } }
                 .offset(x = t.css.spaceSm, y = (-8).dp)
                 .background(t.attentionBg)
                 .padding(horizontal = t.css.spaceXs)
