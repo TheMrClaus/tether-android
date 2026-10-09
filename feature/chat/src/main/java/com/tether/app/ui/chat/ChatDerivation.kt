@@ -114,6 +114,8 @@ internal class ChatRows(
     val storyPoints: List<TimelinePoint>,
     /** The toggle lookups the build made, to replay on the main thread ([GroupToggles.resolve] resets a stale toggle). */
     val toggleReads: List<ToggleRead>,
+    /** ta-8hcc: the files the session's tool calls touched (main transcript and sub-agent threads), built with the rows. */
+    val touched: TouchedFiles = TouchedFiles.EMPTY,
 )
 
 internal class ToggleRead(val key: String, val default: Boolean)
@@ -142,7 +144,7 @@ internal fun deriveChatRows(i: ChatRowsInputs, toggles: Map<String, GroupToggle>
         },
         i.showApprovals, i.consentSessionId,
     )
-    return ChatRows(items, TimelineModel.points(i.tree), reads)
+    return ChatRows(items, TimelineModel.points(i.tree), reads, touchedFilesOf(cardTree(i.projection, i.tree)))
 }
 
 /** The session's subagent runs (the roster and the run tabs read them). */

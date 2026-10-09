@@ -209,6 +209,11 @@ private fun ChatTranscriptBody(
         onPublish = { built -> built.toggleReads.forEach { groupToggles.resolve(it.key, it.default) } },
     ) { toggles -> deriveChatRows(rowInputs, toggles) }
     val items = rows.items
+    // ta-8hcc: the files this session touched go to the opener's stable holder (a relative mention is resolved when tapped);
+    // it takes a new index only when the touched paths change, so a streaming delta publishes nothing.
+    val fileOpener = LocalWorkspaceFileOpener.current
+    val touchedKey = consentSessionId ?: projection.tetherSessionId
+    SideEffect { fileOpener?.touched?.publish(touchedKey, rows.touched) }
     // L2: lazy keys must be unique or Compose throws; a repeated block id, run id or a command id
     // that spells another row's key gets an ordinal (the first keeps its own key).
     val lazyKeys = remember(items) { uniqueLazyKeys(items.map { it.key }) }
@@ -521,7 +526,8 @@ private fun ChatTranscriptBody(
             if (target == null) {
                 LaunchedEffect(sheetKey) { openActivity.value = null }
             } else {
-                CompositionLocalProvider(LocalCopyNotices provides copyNotices) {
+                val sheetAnchor = remember(projection.turnOrder, sheetKey) { activityKeyAnchor(projection, sheetKey) }
+                CompositionLocalProvider(LocalCopyNotices provides copyNotices, LocalFileMentionAnchor provides sheetAnchor) {
                     ActivitySheet(
                         target = target,
                         flags = toolRender,
@@ -659,7 +665,9 @@ private fun ChatRowContent(
                 onFetchTurns(range.first, range.last + 1)
             }
             is ChatItem.Continuation -> ContinuationMarker()
-            is ChatItem.Block -> when (item.block.kind) {
+            is ChatItem.Block -> CompositionLocalProvider(
+                LocalFileMentionAnchor provides remember(item.turnId, item.block.blockId) { FileMentionAnchor(item.turnId, item.block.blockId) },
+            ) { when (item.block.kind) {
                 Vocab.BLOCK_USER_MESSAGE -> UserBubble(item.block, timeLabel = item.timeLabel, find = find)
                 Vocab.BLOCK_MESSAGE -> AgentBubble(item.block, timeLabel = item.timeLabel, find = find)
                 // ta-a5jl: a tool call and a thinking block are one compact row; the card / text is in the detail sheet.
@@ -668,7 +676,7 @@ private fun ChatRowContent(
                 // T7.3: the v54 `!` command panel (command_output_started / _delta / _completed).
                 COMMAND_OUTPUT_BLOCK -> remember(item.raw) { commandOutputView(item.raw) }?.let { CommandOutputPanel(it) }
                 else -> {}
-            }
+            } }
             is ChatItem.Denial -> PermissionDenialCard(item.denial, item.target, item.run, nested = item.nested)
             is ChatItem.Answered -> AnsweredQuestionCard(item.answered)
             is ChatItem.Retry -> item.turn.apiRetry?.let { ApiRetryMarker(it) }

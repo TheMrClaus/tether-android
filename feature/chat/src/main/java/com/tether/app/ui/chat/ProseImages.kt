@@ -246,9 +246,10 @@ internal fun MdInlines(
 ) {
     val pieces = remember(lines) { proseTextPieces(lines) }
     val fileHost = LocalFileLinkDraw.current
-    val texts: List<AnnotatedString?> = remember(pieces, t, type, weight, cursorKey, fileHost) {
+    val fileAnchor = LocalFileMentionAnchor.current
+    val texts: List<AnnotatedString?> = remember(pieces, t, type, weight, cursorKey, fileHost, fileAnchor) {
         val cursor = newCursor()
-        val files = fileHost?.let(::FileLinkDraw)
+        val files = fileHost?.let { FileLinkDraw(it, fileAnchor) }
         pieces.map { piece ->
             (piece as? ProsePiece.Text)?.let { p ->
                 buildAnnotatedString {

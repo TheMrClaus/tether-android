@@ -111,8 +111,23 @@ private const val CODE_TAG = "md-code"
 internal const val FILE_LINK_TAG = "file:"
 
 /** ta-9jnm: how a run of prose draws its file mentions: the host's opener and a budget the run shares. */
-internal class FileLinkDraw(val host: WorkspaceFileLinks) {
+internal class FileLinkDraw(val host: WorkspaceFileLinks, val anchor: FileMentionAnchor? = null) {
     private var left = FileLinks.MAX_LINKS
+
+    init {
+        built.incrementAndGet()
+    }
+
+    /** A tap on a drawn mention: a relative one looks at the session's touched files first (ta-8hcc), else its path opens. */
+    fun open(range: FileLinkRange) {
+        val mention = range.mention
+        if (mention != null) host.openMention(mention, range.path, anchor) else host.open(range.path)
+    }
+
+    internal companion object {
+        /** Test seam (ta-8hcc): how many runs of prose were built with file links; a tool call or a delta must not add to it. */
+        val built = java.util.concurrent.atomic.AtomicInteger()
+    }
 
     /** The mentions in [text] ([source]); each one drawn spends from the budget. */
     fun detect(text: String, source: FileLinkSource): List<FileLinkRange> {
@@ -166,7 +181,7 @@ internal fun AnnotatedString.Builder.appendMarked(
     rule: SafeText.Rule = SafeText.Rule.Prose,
     plan: ProsePlan? = null,
     files: List<FileLinkRange> = emptyList(),
-    openFile: (String) -> Unit = {},
+    openFile: (FileLinkRange) -> Unit = {},
 ) {
     val token = tokenStyle(t)
     val ranges = if (cursor == null) emptyList() else findRanges(text, cursor.needle)
@@ -184,7 +199,7 @@ internal fun AnnotatedString.Builder.appendMarked(
         val end = base + encoded.displayEnd(file.end)
         addStyle(SpanStyle(color = t.violet, textDecoration = TextDecoration.Underline), start, end)
         addLink(
-            LinkAnnotation.Clickable(tag = FILE_LINK_TAG + file.path, linkInteractionListener = { openFile(file.path) }),
+            LinkAnnotation.Clickable(tag = FILE_LINK_TAG + file.path, linkInteractionListener = { openFile(file) }),
             start,
             end,
         )
@@ -270,7 +285,7 @@ private fun AnnotatedString.Builder.appendInline(
     plan: ProsePlan,
     files: FileLinkDraw? = null,
 ) {
-    val openFile: (String) -> Unit = { path -> files?.host?.open?.invoke(path) }
+    val openFile: (FileLinkRange) -> Unit = { range -> files?.open(range) }
     for (node in nodes) {
         when (node) {
             is MdInline.Text -> appendMarked(
@@ -304,7 +319,7 @@ private fun AnnotatedString.Builder.appendInline(
                     LinkAnnotation.Clickable(
                         tag = FILE_LINK_TAG + node.path,
                         styles = TextLinkStyles(SpanStyle(color = t.violet, textDecoration = TextDecoration.Underline)),
-                        linkInteractionListener = { openFile(node.path) },
+                        linkInteractionListener = { files?.host?.open?.invoke(node.path) },
                     ),
                 ) { appendInline(node.children, t, type, weight, onLink, cursor, plan) }
             }

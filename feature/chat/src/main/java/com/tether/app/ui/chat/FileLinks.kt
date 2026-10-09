@@ -9,13 +9,31 @@ import androidx.compose.runtime.staticCompositionLocalOf
  * one absolute path in the host's file browser. The host (the shell) provides it through
  * [LocalWorkspaceFileOpener]; with none provided nothing is drawn as a link.
  */
-class WorkspaceFileLinks(val cwd: String, val open: (String) -> Unit)
+class WorkspaceFileLinks(val cwd: String, val open: (String) -> Unit) {
+    /**
+     * ta-8hcc: the files the session on screen touched, published by its transcript. The identity of this object never
+     * changes with the transcript, so drawing never rebuilds prose; a relative mention reads it when it is TAPPED.
+     */
+    internal val touched = TouchedFilesHolder()
+
+    /**
+     * A tap on a relative inline-code [mention] (as [mentionOf] reads it): the newest file the session touched at or before
+     * [anchor] whose path ends with the mention's whole segments, else [fallback] (the mention under [cwd], as before).
+     */
+    internal fun openMention(mention: String, fallback: String, anchor: FileMentionAnchor?) {
+        open(touched.latest.resolve(mention, anchor) ?: fallback)
+    }
+}
 
 /** The host's file opener for a message's file mentions; null: no link is ever drawn. */
 val LocalWorkspaceFileOpener = staticCompositionLocalOf<WorkspaceFileLinks?> { null }
 
-/** One drawn link inside a text run: the UTF-16 range [start, end) of [text] and the absolute [path] it opens. */
-internal data class FileLinkRange(val start: Int, val end: Int, val path: String)
+/**
+ * One drawn link inside a text run: the UTF-16 range [start, end) of [text] and the absolute [path] it opens.
+ * ta-8hcc: a relative inline-code mention also carries its [mention] (`digests/cat.md`): a tap first looks for a file the
+ * session touched that it names, and opens [path] (the mention under the working directory) only when there is none.
+ */
+internal data class FileLinkRange(val start: Int, val end: Int, val path: String, val mention: String? = null)
 
 /** Where a candidate token came from: a run of plain prose, or a whole inline-code span. */
 internal enum class FileLinkSource { Text, Code }
@@ -113,6 +131,7 @@ object FileLinks {
         val token = text.substring(s, e)
         val path = token.removeSuffixLine()
         if (rejected(path)) return null
+        var mention: String? = null
         val resolved: String = if (path.startsWith("/")) {
             if (path.endsWith("/")) return null
             if (path.split('/').count { it.isNotEmpty() } < 2) return null
@@ -121,9 +140,10 @@ object FileLinks {
         } else {
             if (source != FileLinkSource.Code || cwd.isEmpty() || !cwd.startsWith("/")) return null
             if (path.endsWith("/") || !knownFile(path)) return null
+            mention = mentionOf(path)
             normalize("$cwd/$path") ?: return null
         }
-        return FileLinkRange(s, e, resolved)
+        return FileLinkRange(s, e, resolved, mention)
     }
 
     /** [from, to) with the closing punctuation a sentence leaves behind removed; a ")" only when unmatched. */

@@ -508,6 +508,25 @@ internal fun SubagentRunTab(
     reviewFocus: String? = null,
     onReviewShown: () -> Unit = {},
 ) {
+    // ta-8hcc: this run's prose names files at its launcher's place in the transcript (an unknown block: every touch counts).
+    val anchor = remember(run.turnId, run.toolId) { FileMentionAnchor(run.turnId, run.toolId) }
+    androidx.compose.runtime.CompositionLocalProvider(LocalFileMentionAnchor provides anchor) {
+        SubagentRunTabBody(run, showThinking, pending, pendingQuestions, answeredIds, focus, onFocusShown, reviewFocus, onReviewShown)
+    }
+}
+
+@Composable
+private fun SubagentRunTabBody(
+    run: SubagentRun,
+    showThinking: Boolean,
+    pending: List<ApprovalView>,
+    pendingQuestions: List<QuestionRequestView>,
+    answeredIds: Set<String>,
+    focus: RunFocus?,
+    onFocusShown: () -> Unit,
+    reviewFocus: String?,
+    onReviewShown: () -> Unit,
+) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
     val spacing = transcriptSpacing(t, phone)
