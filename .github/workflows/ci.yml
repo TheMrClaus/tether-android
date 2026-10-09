@@ -5,11 +5,12 @@
 # (android-release.yml, manual) and unchanged.
 name: CI
 
+# Manual only (owner 2026-10-10). The merge bar is the local full gate (~/ta-runs/gate.sh runs these same steps plus
+# :app:assembleRelease on the exact head before every fast-forward), and android-release.yml builds releases on its own.
+# On GitHub's small runners this job failed on every push for reasons outside the code: Robolectric's runtime-jar download
+# from Maven failing (whole test classes fail at MavenArtifactFetcher) and timing-sensitive tests on slow cores.
 on:
-  push:
-    branches: [main, "parity/**"]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
