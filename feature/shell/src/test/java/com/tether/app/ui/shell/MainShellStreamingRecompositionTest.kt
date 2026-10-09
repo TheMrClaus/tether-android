@@ -136,9 +136,17 @@ abstract class StreamingRecompositionBase(private val widthPx: Int, private val 
             publish("message_delta", "t6:m1") { put("text", " delta$n") }
             perDelta += "delta $n: ${HashMap(counts)}"
         }
-        assertTrue("the stream shows", rule.onAllNodes(hasText("delta5", substring = true)).fetchSemanticsNodes().isNotEmpty())
-        // The statusline and the inspector read the tree, and show nothing of a message's words: quiet too (the phone
-        // draws the inspector only in its sheet).
+        // The transcript's rows are derived off the main thread: give the last one its time to arrive.
+        var shown = false
+        for (i in 0 until 100) {
+            shown = rule.onAllNodes(hasText("delta5", substring = true)).fetchSemanticsNodes().isNotEmpty()
+            if (shown) break
+            Thread.sleep(50)
+            rule.mainClock.advanceTimeBy(100)
+            rule.waitForIdle()
+        }
+        assertTrue("the stream shows", shown)
+        // The statusline and the inspector read the tree and show nothing of a message's words: quiet too.
         val recomposed = (watched + listOf("SessionStatusline", "InspectorHost")).associateWith { counts[it] ?: 0 }.filterValues { it > 0 }
         assertTrue("6 plain deltas recomposed: $recomposed; $perDelta", recomposed.isEmpty())
     }
