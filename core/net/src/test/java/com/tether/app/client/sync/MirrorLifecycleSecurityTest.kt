@@ -569,7 +569,9 @@ class MirrorLifecycleSecurityTest {
         h.expectFrame("hello")
         h.await(h.client.connection) { it == ConnectionState.Connected }
         recoversWithAFullAttach()
-        assertTrue(h.mirror.dead)
+        // ta-gfmk: the writer answers the failing read ("no copy") BEFORE it marks itself dead (JournalMirror.handle answers the op,
+        // then rethrows into die()), so the full attach above can run ahead of the flag; it is a state to wait for, not a fact at this line.
+        awaitTrue("the writer is dead") { h.mirror.dead }
     }
 
     /** The same trap with a writer that is stuck rather than dead: the read's bound recovers it. */
