@@ -73,7 +73,8 @@ class PhoneShellDrawerImeTest {
         }
     }
 
-    private fun composer() = rule.onNodeWithTag(ComposerTag)
+    // ta-1jj7: while the drawer is open the chat is hidden from accessibility (merged tree), but stays composed.
+    private fun composer() = rule.onNodeWithTag(ComposerTag, useUnmergedTree = true)
 
     private fun composerText(): String =
         composer().fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()

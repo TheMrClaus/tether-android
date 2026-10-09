@@ -34,9 +34,10 @@ class PhoneDrawerTouchFloorTest {
         val floor = with(rule.density) { PhoneDrawer.Floor.toPx() }
         val nodes = rule.onAllNodes(hasClickAction(), useUnmergedTree = true).fetchSemanticsNodes()
         assertTrue("the drawer has controls", nodes.size > 20)
-        val small = nodes.filter { n -> n.boundsInRoot.width + 0.5f < floor || n.boundsInRoot.height + 0.5f < floor }
+        // The laid-out size, not the bounds clipped to the viewport: a row half scrolled off is still 48 tall.
+        val small = nodes.filter { n -> n.size.width + 0.5f < floor || n.size.height + 0.5f < floor }
         assertTrue(
-            "controls under 48dp: " + small.map { it.config.getOrNull(SemanticsProperties.ContentDescription) to it.boundsInRoot },
+            "controls under 48dp: " + small.map { it.config.getOrNull(SemanticsProperties.ContentDescription) to it.size },
             small.isEmpty(),
         )
     }

@@ -241,10 +241,12 @@ class SidebarBehaviourTest {
         listOf(
             "Close sessions", "Search all conversations", "New session", "Filter sessions by harness", "Active", "Unread", "Hide runs",
             "Sort sessions by Created Date", "Filter sessions", "Open settings", "New session in ${F.ROOT.substringAfterLast('/')}",
-            "Hold and drag to move Worktree with a service", "End Worktree with a service",
+            "End Worktree with a service",
         ).forEach { label ->
             rule.onNodeWithContentDescription(label).assertExists().assert(hasClickAction().or(hasSetTextAction()))
         }
+        // The drag handle is a pointer gesture with Move up / Move down actions, not a click.
+        rule.onNodeWithContentDescription("Hold and drag to move Worktree with a service").assertExists()
         rule.onNodeWithTag(SidebarTags.Scheduled).assertExists().assert(hasClickAction())
         rule.onNodeWithTag(SidebarTags.NewSession).assertExists().assert(hasClickAction())
         rule.onNodeWithTag(SidebarTags.AddWorkspace).assertExists().assert(hasClickAction())

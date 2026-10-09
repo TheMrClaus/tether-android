@@ -322,7 +322,8 @@ class PhoneShellExpandedWidthTest {
         rule.onNodeWithTag(ShellTags.Topbar).assertIsDisplayed()
         rule.onNodeWithTag(ShellTags.MenuKey).performClick()
         assertTrue(state.drawerOpen)
-        rule.onNodeWithTag(ShellTags.TelemetryHandle).assertExists()
+        // ta-1jj7: the open drawer hides the shell from accessibility (merged tree); it stays composed.
+        rule.onNodeWithTag(ShellTags.TelemetryHandle, useUnmergedTree = true).assertExists()
     }
 }
 

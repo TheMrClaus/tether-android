@@ -63,7 +63,7 @@ class PhoneDrawerTallHeightTest {
         val list = rule.onNodeWithTag(SidebarTags.List).fetchSemanticsNode().boundsInRoot
         val scheduled = rule.onNodeWithTag(SidebarTags.Scheduled).fetchSemanticsNode().boundsInRoot
         assertTrue("scheduled $scheduled is above the list $list", scheduled.bottom <= list.top + 0.5f)
-        rule.onNodeWithTag(SidebarTags.List).performScrollToIndex(6)
+        rule.onNodeWithTag(SidebarTags.List).performScrollToIndex(2)
         rule.waitForIdle()
         rule.onNodeWithTag(SidebarTags.Scheduled).assertIsDisplayed()
     }
