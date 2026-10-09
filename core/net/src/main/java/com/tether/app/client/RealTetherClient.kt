@@ -101,6 +101,9 @@ internal enum class RacePoint {
 
     /** ta-coik.19 r2: sends given up on are computed (the store lock released) and not yet published. */
     FailedComputed,
+
+    /** ta-2vm7: an event is folded outside the lock (payload: the session id) and not yet published. */
+    EventFolded,
 }
 
 /** T7.2: a `*-control-result` message is shown in one status line; a longer one is cut. */
@@ -4105,8 +4108,17 @@ class RealTetherClient(
         // An unchanged projection is the same object (T2.1 Revision 6): nothing to publish.
         var stored = next
         if (next !== tree) {
+            raceHook?.invoke(RacePoint.EventFolded, message.sessionId)
             val typed = sessionStore.adapt(message.sessionId, next)
-            ifCurrent(webSocket) { stored = sessionStore.publish(message.sessionId, next, typed) }
+            // ta-2vm7: released (the UI opened other sessions) since the tree was read: nothing to publish,
+            // or one orphan tree and adapter would be put back.
+            ifCurrent(webSocket) {
+                if (retention.isRetained(message.sessionId)) {
+                    stored = sessionStore.publish(message.sessionId, next, typed)
+                } else {
+                    sessionStore.release(message.sessionId)
+                }
+            }
         }
         // Low-1 (r4): the checkpoint is of the tree that was STORED (the capped one), the object
         // checkpointDue compares against, so a cap never makes checkpoints skip.

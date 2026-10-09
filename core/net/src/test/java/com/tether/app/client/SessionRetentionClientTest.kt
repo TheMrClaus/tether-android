@@ -373,4 +373,29 @@ class SessionRetentionClientTest {
         assertEquals(setOf("s20"), h.client.projectionTrees.value.keys)
         assertTrue("peak ${watch.max()} trees", watch.max() <= 2)
     }
+
+    @Test
+    fun aSessionReleasedWhileAnEventIsBeingFoldedIsNotPutBack() {
+        val all = ids(5)
+        val ws = connected(all)
+        ids(4).forEach { open(ws, it) } // s1 is the oldest of the four kept
+        // The UI opens s5 after the reader read s1's tree and folded the event, before it publishes.
+        var raced = false
+        h.client.raceHook = { point, id ->
+            if (point == RacePoint.EventFolded && id == "s1" && !raced) {
+                raced = true
+                h.now.addAndGet(1)
+                h.client.attach("s5")
+            }
+        }
+        ws.send(turnStartedEvent("s1", "t2", 2))
+        h.serverBarrier(ws)
+        h.client.raceHook = null
+        assertTrue("the race happened", raced)
+        assertFalse("no orphan tree", h.client.projectionTrees.value.containsKey("s1"))
+        assertFalse(h.client.projections.value.containsKey("s1"))
+        val census = h.client.memoryCensus()
+        assertTrue("adapters ${census.adapters}", census.adapters <= 3)
+        assertEquals(setOf("s2", "s3", "s4"), h.client.projectionTrees.value.keys)
+    }
 }
