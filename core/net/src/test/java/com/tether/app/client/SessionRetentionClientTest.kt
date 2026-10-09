@@ -2,6 +2,7 @@ package com.tether.app.client
 
 import com.tether.app.protocol.tree.JsCodec
 import com.tether.app.protocol.tree.JsObj
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -299,5 +300,77 @@ class SessionRetentionClientTest {
         // The reconcile used the frame's state; the tree itself was not kept.
         assertNull(h.client.projectionTrees.value["s1"])
         assertNotNull(h.client.projectionTrees.value["s6"])
+    }
+
+    /** The most trees the client published at once since [watchTrees] began. */
+    private class TreePeak(val job: kotlinx.coroutines.Job, private val peak: java.util.concurrent.atomic.AtomicInteger) {
+        fun max() = peak.get()
+        fun stop() = job.cancel()
+    }
+
+    /** Sees EVERY published map (an unconfined collector runs inside each update), so the peak is exact. */
+    private fun watchTrees(): TreePeak {
+        val peak = java.util.concurrent.atomic.AtomicInteger(0)
+        val job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch {
+            h.client.projectionTrees.collect { peak.accumulateAndGet(it.size) { a, b -> maxOf(a, b) } }
+        }
+        return TreePeak(job, peak)
+    }
+
+    /** Backgrounds past the grace, then comes back: the socket is replaced and the ready re-attaches. */
+    private fun backgroundPastTheGraceAndResume(readyIds: List<String>): WebSocket {
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_GRACE_MS + 1)
+        h.enqueueConnect()
+        h.client.setAppForeground(true)
+        val next = h.nextSocket()
+        h.handshake(next, readyListing(*readyIds.toTypedArray()))
+        return next
+    }
+
+    @Test
+    fun aResumeAfterTheBackgroundGraceReattachesTheRetainedSetAndNeverHoldsMoreThanOneTreeOverIt() {
+        val all = ids(20)
+        val ws = connected(all)
+        all.forEach { open(ws, it) }
+        val retained = setOf("s17", "s18", "s19", "s20")
+        assertEquals(retained, h.client.projectionTrees.value.keys)
+        val watch = watchTrees()
+
+        val next = backgroundPastTheGraceAndResume(all)
+        // The open chat first; the others after its snapshot. Each answer is a FULL state (a long absence).
+        val attached = attaches(h.framesUntilBarrier()).map { it.first }.toMutableList()
+        assertEquals(listOf("s20"), attached)
+        next.send(snapshotFrame("s20", 5, turnState("s20", chars = 2_000)))
+        h.serverBarrier(next)
+        attached += attaches(h.framesUntilBarrier()).map { it.first }
+        for (id in attached.filter { it != "s20" }) next.send(snapshotFrame(id, 5, turnState(id, chars = 2_000)))
+        h.serverBarrier(next)
+        watch.stop()
+
+        assertEquals("the re-attach set is the retained set", retained, attached.toSet())
+        assertEquals(retained, h.client.projectionTrees.value.keys)
+        assertTrue("peak ${watch.max()} trees", watch.max() <= retained.size + 1)
+        assertTrue(h.client.memoryCensus().adapters <= retained.size + 1)
+    }
+
+    @Test
+    fun aResumeAfterTheMemoryWasTrimmedReattachesTheOpenSessionAlone() {
+        val all = ids(20)
+        val ws = connected(all)
+        all.forEach { open(ws, it) }
+        // The system trims a hidden app (UI_HIDDEN) long before the grace ends.
+        h.client.trimMemory(20)
+        assertEquals(setOf("s20"), h.client.projectionTrees.value.keys)
+        val watch = watchTrees()
+
+        val next = backgroundPastTheGraceAndResume(all)
+        assertEquals(listOf("s20"), attaches(h.framesUntilBarrier()).map { it.first })
+        next.send(snapshotFrame("s20", 5, turnState("s20", chars = 2_000)))
+        h.serverBarrier(next)
+        assertEquals("nothing else is attached", emptyList<Pair<String, Long?>>(), attaches(h.framesUntilBarrier()))
+        watch.stop()
+        assertEquals(setOf("s20"), h.client.projectionTrees.value.keys)
+        assertTrue("peak ${watch.max()} trees", watch.max() <= 2)
     }
 }
