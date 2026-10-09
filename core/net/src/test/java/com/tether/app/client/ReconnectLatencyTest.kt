@@ -259,6 +259,102 @@ class ReconnectLatencyTest {
         assertEquals("no background loop after the suspend", requests, h.server.requestCount)
     }
 
+    // ------------------------------------------------------------------
+    // ta-nl5m: what began before the app left must not slow the return
+    // ------------------------------------------------------------------
+
+    private fun slowFailure(delayMs: Long = 3_000) {
+        h.server.enqueue(
+            MockResponse().setResponseCode(500).setBody("{}").setHeadersDelay(delayMs, TimeUnit.MILLISECONDS),
+        )
+    }
+
+    private fun awaitRequests(count: Int) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (System.nanoTime() < deadline && h.server.requestCount < count) Thread.sleep(5)
+        assertEquals(count, h.server.requestCount)
+    }
+
+    @Test
+    fun aProbeStartedBeforeTheAppLeftAndFailingAfterTheReturnDoesNotDelayTheFreshAttempt() {
+        val ws = connected()
+        h.client.setAppForeground(false)
+        lose(ws) // the gateway dropped the link meanwhile: a backoff wait runs in the background
+        val wait = h.scheduler.await(::isReconnectDelay)
+        h.now.addAndGet(40_000)
+        // The wait ends in the background and its attempt hangs on a connection that is gone.
+        slowFailure()
+        wait.fire()
+        awaitRequests(3)
+        // Back in front: the old attempt is let go and a fresh one starts at once.
+        h.enqueueConnect()
+        h.client.setAppForeground(true)
+        h.handshake(h.nextSocket())
+        assertEquals("first probe and upgrade, the old probe, the fresh probe, its upgrade", 5, h.server.requestCount)
+        // No backoff was armed by the old probe failing: nothing but the one wait before the trip.
+        assertEquals(listOf(wait.delayMs), h.scheduler.history().filter { isReconnectDelay(it.delayMs) }.map { it.delayMs })
+    }
+
+    @Test
+    fun theFirstFailureOfAReturnsFreshAttemptRetriesAtOnceThenBacksOff() {
+        connected()
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_WIRE_FRESH_MS)
+        h.enqueueAuthFailure()
+        h.client.setAppForeground(true)
+        val first = h.scheduler.await(::isReconnectDelay)
+        assertEquals("no wait before the one free retry", 0L, first.delayMs)
+        h.enqueueAuthFailure()
+        first.fire()
+        val second = h.scheduler.await { isReconnectDelay(it) && it != 0L }
+        assertEquals("the second failure backs off as ever", 550L, second.delayMs)
+        h.enqueueConnect()
+        second.fire()
+        h.handshake(h.nextSocket())
+    }
+
+    @Test
+    fun anUpgradeThatFailsRightAfterTheReturnRetriesAtOnceToo() {
+        connected()
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_WIRE_FRESH_MS)
+        // The probe answers, the upgrade is refused.
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody("""{"authenticated":true}"""))
+        h.server.enqueue(MockResponse().setResponseCode(500))
+        h.client.setAppForeground(true)
+        val retry = h.scheduler.await(::isReconnectDelay)
+        assertEquals(0L, retry.delayMs)
+    }
+
+    @Test
+    fun aFailureLongAfterTheReturnBacksOffAsEver() {
+        connected()
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_WIRE_FRESH_MS)
+        h.enqueueConnect()
+        h.client.setAppForeground(true)
+        val next = h.nextSocket()
+        h.handshake(next)
+        // That socket was lost right after its handshake: the free retry was spent on opening.
+        h.now.addAndGet(1)
+        lose(next)
+        assertEquals(550L, h.scheduler.await(::isReconnectDelay).delayMs)
+    }
+
+    @Test
+    fun theIdlePooledConnectionsAreLetGoOnAReturnAfterALongAbsence() {
+        connected()
+        h.server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        kotlinx.coroutines.runBlocking { h.client.fetchStats() }
+        assertTrue("a connection is idle in the pool", h.http.connectionPool.idleConnectionCount() > 0)
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_WIRE_FRESH_MS)
+        h.enqueueConnect()
+        h.client.setAppForeground(true)
+        h.handshake(h.nextSocket())
+        assertEquals("what was idle before the absence is not reused", 0, h.http.connectionPool.idleConnectionCount())
+    }
+
     @Test
     fun aDefaultNetworkChangeReplacesAnOpenSocketAtOnce() {
         connected()

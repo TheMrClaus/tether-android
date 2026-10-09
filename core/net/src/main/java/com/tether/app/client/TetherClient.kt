@@ -705,7 +705,10 @@ interface TetherClient {
      * [ConnectionTimings.RESUME_PING_TIMEOUT_MS] ping; one that heard nothing for longer is replaced at
      * once (the server's heartbeat has ended it while the app could not answer). Background: after
      * [ConnectionTimings.BACKGROUND_GRACE_MS] (3 minutes) the socket is closed and reconnects
-     * stop until the next foreground; FCM covers the background.
+     * stop until the next foreground; FCM covers the background. ta-nl5m: with no live link to keep
+     * after a long absence, a connect attempt begun before the app left (and its backoff wait) is let
+     * go, idle pooled connections are evicted, a fresh attempt starts at once, and that attempt's first
+     * failure retries at once before the normal backoff.
      */
     fun setAppForeground(foreground: Boolean)
 

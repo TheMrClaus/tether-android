@@ -549,6 +549,14 @@ class RealTetherClient(
     @Volatile
     private var lastWireInboundAt = 0L
 
+    /**
+     * ta-nl5m: the fresh connect attempt a return from the background starts may fail once for a
+     * reason the absence explains (a pooled connection a gateway dropped meanwhile): that first failure
+     * retries at once, the next ones back off as ever. Set on such a return, spent by the first failure
+     * or cleared by the first socket that opens. Guarded by [lock].
+     */
+    private var resumeRetryLeft = false
+
     // --- protocol state (guarded by lock) ---
     private val tracker = CursorTracker()
     private val subscribed = LinkedHashSet<String>()
@@ -2684,6 +2692,8 @@ class RealTetherClient(
             trace.begin("resume")
             var stale: WebSocket? = null
             var verify = false
+            var fresh = false
+            var abandoned: WebSocket? = null
             val resume = synchronized(lock) {
                 inForeground = true
                 backgroundTask?.cancel()
@@ -2703,12 +2713,33 @@ class RealTetherClient(
                 if (!wasSuspended && socketOpen && away != null && away >= ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS) {
                     if (clock() - lastWireInboundAt >= ConnectionTimings.BACKGROUND_WIRE_FRESH_MS) stale = socket else verify = true
                 }
+                // ta-nl5m: no live link to keep after a long absence. Whatever a connect attempt began before
+                // the app left (a probe on a pooled connection a gateway dropped meanwhile, an upgrade, a
+                // backoff wait run up in the background) is let go, and a fresh attempt starts now: it must
+                // not wait for the old one to fail and then for a backoff the absence ran up.
+                val longAway = away != null && away >= ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS
+                if (!haltedLocked() && (wasSuspended || stale != null || (longAway && !socketOpen))) {
+                    fresh = true
+                    resumeRetryLeft = true
+                    if (!socketOpen && (connecting || socket != null)) {
+                        endConnectAttemptsLocked()
+                        abandoned = detachSocketLocked()
+                    }
+                    reconnectTask?.cancel()
+                    reconnectTask = null
+                }
                 wasSuspended
+            }
+            if (fresh) {
+                // Idle pooled connections were made before the absence: a request reusing a dead one waits
+                // out the read timeout (as on a network change). The pool is shared; only idle ones go.
+                httpClient.connectionPool.evictAll()
+                abandoned?.cancel()
             }
             // Web visibilitychange -> reconnectIfIdle: ping an open socket,
             // reconnect a dead one immediately.
             when {
-                resume -> {
+                resume || (fresh && stale == null) -> {
                     trace.mark("reconnect")
                     connectNow()
                 }
@@ -2726,6 +2757,7 @@ class RealTetherClient(
         }
         synchronized(lock) {
             inForeground = false
+            resumeRetryLeft = false
             if (backgroundedAt == null) backgroundedAt = clock()
             backgroundTask?.cancel()
             backgroundTask = scheduler.schedule(ConnectionTimings.BACKGROUND_GRACE_MS) { suspendForBackground() }
@@ -2943,7 +2975,8 @@ class RealTetherClient(
                     return@launch
                 }
                 connectionState.value = ConnectionState.Disconnected
-                scheduleReconnect()
+                // ta-nl5m: the first failure of a return's fresh attempt retries at once, then backoff.
+                scheduleReconnect(delayMs = if (consumeResumeRetry()) 0 else null)
                 return@launch
             }
             synchronized(lock) {
@@ -3152,6 +3185,15 @@ class RealTetherClient(
         }
     }
 
+    /** True once per return from the background ([resumeRetryLeft]); spends it. Caller holds [lock]. */
+    private fun consumeResumeRetryLocked(): Boolean {
+        val left = resumeRetryLeft && inForeground
+        resumeRetryLeft = false
+        return left
+    }
+
+    private fun consumeResumeRetry(): Boolean = synchronized(lock) { consumeResumeRetryLocked() }
+
     /** The next attempt after [Backoff.next] (or [delayMs], R2's one immediate attempt) — never a fixed-rate or tight loop. */
     private fun scheduleReconnect(delayMs: Long? = null) {
         synchronized(lock) {
@@ -3258,6 +3300,8 @@ class RealTetherClient(
                 tracker.clearResyncFlags()
                 lastInboundAt = clock()
                 lastWireInboundAt = lastInboundAt
+                // ta-nl5m: a link opened: the return's one free retry is no longer owed.
+                resumeRetryLeft = false
                 // use-tether.ts 90fbb9f :727-729: everything is back to `waiting` until reconcile
                 // (the assignment republishes the rows, now on an open socket).
                 pendingStore = PendingInput.resetInFlight(pendingStore)
@@ -3345,7 +3389,8 @@ class RealTetherClient(
             detachSocketLocked()
             connecting = false
             if (haltedLocked()) return
-            worked && inForeground
+            // ta-nl5m: so is the first failure of a return's fresh attempt (an upgrade that fails).
+            (worked && inForeground) || consumeResumeRetryLocked()
         }
         connectionState.value = ConnectionState.Disconnected
         trace.mark(if (immediate) "socket-lost reconnect-now" else "socket-lost backoff")
