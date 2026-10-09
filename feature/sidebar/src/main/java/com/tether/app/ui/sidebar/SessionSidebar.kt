@@ -863,7 +863,7 @@ private fun SessionFilter(query: String, onChange: (String) -> Unit, phone: Bool
                 .semantics { contentDescription = "Filter sessions" },
             decorationBox = { inner ->
                 Box(contentAlignment = Alignment.CenterStart) {
-                    if (query.isEmpty()) Text("Filter sessions…", style = style, color = t.faint, maxLines = 1)
+                    if (query.isEmpty()) Text("Filter sessions…", style = style.ltrWords(), color = t.faint, maxLines = 1)
                     inner()
                 }
             },
@@ -1222,7 +1222,7 @@ private fun SidebarAddRow(icon: androidx.compose.ui.graphics.vector.ImageVector,
     ) {
         val ink = t.muted
         SmallIcon(icon, ink, iconSize)
-        Text(label, style = css(type.ui, 0.75f, 600), color = ink)
+        Text(label, style = css(type.ui, 0.75f, 600).ltrWords(), color = ink)
     }
 }
 

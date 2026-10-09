@@ -71,6 +71,14 @@ internal fun css(family: FontFamily, rem: Float, weight: Int, trackingEm: Float 
     lineHeightStyle = CssLineHeight,
 )
 
+/**
+ * ta-g8py: the drawer's own words are English ("Archive idle sessions…", "· 8m", "· 3 matches"). Under an
+ * RTL layout a Text with no direction lays out in the layout's direction, which carries its leading or
+ * trailing neutral (a "·" or an "…") to the wrong end ("…Archive", "8m ·"). An explicit LTR paragraph
+ * keeps them where the words say. In an LTR layout the paragraph is LTR already: no pixel moves.
+ */
+internal fun TextStyle.ltrWords(): TextStyle = copy(textDirection = com.tether.app.ui.text.codeDirection)
+
 internal val Float.rem: Dp get() = (this * 16f).dp
 
 /** Lucide `star` with `fill: currentColor` (`.workspace-block-pin.is-pinned svg`, globals.css 3128). */

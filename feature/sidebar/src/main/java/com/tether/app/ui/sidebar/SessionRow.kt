@@ -666,7 +666,7 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
             // words say "was", on a faint still dot (no spinner, no violet ping).
             StatusDot(t.faint, size = 0.4f.rem, modifier = Modifier.flexFloor(0.dp))
             Text(was, style = style, color = t.faint, softWrap = false)
-            Text("· $rel", style = style, color = t.faint, softWrap = false)
+            Text("· $rel", style = style.ltrWords(), color = t.faint, softWrap = false)
         } else if (live != null) {
             val color = when (live.status) {
                 "active" -> t.running
@@ -681,10 +681,10 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
             }
             // ta-28i r2: a status this build does not know is the server's word: the label rule.
             Text(Format.statusCopy[live.status] ?: LabelText.label(live.status), style = style, color = color)
-            Text("· $rel", style = style, color = t.faint)
+            Text("· $rel", style = style.ltrWords(), color = t.faint)
         } else {
             SmallIcon(TetherIcons.History, t.faint, 12.dp)
-            Text("$rel ago", style = style, color = t.faint)
+            Text("$rel ago", style = style.ltrWords(), color = t.faint)
         }
         // T13.2 (SYNC_DESIGN §4.2): `history` + "12m" for a saved copy, `cloud-off` for none.
         if (live != null && sync != null) com.tether.app.ui.components.FreshnessGlyph(sync, now, Modifier.testTag(SidebarTags.freshness(entry.key)))
@@ -751,7 +751,7 @@ private fun rowDescription(
  * the hit counted more than one (session-sidebar.tsx:384-389). The row's description carries it.
  */
 @Composable
-private fun SnippetLine(snippet: String, matchCount: Int, phone: Boolean) {
+internal fun SnippetLine(snippet: String, matchCount: Int, phone: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val style = css(type.ui, if (phone) 0.65f else 0.7f, 400)
@@ -762,7 +762,7 @@ private fun SnippetLine(snippet: String, matchCount: Int, phone: Boolean) {
     ) {
         SmallIcon(TetherIcons.Search, t.faint, 11.dp)
         Text(snippet, style = style.copy(textDirection = proseDirection), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-        if (matchCount > 1) Text("·\u00A0$matchCount matches", style = style, color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.alpha(0.8f))
+        if (matchCount > 1) Text("·\u00A0$matchCount matches", style = style.ltrWords(), color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.alpha(0.8f))
     }
 }
 
