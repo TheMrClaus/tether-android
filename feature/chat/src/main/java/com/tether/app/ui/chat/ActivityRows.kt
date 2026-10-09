@@ -107,8 +107,12 @@ internal fun ActivityToolRow(raw: JsObj, key: String, nested: Boolean, showThink
             val media = remember(output) { extractToolMedia(output) }
             if (media.isNotEmpty()) {
                 val plan = remember(raw, showThinking) { cardMediaPlan(null, raw, showThinking) }
-                Box(Modifier.fillMaxWidth().padding(start = ActivityVerbInset + if (nested) ActivityNestInset else 0.dp, end = 12.dp, top = 4.dp)) {
-                    ToolMediaRow(media, limit = plan.card)
+                // ta-0jtb: the picture sits bare under its row, as the reference's does: no 1 px rule and none of the card's
+                // chrome. The gap above and below is css.spaceSm (the chrome's own vertical padding) and the tile starts at
+                // the verb's left edge (the chrome used to add spaceMd to it).
+                val gap = LocalTetherTokens.current.css.spaceSm
+                Box(Modifier.fillMaxWidth().padding(start = ActivityVerbInset + if (nested) ActivityNestInset else 0.dp, end = 12.dp, top = gap, bottom = gap)) {
+                    ToolMediaRow(media, limit = plan.card, bare = true)
                 }
             }
         }

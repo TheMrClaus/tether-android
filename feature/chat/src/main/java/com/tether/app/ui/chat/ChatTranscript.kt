@@ -517,7 +517,7 @@ private fun ChatTranscriptBody(
         // group that closes as its run ends must not close the sheet), and closes when the block has left the projection.
         val sheetKey = openActivity.value
         if (sheetKey != null) {
-            val target = remember(projection, tree, sheetKey) { activityTarget(projection, tree, sheetKey) }
+            val target = remember(projection, tree, sheetKey, toolRender.showThinking) { activityTarget(projection, tree, sheetKey, toolRender.showThinking) }
             if (target == null) {
                 LaunchedEffect(sheetKey) { openActivity.value = null }
             } else {

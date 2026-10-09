@@ -105,6 +105,9 @@ private fun joinArgs(vararg parts: String): String = parts.filter { it.isNotEmpt
 
 private fun capped(arg: String): String = if (arg.length > ACTIVITY_ARG_MAX) arg.substring(0, ACTIVITY_ARG_MAX) else arg
 
+/** The row verb of the generic kind (a tool with no kind of its own, mcp__ names included). */
+internal const val ActivityGenericVerb = "Tool"
+
 /** The row for a tool block: its verb, glyph, argument (the same fields as `toolInputSummary`) and state. */
 internal fun activityRowModel(block: JsObj): ActivityRowModel {
     val name = block.toolName().orEmpty()
@@ -141,7 +144,7 @@ internal fun activityRowModel(block: JsObj): ActivityRowModel {
             row("MCP", ActivityGlyph.Server, "${activityArgText(view.server)} · ${activityArgText(view.tool)}")
         }
         name.startsWith("collaboration:") -> row("Agents", ActivityGlyph.Boxes, activityArgText(collaborationView(block).action))
-        else -> row("Tool", ActivityGlyph.Wrench, joinArgs(activityArgText(name), compactInput(block["input"])))
+        else -> row(ActivityGenericVerb, ActivityGlyph.Wrench, joinArgs(activityArgText(name), compactInput(block["input"])))
     }
 }
 
@@ -161,10 +164,11 @@ internal fun activityKey(turnId: String, blockId: String): String = "$turnId/$bl
 /**
  * The block a sheet [key] names, read from the projection TREE (never from the row list, so an activity group that
  * closes as its run ends does not close the sheet), with the typed projection as the fallback the rows use. Null when
- * the block has left the projection. A turn id is matched as the longest known id the key starts with, so an id with a
+ * the block has left the projection, and for a thinking block while the showThinking gate is off (its row is gone, so its
+ * open sheet closes: ta-rzgv). A turn id is matched as the longest known id the key starts with, so an id with a
  * slash in it still resolves.
  */
-internal fun activityTarget(projection: SessionProjection, tree: JsObj?, key: String): ActivityTarget? {
+internal fun activityTarget(projection: SessionProjection, tree: JsObj?, key: String, showThinking: Boolean): ActivityTarget? {
     val turnId = projection.turnOrder.filter { key.startsWith("$it/") }.maxByOrNull { it.length } ?: return null
     val blockId = key.substring(turnId.length + 1)
     val turn = projection.turnsById[turnId] ?: return null
@@ -173,7 +177,7 @@ internal fun activityTarget(projection: SessionProjection, tree: JsObj?, key: St
     val kind = typed?.kind ?: treeBlock?.field("kind") ?: return null
     return when (kind) {
         Vocab.BLOCK_TOOL -> ActivityTarget.Tool(treeBlock ?: typed?.asTree() ?: return null)
-        Vocab.BLOCK_THINKING -> ActivityTarget.Thinking(typed ?: return null)
+        Vocab.BLOCK_THINKING -> if (showThinking) ActivityTarget.Thinking(typed ?: return null) else null
         else -> null
     }
 }

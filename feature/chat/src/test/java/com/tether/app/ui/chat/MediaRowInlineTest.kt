@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollToNode
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,5 +33,15 @@ class MediaRowInlineTest {
         rule.onAllNodes(isDialog()).assertCountEquals(0)
         // The tile is the transcript's own (it loaded through the loader), not a sheet's.
         rule.onAllNodesWithContentDescription("View image full size").assertCountEquals(1)
+    }
+
+    /** ta-0jtb: the picture sits bare under its row: the gap is css.spaceSm (8 dp) and nothing (no 1 px rule, no chrome padding) is added to it. */
+    @Test fun theTileSitsBareUnderItsRowAtTheSmallGap() {
+        rule.showTranscript(ActivityFixtures.rows, showThinking = true, groupsOpen = true)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(rowLabel("Read /w/p/chart.png, done"))
+        val row = rule.onNode(rowLabel("Read /w/p/chart.png, done")).fetchSemanticsNode().boundsInRoot
+        val media = rule.onNodeWithTag("tool-media").fetchSemanticsNode().boundsInRoot
+        val gap = 8f * rule.density.density
+        assertEquals("gap between the row and its picture, px", gap, media.top - row.bottom, 0.5f)
     }
 }

@@ -81,7 +81,7 @@ class ActivitySheetParityTest {
         rule.waitForIdle()
         var compared = 0
         for (key in toolKeys(fixture)) {
-            val target = activityTarget(fixture.projection, fixture.tree, key) as ActivityTarget.Tool
+            val target = activityTarget(fixture.projection, fixture.tree, key, showThinking = true) as ActivityTarget.Tool
             if (skip(target.raw)) continue
             val model = activityRowModel(target.raw)
             rule.openRow(model.label)
@@ -94,7 +94,7 @@ class ActivitySheetParityTest {
             rule.waitForIdle()
             val card = mutableListOf<String>()
             words(rule.onNodeWithTag("alone", useUnmergedTree = true).fetchSemanticsNode(), card)
-            sheet.remove(model.verb)
+            sheet.remove(activitySheetTitle(target))
             sheet.remove("Close")
             assertTrue("${model.label}: the sheet is not empty", sheet.isNotEmpty())
             assertEquals("${model.label}: the sheet body is the card's words", card.sorted(), sheet.sorted())

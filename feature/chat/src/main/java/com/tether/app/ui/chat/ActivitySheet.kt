@@ -36,7 +36,7 @@ internal fun ActivitySheet(target: ActivityTarget, flags: ToolRenderFlags, onDis
     val model = remember(target) { target.rowModel() }
     TetherSheet(
         onDismiss = onDismiss,
-        title = model.verb,
+        title = activitySheetTitle(target),
         icon = model.glyph.icon(),
         cardWidth = activitySheetCardWidth(),
     ) {
@@ -49,7 +49,7 @@ internal fun ActivitySheet(target: ActivityTarget, flags: ToolRenderFlags, onDis
 internal fun ActivitySheetSurface(target: ActivityTarget, flags: ToolRenderFlags, modifier: Modifier = Modifier, docked: Boolean = currentLayoutClass() == TetherLayoutClass.Phone) {
     val model = remember(target) { target.rowModel() }
     TetherSheetSurface(
-        title = model.verb,
+        title = activitySheetTitle(target),
         modifier = modifier,
         docked = docked,
         onClose = {},
@@ -58,6 +58,18 @@ internal fun ActivitySheetSurface(target: ActivityTarget, flags: ToolRenderFlags
     ) {
         ActivitySheetBody(target, flags)
     }
+}
+
+/**
+ * ta-ktlw: the sheet's title names the action. The row's verb for a built-in kind (Shell, Read, Edit, Search, Thinking,
+ * MCP ...); for the generic kind, whose verb is only "Tool", the tool's display name (the row argument's first token).
+ * The ROW keeps its verb. The name is the tool's own word, so it is drawn by the one-line code rule (a bidi or control
+ * character in it is a token, never raw: the title is a plain string).
+ */
+internal fun activitySheetTitle(target: ActivityTarget): String {
+    val model = target.rowModel()
+    if (target !is ActivityTarget.Tool || model.verb != ActivityGenericVerb) return model.verb
+    return activityArgText(target.raw.toolName()).let { if (it.isEmpty()) model.verb else com.tether.app.ui.text.SafeText.line(it) }
 }
 
 private fun ActivityTarget.rowModel(): ActivityRowModel = when (this) {

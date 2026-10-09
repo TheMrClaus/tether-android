@@ -64,4 +64,29 @@ class ThinkingRowTest {
         rule.onAllNodes(rowLabel("Thinking")).assertCountEquals(0)
         rule.onAllNodesWithContentDescription("Thinking").assertCountEquals(0)
     }
+
+    /** ta-rzgv: a sheet that is OPEN when the gate turns off closes with its row (the sheet's block is gated like the row). */
+    @Test fun anOpenThinkingSheetClosesWhenTheGateTurnsOff() {
+        var showThinking by mutableStateOf(true)
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) {
+                ChatTranscript(
+                    projection = fixture.projection, tree = fixture.tree, showThinking = showThinking, onFetchTurns = { _, _ -> },
+                    zone = ChatFixtures.zone, showTimeline = false,
+                )
+            }
+        }
+        rule.waitForIdle()
+        rule.onNode(rowLabel("Thinking, done")).performClick()
+        rule.waitForIdle()
+        rule.onNode(hasText("Paragraph 1 of the reasoning.") and hasAnyAncestor(isDialog()), useUnmergedTree = true).assertExists()
+        rule.runOnIdle { showThinking = false }
+        rule.waitUntil(5_000) { rule.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty() }
+        rule.onAllNodes(rowLabel("Thinking")).assertCountEquals(0)
+        // The gate back on: the row is back and the sheet stays shut (the open key was cleared, not parked).
+        rule.runOnIdle { showThinking = true }
+        rule.waitForIdle()
+        rule.onNode(rowLabel("Thinking, done")).assertExists()
+        assertEquals(0, rule.onAllNodes(isDialog()).fetchSemanticsNodes().size)
+    }
 }

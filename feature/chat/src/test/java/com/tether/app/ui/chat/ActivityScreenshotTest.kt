@@ -35,6 +35,7 @@ enum class ActivityShot(val dir: String) {
     SheetThinking("activity-sheet-thinking"),
     SheetEdit("activity-sheet-edit"),
     SheetRunning("activity-sheet-running"),
+    SheetGeneric("activity-sheet-generic"),
 }
 
 private const val ActivityCaptureAtMs = 600L
@@ -48,6 +49,8 @@ private fun boardFor(shot: ActivityShot): ActivityBoard = when (shot) {
     ActivityShot.SheetThinking -> ActivityBoard(ChatFixtures.thinking, "t1/t1:th0")
     ActivityShot.SheetEdit -> ActivityBoard(ActivityFixtures.edit, keyOf(ActivityFixtures.edit, "e1"))
     ActivityShot.SheetRunning -> ActivityBoard(ActivityFixtures.runningCommand, keyOf(ActivityFixtures.runningCommand, "cmd-live"), richCodex = true)
+    // ta-ktlw: the generic kind (an mcp__ tool), titled by the tool's name.
+    ActivityShot.SheetGeneric -> ActivityBoard(ToolFixtures.tools, keyOf(ToolFixtures.tools, "t1:tool10"))
 }
 
 /** The sheet key of the tool block whose tool id is [toolId] (the reducer keys a tool block by its tool id). */
@@ -69,7 +72,7 @@ internal fun ActivityBoardContent(fixture: ChatFixtures.Folded, sheetKey: String
                 groupToggles = allGroupsOpen(fixture, richCodex),
                 richCodex = richCodex,
             )
-            val target = sheetKey?.let { activityTarget(fixture.projection, fixture.tree, it) }
+            val target = sheetKey?.let { activityTarget(fixture.projection, fixture.tree, it, showThinking) }
             if (target != null) {
                 Box(Modifier.fillMaxSize().background(dialogScrim(t)), contentAlignment = if (docked) Alignment.BottomCenter else Alignment.Center) {
                     ActivitySheetSurface(target, ToolRenderFlags(richCodex, richOpencode = false, showThinking = showThinking), docked = docked)
@@ -122,7 +125,8 @@ class ActivityPhoneScreenshotTest(private val shot: ActivityShot, private val sk
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> =
             listOf(ActivityShot.Rows, ActivityShot.SheetShell, ActivityShot.SheetThinking, ActivityShot.SheetEdit).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } } +
-                listOf(arrayOf<Any>(ActivityShot.SheetRunning, TetherSkin.StudioDark))
+                listOf(arrayOf<Any>(ActivityShot.SheetRunning, TetherSkin.StudioDark)) +
+                listOf(ActivityShot.SheetGeneric).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
