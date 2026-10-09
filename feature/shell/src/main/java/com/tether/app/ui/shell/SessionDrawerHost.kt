@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -32,6 +33,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.zIndex
 import com.tether.app.ui.sidebar.PhoneDrawer
 import com.tether.app.ui.theme.LocalReducedMotion
+import com.tether.app.ui.theme.LocalSystemBarOverride
 import com.tether.app.ui.theme.LocalTetherTokens
 
 /**
@@ -91,6 +93,14 @@ fun SessionDrawerHost(
         label = "drawerSlide",
     )
     val shown = open || slide > -1.02f
+    // The panel fills the window, bars included: while it is open the system bars take its colour
+    // (and their icons its luminance) instead of the skin's, or its edges would read as bands. Not tied
+    // to the slide; cleared when it closes and when the host leaves the composition.
+    val bars = LocalSystemBarOverride.current
+    DisposableEffect(open, bars) {
+        if (open) bars.value = StudioDrawer.background
+        onDispose { bars.value = null }
+    }
     BoxWithConstraints(
         modifier
             .fillMaxSize()
