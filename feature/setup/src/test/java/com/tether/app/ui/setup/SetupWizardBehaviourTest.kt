@@ -6,6 +6,8 @@ import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -221,12 +223,15 @@ class SetupWizardBehaviourTest {
         model.next(); model.next()
         waitFor { shows("Point at your projects.") }
         tap(SetupTags.Browse)
-        waitFor { exists(FolderPickerTags.Dialog) && shows("projects") }
+        // The folder ROW: shows("projects") is also the step's own title ("Point at your projects."), so it says nothing of the listing.
+        waitFor { exists(FolderPickerTags.Dialog) && rule.onAllNodesWithText("projects", substring = false).fetchSemanticsNodes().isNotEmpty() }
         assertEquals("/api/setup/browse?path=%2Fhome%2Fop", fake.calls("/api/setup/browse").first().target)
         // Navigate into a folder, then use it.
         rule.onAllNodesWithText("projects", substring = false).onFirst().performSemanticsAction(SemanticsActions.OnClick)
         waitFor { fake.calls("/api/setup/browse").size == 2 }
-        waitFor { shows("/home/op/projects") }
+        // The picker's "current folder" line, not any text holding the path: the first listing's row carries "/home/op/projects" as its
+        // detail, so shows() was already true before the second listing arrived, and Use then chose the old folder.
+        waitFor { rule.onAllNodes(hasTestTag(FolderPickerTags.Current) and hasAnyDescendant(hasText("/home/op/projects")), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         tap(FolderPickerTags.Use)
         waitFor { !exists(FolderPickerTags.Dialog) }
         assertEquals("/home/op/projects", model.workspaceRoot)
