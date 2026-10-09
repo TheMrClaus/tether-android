@@ -36,6 +36,10 @@ badge (`components/dashboard.tsx:194-199`), measured against tether @ PARITY_BAS
   so a status is never shown by colour alone. Each tile reads "caption: value" and each meta line
   reads "label: value". The title is a heading. The filter keys expose their selected state. They are
   drawn at the web's size, and Compose widens their touch target to 48dp (tested).
+- **Last crash / Recent exits** (W30): an owner-directed addition with no web counterpart. When this device
+  holds a crash record or the system reports recent exits, the body opens with them: the last uncaught
+  exception (when, app version, thread, the stack) and up to five process exits. Copy puts both on the
+  clipboard as plain text, and Clear deletes the record. The record stays on the device.
 
 ## Montages (`montages.sh`)
 

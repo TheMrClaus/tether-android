@@ -819,7 +819,8 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     GlobalSearchHost(vm = vm, prefs = prefs, sessions = sessions, workspaceRoot = workspaceRoot, onCloseDrawer = shell::closeDrawer)
 
     if (showLog) {
-        LogDialog(
+        // ta-otgf: with the device's own records (the last crash, the recent exits), read on IO each open.
+        com.tether.app.ui.log.DeviceLogDialog(
             entries = eventLog.entries,
             sessions = sessions,
             state = logState,

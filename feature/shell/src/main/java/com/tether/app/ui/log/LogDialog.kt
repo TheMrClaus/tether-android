@@ -27,10 +27,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.style.TextDirection
+import com.tether.app.crash.CrashRecord
+import com.tether.app.crash.ProcessExit
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -116,6 +126,18 @@ internal object LogDialogTags {
     const val StatsError = "log-stats-error"
     const val Stats = "log-stats"
     const val Meta = "log-meta"
+
+    // ta-otgf: the "Last crash" / "Recent exits" section.
+    const val Crash = "log-crash"
+    const val CrashCopy = "log-crash-copy"
+    const val CrashClear = "log-crash-clear"
+    const val CrashMeta = "log-crash-meta"
+    const val CrashException = "log-crash-exception"
+    const val CrashToggle = "log-crash-toggle"
+    const val CrashEnd = "log-crash-end"
+    const val Exits = "log-exits"
+    const val Exit = "log-exit"
+    fun crashStack(i: Int) = "log-crash-stack-$i"
 }
 
 /**
@@ -129,6 +151,9 @@ fun LogDialog(
     state: LogDialogState,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
+    crash: CrashRecord? = null,
+    exits: List<ProcessExit> = emptyList(),
+    onClearCrash: () -> Unit = {},
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         val view = LocalView.current
@@ -140,6 +165,9 @@ fun LogDialog(
             state = state,
             onRefresh = onRefresh,
             onClose = onDismiss,
+            crash = crash,
+            exits = exits,
+            onClearCrash = onClearCrash,
             surfaceModifier = Modifier.graphicsLayer {
                 val p = progress.value
                 alpha = p
@@ -163,6 +191,9 @@ fun LogDialogFrame(
     surfaceModifier: Modifier = Modifier,
     locale: Locale = Locale.getDefault(),
     zone: ZoneId = ZoneId.systemDefault(),
+    crash: CrashRecord? = null,
+    exits: List<ProcessExit> = emptyList(),
+    onClearCrash: () -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
     BoxWithConstraints(modifier.fillMaxSize().background(dialogScrim(t)), contentAlignment = Alignment.Center) {
@@ -197,6 +228,9 @@ fun LogDialogFrame(
                 narrow = narrow,
                 locale = locale,
                 zone = zone,
+                crash = crash,
+                exits = exits,
+                onClearCrash = onClearCrash,
                 modifier = Modifier.weight(1f, fill = false).heightIn(min = bodyMin),
             )
             LogFooter(narrow, onClose)
@@ -268,6 +302,9 @@ private fun LogBody(
     narrow: Boolean,
     locale: Locale,
     zone: ZoneId,
+    crash: CrashRecord?,
+    exits: List<ProcessExit>,
+    onClearCrash: () -> Unit,
     modifier: Modifier,
 ) {
     val t = LocalTetherTokens.current
@@ -284,9 +321,37 @@ private fun LogBody(
         narrow -> PaddingValues(horizontal = 20.dp, vertical = 24.dp)
         else -> PaddingValues(28.dp)
     }
-    LazyColumn(modifier.fillMaxWidth(), contentPadding = padding) {
+    // ta-otgf: collapsed on every open; "Show less" returns the list to the record's head.
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var stackOpen by remember(crash?.timeMs) { mutableStateOf(false) }
+    val copy = remember { CrashCopyState() }
+    // The device's records are read after the dialog opens; a section that arrives above the first visible
+    // item would otherwise leave the list scrolled past it (a lazy list keeps its anchor by key).
+    val deviceSection = crash != null || exits.isNotEmpty()
+    LaunchedEffect(deviceSection) { if (deviceSection) listState.scrollToItem(0) }
+    LazyColumn(modifier.fillMaxWidth(), state = listState, contentPadding = padding) {
         var first = true
         fun Modifier.sectionGap(): Modifier = if (first) { first = false; this } else padding(top = gap)
+        // The device's own section, first in the body: a crash record and/or the system's recent exits.
+        if (crash != null || exits.isNotEmpty()) {
+            crashSection(
+                crash = crash,
+                exits = exits,
+                narrow = narrow,
+                locale = locale,
+                zone = zone,
+                gap = gap,
+                firstModifier = Modifier.sectionGap(),
+                stackOpen = stackOpen,
+                onToggleStack = {
+                    stackOpen = !stackOpen
+                    if (!stackOpen) scope.launch { listState.scrollToItem(0) }
+                },
+                copy = copy,
+                onClear = onClearCrash,
+            )
+        }
         if (state.statsError.isNotEmpty()) {
             val m = Modifier.sectionGap()
             item(key = "stats-error") { EmptyNote(state.statsError, m.testTag(LogDialogTags.StatsError)) }
@@ -410,21 +475,28 @@ private fun StatTile(tile: Tile, firstInRow: Boolean, lastInRow: Boolean, modifi
 /** `.log-meta`: key/value lines, two columns (one when narrow). */
 @Composable
 private fun MetaGrid(stats: ServerStats, narrow: Boolean, modifier: Modifier) {
-    val t = LocalTetherTokens.current
     val lines = listOf(
-        Triple("Engine", null, LogReadings.engine(stats)),
-        Triple("Sessions", null, LogReadings.sessions(stats)),
-        Triple("Memory", TetherIcons.Cpu, LogReadings.memory(stats)),
-        Triple("Connected clients", null, "${stats.clients}"),
-        Triple("Protocol", null, "v${stats.protocolVersion}"),
+        MetaItem("Engine", null, LogReadings.engine(stats)),
+        MetaItem("Sessions", null, LogReadings.sessions(stats)),
+        MetaItem("Memory", TetherIcons.Cpu, LogReadings.memory(stats)),
+        MetaItem("Connected clients", null, "${stats.clients}"),
+        MetaItem("Protocol", null, "v${stats.protocolVersion}"),
     )
+    MetaRows(lines, narrow, modifier)
+}
+
+internal class MetaItem(val label: String, val icon: ImageVector?, val value: String, val valueDirection: TextDirection? = null)
+
+/** The `.log-meta` grid: [lines] in two columns (one when narrow). */
+@Composable
+internal fun MetaRows(lines: List<MetaItem>, narrow: Boolean, modifier: Modifier) {
     val columns = if (narrow) 1 else 2
     val rowGap = (if (narrow) 0.dp else 12.dp)
     val columnGap = 28.dp
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(rowGap)) {
         lines.chunked(columns).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(columnGap)) {
-                row.forEach { (label, icon, value) -> MetaLine(label, icon, value, Modifier.weight(1f)) }
+                row.forEach { MetaLine(it.label, it.icon, it.value, Modifier.weight(1f), it.valueDirection) }
                 repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
@@ -432,7 +504,7 @@ private fun MetaGrid(stats: ServerStats, narrow: Boolean, modifier: Modifier) {
 }
 
 @Composable
-private fun MetaLine(label: String, icon: ImageVector?, value: String, modifier: Modifier) {
+private fun MetaLine(label: String, icon: ImageVector?, value: String, modifier: Modifier, valueDirection: TextDirection? = null) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val labelStyle = cssText(type.ui, 0.75f, 400)
@@ -451,7 +523,7 @@ private fun MetaLine(label: String, icon: ImageVector?, value: String, modifier:
             value,
             color = t.white,
             textAlign = TextAlign.End,
-            style = cssText(type.ui, 0.8125f, 600),
+            style = cssText(type.ui, 0.8125f, 600).let { if (valueDirection != null) it.copy(textDirection = valueDirection) else it },
             modifier = Modifier.weight(1f).alignByBaseline(),
         )
     }
@@ -621,7 +693,7 @@ private fun LogRow(
 }
 
 /** One row's share of the list (studio.css): no frame, the row tint, and a `--line` bottom rule on every row but the last. */
-private fun Modifier.logRowEdges(t: TetherTokens, last: Boolean, tint: Color): Modifier =
+internal fun Modifier.logRowEdges(t: TetherTokens, last: Boolean, tint: Color): Modifier =
     drawBehind {
         val px = 1.dp.toPx()
         clipRect {
@@ -644,7 +716,7 @@ private fun Modifier.cssLineBox(height: TextUnit): Modifier = layout { measurabl
 }
 
 /** A 1px `--line` rule along the bottom edge (a `border-bottom`). */
-private fun Modifier.drawBottomRule(color: Color): Modifier = drawBehind {
+internal fun Modifier.drawBottomRule(color: Color): Modifier = drawBehind {
     val px = 1.dp.toPx()
     drawRect(color, Offset(0f, size.height - px), Size(size.width, px))
 }
@@ -661,7 +733,7 @@ private fun Modifier.drawEndRule(color: Color): Modifier = drawBehind {
  * can align time and level to it.
  */
 @Composable
-private fun BaselineFlow(hGap: Dp, vGap: Dp, modifier: Modifier, content: @Composable () -> Unit) {
+internal fun BaselineFlow(hGap: Dp, vGap: Dp, modifier: Modifier, content: @Composable () -> Unit) {
     Layout(content, modifier) { measurables, constraints ->
         val h = hGap.roundToPx()
         val v = vGap.roundToPx()

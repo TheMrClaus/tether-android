@@ -313,7 +313,7 @@ fun expandPeek(text: String): String {
  * (globals.css:8466). Touch: pressed is the web's hover (`--ink` on `--tint-sm`).
  */
 @Composable
-private fun ExpandToggleRow(open: Boolean, hidden: Int?, onClick: () -> Unit) {
+fun ExpandToggleRow(open: Boolean, hidden: Int?, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val reduced = LocalReducedMotion.current

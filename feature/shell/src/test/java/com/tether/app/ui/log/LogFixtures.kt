@@ -1,6 +1,8 @@
 package com.tether.app.ui.log
 
 import com.tether.app.client.ServerStats
+import com.tether.app.crash.CrashRecord
+import com.tether.app.crash.ProcessExit
 import com.tether.app.protocol.LogEntry
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.TetherJson
@@ -83,6 +85,29 @@ object LogFixtures {
 
     /** Newest first on screen: attach, connect, attach. */
     val webTablet: List<LogEntry> = webLog("ws.attach", "ws.connect", "ws.attach")
+
+    /**
+     * The crash fixture (W30; synthetic: a fixed epoch, no hostnames, no device paths, no real
+     * messages): 42 stack lines in two chunks, 12 `... more` common frames, and two exits.
+     */
+    val crash: CrashRecord = run {
+        val message = "Synthetic failure while restoring the session list after resume"
+        val frames = (1..24).map { "\tat com.tether.app.fixture.SyntheticFrames.step%02d(SyntheticFrames.kt:%d)".format(it, 100 + it) }
+        val cause = (1..15).map { "\tat com.tether.app.fixture.SyntheticCause.step%02d(SyntheticCause.kt:%d)".format(it, 200 + it) }
+        val stack = (listOf("java.lang.IllegalStateException: $message") + frames +
+            listOf("Caused by: java.lang.IllegalArgumentException: Synthetic root cause") + cause + listOf("\t... 12 more"))
+            .joinToString("\n")
+        CrashRecord(
+            timeMs = T0 - 3_595_750, versionName = "0.6.0", versionCode = 16, androidRelease = "16", androidSdk = 36,
+            thread = "main", exceptionClass = "java.lang.IllegalStateException", message = message, stack = stack,
+        )
+    }
+
+    /** Newest first: a Java crash 230 ms after the record, and a low-memory kill the day before. */
+    val exits: List<ProcessExit> = listOf(
+        ProcessExit(timeMs = crash.timeMs + 230, reason = 4, importance = 100, status = 0, pid = 21734, description = "crash"),
+        ProcessExit(timeMs = T0 - 105_463_000, reason = 3, importance = 400, status = 0, pid = 20211, description = null),
+    )
 
     private fun session(id: String, name: String) =
         AgentSession(id = id, provider = "claude", name = name, cwd = "/work/app", status = "ready", startedAt = 1, updatedAt = 1)

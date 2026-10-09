@@ -25,7 +25,11 @@ import org.robolectric.annotation.Config
  * reference's own state (phone and tablet), for the montages.
  */
 enum class LogShot(val id: String) {
-    Full("log-dialog"), Empty("log-dialog-empty"), Warnings("log-dialog-warnings"), Corpus("log-dialog-corpus"),
+    Full("log-dialog"),
+
+    /** ta-otgf: the full dialog under the device's section: a crash record (42 stack lines) and two exits. */
+    Crash("log-dialog-crash"),
+    Empty("log-dialog-empty"), Warnings("log-dialog-warnings"), Corpus("log-dialog-corpus"),
 
     /** The web reference's seeded state, for the montages (docs/parity/screens/log-dialog). */
     Web("log-dialog-web"),
@@ -55,6 +59,8 @@ fun ComposeContentTestRule.snapLog(shot: LogShot, skin: TetherSkin, size: String
                     onClose = {},
                     locale = LogFixtures.locale,
                     zone = LogFixtures.zone,
+                    crash = if (shot == LogShot.Crash) LogFixtures.crash else null,
+                    exits = if (shot == LogShot.Crash) LogFixtures.exits else emptyList(),
                 )
             }
         }
@@ -91,7 +97,7 @@ class LogDialogTabletScreenshotTest(private val shot: LogShot, private val skin:
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(LogShot.Full, LogShot.Web).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(LogShot.Full, LogShot.Crash, LogShot.Web).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -102,6 +108,21 @@ class LogDialogFontScaleScreenshotTest(private val skin: TetherSkin) {
     @get:Rule val rule = createComposeRule()
 
     @Test fun log() = rule.snapLog(LogShot.Full, skin, "phone", name = "log-dialog-font-1.3x")
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(it) }
+    }
+}
+
+/** ta-otgf: the crash section at 360 dp and 2.0x font (the keys wrap under the heading, the summary cuts to two lines). */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w360dp-h800dp-420dpi", fontScale = 2.0f)
+class LogDialogCrashFontScaleScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun log() = rule.snapLog(LogShot.Crash, skin, "phone", name = "log-dialog-crash-360-font-2.0x")
 
     companion object {
         @JvmStatic
