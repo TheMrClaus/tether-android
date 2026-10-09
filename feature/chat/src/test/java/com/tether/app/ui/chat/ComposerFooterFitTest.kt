@@ -99,7 +99,7 @@ class ComposerFooterFitTest(private val windowDp: Int, private val fontScale: Fl
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}dp x{1}")
-        fun params(): List<Array<Any>> = listOf(800, 845, 860, 900).flatMap { w -> listOf(1.0f, 1.3f, 2.0f).map { arrayOf<Any>(w, it) } }
+        fun params(): List<Array<Any>> = listOf(800, 802, 804, 845, 860, 900).flatMap { w -> listOf(1.0f, 1.3f, 2.0f).map { arrayOf<Any>(w, it) } }
     }
 
     @Test fun theKeysKeepTheirNaturalWidthAndTheTotalsReadoutFollowsTheContainerQuery() {
@@ -108,7 +108,10 @@ class ComposerFooterFitTest(private val windowDp: Int, private val fontScale: Fl
         assertEquals("Queue width", rule.queue(REFERENCE_TAG).rect().width, rule.queue(PANE_TAG).rect().width, 0.5f)
         assertEquals("Interrupt width", rule.interrupt(REFERENCE_TAG).rect().width, rule.interrupt(PANE_TAG).rect().width, 0.5f)
         // (b) the container query: the toolbar's content is 441.2 at the 800 pane (hidden), 486.2 at 845 (shown).
-        val shown = windowDp > 800
+        // The app's toolbar content is the window less 355.4 dp (444.6 at 800, 446.6 at 802 hidden, 448.6 at 804 shown, 450.7 at 806: the
+        // web's 441.2 at 800 is 3.4 dp narrower, so the web's own edge is 806.6 dp; ta-n1jk/ta-fmdq receipt). 802 and 804 straddle 448
+        // by more than the pixel rounding (0.1 dp); 807 is rounding-dependent in the web's numbers, so it is not a window.
+        val shown = windowDp >= 804
         assertEquals("the totals readout at ${windowDp}dp", if (shown) 1 else 0, rule.totalsCount(PANE_TAG))
         if (!shown) return
         val totals = rule.totals(PANE_TAG).rect()
@@ -124,7 +127,7 @@ class ComposerFooterFitTest(private val windowDp: Int, private val fontScale: Fl
         assertTrue("the readout has a natural width: $natural", natural > 0f)
         if (windowDp == 845 && fontScale == 2.0f) {
             assertTrue("at 845 x2.0 the readout (${natural / d} dp) is wider than its strip (${totals.width / d} dp)", natural > totals.width + 0.5f)
-        } else if (fontScale == 1.0f) {
+        } else if (fontScale == 1.0f && windowDp >= 845) {
             assertTrue("at x1.0 the readout is whole: ${natural / d} dp in ${totals.width / d} dp", natural <= totals.width + 0.5f)
         }
     }
