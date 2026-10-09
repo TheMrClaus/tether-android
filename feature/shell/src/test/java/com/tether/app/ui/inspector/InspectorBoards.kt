@@ -245,7 +245,7 @@ object InspectorBoards {
                 "native_session_id", "t1",
                 """{"nativeSessionId":"fixture-native","cliVersion":"2.1.284",
                    "cliCapabilities":["interrupt_receipt_v1","interrupt_cancel_queued_v1","msg_lifecycle_v1","mcp_read_resource_v1","mcp_tool_ui_meta_v1"],
-                   "cliInventory":{"commands":[${(listOf("github-task", "impeccable", "native-orchestration", "paseo", "paseo-advisor", "paseo-committee", "paseo-handoff", "paseo-help") + (0 until 47).map { "cmd-$it" }).joinToString(",") { """{"name":"$it","description":""}""" }}],
+                   "cliInventory":{"commands":[${(listOf("github-task", "impeccable", "native-orchestration", "relay", "relay-advisor", "relay-committee", "relay-handoff", "relay-help") + (0 until 47).map { "cmd-$it" }).joinToString(",") { """{"name":"$it","description":""}""" }}],
                    "tools":[${(listOf("Task", "AskUserQuestion", "Bash", "CronCreate", "CronDelete", "CronList", "Edit", "EnterPlanMode") + (0 until 152).map { "tool-$it" }).joinToString(",") { "\"$it\"" }}],"mcpServers":[]}}""",
             )
             runs.forEachIndexed { index, (description, type, tokens, background, effort) ->
