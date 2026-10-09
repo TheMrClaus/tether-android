@@ -42,7 +42,7 @@ internal fun WebSelectionEffects(
     val stored by remember(prefs) { prefs.preferences }.collectAsStateWithLifecycle(initialValue = null)
     val loaded = stored ?: return
     val client = vm.client
-    val sessions by client.sessions.collectAsStateWithLifecycle()
+    val sessions by vm.displaySessions.collectAsStateWithLifecycle()
     val activeId by vm.activeId.collectAsStateWithLifecycle()
     val pending by vm.pendingSessionId.collectAsStateWithLifecycle()
     val openingHistoryId by vm.openingHistoryId.collectAsStateWithLifecycle()

@@ -52,6 +52,13 @@ class TetherViewModel(
     private val monotonicClock: () -> Long = SystemClock::elapsedRealtime,
 ) : ViewModel() {
 
+    /**
+     * ta-jtfq: [TetherClient.sessions] as the screens draw it: the same list, except that the per-event `updatedAt` /
+     * `lastMessageAt` / `lastSeq` stamps of a streaming reply do not republish it while no age word or order changes
+     * ([displayStable]). The shell, the drawer and the chat read this; code that needs the stamps exactly reads the client.
+     */
+    val displaySessions: StateFlow<List<AgentSession>> = displayStable(client.sessions, viewModelScope)
+
     private val _selectedSessionId = MutableStateFlow<String?>(null)
 
     /**

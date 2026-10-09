@@ -203,7 +203,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     // recompose the whole shell, its drawer and the composer for it.
     val projectionTrees = vm.client.projectionTrees.collectAsStateWithLifecycle()
 
-    val sessions by vm.client.sessions.collectAsStateWithLifecycle()
+    val sessions by vm.displaySessions.collectAsStateWithLifecycle()
     val projections = vm.client.projections.collectAsStateWithLifecycle()
     val providers by vm.client.providers.collectAsStateWithLifecycle()
     val connection by vm.client.connection.collectAsStateWithLifecycle()

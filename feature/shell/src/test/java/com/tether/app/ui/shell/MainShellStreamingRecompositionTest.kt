@@ -63,8 +63,11 @@ abstract class StreamingRecompositionBase(private val widthPx: Int, private val 
         return foldTree(freshTree(), *events.toTypedArray())
     }
 
-    private fun session() =
-        AgentSession(id = "s1", provider = "claude", name = "s1", cwd = "/w", status = "active", startedAt = 1, updatedAt = 1, historyId = "h-s1")
+    private val t0 = System.currentTimeMillis()
+    private var frames = 0
+
+    private fun session(stamp: Long = t0) =
+        AgentSession(id = "s1", provider = "claude", name = "s1", cwd = "/w", status = "active", startedAt = 1, updatedAt = stamp, historyId = "h-s1", lastMessageAt = stamp, lastSeq = stamp - t0)
 
     /** The stored preferences load on another thread: let those late recompositions finish before counting. */
     private fun settleQuietly() {
@@ -105,6 +108,8 @@ abstract class StreamingRecompositionBase(private val widthPx: Int, private val 
             // The store publishes the tree, then the projection adapted from it.
             client.projectionTrees.value = client.projectionTrees.value + ("s1" to tree)
             client.projections.value = client.projections.value + ("s1" to adapter.adapt(tree)!!)
+            // The server's `session` frame for every event: onHeadlessStateChange stamps updatedAt, lastMessageAt and the journal head.
+            client.sessions.value = listOf(session(t0 + 40L * ++frames))
         }
         rule.mainClock.advanceTimeBy(100)
         rule.waitForIdle()
