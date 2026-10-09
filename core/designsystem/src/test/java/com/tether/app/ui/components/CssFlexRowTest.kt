@@ -150,6 +150,43 @@ class CssFlexRowTest {
         assertEquals("text left = dot + gap", dot.x + dot.w + 8f, text.x, 0.5f)
     }
 
+    /**
+     * (e) The footer span at its floor (the 2.0x rail): the outer row can shrink the span no further than its
+     * min-content, which counts the dot at its specified width, so inside the span the dot and the text share the
+     * deficit in proportion: dot = 6.4 * (6.4 + R) / (6.4 + T), R the min-content and T the max-content of the text
+     * (the web: an oval about 3 px wide). It was 0 when the span's floor counted the dot at its declared floor.
+     */
+    @Config(qualifiers = "w1280dp-h800dp-mdpi", fontScale = 2.0f)
+    @Test fun theFooterDotSurvivesTheSpanAtItsFloor() {
+        val dot = Box4(); val text = Box4(); val whole = Box4(); val word = Box4()
+        rule.setContent {
+            TetherTheme {
+                val style = TextStyle(fontFamily = LocalTetherTypography.current.ui, fontSize = 10.56.sp, fontWeight = FontWeight(500))
+                val d = LocalDensity.current
+                androidx.compose.foundation.layout.Column {
+                    // Probes: the text's max-content (one line) and its longest word.
+                    Text("Private runtime", style = style, softWrap = false, modifier = Modifier.onGloballyPositioned { whole.w = it.size.width / d.density })
+                    Text("runtime", style = style, softWrap = false, modifier = Modifier.onGloballyPositioned { word.w = it.size.width / d.density })
+                    // The outer row is exactly the actions wide: the span sits at its floor.
+                    Box(Modifier.width(140.dp)) {
+                        CssFlexRow(justify = FlexJustify.SpaceBetween, modifier = Modifier.width(140.dp)) {
+                            Box(Modifier.size(140.dp, 44.dp))
+                            CssFlexRow(gap = 8.dp) {
+                                StatusDot(Color.Red, dotDp.dp, Modifier.flexFloor(0.dp).onGloballyPositioned { dot.w = it.size.width / d.density })
+                                Text("Private runtime", style = style, modifier = Modifier.onGloballyPositioned { text.w = it.size.width / d.density })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val expected = dotDp * (dotDp + word.w) / (dotDp + whole.w)
+        assertTrue("the dot is drawn: ${dot.w}", dot.w > 0f)
+        assertEquals("dot = 6.4 (6.4 + R) / (6.4 + T), R=${word.w}, T=${whole.w}", expected, dot.w, 0.5f)
+        assertTrue("the text keeps at least its longest word: ${text.w}", text.w >= word.w - 0.5f)
+    }
+
     @Test fun flexTargetsFollowsTheCssResolution() {
         // Fits: the bases. Deficit 20 over bases 60/40 -> 48/32; a floor of 40 on the second freezes it, the first takes the rest.
         assertEquals(listOf(60f, 40f), flexTargets(intArrayOf(60, 40), intArrayOf(0, 0), 100f).toList())

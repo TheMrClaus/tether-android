@@ -145,8 +145,14 @@ private class CssFlexRowPolicy(
     override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int): Int =
         measurables.sumOf { it.maxIntrinsicWidth(height) } + gap.roundToPx() * (measurables.size - 1).coerceAtLeast(0)
 
+    /**
+     * The flex container's min-content width: each item's OWN min-content contribution plus the gaps. A declared
+     * [flexFloor] is only the shrink floor inside this container's own layout (measure), never what it asks of its
+     * parent: CSS counts the dot at its specified 0.4rem here, which keeps it from being shrunk to nothing by the
+     * outer row (ta-z4c1 L3: the footer's dot vanished at 2.0x).
+     */
     override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int): Int =
-        measurables.sumOf { it.floorPx(this, height, it.maxIntrinsicWidth(height)) } + gap.roundToPx() * (measurables.size - 1).coerceAtLeast(0)
+        measurables.sumOf { it.minIntrinsicWidth(height) } + gap.roundToPx() * (measurables.size - 1).coerceAtLeast(0)
 
     override fun IntrinsicMeasureScope.minIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int): Int =
         measurables.maxOfOrNull { it.minIntrinsicHeight(Constraints.Infinity) } ?: 0
