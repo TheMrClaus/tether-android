@@ -123,15 +123,28 @@ class ToolMediaVideoBehaviourTest {
         rule.onNodeWithContentDescription("Play video").performClick()
         val clip = registry!!.clip(item.src)!!
         waitFor("settled") { clip.currentDownload?.outcome() != null }
+        waitFor("the row's player") { players.size == 1 }
         rule.runOnIdle { players.single().onFailed() }
-        rule.waitForIdle()
+        waitFor("the row says Blocked") { rule.waitForIdle(); rule.onAllNodesWithText(MediaCopy.BLOCKED).fetchSemanticsNodes().size == 1 }
         rule.onNodeWithText(MediaCopy.BLOCKED).assertIsDisplayed()
         rule.onNodeWithText(MediaCopy.BLOCKED_DETAIL).assertIsDisplayed()
         // The expand key stays (the web keeps the element); the viewer shows the same copy.
+        val rowsDownload = clip.currentDownload
         rule.onNodeWithContentDescription("View video full size").performClick()
-        rule.waitForIdle()
+        // ta-wrqi / ta-ar84: the viewer is a window of its own, composed on a frame after the click, and its player is made
+        // by its LaunchedEffect; waitUntil alone does not pump that window, so each wait idles first. A failure reported
+        // before the viewer's player exists would reach the row's player again and the viewer would never learn of it.
+        waitFor("the viewer's own player") { rule.waitForIdle(); players.size == 2 }
+        waitFor("the viewer") { rule.onAllNodesWithContentDescription("Video viewer").fetchSemanticsNodes().isNotEmpty() }
+        // The failed download is not reused: the viewer's play started a fresh one, and its player says "Blocked" only
+        // from that download's verdict (ClipView: clip.failure() ?: Failed), so the failure is reported once it has settled.
+        waitFor("the viewer's own download settled") { clip.currentDownload.let { it != null && it !== rowsDownload && it.outcome() != null } }
         rule.runOnIdle { players.last().onFailed() }
-        rule.waitForIdle()
+        waitFor("the viewer says Blocked too") {
+            rule.waitForIdle()
+            rule.onAllNodesWithText(MediaCopy.BLOCKED).fetchSemanticsNodes().size == 2 &&
+                rule.onAllNodesWithText(MediaCopy.BLOCKED_DETAIL).fetchSemanticsNodes().size == 2
+        }
         rule.onNodeWithContentDescription("Video viewer").assertIsDisplayed()
         assertEquals(2, rule.onAllNodesWithText(MediaCopy.BLOCKED).fetchSemanticsNodes().size)
         assertEquals(2, rule.onAllNodesWithText(MediaCopy.BLOCKED_DETAIL).fetchSemanticsNodes().size)
