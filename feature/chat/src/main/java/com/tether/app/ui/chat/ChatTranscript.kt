@@ -298,6 +298,20 @@ private fun ChatTranscriptBody(
             .drop(1)
             .collect { backward -> if (backward && !ownScroll[0]) sticky = false }
     }
+    // ta-jj9k (owner-directed): a reader who settles at the bottom (no scroll in progress, nothing further to scroll)
+    // is at the latest message: following resumes and "Jump to latest" goes, as after a tap on it. The same rule as the
+    // sub-agent panel's (SubagentRuns.kt). The web re-engages only on a click (chat-view.tsx:1942-1955); this is the
+    // owner's ask. Not while a find match or a Review-request card is being shown (each stops following on purpose and
+    // leaves the list at its end), and not under the follow code's own pins.
+    val holdsPlace by rememberUpdatedState(find?.activeHit != null || reviewFocus != null)
+    LaunchedEffect(listState) {
+        // [laidOut]: before the first measure that has rows the list reports it cannot scroll forward; a reader put at
+        // the top by a restore (or a screen that opens unfollowed) is not at the bottom for that.
+        snapshotFlow { Triple(listState.isScrollInProgress, listState.canScrollForward, listState.layoutInfo.visibleItemsInfo.isNotEmpty()) }
+            .collect { (scrolling, canForward, laidOut) ->
+                if (laidOut && !scrolling && !canForward && !sticky && !holdsPlace && !ownScroll[0]) sticky = true
+            }
+    }
     // ta-coik.19: the send bubbles are the list's last rows; following the newest content follows them.
     val sendRows = sends.pending.size + sends.failed.size
     val lastIndex = host.rows.size + leading + sendRows - 1
