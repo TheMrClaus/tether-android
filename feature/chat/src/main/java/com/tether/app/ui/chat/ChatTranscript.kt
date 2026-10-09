@@ -409,65 +409,9 @@ private fun ChatTranscriptBody(
         val head = host.firstIndexOf[row] + leading
         val last = head + (if (row + 1 < items.size) host.firstIndexOf[row + 1] else host.rows.size) - host.firstIndexOf[row] - 1
         val gapHead = with(reviewDensity) { gapAt(head - leading, host.rows[head - leading]).toPx() }
-        val startIndex = listState.firstVisibleItemIndex
-        val startOffset = listState.firstVisibleItemScrollOffset
         ownScroll[0] = true
         try {
-            listState.scrollToItem(head)
-            withFrameNanos { }
-            var focused = false
-            var tries = 0
-            while (!focused && tries++ < 5) {
-                focused = try {
-                    reviewRequester.requestFocus()
-                } catch (_: IllegalStateException) {
-                    false
-                }
-                if (!focused) withFrameNanos { }
-            }
-            // Compose has no `preventScroll`: a gained focus asks the scroller to show the card, a frame or two later.
-            // Let that settle first, so the centring below is the last word.
-            repeat(3) { withFrameNanos { } }
-            while (listState.isScrollInProgress) withFrameNanos { }
-            // The card's extent in one frame of reference (the scrolled distance from the head at the top).
-            val tops = HashMap<Int, Float>()
-            val bottoms = HashMap<Int, Float>()
-            var travelled = 0f
-            fun note() {
-                for (info in listState.layoutInfo.visibleItemsInfo) {
-                    if (info.index in head..last) {
-                        tops[info.index] = info.offset + travelled
-                        bottoms[info.index] = info.offset + info.size + travelled
-                    }
-                }
-            }
-            note()
-            var steps = 0
-            while (last !in bottoms && steps++ < 400) {
-                val consumed = listState.scrollBy(listState.layoutInfo.viewportSize.height * 0.8f)
-                if (consumed == 0f) break
-                travelled += consumed
-                note()
-            }
-            val spanTop = (tops[head] ?: 0f) + gapHead
-            val spanBottom = bottoms[last] ?: bottoms.values.maxOrNull() ?: spanTop
-            val info = listState.layoutInfo
-            val viewportCentre = (info.viewportStartOffset + info.viewportEndOffset) / 2f
-            val want = (spanTop + spanBottom) / 2f - travelled - viewportCentre
-            listState.scrollBy(want)
-            // The focus's own bring-into-view may still be in flight: what it moves, the centring takes back.
-            val landedIndex = listState.firstVisibleItemIndex
-            val landedOffset = listState.firstVisibleItemScrollOffset
-            repeat(2) { withFrameNanos { } }
-            if (listState.firstVisibleItemIndex != landedIndex || listState.firstVisibleItemScrollOffset != landedOffset) {
-                listState.scrollToItem(landedIndex, landedOffset)
-            }
-            if (listState.firstVisibleItemIndex < startIndex ||
-                (listState.firstVisibleItemIndex == startIndex && listState.firstVisibleItemScrollOffset < startOffset)
-            ) {
-                sticky = false
-            }
-            withFrameNanos { }
+            landOnReviewCard(listState, reviewRequester, head, last, gapHead) { sticky = false }
         } finally {
             ownScroll[0] = false
         }

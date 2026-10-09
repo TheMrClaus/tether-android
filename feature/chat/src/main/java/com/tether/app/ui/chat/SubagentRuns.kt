@@ -33,6 +33,10 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -497,6 +501,12 @@ internal fun SubagentRunTab(
     focus: RunFocus? = null,
     /** Round 2: the [focus] request was used (its step is on screen): the caller clears it. */
     onFocusShown: () -> Unit = {},
+    /**
+     * ta-d0qg (dashboard.tsx:1424-1445): the Overview's "Review request" lands on the exact card here too: the cards below the
+     * run panel stay mounted on every tab (chat-view.tsx:3399-3403), and the tab stays selected.
+     */
+    reviewFocus: String? = null,
+    onReviewShown: () -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -554,7 +564,45 @@ internal fun SubagentRunTab(
     // The 12dp between the items is each item's own top padding (not an arrangement), so the segments of an
     // approval card sit flush and the card paints its own seams.
     val gap = t.css.spaceMd
+
+    // ta-d0qg: "Review request" with this tab open. The same landing as the transcript's ([landOnReviewCard], ta-4711): the card's
+    // items are the rows' count on, the approvals' segments in order and then the questions; once per request, after the tab's
+    // own pins above (the web's mount scroll precedes its rAF), and the follow stops on a net move toward older rows.
+    val reviewRequester = remember { FocusRequester() }
+    val review = remember(reviewFocus, reviewRequester) { reviewFocus?.let { ReviewFocus(it, reviewRequester) } }
+    val reviewCentred = remember { arrayOfNulls<String>(1) }
+    val reviewShown by rememberUpdatedState(onReviewShown)
+    val reviewDensity = LocalDensity.current
+    LaunchedEffect(reviewFocus, pending, pendingQuestions) {
+        val id = reviewFocus
+        if (id == null) {
+            reviewCentred[0] = null
+            return@LaunchedEffect
+        }
+        if (reviewCentred[0] == id) return@LaunchedEffect
+        var head = rows.size
+        var span = 0
+        val approvalAt = pending.indexOfFirst { it.requestId == id }
+        if (approvalAt >= 0) {
+            head += approvalSegments.take(approvalAt).sumOf { it.size }
+            span = approvalSegments[approvalAt].size
+        } else {
+            val questionAt = pendingQuestions.indexOfFirst { it.requestId == id }
+            // Not rendered yet: the next change of the cards runs this again (dashboard.tsx:1436-1438).
+            if (questionAt < 0) return@LaunchedEffect
+            head += approvalSegments.sumOf { it.size } + questionAt
+            span = 1
+        }
+        val last = head + span - 1
+        // Behind the tab's own pins (above): a frame for them to land first.
+        withFrameNanos { }
+        val gapHead = with(reviewDensity) { (if (rows.isNotEmpty() || head > rows.size) gap else 0.dp).toPx() }
+        landOnReviewCard(listState, reviewRequester, head, last, gapHead) { sticky = false }
+        reviewCentred[0] = id
+        reviewShown()
+    }
     ProvideApprovalState {
+    ProvideReviewFocus(review) {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize().background(chatWellColor(t)).nestedScroll(followGuard).testTag("subrun-panel"),
@@ -583,6 +631,7 @@ internal fun SubagentRunTab(
                 SelectableRow { QuestionCard(q, answered = q.requestId in answeredIds) }
             }
         }
+    }
     }
     }
 }

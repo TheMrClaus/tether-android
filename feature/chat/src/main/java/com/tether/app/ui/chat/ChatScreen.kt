@@ -450,6 +450,8 @@ fun ChatScreen(
                     showApprovals = showApprovals,
                     focus = runFocus,
                     onFocusShown = { runFocus = null },
+                    reviewFocus = reviewFocus,
+                    onReviewShown = onReviewShown,
                 ) }
 
                 // ta-coik.33: one transcript per conversation, as the web remounts its ChatView per session
@@ -602,13 +604,15 @@ private fun RunTab(
     showApprovals: Boolean,
     focus: RunFocus?,
     onFocusShown: () -> Unit,
+    reviewFocus: String?,
+    onReviewShown: () -> Unit,
 ) {
     val state = remember(projection, tree) { cardTree(projection, tree) }
     val pending = remember(state, showApprovals, consent.sessionId) { if (showApprovals) pendingApprovals(state, consent.sessionId) else emptyList() }
     val pendingQ = remember(state, consent.sessionId) { pendingQuestions(state, consent.sessionId) }
     val answeredIds = remember(state) { answeredRequestIds(state) }
     CompositionLocalProvider(LocalConsent provides consent) {
-        SubagentRunTab(run, showThinking, pending, pendingQ, answeredIds, focus, onFocusShown)
+        SubagentRunTab(run, showThinking, pending, pendingQ, answeredIds, focus, onFocusShown, reviewFocus, onReviewShown)
     }
 }
 
