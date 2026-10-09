@@ -1,5 +1,6 @@
 package com.tether.app.ui.shell
 
+import com.tether.app.ui.util.RecompositionProbe
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -99,6 +100,7 @@ fun ExpandedShell(
      */
     showRail: Boolean = true,
 ) {
+    RecompositionProbe("ExpandedShell")
     val t = LocalTetherTokens.current
     LaunchedEffect(Unit) { state.closeDrawer() }
     // ta-coik.31: opening the tools menu takes focus and the keyboard away from the composer (the web's focus move).

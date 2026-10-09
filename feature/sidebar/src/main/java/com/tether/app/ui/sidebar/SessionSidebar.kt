@@ -1,5 +1,6 @@
 package com.tether.app.ui.sidebar
 
+import com.tether.app.ui.util.RecompositionProbe
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -205,6 +206,7 @@ fun SessionSidebar(
     layout: TetherLayoutClass = currentLayoutClass(),
     seed: SidebarUiSeed = SidebarUiSeed(),
 ) {
+    RecompositionProbe("SessionSidebar")
     val base = LocalTetherTokens.current
     ProvideTokenScope(StudioSidebarScope) {
         SidebarContent(state, actions, modifier, layout, seed)

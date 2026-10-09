@@ -1,5 +1,6 @@
 package com.tether.app.ui.shell
 
+import com.tether.app.ui.util.RecompositionProbe
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -154,6 +155,7 @@ fun PhoneShell(
     /** T15.4: the Sessions rail exists (dashboard.tsx `showRail`): false on the Overview, so no drawer. */
     showRail: Boolean = true,
 ) {
+    RecompositionProbe("PhoneShell")
     val t = LocalTetherTokens.current
     BackHandler(enabled = state.canHandleBack) { state.handleBack() }
     LaunchedEffect(showRail) { if (!showRail) state.closeDrawer() }

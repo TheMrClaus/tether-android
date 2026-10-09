@@ -1,5 +1,6 @@
 package com.tether.app.ui.chat
 
+import com.tether.app.ui.util.RecompositionProbe
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -247,6 +248,7 @@ fun Composer(
     /** T8.6 part 2: the elements picked in the browser pane, riding the next send (null: none can be). */
     browserPicks: ComposerPicks? = null,
 ) {
+    RecompositionProbe("Composer")
     val t = LocalTetherTokens.current
     val metrics = composerMetrics()
     // ta-coik.20: the typed draft (and its cursor) survives a rotation, as a browser resize keeps the textarea.

@@ -1,5 +1,6 @@
 package com.tether.app.ui
 
+import com.tether.app.ui.util.RecompositionProbe
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,6 +63,7 @@ fun SessionDrawer(
     /** The wall clock behind the relative times and the "Older" band's 7-day horizon (the web's Date.now()). */
     clock: () -> Long = System::currentTimeMillis,
 ) {
+    RecompositionProbe("SessionDrawer")
     val client = vm.client
     val scope = rememberCoroutineScope()
     // ta-coik.47: the folded blocks and seen stamps are the server's (the web's localStorage is per origin).

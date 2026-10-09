@@ -1,5 +1,6 @@
 package com.tether.app.ui.statusline
 
+import com.tether.app.ui.util.RecompositionProbe
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -73,6 +74,7 @@ fun SessionStatusline(
      */
     stale: String? = null,
 ) {
+    RecompositionProbe("SessionStatusline")
     val tick = rememberWrapUpExpiry(state.takeIf { stale == null }, env)
     val segments = remember(metrics, state, tick) { buildStatusSegments(metrics, state, env()) }
     StatuslineSegments(segments, modifier, horizontalArrangement, wrap, stale)

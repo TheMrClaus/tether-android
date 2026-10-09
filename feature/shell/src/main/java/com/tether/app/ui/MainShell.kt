@@ -1,5 +1,6 @@
 package com.tether.app.ui
 
+import com.tether.app.ui.util.RecompositionProbe
 import android.content.Context
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,6 +92,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import com.tether.app.protocol.model.SessionView
+import com.tether.app.protocol.model.TextOnlyDelta
+import com.tether.app.protocol.tree.JsObj
+import com.tether.app.ui.util.rememberLatched
 import com.tether.app.ui.components.ProvideWindowWidthDp
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.windowWidthDp
@@ -112,6 +117,17 @@ import com.tether.app.ui.shell.shellLayoutFor
 import com.tether.app.ui.statusline.ContextGauge
 import com.tether.app.ui.statusline.SessionStatusline
 import com.tether.app.ui.statusline.TelemetryMetrics
+
+/**
+ * ta-jtfq: the session's view of its tree for the statusline and the inspector, read where they are drawn. Held while a
+ * delta only appends words to an agent message (neither shows those), so a stream does not recompose them.
+ */
+@Composable
+private fun rememberSessionView(trees: State<Map<String, JsObj>>, sessionId: String?): SessionView? {
+    val tree = sessionId?.let { trees.value[it] }
+    val held = rememberLatched(tree, sessionId) { was, next -> TextOnlyDelta.isTextOnly(was, next) }
+    return remember(held) { held?.let(::SessionView) }
+}
 
 /** ta-coik.52: the Overview's filter choice and the server it was read for (null origin: no server). */
 internal data class OverviewChoiceFor(val origin: String?, val choice: com.tether.app.ui.overview.OverviewChoice)
@@ -164,6 +180,7 @@ fun MainShell(vm: TetherViewModel, prefs: UiPrefs) {
 
 @Composable
 private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
+    RecompositionProbe("MainShellBody")
     val t = LocalTetherTokens.current
     val context = LocalContext.current
     val shell = rememberPhoneShellState()
@@ -181,10 +198,13 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     val transcriptScroll = rememberSaveable(saver = TranscriptScrollStore.Saver) { TranscriptScrollStore() }
     val layout = shellLayoutFor(windowWidthDp())
     val persisted = rememberPersistedPanels(prefs, vm.client.serverUrl)
-    val projectionTrees by vm.client.projectionTrees.collectAsStateWithLifecycle()
+    // ta-jtfq: the two per-delta maps are held as State and read only where they are shown (the chat, the statusline,
+    // the inspector), never here: a streamed delta changes both at the delta rate, and a read in this body would
+    // recompose the whole shell, its drawer and the composer for it.
+    val projectionTrees = vm.client.projectionTrees.collectAsStateWithLifecycle()
 
     val sessions by vm.client.sessions.collectAsStateWithLifecycle()
-    val projections by vm.client.projections.collectAsStateWithLifecycle()
+    val projections = vm.client.projections.collectAsStateWithLifecycle()
     val providers by vm.client.providers.collectAsStateWithLifecycle()
     val connection by vm.client.connection.collectAsStateWithLifecycle()
     // ta-coik.42: the web's two slots (dashboard.tsx 90fbb9f :274 `activeId`, :292 `pendingSessionId`).
@@ -306,7 +326,6 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
         kotlinx.coroutines.flow.combine(prefs.preferences, vm.client.serverUrl) { p, url -> p.lastOpenedFor(com.tether.app.client.serverOrigin(url)) }
             .collect { rememberedChat.value = it }
     }
-    val projection = selectedId?.let { projections[it] }
     val connected = connection == ConnectionState.Connected
     // T13.2 (SYNC_DESIGN §4): the link banner, and how current each session's copy is.
     val syncStates by vm.client.syncStates.collectAsStateWithLifecycle()
@@ -471,7 +490,6 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     }
 
     val metrics = TelemetryMetrics.from(session?.metrics)
-    val sessionView = session?.let { s -> projectionTrees[s.id]?.let(::SessionView) }
 
     // T5.3 dashboard.tsx:1186-1194: Ctrl/Cmd+Shift+F opens the global search from anywhere.
     Box(
@@ -571,6 +589,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                     )
                 },
                 chat = {
+                    val projection = selectedId?.let { projections.value[it] }
                     CompositionLocalProvider(
                         LocalCardStates provides cardStates,
                         LocalTranscriptScrollStore provides transcriptScroll,
@@ -592,7 +611,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                     }
                 },
                 // T9.1: the full inspector, in the phone's telemetry sheet and the expanded column alike.
-                inspector = { session?.let { InspectorHost(vm, it, sessionView, onUseCodexReset = codexReset::open) } },
+                inspector = { session?.let { InspectorHost(vm, it, rememberSessionView(projectionTrees, it.id), onUseCodexReset = codexReset::open) } },
                 // T9.2 (workspace-header.tsx:113, dashboard.tsx:1615): the DeepSeek peak badge reads the
                 // session's harness and its live model (the pick, else the default the harness applied).
                 headerBadge = { s ->
@@ -609,7 +628,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                 // T4.3's live gauge, dial and statusline (docs/parity/screens/statusline/README.md).
                 gauge = { host -> ContextGauge(metrics, showLabel = host.showLabel, pressed = host.open, onClick = host.onToggle, stale = staleReading) },
                 statusline = { expanded ->
-                    SessionStatusline(metrics, sessionView, horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End, stale = staleReading)
+                    SessionStatusline(metrics, rememberSessionView(projectionTrees, session?.id), horizontalArrangement = if (expanded) Arrangement.Start else Arrangement.End, stale = staleReading)
                 },
                 // ta-3e7: components/studio-welcome.tsx on the empty Sessions stage (both Studio lightings).
                 studioWelcome = { expanded ->

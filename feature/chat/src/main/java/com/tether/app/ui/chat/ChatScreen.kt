@@ -59,6 +59,8 @@ import com.composables.icons.lucide.Cpu
 import com.tether.app.client.HttpPublicImages
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.SessionProjection
+import com.tether.app.protocol.model.TextOnlyDelta
+import com.tether.app.ui.util.rememberLatched
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.SpinningIcon
@@ -131,6 +133,10 @@ fun ChatScreen(
 
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
     val tree = session?.let { trees[it.id] }
+    // ta-jtfq: the composer reads the run state, the queue, the todo bar and the background commands, never a message's
+    // words, so while a delta only appends words it keeps the reading it has and is skipped, not recomposed.
+    val composerProjection = rememberLatched(projection, session?.id) { held, next -> TextOnlyDelta.isTextOnly(held, next) }
+    val composerTree = rememberLatched(tree, session?.id) { held, next -> TextOnlyDelta.isTextOnly(held, next) }
     // T6.4: the runs read the TREE (background tasks and spawned runs are not in the typed projection).
     // ta-coik.37: built off the main thread after the first build for a session (ChatDerivation.kt).
     val derivationObserver = LocalChatDerivationObserver.current
@@ -186,7 +192,10 @@ fun ChatScreen(
     // key was drawn for and to its turn, the client re-checks it all under its lock.
     // T6.7 r3: a failed interrupt of the turn that is still cancelling unlocks the keys for a retry.
     val failedInterrupts by vm.client.failedInterrupts.collectAsStateWithLifecycle()
-    val liveness = ComposerLiveness(interruptLock = stopLock, stale = ChatFreshness.staleCopy(liveNow, sync), failedInterruptTurn = session?.let { failedInterrupts[it.id] })
+    // ta-jtfq: one instance per distinct reading (it is compared by identity), so the composer is skipped when it is unchanged.
+    val staleCopy = ChatFreshness.staleCopy(liveNow, sync)
+    val failedInterruptTurn = session?.let { failedInterrupts[it.id] }
+    val liveness = remember(stopLock, staleCopy, failedInterruptTurn) { ComposerLiveness(interruptLock = stopLock, stale = staleCopy, failedInterruptTurn = failedInterruptTurn) }
     // T6.7: and to the turn the tapped key was drawn for (the Composer passes it).
     val onInterrupt: (String) -> com.tether.app.client.InterruptResult = remember(session?.id, consentOrigin, vm) {
         val s = session
@@ -363,6 +372,23 @@ fun ChatScreen(
     var browserPicks by remember { mutableStateOf(emptyList<SessionPick>()) }
     var browserPageUrl by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(focusFind) { if (focusFind > 0) runCatching { findFocus.requestFocus() } }
+    // ta-jtfq: the composer's own inputs, one instance each per distinct reading (they are compared by identity, and the
+    // modifier is rebuilt by every call), so a recomposition of this screen that changes none of them skips the composer.
+    val composerModifier = remember { Modifier.keepsIntrinsicHeight().testTag(CHAT_COMPOSER_TAG) }
+    val composerBrowser = remember(session, browserOpen) { if (session != null) ComposerBrowser(browserOpen) { browserOpen = !browserOpen } else null }
+    val composerPicks = remember(session, browserPicks, browserPageUrl, consentOrigin, vm) {
+        if (session != null) {
+            ComposerPicks(
+                items = browserPicks.filter { it.sessionId == session.id }.map { it.pick },
+                pageUrl = browserPageUrl,
+                onRemove = { pick -> browserPicks = browserPicks.filterNot { it.pick === pick } },
+                onClear = { browserPicks = browserPicks.filter { it.sessionId != session.id } },
+                send = { text, shots -> vm.sendAttachments(session.id, text, null, consentOrigin, shots) },
+            )
+        } else {
+            null
+        }
+    }
 
     Box(
         modifier.onPreviewKeyEvent { event ->
@@ -499,9 +525,9 @@ fun ChatScreen(
             composer = {
             // The composer deck draws its own top seam (`.chat-composer` border-top + lip, T7.1).
             Composer(
-                modifier = Modifier.keepsIntrinsicHeight().testTag(CHAT_COMPOSER_TAG),
+                modifier = composerModifier,
                 session = session,
-                projection = projection,
+                projection = composerProjection,
                 controls = session?.let { controlsMap[it.id] },
                 serverNow = { vm.serverNow(session?.id) },
                 onSend = { text, attachments -> session?.let { vm.sendOrQueue(it.id, text, attachments) } ?: false },
@@ -524,7 +550,7 @@ fun ChatScreen(
                         vm.composerInserts.filter { id in it }.mapNotNull { vm.takeComposerInsert(id) }
                     }
                 },
-                tree = tree,
+                tree = composerTree,
                 commandActions = commandActions,
                 controlActions = controlActions,
                 pinnedModels = pinnedModels,
@@ -537,18 +563,8 @@ fun ChatScreen(
                 sendRows = sends.pending,
                 github = composerGitHub,
                 takeover = takeover,
-                browser = if (session != null) ComposerBrowser(browserOpen) { browserOpen = !browserOpen } else null,
-                browserPicks = if (session != null) {
-                    ComposerPicks(
-                        items = browserPicks.filter { it.sessionId == session.id }.map { it.pick },
-                        pageUrl = browserPageUrl,
-                        onRemove = { pick -> browserPicks = browserPicks.filterNot { it.pick === pick } },
-                        onClear = { browserPicks = browserPicks.filter { it.sessionId != session.id } },
-                        send = { text, shots -> vm.sendAttachments(session.id, text, null, consentOrigin, shots) },
-                    )
-                } else {
-                    null
-                },
+                browser = composerBrowser,
+                browserPicks = composerPicks,
             )
             },
         )

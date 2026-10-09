@@ -1,5 +1,6 @@
 package com.tether.app.ui.inspector
 
+import com.tether.app.ui.util.RecompositionProbe
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +36,7 @@ fun ColumnScope.InspectorHost(
     /** T9.2: the shared Codex confirmation (inspector.tsx:761-766 `resetCreditDialogRef.open`). */
     onUseCodexReset: ((com.tether.app.ui.usage.CodexResetRequest) -> Unit)? = null,
 ) {
+    RecompositionProbe("InspectorHost")
     val providers by vm.client.providers.collectAsStateWithLifecycle()
     val diffs by vm.client.worktreeDiffs.collectAsStateWithLifecycle()
     val fileDiffs by vm.client.gitFileDiffs.collectAsStateWithLifecycle()
