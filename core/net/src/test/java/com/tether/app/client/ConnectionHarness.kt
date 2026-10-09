@@ -1,5 +1,6 @@
 package com.tether.app.client
 
+import com.tether.app.client.sync.SessionRetention
 import com.tether.app.protocol.TetherJson
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -204,6 +205,8 @@ class ConnectionHarness {
         configured: Boolean = true,
         deviceToken: String? = null,
         sweepIntervalMs: Long = 3_600_000,
+        retentionBudgetBytes: Long? = null,
+        retainedOthers: Int = SessionRetention.DEFAULT_OTHERS,
     ): RealTetherClient {
         server.start()
         settings = if (deviceToken != null) {
@@ -223,6 +226,8 @@ class ConnectionHarness {
             // The sweeper is not under test here (unless a test asks for it); keep it out of the way.
             sweepIntervalMs = sweepIntervalMs,
             scheduler = scheduler,
+            retentionBudgetBytes = retentionBudgetBytes ?: (Runtime.getRuntime().maxMemory() / 4),
+            retainedOthers = retainedOthers,
         )
         return client
     }

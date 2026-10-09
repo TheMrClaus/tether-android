@@ -325,21 +325,24 @@ class MirrorHydrationTest {
     }
 
     @Test
-    fun theReadyReattachIsCappedToPinnedAndTheTenMostRecentlyOpened() {
+    fun theReadyReattachIsCappedToTheFourMostRecentlyOpenedTheMemoryKeeps() {
+        // ta-2vm7: was "pinned + the 10 most recently opened": every one of those loaded a whole tree.
+        // Memory keeps the open session and three more, so a cold start restores the four last opened.
         val list = (0 until 15).map { sessionJson("m$it", pinned = it == 0 || it == 1) }.toTypedArray()
         h.boot(ready = ready(*list))
         for (i in 0 until 15) {
             h.now.addAndGet(1_000)
             h.client.attach("m$i") // opened in order: m14 is the most recent
             h.ws.send(snapshotFrame("m$i", 1, state().replace("s1", "m$i")))
+            h.await(h.client.projectionTrees) { it.containsKey("m$i") } // in, before the next open can release it
         }
         h.serverBarrier()
         h.dbSession("m0")
         h.kill(flushFirst = true)
         h.boot(ready = ready(*list))
         val attached = h.framesUntilBarrier().filter { it.type() == "attach" }.map { it["sessionId"]!!.jsonPrimitive.content }.toSet()
-        // Pinned m0, m1 + the 10 most recently opened (m5..m14); m2..m4 keep their saved copy.
-        assertEquals((listOf("m0", "m1") + (5 until 15).map { "m$it" }).toSet(), attached)
+        // The four most recently opened (m11..m14); pinned ones and the rest keep their saved copy.
+        assertEquals((11 until 15).map { "m$it" }.toSet(), attached)
         // Opening a capped-out one attaches it, from its cursor.
         h.client.attach("m3")
         val m3 = h.framesUntilBarrier().single { it.type() == "attach" }

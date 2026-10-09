@@ -78,7 +78,9 @@ class ComposerWireTest {
 
     @Test fun theRecordedQueueScenarioReplaysThroughTheComposerPath() {
         val sessionId = "sess-0001"
-        val client = h.newClient()
+        // Every barrier below is a `created` the view model opens: with the default of four sessions in
+        // memory the recorded session would be released after the fourth, so this replay keeps them all.
+        val client = h.newClient(retainedOthers = 1_000)
         h.enqueueConnect()
         client.start()
         val ws = h.nextSocket()

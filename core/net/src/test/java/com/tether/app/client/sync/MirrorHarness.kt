@@ -91,6 +91,8 @@ class MirrorHarness(
     var bindTimeoutMs: Long = 30_000,
     /** The client's bound on a hydration read (generous by default, for the same reason). */
     var hydrateTimeoutMs: Long = 30_000,
+    /** ta-2vm7: the client's in-memory budget (null = its default, a quarter of the heap limit). */
+    var retentionBudgetBytes: Long? = null,
 ) {
     /**
      * ta-jt9 L-A1: the next processes read the stored credential as a transient Keystore error
@@ -176,6 +178,7 @@ class MirrorHarness(
             scheduler = scheduler,
             onLogout = { url, credential -> onLogout(url, credential) },
             mirror = mirrorOrNull,
+            retentionBudgetBytes = retentionBudgetBytes ?: (Runtime.getRuntime().maxMemory() / 4),
         ).also {
             it.mirrorBindTimeoutMs = bindTimeoutMs
             it.mirrorHydrateTimeoutMs = hydrateTimeoutMs

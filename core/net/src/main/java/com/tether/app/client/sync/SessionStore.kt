@@ -45,6 +45,9 @@ class SessionStore {
 
     fun has(sessionId: String): Boolean = treesState.value.containsKey(sessionId)
 
+    /** How many memoized adapters (each pins its last tree) this store holds: a census for tests and diagnostics. */
+    fun adapterCount(): Int = synchronized(adapters) { adapters.size }
+
     /** [tree]'s typed view through [sessionId]'s memoized adapter: null when the tree does not fit the typed model. */
     fun adapt(sessionId: String, tree: JsObj): SessionProjection? {
         val adapter = synchronized(adapters) { adapters.getOrPut(sessionId) { LegacyProjectionAdapter() } }
@@ -74,6 +77,22 @@ class SessionStore {
         fetchedDetails.remove(sessionId)
     }
 
+    /**
+     * ta-2vm7: [sessionId] leaves memory: its tree, typed view, adapter (it pins the last tree), trim
+     * boundary and every piece of mirror bookkeeping, the "read tried" mark included, so a later open
+     * may read its saved copy again. Nothing is detached: the session comes back with its next attach.
+     */
+    fun release(sessionId: String) {
+        if (treesState.value.containsKey(sessionId)) treesState.value = treesState.value - sessionId
+        if (projectionsState.value.containsKey(sessionId)) projectionsState.value = projectionsState.value - sessionId
+        if (trimmedBeforeState.value.containsKey(sessionId)) trimmedBeforeState.value = trimmedBeforeState.value - sessionId
+        synchronized(adapters) { adapters.remove(sessionId) }
+        hydrating.remove(sessionId)
+        hydrationTried.remove(sessionId)
+        tailSinceBase.remove(sessionId)
+        fetchedDetails.remove(sessionId)
+    }
+
     fun setTrimmedBefore(sessionId: String, trimmedBefore: Int?) {
         trimmedBeforeState.value = trimmedBefore
             ?.let { trimmedBeforeState.value + (sessionId to it) }
@@ -85,6 +104,8 @@ class SessionStore {
         treesState.value = emptyMap()
         projectionsState.value = emptyMap()
         trimmedBeforeState.value = emptyMap()
+        // The adapters pin the last tree of every session they served: a sign-out must free them too.
+        synchronized(adapters) { adapters.clear() }
     }
 
     /** The mirror bookkeeping is per server, like the cursors. */

@@ -109,4 +109,37 @@ class SessionStoreTest {
         assertTrue(store.trimmedBefore.value.isEmpty())
         assertTrue("a new binding may read again", store.beginHydration("s2"))
     }
+
+    @Test
+    fun releaseForgetsTheTreeTheTypedViewTheAdapterAndEveryBookkeepingOfTheSession() {
+        assertTrue(store.beginHydration("s1")) // a read in flight, and the "tried" mark
+        store.publish("s1", base, store.adapt("s1", base))
+        store.publish("s2", base, store.adapt("s2", base))
+        store.setTrimmedBefore("s1", 2)
+        store.setTrimmedBefore("s2", 2)
+        store.addDetails("s1", obj("""{"t0":{"turnId":"t0","blocks":["x"]}}"""))
+        store.countTail("s1")
+        assertEquals(2, store.adapterCount())
+
+        store.release("s1")
+
+        assertNull(store.tree("s1"))
+        assertFalse(store.projections.value.containsKey("s1"))
+        assertFalse(store.trimmedBefore.value.containsKey("s1"))
+        assertEquals("the adapter (it pins the last tree) goes with it", 1, store.adapterCount())
+        assertFalse(store.isHydrating("s1"))
+        assertTrue("a later open may read its saved copy again", store.beginHydration("s1"))
+        assertFalse("no tail count left", store.checkpointDue("s1", "turn_end", base, every = 1, atTurnEnd = 1))
+        // The other session is untouched.
+        assertSame(base, store.tree("s2"))
+        assertTrue(store.projections.value.containsKey("s2"))
+        assertEquals(2, store.trimmedBefore.value["s2"])
+    }
+
+    @Test
+    fun clearViewsDropsTheAdaptersToo() {
+        store.publish("s1", base, store.adapt("s1", base))
+        store.clearViews()
+        assertEquals(0, store.adapterCount())
+    }
 }

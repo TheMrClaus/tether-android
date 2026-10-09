@@ -1,6 +1,7 @@
 package com.tether.app.client
 
 import com.tether.app.client.sync.MirrorLink
+import com.tether.app.client.sync.SessionRetention
 import com.tether.app.client.sync.SessionStore
 import com.tether.app.mirror.Hydration
 import com.tether.app.mirror.JournalMirror
@@ -105,6 +106,9 @@ internal enum class RacePoint {
 /** T7.2: a `*-control-result` message is shown in one status line; a longer one is cut. */
 private const val MAX_CONTROL_MESSAGE = 500
 
+/** [android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW]: from this level up the client releases what is not on screen. */
+private const val TRIM_MEMORY_RUNNING_LOW = 10
+
 /** use-tether.ts:339, the web's word for any frame its `send` could not put on the link. */
 private const val LINK_RECONNECTING = "The secure link is reconnecting. Your input was not sent."
 
@@ -173,7 +177,6 @@ private const val SETTINGS_READ_ATTEMPTS = 3
 private const val SETTINGS_READ_RETRY_MS = 250L
 
 /** §3.1 rule 5: mirror-restored sessions re-attached on `ready`, beyond pinned ones. */
-private const val MIRROR_REATTACH_RECENT = 10
 
 /**
  * Upper bound on the best-effort server calls made while signing out. Public so the logout
@@ -331,6 +334,13 @@ class RealTetherClient(
      * host, an id or content. The app logs them under `TetherTiming`.
      */
     timing: (String) -> Unit = {},
+    /**
+     * ta-2vm7: the most the projections of the sessions this client keeps in memory may weigh (an
+     * estimate from the frames' sizes). Default: a quarter of the heap limit.
+     */
+    private val retentionBudgetBytes: Long = Runtime.getRuntime().maxMemory() / 4,
+    /** ta-2vm7: how many sessions stay in memory besides the open one. */
+    retainedOthers: Int = SessionRetention.DEFAULT_OTHERS,
 ) : TetherClient {
 
     private val trace = TimingTrace(timing)
@@ -560,6 +570,21 @@ class RealTetherClient(
     // --- protocol state (guarded by lock) ---
     private val tracker = CursorTracker()
     private val subscribed = LinkedHashSet<String>()
+
+    // ta-2vm7: which sessions keep a projection in memory (guarded by lock). Only these are subscribed,
+    // attached on a new socket, hydrated, or have a snapshot published; the rest are released.
+    private val retention = SessionRetention(maxOthers = retainedOthers, budgetBytes = retentionBudgetBytes)
+
+    // The size in characters of the frame being handled: the estimate of what it adds to memory.
+    // Written by the socket's reader thread just before it handles the frame, read by that thread only.
+    private var inboundChars = 0
+
+    // ta-2vm7: sessions that hold unsent or unacknowledged input but are not kept in memory keep a cursor
+    // (so the live acknowledgement of that input still lands) and no tree. Their next open forgets the
+    // cursor: a cursor with no tree would be answered with no state and leave the chat blank. Under lock.
+    private val cursorsWithoutTree = HashSet<String>()
+
+    private fun holdsInputLocked(sessionId: String): Boolean = pendingStore.records.any { it.sessionId == sessionId }
 
     // ta-coik.19 (web issue #135): the reactive mirror of [pendingStore] the chat draws its
     // "sending" / "waiting for link" bubbles from, and the sends given up on ("Not delivered").
@@ -1631,6 +1656,11 @@ class RealTetherClient(
     /** Everything that is per server and not the pending store. Caller holds [lock]. */
     private fun clearServerStateLocked() {
         subscribed.clear()
+        retention.clear()
+        cursorsWithoutTree.clear()
+        // ta-2vm7: the projections and their adapters (each pins its last tree) go with the server's
+        // state: a sign-out must free what a signed-in session held, not leave it until the next switch.
+        sessionStore.clearViews()
         tracker.clear()
         reconciledSessions.clear()
         attachedThisEpoch.clear()
@@ -1997,6 +2027,8 @@ class RealTetherClient(
             val origin = mirrorOrigin ?: return
             // The mirror is bound to the server in force, not one a sign-in just left (L1).
             if (origin != currentOriginLocked()) return
+            // ta-2vm7: only a session kept in memory reads its saved copy (a cold start loads none).
+            if (!retention.isRetained(sessionId)) return
             if (!sessionStore.beginHydration(sessionId)) return
             generation = mirrorGeneration
             origin to link.mirror.hydrateAsync(origin, sessionId)
@@ -2182,6 +2214,63 @@ class RealTetherClient(
             requestHydration(sessionId)
         }
         drainPending()
+    }
+
+    /** What the client holds per session, counted: for tests and diagnostics only (ta-2vm7). */
+    internal data class MemoryCensus(
+        val trees: Int,
+        val projections: Int,
+        val adapters: Int,
+        val cursors: Set<String>,
+        val subscribed: Set<String>,
+        val attached: Set<String>,
+        val live: Set<String>,
+    )
+
+    internal fun memoryCensus(): MemoryCensus = synchronized(lock) {
+        MemoryCensus(
+            trees = sessionStore.trees.value.size,
+            projections = sessionStore.projections.value.size,
+            adapters = sessionStore.adapterCount(),
+            cursors = tracker.attachedSessions(),
+            subscribed = subscribed.toSet(),
+            attached = attachedThisEpoch.toSet(),
+            live = liveThisEpoch.toSet(),
+        )
+    }
+
+    override fun trimMemory(level: Int) {
+        // RUNNING_LOW (10) and every level above it (critical, UI hidden, background, moderate, complete):
+        // keep the open session, let the rest go. RUNNING_MODERATE (5) asks for nothing yet.
+        if (level < TRIM_MEMORY_RUNNING_LOW) return
+        synchronized(lock) { releaseLocked(retention.trim()) }
+    }
+
+    /**
+     * ta-2vm7: each of [sessionIds] leaves memory: its projection, typed twin and adapter, its cursor
+     * (so the next attach asks for everything: a cursor at head would be answered with no state and
+     * leave the reopened session blank), its subscription, its attach on this socket and its live
+     * flag. Nothing is sent: the web never detaches either. Frames about the session that the sidebar,
+     * overview and notifications read (they carry no tree) are not affected. Caller holds [lock].
+     */
+    private fun releaseLocked(sessionIds: List<String>) {
+        if (sessionIds.isEmpty()) return
+        for (id in sessionIds) {
+            sessionStore.release(id)
+            subscribed.remove(id)
+            seededFromMirror.remove(id)
+            if (holdsInputLocked(id)) {
+                // Its input is still to be acknowledged: the cursor and the attach stay, so a live ack lands.
+                cursorsWithoutTree.add(id)
+            } else {
+                tracker.forget(id)
+                attachedThisEpoch.remove(id)
+            }
+            openedAt.remove(id)
+            deferredAttach?.let { it.ids.remove(id); it.snapshotted.remove(id) }
+            setLiveLocked(id, false)
+        }
+        publishAttachedLocked()
     }
 
     override fun start() {
@@ -2449,6 +2538,13 @@ class RealTetherClient(
             // ta-2ew (R2): no create answer outlives the sign-out (the URL stays, so a sign-in to the
             // same server is no switch, and the filter alone would return it again then).
             createRepliesByRequest.clear()
+            // ta-2vm7: the projections go with the sign-out (their adapters each pin a tree), and with
+            // them the cursors and subscriptions that describe them: a re-sign-in attaches afresh.
+            subscribed.clear()
+            retention.clear()
+            cursorsWithoutTree.clear()
+            sessionStore.clearViews()
+            tracker.clear()
         }
         ws?.close(1000, "logout")
         // ta-2ew r2 (security P4-3): the latest replies go with the record; the seq counters keep
@@ -3322,6 +3418,7 @@ class RealTetherClient(
             lastInboundAt = clock()
             lastWireInboundAt = lastInboundAt
             val message = ServerMessage.parse(text)
+            inboundChars = text.length
             raceHook?.invoke(RacePoint.FrameAdmitted, message)
             handleFrame(webSocket, message)
             raceHook?.invoke(RacePoint.FrameHandled, message)
@@ -3658,12 +3755,16 @@ class RealTetherClient(
             // A handshake the server accepted is the success that resets backoff.
             backoff.reset()
             val ids = LinkedHashSet<String>()
+            // ta-2vm7: what is re-attached is what is kept in memory (the open session and the few before
+            // it, at a cold start the ones the last process had open last) and the sessions holding input
+            // (below). Every other cursor restored from the mirror is left alone: that session keeps its
+            // saved copy until it is opened. The web re-attaches the mounted chat and the sessions with
+            // pending input only (use-tether.ts :826-831).
+            retention.adopt(recentMirrorSessionsLocked().asReversed()).let(::releaseLocked)
             ids.addAll(subscribed)
-            // T13.1 §3.1 rule 5: cursors restored from the mirror are capped (pinned + the 10
-            // most recently opened); the rest keep their saved copy until opened or until a live
-            // event's gap resync. Cursors of this process are all re-attached, as before.
             ids.addAll(tracker.attachedSessions().filter { it !in seededFromMirror })
-            ids.addAll(cappedMirrorSessionsLocked(message.sessions))
+            ids.addAll(seededFromMirror)
+            ids.retainAll { retention.isRetained(it) }
             // Only the store of THIS socket's server: another origin's session
             // ids never reach it (ta-s8q).
             if (pendingOrigin != null && pendingOrigin == socketOrigin) pendingStore.records.mapTo(ids) { it.sessionId }
@@ -3736,16 +3837,14 @@ class RealTetherClient(
     }
 
     /**
-     * §3.1 rule 5: the mirror-restored sessions the ready re-attach includes: pinned ones (per
-     * this `ready`) and the [MIRROR_REATTACH_RECENT] most recently opened. Caller holds [lock].
+     * §3.1 rule 5, bounded by memory (ta-2vm7): the mirror-restored sessions most recently opened, as
+     * many as the retained set has room for. Caller holds [lock].
      */
-    private fun cappedMirrorSessionsLocked(live: List<AgentSession>): List<String> {
+    private fun recentMirrorSessionsLocked(): List<String> {
         if (seededFromMirror.isEmpty()) return emptyList()
-        val pinned = live.filter { it.pinned }.map { it.id }.toSet()
-        val recent = seededFromMirror.filter { lastOpenedAt.containsKey(it) }
+        return seededFromMirror.filter { lastOpenedAt.containsKey(it) && !retention.isRetained(it) }
             .sortedByDescending { lastOpenedAt.getValue(it) }
-            .take(MIRROR_REATTACH_RECENT)
-        return seededFromMirror.filter { it in pinned } + recent
+            .take(retention.room())
     }
 
     /** Outside the native window: terminal until retryConnection() (user action). */
@@ -3824,8 +3923,29 @@ class RealTetherClient(
         // A frame of a socket let go meanwhile (a sign-in to another server)
         // must not seed a cursor or authorise redelivery on the next one.
         var shown: JsObj? = message.state
+        var unretained = false
         val current = synchronized(lock) {
             if (socket !== webSocket) return@synchronized false
+            // ta-2vm7: a snapshot for a session that is not kept in memory (an unasked follow-up, or the
+            // reply for a session that only holds input) is never published, and leaves no cursor behind:
+            // a cursor with no tree would answer the next open with no state and leave it blank.
+            if (!retention.isRetained(message.sessionId)) {
+                unretained = true
+                mirrorOriginForLocked(message.sessionId)?.let { mirrorLink?.snapshot(it, message) }
+                seededFromMirror.remove(message.sessionId)
+                if (message.sessionId in attachedThisEpoch && holdsInputLocked(message.sessionId)) {
+                    // Asked for by the re-attach of a session holding input: its cursor lets the live
+                    // acknowledgement of that input land; the state below only reconciles it.
+                    tracker.onSnapshot(message.sessionId, message.throughSeq)
+                    cursorsWithoutTree.add(message.sessionId)
+                } else {
+                    tracker.forget(message.sessionId)
+                    cursorsWithoutTree.remove(message.sessionId)
+                    if (attachedThisEpoch.remove(message.sessionId)) publishAttachedLocked()
+                }
+                setLiveLocked(message.sessionId, false)
+                return@synchronized true
+            }
             tracker.onSnapshot(message.sessionId, message.throughSeq)
             mirrorOriginForLocked(message.sessionId)?.let { mirrorLink?.snapshot(it, message) }
             seededFromMirror.remove(message.sessionId)
@@ -3846,13 +3966,18 @@ class RealTetherClient(
         // base); pending input still reconciles against the tree, as on the web.
         val tree = message.state
         val published = shown
-        val typed = published?.let { sessionStore.adapt(message.sessionId, it) }
-        val wrote = ifCurrent(webSocket) {
-            sessionStore.setTrimmedBefore(message.sessionId, message.trimmedBefore)
-            if (published != null) sessionStore.publish(message.sessionId, published, typed)
-            // SYNC_DESIGN §4.1: only a session attached on THIS socket becomes live (never one the
-            // server pushed a snapshot for unasked).
-            if (message.sessionId in attachedThisEpoch) setLiveLocked(message.sessionId, true)
+        val typed = if (unretained) null else published?.let { sessionStore.adapt(message.sessionId, it) }
+        val wrote = unretained || ifCurrent(webSocket) {
+            // ta-2vm7: its weight counts against the budget first; the oldest sessions beyond it go (this
+            // one too, if it is the oldest and not open).
+            releaseLocked(retention.resize(message.sessionId, inboundChars * SessionRetention.HEAP_PER_JSON_CHAR))
+            if (retention.isRetained(message.sessionId)) {
+                sessionStore.setTrimmedBefore(message.sessionId, message.trimmedBefore)
+                if (published != null) sessionStore.publish(message.sessionId, published, typed)
+                // SYNC_DESIGN §4.1: only a session attached on THIS socket becomes live (never one the
+                // server pushed a snapshot for unasked).
+                if (message.sessionId in attachedThisEpoch) setLiveLocked(message.sessionId, true)
+            }
         }
         if (!wrote || tree == null) return
         // use-tether.ts:953-984 — the DURABLE acknowledgement, read off the raw
@@ -3890,11 +4015,23 @@ class RealTetherClient(
         val decision = synchronized(lock) {
             // A let-go socket's event: dropped (its cursor and acks are not ours).
             if (socket !== webSocket) return
-            tracker.onEvent(message.sessionId, event.seq, canSend = socketOpen).also { decision ->
+            val kept = retention.isRetained(message.sessionId)
+            var raw = tracker.onEvent(message.sessionId, event.seq, canSend = socketOpen)
+            // ta-2vm7: a gap on a session that is not kept in memory (a cursor restored from the mirror
+            // and never opened) is not worth an attach, whose snapshot would put its tree back: it
+            // forgets the cursor and waits for its next open, which attaches in full.
+            if (raw is CursorTracker.Decision.Resync && !kept && message.sessionId !in cursorsWithoutTree) {
+                tracker.forget(message.sessionId)
+                seededFromMirror.remove(message.sessionId)
+                raw = CursorTracker.Decision.AwaitSnapshot
+            }
+            raw.also { decision ->
                 // Only what the cursor folds is mirrored, in frame order (§2.3).
                 if (decision == CursorTracker.Decision.Fold) {
                     seqlessCleared = mirrorOriginForLocked(message.sessionId)?.let { mirrorLink?.event(it, message.sessionId, event) }
-                    if (event.seq != null && mirrorLink != null) sessionStore.countTail(message.sessionId)
+                    // ta-2vm7: tail counts and weight only for a session kept in memory.
+                    if (kept) releaseLocked(retention.grew(message.sessionId, inboundChars * SessionRetention.HEAP_PER_JSON_CHAR))
+                    if (kept && event.seq != null && mirrorLink != null) sessionStore.countTail(message.sessionId)
                     // Its saved copy is being read: fold this on top of it when it lands.
                     // ta-705 (4): the JsonElement -> JsObj walk happens only for an event that is
                     // really buffered; every other event is converted once, after the lock (below).
@@ -4002,6 +4139,9 @@ class RealTetherClient(
         val next = tree.put("turnsById", turnsById.spread(message.turns))
         val typed = sessionStore.adapt(message.sessionId, next)
         ifCurrent(webSocket) {
+            // ta-2vm7: released since (budget, trim): the details have nowhere to go.
+            releaseLocked(retention.grew(message.sessionId, inboundChars * SessionRetention.HEAP_PER_JSON_CHAR))
+            if (!retention.isRetained(message.sessionId)) return@ifCurrent
             sessionStore.publish(message.sessionId, next, typed)
             mirrorOriginForLocked(message.sessionId)?.let { mirrorLink?.turnsDetail(it, message.sessionId, message.turns, tree) }
             if (mirrorLink != null) sessionStore.addDetails(message.sessionId, message.turns)
@@ -4796,6 +4936,13 @@ class RealTetherClient(
             if (expectedOrigin != null && originStandingLocked(expectedOrigin) != OriginStanding.Configured) return false
             on = socket
             subscribed.add(sessionId)
+            // ta-2vm7: the open one and the few before it stay in memory; the oldest beyond them go.
+            releaseLocked(retention.open(sessionId))
+            // A cursor kept for input only (no tree): this open needs everything, so a fresh attach in full.
+            if (cursorsWithoutTree.remove(sessionId)) {
+                tracker.forget(sessionId)
+                attachedThisEpoch.remove(sessionId)
+            }
             // §3.1 rule 5: "most recently opened" orders the capped ready re-attach.
             mirrorOrigin?.let { origin ->
                 mirrorLink?.opened(origin, sessionId)

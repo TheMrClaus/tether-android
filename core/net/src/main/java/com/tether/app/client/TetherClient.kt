@@ -713,6 +713,13 @@ interface TetherClient {
     fun setAppForeground(foreground: Boolean)
 
     /**
+     * ta-2vm7: the system is short of memory ([android.content.ComponentCallbacks2.onTrimMemory] [level]):
+     * the client releases the in-memory projections of every session but the open one (they come back,
+     * from the saved copy and the server, when a session is opened). Default: nothing is held to release.
+     */
+    fun trimMemory(level: Int) {}
+
+    /**
      * User action out of a terminal [ConnectionState.VersionMismatch] (the
      * banner's retry): clear the halt and connect now. Nothing automatic ever
      * leaves that state, so a server that stays incompatible cannot loop.
