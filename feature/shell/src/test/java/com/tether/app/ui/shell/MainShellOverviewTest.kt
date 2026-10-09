@@ -6,6 +6,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -89,6 +90,10 @@ class MainShellOverviewTest {
         runPrefsWrite { prefs.updatePreferences { com.tether.app.ui.prefs.TetherPreferences.Default } }
         rule.setContent { TetherTheme { CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, prefs) } } }
         rule.waitForIdle()
+        // The shell paints the session only once the stored preferences have arrived (`showEnded` is null until then), and
+        // that DataStore read hops through Dispatchers.IO, which waitForIdle() does not wait for (the ta-7njx race): wait for
+        // the session header so the "nothing seen yet" checks below are about a shell that is really up, not a blank one.
+        rule.waitUntil(5_000) { rule.onAllNodesWithTag(ShellTags.EndSessionKey).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(emptyList<String>(), client.seenCalls)
 
         // Open the Overview from the top bar: it subscribes, and the selected session leaves the screen.
@@ -127,6 +132,9 @@ class MainShellOverviewTest {
         rule.waitForIdle()
         rule.onNodeWithTag(OverviewTags.open("s1")).performScrollTo().performClick()
         rule.waitForIdle()
+        // The session view's mark-seen rule runs once the sidebar's own read of the stored preferences (a second DataStore
+        // collection through Dispatchers.IO) has arrived, which waitForIdle() does not wait for: await the mark itself.
+        rule.waitUntil(5_000) { client.seenCalls.isNotEmpty() }
         assertEquals(listOf("h-s1"), client.seenCalls.toList())
     }
 }
