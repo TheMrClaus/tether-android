@@ -30,7 +30,13 @@ fun Modifier.maxWidthFraction(fraction: Float): Modifier = this.then(
 fun Modifier.widthMaxContent(): Modifier = this.then(
     Modifier.layout { measurable, constraints ->
         val room = if (constraints.hasBoundedWidth) constraints.maxWidth else WIDTH_MAX_CONTENT_CAP
-        val wanted = measurable.maxIntrinsicWidth(constraints.maxHeight).coerceIn(0, room)
+        // A child taller than a Constraints can hold (a Column asks its cross size at its own height) throws from inside the
+        // intrinsic query too: such content has no meaningful widest line, so it takes the room it has.
+        val wanted = try {
+            measurable.maxIntrinsicWidth(constraints.maxHeight).coerceIn(0, room)
+        } catch (_: IllegalArgumentException) {
+            room
+        }
         val width = wanted.coerceAtLeast(constraints.minWidth.coerceAtMost(room))
         val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
         layout(placeable.width, placeable.height) { placeable.place(0, 0) }

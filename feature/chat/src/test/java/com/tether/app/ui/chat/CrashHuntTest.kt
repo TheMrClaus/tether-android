@@ -222,6 +222,23 @@ open class CrashHuntTest {
         println("CRASHHUNT corpus: $renders renders ($rows activity rows on screen at the ends), reducer refused ${stats[0]}, adapter refused ${stats[1]}")
     }
 
+    @Test fun everyHostileStringAsAMessageAndAPromptWithLinksAndFindMarks() {
+        show()
+        var n = 0
+        for (text in hostile + hostile.zipWithNext { a, b -> "See $a and `$b` then [$a]($b) /a/b.kt:12" }) {
+            val f = ChatFixtures.fold(*ChatFixtures.turn("t1", text, text, ChatFixtures.T_IDLE))
+            rule.runOnIdle { toggles = GroupToggles() }
+            render(Run(f.projection, f.tree), "hostile #$n")
+            for (q in listOf("a", "/", "kt", "é", "😀", "e\u0301")) {
+                rule.runOnIdle { find = q }
+                render(Run(f.projection, f.tree), "hostile #$n (${text.length} chars, ${text.count { it == '\n' }} newlines, starts '${text.take(30).replace("\n", "|")}') find '$q'")
+            }
+            rule.runOnIdle { find = null }
+            n++
+        }
+        println("CRASHHUNT hostile strings: $n")
+    }
+
     @Test fun mutatedCorpusScenariosNeverCrashTheTranscript() {
         show()
         val seeds = (System.getenv("CRASHHUNT_SEEDS") ?: "40").toInt()

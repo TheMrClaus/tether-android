@@ -48,6 +48,18 @@ class HugeLineBubbleTest {
         show("y ".repeat(30_000), "ok")
     }
 
+    private val tall = (1..20_000).joinToString("\n") { "row $it" }
+
+    @Test fun anAgentParagraphOfTwentyThousandLinesLaysOut() {
+        show("go", tall)
+        rule.onNodeWithTag(WellTag).assertExists()
+    }
+
+    @Test fun aUserMessageOfTwentyThousandLinesLaysOut() {
+        show(tall, "ok")
+        rule.onNodeWithTag(WellTag).assertExists()
+    }
+
     private fun commandRun(command: String, output: String) = ChatFixtures.fold(
         ev("turn_started", "t1", ts = 1L) {
             put("idempotencyKey", "k-t1")

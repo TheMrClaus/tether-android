@@ -58,6 +58,8 @@ open class HostileToolSheetTest {
         s.tool(id(), "Bash", """{"command":"sleep 99"}""", done = false)
         s.delta("h${n - 1}", bigLine)
         s.delta("never", "orphan")
+        s.thinking("th-big", (1..20_000).joinToString("\n") { "thought $it /a/b.kt" })
+        s.thinking("th-wide", bigLine + uni)
         s.message("m1", "See /w/p/a.kt:12 and `${"b/".repeat(300)}c.kt` and ${"/z".repeat(800)}.kt then " + uni)
         return s
     }
@@ -77,8 +79,18 @@ open class HostileToolSheetTest {
             opened++
             val dialogs = rule.onAllNodes(isDialog()).fetchSemanticsNodes().size
             assertTrue("a sheet for item $idx", dialogs == 1)
-            rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Close") and androidx.compose.ui.test.hasAnyAncestor(isDialog()), useUnmergedTree = true)
-                .onFirst().performClick()
+            // Every "Show more" in the sheet, until none is left (the full output of a 5,000-line call is then composed).
+            repeat(4) {
+                val more = rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Show more") and androidx.compose.ui.test.hasAnyAncestor(isDialog()), useUnmergedTree = true)
+                if (more.fetchSemanticsNodes().isNotEmpty()) {
+                    more.onFirst().performClick()
+                    rule.waitForIdle()
+                }
+            }
+            // A tap on a key scrolled out of the sheet's window lands on the scrim and dismisses it: that is the harness, not a crash
+            // (an exception would have failed the test already); the sheet is then simply closed.
+            val close = rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Close") and androidx.compose.ui.test.hasAnyAncestor(isDialog()), useUnmergedTree = true)
+            if (close.fetchSemanticsNodes().isNotEmpty()) close.onFirst().performClick()
             rule.waitForIdle()
             rule.onAllNodes(isDialog()).assertCountEquals(0)
         }
