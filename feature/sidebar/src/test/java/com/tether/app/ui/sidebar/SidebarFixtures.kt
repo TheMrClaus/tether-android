@@ -124,6 +124,34 @@ object SidebarFixtures {
         live("g8", "Retired docs pass", cwd = DOCS, ago = 900, archived = true),
     )
 
+    /** A 69-character name that cannot fit one phone line (the phone draws it on one line, cut with an ellipsis). */
+    const val LONG_NAME = "Untangle the reconnect backoff so a flapping link stops nagging users"
+
+    /** A name that is one overlong word: no space to break at, so the line ends in an ellipsis. */
+    const val LONG_WORD = "Investigate_supercalifragilisticexpialidocious_checkpointing_regression"
+
+    /** A location long enough that the phone row's meta line must cut it. */
+    const val LONG_LOCATION = "$ROOT/repo/.worktrees/reconnect-backoff-for-the-flapping-link-regression"
+
+    /**
+     * The phone drawer's long-names board (ta-1jj7): a 69-character name, an overlong word, a short
+     * "main", then active / waiting / idle, a worktree location, an unseen row with its digest, and a
+     * handed-off one.
+     */
+    val longNameSessions: List<AgentSession> = listOf(
+        live("l1", LONG_NAME, status = "active", ago = 1),
+        live("l2", LONG_WORD, status = "waiting", ago = 3),
+        live("l3", "main", ago = 5),
+        live("l4", "Fix the flaky retry test in the importer", cwd = LONG_LOCATION, ago = 9),
+        live("l5", "Finished while you were away, with a name that also runs long", ago = 12, historyId = "h-long"),
+        live("l6", "Moved to a new session after the context filled up completely", ago = 50, handedOffTo = "l1"),
+    )
+    val longNameHistories: Map<String, List<HistorySession>> = mapOf(
+        ROOT to listOf(
+            history("h-long", "Finished while you were away, with a name that also runs long", ago = 12, seenAgo = 40, digest = HistoryDigest(3, "All four tests pass; the backoff is 250ms.")),
+        ),
+    )
+
     fun state(
         sessions: List<AgentSession>,
         pinned: List<String> = emptyList(),
@@ -180,9 +208,11 @@ private val StudioRail = Color(0xFF141D2E)
 
 /**
  * The host containers the sidebar lives in, reproduced for the goldens (feature/shell owns the
- * real ones): the phone drawer — `min(20rem, 88vw)` (Studio `min(21rem, 92vw)`), padded
- * `space-md` (Studio `1rem 0.875rem 0.75rem`), `--graphite` with a `1px --line` right edge (Studio
- * the fixed `#141d2e`) over the scrimmed page — and the expanded layout's 264dp rail column.
+ * real ones). The phone drawer follows SessionDrawerHost in lockstep (ta-1jj7, owner-directed
+ * design: the compact full-screen drawer; ta-8znp: the foot inset): an opaque full-width panel on the
+ * fixed `#141d2e`, no backdrop, padded by [PhoneDrawer]'s design minimum per side (the system-bar and
+ * cutout insets are zero here; the host's own test measures them). The expanded layout's 264dp rail
+ * column keeps `1.35rem 0.875rem 0.75rem`.
  */
 @Composable
 fun SidebarUnderTest(
@@ -197,12 +227,7 @@ fun SidebarUnderTest(
             val t = LocalTetherTokens.current
             BoxWithConstraints(Modifier.fillMaxSize().background(t.mineral)) {
                 val phone = layout == TetherLayoutClass.Phone
-                if (phone) Box(Modifier.fillMaxSize().background(t.scrim))
-                val width = when {
-                    !phone -> 264.dp
-                    else -> minOf(336.dp, maxWidth * 0.92f)
-                }
-                val edge = if (phone) t.line else t.lineStrong
+                val width = if (phone) maxWidth else 264.dp
                 Box(
                     Modifier
                         .width(width)
@@ -210,12 +235,17 @@ fun SidebarUnderTest(
                         .drawBehind {
                             drawRect(StudioRail)
                         }
-                        .padding(end = 0.dp)
-                        .padding(
-                            start = 14.dp,
-                            end = 14.dp,
-                            top = (if (phone) 16.dp else 21.6.dp),
-                            bottom = 12.dp,
+                        .then(
+                            if (phone) {
+                                Modifier.padding(
+                                    start = PhoneDrawer.Edge,
+                                    end = PhoneDrawer.Edge,
+                                    top = PhoneDrawer.Edge,
+                                    bottom = PhoneDrawer.Bottom,
+                                )
+                            } else {
+                                Modifier.padding(start = 14.dp, end = 14.dp, top = 21.6.dp, bottom = 12.dp)
+                            },
                         ),
                 ) {
                     SessionSidebar(state, actions, layout = layout, seed = seed)

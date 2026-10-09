@@ -46,7 +46,8 @@ object ShellTags {
     const val EmptyWorkspace = "shell-empty"
     const val StartSessionKey = "shell-start-session"
     const val Drawer = "shell-drawer"
-    const val DrawerBackdrop = "shell-drawer-backdrop"
+    /** The always-composed drawer host: it carries [DrawerOpenKey], the positive open/closed signal. */
+    const val DrawerHost = "shell-drawer-host"
 
     // The expanded (desktop) layout, T4.2.
     const val Sidebar = "shell-sidebar"
@@ -180,7 +181,14 @@ fun PhoneShell(
     })
 
     Box(modifier.fillMaxSize().testTag(ShellTags.Shell)) {
-        Column(Modifier.fillMaxSize().background(t.graphite)) {
+        // ta-1jj7 (owner-directed design): the open drawer is an opaque full-window panel, so the topbar and
+        // the chat behind it leave the accessibility tree while it is open (TalkBack never reaches them).
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(t.graphite)
+                .then(if (showRail && state.drawerOpen) Modifier.clearAndSetSemantics { } else Modifier),
+        ) {
             TetherTopbar(actions = barActions, state = topbarState, onToggleMenu = state::toggleMenu)
             // T13.2: the link banner, under the topbar (never a modal).
             LocalShellFreshness.current.banner?.let { com.tether.app.ui.components.ConnectionBanner(it, Modifier.testTag(ShellTags.LinkBanner)) }
@@ -238,7 +246,7 @@ fun PhoneShell(
             }
         }
 
-        if (showRail) SessionDrawerHost(open = state.drawerOpen, onClose = state::closeDrawer) { slots.drawer() }
+        if (showRail) SessionDrawerHost(open = state.drawerOpen) { slots.drawer() }
 
         if (session != null && state.linksOpen) {
             SessionLinksPopover(

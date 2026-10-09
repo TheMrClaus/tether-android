@@ -104,6 +104,11 @@ class DraftComposerSheetBehaviourTest {
 
     private fun exists(tag: String) = rule.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
 
+    /** The drawer host's open flag (ta-1jj7): null while the host is not composed. */
+    private fun drawerOpen(): Boolean? =
+        rule.onAllNodesWithTag(ShellTags.DrawerHost, useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()
+            ?.config?.getOrNull(com.tether.app.ui.shell.DrawerOpenKey)
+
     /**
      * Waits for [condition], letting the main looper run what the view model posted to it on each
      * poll (Robolectric pauses that looper; the engine's first-turn wait resumes there).
@@ -208,7 +213,8 @@ class DraftComposerSheetBehaviourTest {
         tap(ShellTags.MenuKey)
         tap(SidebarTags.NewSession)
         awaitTag(DraftComposerTags.Sheet)
-        until("the drawer closed") { !exists(ShellTags.DrawerBackdrop) }
+        // The positive signal: the host says "closed" (a missing backdrop node would also pass for a drawer that never drew one).
+        until("the drawer closed") { drawerOpen() == false }
     }
 
     /** r2 (F3): dashboard.tsx starts the operator in the message box. */

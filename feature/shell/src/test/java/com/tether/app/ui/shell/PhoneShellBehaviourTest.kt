@@ -11,6 +11,8 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
@@ -43,18 +45,53 @@ class PhoneShellBehaviourTest {
         rule.runOnUiThread { rule.activity.onBackPressedDispatcher.onBackPressed() }
     }
 
-    @Test fun menuOpensTheDrawerAndTheBackdropClosesIt() {
+    /** The drawer host's open flag: the positive signal (a missing node could only say "not drawn"). */
+    private fun drawerFlag(): Boolean? = rule.onNodeWithTag(ShellTags.DrawerHost).fetchSemanticsNode().config.getOrNull(DrawerOpenKey)
+
+    @Test fun menuOpensTheDrawerAndCloseHidesIt() {
         val state = PhoneShellState()
         show(state)
+        assertEquals("closed at first", false, drawerFlag())
         rule.onNodeWithContentDescription("Open sessions").performClick()
         assertTrue(state.drawerOpen)
         assertEquals(listOf("drawer"), events)
+        assertEquals("open", true, drawerFlag())
         rule.onNodeWithTag(DrawerSlotTag).assertExists()
-        // The panel covers the backdrop's centre; tap the visible strip at the right edge.
-        rule.onNodeWithContentDescription("Close sessions").performTouchInput { click(Offset(width - 10f, centerY)) }
+        // ta-1jj7 (owner-directed design): no backdrop is left; the drawer's own close key, Back and a
+        // selection close it (the slot here is a placeholder, so the state's close stands for the key).
+        rule.runOnUiThread { state.closeDrawer() }
         rule.waitForIdle()
         assertFalse(state.drawerOpen)
-        rule.onNodeWithTag(ShellTags.DrawerBackdrop).assertDoesNotExist()
+        assertEquals("closed again", false, drawerFlag())
+        rule.onNodeWithTag(DrawerSlotTag).assertDoesNotExist()
+    }
+
+    /** ta-1jj7: the open panel is opaque and full-window, so the topbar and the chat behind it leave the accessibility tree. */
+    @Test fun openDrawerHidesTheShellFromTalkBack() {
+        val state = PhoneShellState()
+        show(state)
+        rule.onNodeWithTag(ShellTags.MenuKey).assertExists()
+        rule.onNodeWithTag(ShellTags.Stage).assertExists()
+        rule.onNodeWithTag(ShellTags.MenuKey).performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag(DrawerSlotTag).assertExists()
+        rule.onNodeWithTag(ShellTags.MenuKey).assertDoesNotExist()
+        rule.onNodeWithTag(ShellTags.Stage).assertDoesNotExist()
+        rule.runOnUiThread { state.closeDrawer() }
+        rule.waitForIdle()
+        rule.onNodeWithTag(ShellTags.MenuKey).assertExists()
+        rule.onNodeWithTag(ShellTags.Stage).assertExists()
+    }
+
+    /** ta-1jj7: the open panel spans the window's width (it was the web's `min(21rem, 92vw)`). */
+    @Test fun theOpenPanelFillsTheWindow() {
+        val state = PhoneShellState(drawerOpen = true)
+        show(state)
+        rule.waitForIdle()
+        val root = rule.onRoot().getBoundsInRoot()
+        val panel = rule.onNodeWithTag(ShellTags.Drawer).getBoundsInRoot()
+        assertEquals((root.right - root.left).value, (panel.right - panel.left).value, 0.5f)
+        assertEquals(0f, panel.left.value, 0.5f)
     }
 
     @Test fun closedDrawerIsHiddenFromTalkBack() {
@@ -66,9 +103,11 @@ class PhoneShellBehaviourTest {
         val state = PhoneShellState()
         show(state)
         rule.onNodeWithTag(ShellTags.MenuKey).performClick()
+        assertEquals(true, drawerFlag())
         back()
         rule.waitForIdle()
         assertFalse(state.drawerOpen)
+        assertEquals("the host says closed", false, drawerFlag())
     }
 
     @Test fun backWithNothingOpenFallsThrough() {

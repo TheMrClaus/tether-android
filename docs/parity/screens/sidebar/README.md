@@ -6,16 +6,24 @@ the sidebar's Roborazzi goldens in `feature/sidebar/src/test/screenshots/` (phon
 2.625 px/dp, tablet 1280dp @mdpi, so crops compare 1:1).
 
 The goldens render `SessionSidebar` (components/session-sidebar.tsx) inside a copy of its host
-container: the phone drawer (`min(20rem, 88vw)`, Studio `min(21rem, 92vw)`, padded `space-md`) and
-the expanded layout's 264dp rail. feature/shell owns the real containers (T4.1 `SessionDrawerHost`,
-T4.2 `SidebarColumn`), and both host the same `SessionDrawer` composable. The fixture reproduces the
-seeded scenario: one workspace block (`ws`, current, unpinned), 11 live headless chats, and Hide runs
-on.
+container: the phone drawer and the expanded layout's 264dp rail. The phone drawer is **a full-screen,
+compact panel: owner-directed design (ta-1jj7)**, not the web's `min(21rem, 92vw)` drawer: opaque, the
+whole window, no backdrop, padded by the larger of the system bars, the display cutout and an 8 / 8 / 8 / 12 dp
+minimum (ta-8znp: the navigation bar raises the foot, as the web's `max(space-md, safe-area-inset-bottom)`),
+with one 48 dp touch floor. Its rows are two lines (the provider cap, a one-line name with an end ellipsis, a
+status and time line with the location beside it when it fits) at about twice the sessions per screen.
+feature/shell owns the real containers (T4.1 `SessionDrawerHost`, T4.2 `SidebarColumn`), and both host the
+same `SessionDrawer` composable; `SidebarFixtures` follows the host in lockstep through `PhoneDrawer`. The
+fixture reproduces the seeded scenario: one workspace block (`ws`, current, unpinned), 11 live headless chats,
+and Hide runs on.
+
+The two phone montages below were built against the web's drawer **before** ta-1jj7 and are historical: they no
+longer compare layout (the web has no compact drawer). The tablet montage still compares 1:1.
 
 | Montage | Mean diff | What matches | Explained differences |
 |---|---|---|---|
-| `drawer-top-<skin>-phone.png` | 7.9–10.5/255 | the "Workspaces" mobile header and close key; the New session key (face, legend, `N` cap: charcoal in the instrument skins, the white 15% chip in Studio, where the rail's token scope makes it `#365cde`); the legend and its count pill; the recessed filter bank with Hide runs latched; the two recessed wells | (1) **Scheduled actions** renders disabled (0.48) with no count. Its host (T9.3) and the `scheduled-actions` data are not built yet, so the web's "2" badge has no source. This follows the T4.1 rule for keys whose host is missing. (2) The **New session key is 44dp tall** (web `2.6rem` = 41.6dp), for the 44dp minimum target, so everything below it sits about 2.4dp lower. (3) **Studio phone filter keys** are 2.5rem wide (web 2.75rem) so the legend and its count fit on one line in the 21rem drawer. The touch target stays ≥ 44dp. (4) The rest is glyph rasterization and Manrope metrics (the same as the T4.1 / T3.3 montages). |
-| `drawer-rows-<skin>-phone.png` | 7.6–9.9/255 | the current block header (violet wash + edge; Studio borderless on the scoped `#263b66`), its badge, dot, chevron, + and star; the row grid (40dp handle with the 28dp molded provider cap, copy, chevron, the 44dp end ×); two-line clamped titles; CHAT tags (hidden in Studio); status dot + words + time; the `~/repo` sub-path; the footer seam and PRIVATE RUNTIME | The rows drift a few px per row (row pitch within about 3dp). This comes from the two-line title's line-height (1.4) under Android's text layout, and from Studio's `0.75rem` row padding meeting a slightly shorter status line. It is metrics, not layout: every padding and gap is the cited CSS value. |
+| `drawer-top-<skin>-phone.png` (phone drawer: full screen, compact rows: owner-directed design, ta-1jj7; montage historical) | 7.9–10.5/255 | the "Workspaces" mobile header and close key; the New session key (face, legend, `N` cap: charcoal in the instrument skins, the white 15% chip in Studio, where the rail's token scope makes it `#365cde`); the legend and its count pill; the recessed filter bank with Hide runs latched; the two recessed wells | (1) **Scheduled actions** renders disabled (0.48) with no count. Its host (T9.3) and the `scheduled-actions` data are not built yet, so the web's "2" badge has no source. This follows the T4.1 rule for keys whose host is missing. (2) The **New session key is 44dp tall** (web `2.6rem` = 41.6dp), for the 44dp minimum target, so everything below it sits about 2.4dp lower. (3) **Studio phone filter keys** are 2.5rem wide (web 2.75rem) so the legend and its count fit on one line in the 21rem drawer. The touch target stays ≥ 44dp. (4) The rest is glyph rasterization and Manrope metrics (the same as the T4.1 / T3.3 montages). |
+| `drawer-rows-<skin>-phone.png` (phone drawer rows: compact two-line rows: owner-directed design, ta-1jj7; montage historical) | 7.6–9.9/255 | the current block header (violet wash + edge; Studio borderless on the scoped `#263b66`), its badge, dot, chevron, + and star; the row grid (40dp handle with the 28dp molded provider cap, copy, chevron, the 44dp end ×); two-line clamped titles; CHAT tags (hidden in Studio); status dot + words + time; the `~/repo` sub-path; the footer seam and PRIVATE RUNTIME | The rows drift a few px per row (row pitch within about 3dp). This comes from the two-line title's line-height (1.4) under Android's text layout, and from Studio's `0.75rem` row padding meeting a slightly shorter status line. It is metrics, not layout: every padding and gap is the cited CSS value. |
 | `column-<skin>-tablet.png` | 12.1–13.3/255 | no mobile header; the Collapse key in the footer; the filter bank running past the 264dp rail as on the web; the ellipsized two-line titles; the 16px chevrons in the desktop's 0.75rem grid column | (1) The web tablet crop starts under its 48px (Studio 64px) topbar. The golden's rail starts at y = 0, so a sub-pixel start offset remains. (2) Scheduled actions and New session as above. (3) Title wrapping differs where Chromium and Android break at different characters in a very narrow column ("Worktree / with a…" vs "Worktree / with a servi…"). |
 
 States with no web shot (goldens only, all 6 skins at phone size unless noted):

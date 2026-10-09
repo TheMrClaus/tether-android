@@ -6,6 +6,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -300,7 +301,8 @@ class GlobalSearchBehaviourTest {
     @Test fun theSidebarKeyOpensTheModal() {
         val h = host(sessions = F.drawerSessions, withDrawer = true)
         assertFalse(h.vm.globalSearchOpen.value)
-        rule.onNodeWithText("Search all conversations…").performClick()
+        // ta-1jj7 (owner-directed design): on the phone the well is a 48 dp key; its words are its label.
+        rule.onNodeWithContentDescription("Search all conversations").performClick()
         rule.waitForIdle()
         assertTrue(h.vm.globalSearchOpen.value)
         rule.onNodeWithTag(GlobalSearchTags.Dialog).assertIsDisplayed()

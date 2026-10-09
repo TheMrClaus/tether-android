@@ -22,6 +22,7 @@ import androidx.compose.ui.test.requestFocus
 import com.tether.app.nav.NavTestClient.Companion.OTHER_LISTED
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
@@ -89,7 +90,26 @@ class NavShellTest {
         link("tether://session/$LISTED")
         rule.waitForIdle()
         assertEquals(LISTED, vm.selectedSessionId.value)
-        rule.onNodeWithTag(ShellTags.DrawerBackdrop).assertDoesNotExist()
+        // The positive closed signal: the host says "closed" (no backdrop node is left to look for).
+        assertEquals("the drawer is closed", false, drawerOpen())
+        assertFalse("Back must fall through to the system", backIsConsumed())
+    }
+
+    /** The drawer host's open flag (ta-1jj7). */
+    private fun drawerOpen(): Boolean? =
+        rule.onNodeWithTag(ShellTags.DrawerHost).fetchSemanticsNode().config.getOrNull(com.tether.app.ui.shell.DrawerOpenKey)
+
+    /** ta-1jj7 (owner-directed design): with no backdrop, the drawer's own close key closes it, and Back then leaves the app. */
+    @Test
+    fun onThePhoneTheCloseKeyClosesTheDrawer() {
+        assertEquals("closed at first", false, drawerOpen())
+        rule.onNodeWithTag(ShellTags.MenuKey).performClick()
+        rule.waitForIdle()
+        assertEquals("open", true, drawerOpen())
+        assertTrue("Back closes the drawer", backIsConsumed())
+        rule.onNodeWithContentDescription("Close sessions").performClick()
+        rule.waitForIdle()
+        assertEquals("closed by its own key", false, drawerOpen())
         assertFalse("Back must fall through to the system", backIsConsumed())
     }
 

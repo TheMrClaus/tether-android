@@ -101,9 +101,17 @@ class PhoneShellStateTest {
         assertEquals(com.tether.app.ui.components.TetherLayoutClass.Expanded, shellLayoutFor(1280))
     }
 
-    @Test fun drawerWidthFollowsTheWebClamp() {
-        // Studio: min(21rem, 92vw) (studio.css 443).
-        assertEquals(336f, drawerWidth(viewportWidth = androidx.compose.ui.unit.Dp(412f)).value, 0.01f)
-        assertEquals(331.2f, drawerWidth(viewportWidth = androidx.compose.ui.unit.Dp(360f)).value, 0.01f)
+    /** ta-1jj7 (owner-directed design): the phone drawer is the whole window, not the web's `min(21rem, 92vw)`. */
+    @Test fun drawerIsFullScreen() {
+        listOf(360f, 412f, 767f).forEach { w ->
+            assertEquals(w, drawerWidth(viewportWidth = androidx.compose.ui.unit.Dp(w)).value, 0.01f)
+        }
+    }
+
+    /** ta-1jj7: the panel enters from the start edge, so a right-to-left layout mirrors the slide. */
+    @Test fun drawerEntersFromTheStartEdge() {
+        assertEquals(-1.02f, drawerOffsetFraction(-1.02f, rtl = false), 0.0001f)
+        assertEquals(1.02f, drawerOffsetFraction(-1.02f, rtl = true), 0.0001f)
+        assertEquals(0f, drawerOffsetFraction(0f, rtl = true), 0.0001f)
     }
 }

@@ -100,9 +100,14 @@ fun sidebarSeed(shot: SidebarShot): SidebarUiSeed = when (shot) {
 private const val CaptureAtMs = 600L
 
 fun ComposeContentTestRule.snapSidebar(shot: SidebarShot, skin: TetherSkin, name: String, size: String, layout: TetherLayoutClass) {
-    mainClock.autoAdvance = false
     // The real host wires every callback; Collapse (desktop only) must be present to be drawn.
-    setContent { SidebarUnderTest(skin, sidebarState(shot), layout, sidebarSeed(shot), SidebarActions(onCollapse = {})) }
+    snapContent(skin, name, size) { SidebarUnderTest(skin, sidebarState(shot), layout, sidebarSeed(shot), SidebarActions(onCollapse = {})) }
+}
+
+/** Draws [content], lets every transition settle and compares (or records) the golden at `src/test/screenshots/<name>/<skin>-<size>.png`. */
+fun ComposeContentTestRule.snapContent(skin: TetherSkin, name: String, size: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+    mainClock.autoAdvance = false
+    setContent { content() }
     mainClock.advanceTimeBy(CaptureAtMs)
     waitForIdle()
     // The screen capture includes the menus' popup windows.
@@ -191,4 +196,57 @@ class SidebarFontScale2TabletScreenshotTest(private val skin: TetherSkin) {
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
         fun params(): List<Array<Any>> = listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(it) }
     }
+}
+
+/**
+ * ta-1jj7 (owner-directed design): the compact phone drawer on a short landscape phone (640 x 360 dp, the
+ * Phone class): the New session row is pinned and the rest of the header scrolls with the list.
+ */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+@Config(qualifiers = "w640dp-h360dp-xhdpi")
+class SidebarDrawerLandscapeScreenshotTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun sidebar() = rule.snapSidebar(SidebarShot.Drawer, TetherSkin.StudioDark, "sidebar-drawer-landscape", "phone", TetherLayoutClass.Phone)
+}
+
+/** The phone drawer in a right-to-left layout: rows, header and footer mirror through start and end. */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class SidebarDrawerRtlScreenshotTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun sidebar() = rule.snapContent(TetherSkin.StudioDark, "sidebar-drawer-rtl", "phone") {
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl) {
+            SidebarUnderTest(TetherSkin.StudioDark, sidebarState(SidebarShot.Drawer), TetherLayoutClass.Phone, sidebarSeed(SidebarShot.Drawer), SidebarActions(onCollapse = {}))
+        }
+    }
+}
+
+private fun ComposeContentTestRule.snapLongNames(name: String) = snapContent(TetherSkin.StudioDark, name, "phone") {
+    SidebarUnderTest(
+        TetherSkin.StudioDark,
+        SidebarFixtures.state(SidebarFixtures.longNameSessions, histories = SidebarFixtures.longNameHistories, activeId = "l3"),
+        TetherLayoutClass.Phone,
+        SidebarUiSeed(),
+        SidebarActions(onCollapse = {}),
+    )
+}
+
+/** A 360 x 640 phone with names that do not fit one line: a long name, an overlong word, a worktree location, an unseen digest, a handoff. */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+@Config(qualifiers = "w360dp-h640dp-xhdpi")
+class SidebarLongNames360ScreenshotTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun sidebar() = rule.snapLongNames("sidebar-long-names-360")
+}
+
+/** The same at twice the text: rows grow, nothing clips, the header scrolls with the list. */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+@Config(qualifiers = "w360dp-h640dp-xhdpi", fontScale = 2.0f)
+class SidebarLongNames360Font2ScreenshotTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun sidebar() = rule.snapLongNames("sidebar-long-names-360-font-2.0x")
 }

@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import com.tether.app.ui.theme.TetherSkin
@@ -223,5 +224,34 @@ class SidebarBehaviourTest {
         rule.onNodeWithContentDescription("Finished while you were away, changed since you last looked", substring = true).assertExists()
         rule.onNodeWithContentDescription("3 new turns since you left", substring = true).assertExists()
         rule.onRoot().assertExists()
+    }
+
+    /** ta-1jj7 (owner-directed design): the drawer's own close key is the way out now that no backdrop is left to tap. */
+    @Test fun phoneCloseKeyCallsOnCloseDrawer() {
+        show()
+        rule.onNodeWithContentDescription("Close sessions").performClick()
+        assertEquals(listOf("close"), events)
+    }
+
+    /** ta-1jj7: the compact drawer keeps every action the old one had (the search well became a key). */
+    @Test fun phoneDrawerKeepsEveryAction() {
+        val withHosts = actions.copy(onOpenGlobalSearch = { events += "search" }, onOpenScheduledActions = { events += "scheduled" })
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, F.state(F.drawerSessions), actions = withHosts) }
+        rule.waitForIdle()
+        listOf(
+            "Close sessions", "Search all conversations", "New session", "Filter sessions by harness", "Active", "Unread", "Hide runs",
+            "Sort sessions by Created Date", "Filter sessions", "Open settings", "New session in ${F.ROOT.substringAfterLast('/')}",
+            "Hold and drag to move Worktree with a service", "End Worktree with a service",
+        ).forEach { label ->
+            rule.onNodeWithContentDescription(label).assertExists().assert(hasClickAction().or(hasSetTextAction()))
+        }
+        rule.onNodeWithTag(SidebarTags.Scheduled).assertExists().assert(hasClickAction())
+        rule.onNodeWithTag(SidebarTags.NewSession).assertExists().assert(hasClickAction())
+        rule.onNodeWithTag(SidebarTags.AddWorkspace).assertExists().assert(hasClickAction())
+        rule.onNodeWithTag(ArchiveStaleTags.Entry).assertExists().assert(hasClickAction())
+        row("Add the version file").assert(hasClickAction())
+        rule.onNodeWithContentDescription("Search all conversations").performClick()
+        rule.onNodeWithTag(SidebarTags.Scheduled).performClick()
+        assertEquals(listOf("search", "scheduled"), events)
     }
 }

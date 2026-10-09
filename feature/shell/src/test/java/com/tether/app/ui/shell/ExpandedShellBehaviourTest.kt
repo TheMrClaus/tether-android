@@ -300,7 +300,8 @@ class ExpandedShellBehaviourTest : ExpandedBehaviourBase() {
         show(state)
         rule.waitForIdle()
         assertFalse(state.drawerOpen)
-        rule.onNodeWithTag(ShellTags.DrawerBackdrop).assertDoesNotExist()
+        // The expanded layout has no drawer to open or close: its host is never composed.
+        rule.onNodeWithTag(ShellTags.DrawerHost).assertDoesNotExist()
         assertFalse(rule.activity.onBackPressedDispatcher.hasEnabledCallbacks())
     }
 

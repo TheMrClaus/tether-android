@@ -173,6 +173,12 @@ class DragController internal constructor(
 /**
  * `SessionItem` (session-sidebar.tsx:143-410) with the material-layer row (globals.css 1126-1330,
  * 1439-1570, 11097-11118, 11654-11741; studio.css 323-341).
+ *
+ * On the phone (ta-1jj7, owner-directed design: the compact full-screen drawer) the row is two
+ * lines at the 48 dp floor: the provider cap in a 48 dp handle, then ONE name line with an end
+ * ellipsis over a meta line (status words and time, the location beside them when 72 dp or more
+ * remains), then the 48 dp end key. Nothing the rail's row carries is dropped; the full name stays
+ * in the TalkBack label. Every phone branch is under [phone]; the rail's row is unchanged.
  */
 @Composable
 internal fun SessionRow(
@@ -261,7 +267,7 @@ internal fun SessionRow(
             .onGloballyPositioned { rowBounds[entry.key] = it.boundsInRoot() }
             .alpha(if (dragging) 0.72f else 1f)
             .cssSurface(rowShape, rowFace, rowBorder, rowShadows)
-            .then(if (phone) Modifier.clipToBounds().padding(vertical = 2.dp) else Modifier.padding(end = 0.15f.rem))
+            .then(if (phone) Modifier.clipToBounds() else Modifier.padding(end = 0.15f.rem))
             .testTag(SidebarTags.row(entry.key)),
     ) {
         if (swipeEnabled) {
@@ -343,8 +349,8 @@ internal fun SessionRow(
             var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
             Box(
                 Modifier
-                    .width(2.4f.rem)
-                    .heightIn(min = 2.75f.rem)
+                    .width(if (phone) PhoneDrawer.Floor else 2.4f.rem)
+                    .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
                     .onGloballyPositioned { handleCoords = it }
                     .testTag(SidebarTags.handle(entry.key))
                     .semantics {
@@ -396,13 +402,17 @@ internal fun SessionRow(
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                ProviderCap(provider, 1.75f.rem, Modifier.alpha(if (dragEnabled) 1f else 0.72f), selected = active)
+                if (phone) {
+                    ProviderCap(provider, PhoneDrawer.Cap, Modifier.alpha(if (dragEnabled) 1f else 0.72f), selected = active, letterRem = 0.65f)
+                } else {
+                    ProviderCap(provider, 1.75f.rem, Modifier.alpha(if (dragEnabled) 1f else 0.72f), selected = active)
+                }
             }
             // .session-item: the nav button — copy + chevron.
             Row(
                 Modifier
                     .weight(1f)
-                    .heightIn(min = 3.5f.rem)
+                    .heightIn(min = if (phone) PhoneDrawer.Floor else 3.5f.rem)
                     .semantics(mergeDescendants = true) {
                         contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location, offline, sync)
                         if (active) selected = true
@@ -420,52 +430,53 @@ internal fun SessionRow(
                     }
                     // :root .session-item: 0.4rem space-sm, padding-left 0 (Studio 0.75rem 0.25rem, studio.css 325).
                     .then(
-                        Modifier.padding(vertical = 0.75f.rem, horizontal = 0.25f.rem),
+                        if (phone) Modifier.padding(vertical = 0.375f.rem, horizontal = 0.25f.rem)
+                        else Modifier.padding(vertical = 0.75f.rem, horizontal = 0.25f.rem),
                     ),
                 verticalAlignment = Alignment.CenterVertically,
                 // The grid gap: space-md on a phone, space-sm from 48rem (globals.css 4052-4058).
                 horizontalArrangement = Arrangement.spacedBy(if (phone) t.css.spaceMd else t.css.spaceSm),
             ) {
-                Column(Modifier.weight(1f).clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(0.2f.rem)) {
-                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(0.4f.rem)) {
-                        if (unseen) {
-                            Box(Modifier.padding(top = 0.45f.rem).size(7.dp).background(t.violet, RoundedCornerShape(50)))
-                        }
-                        // `.session-item-head strong`: -webkit-line-clamp 2, whole words (globals.css 10917-10923, ta-z4c1).
-                        WholeWordText(
-                            name,
-                            style = (css(type.ui, 0.78f, 600, lineHeight = 1.45f))
-                                .copy(textDirection = proseDirection),
-                            color = (if (active) Color.White else t.ink),
-                            maxLines = 2,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        if (live?.handedOffTo != null) SmallIcon(TetherIcons.ArrowRightLeft, ink, 12.dp, Modifier.padding(top = 0.2f.rem))
-                    }
-                    StatusLine(entry, now, updatedAt, offline, sync)
-                    digest?.let { d ->
-                        Column(Modifier.padding(top = 0.1f.rem), verticalArrangement = Arrangement.spacedBy(0.05f.rem)) {
-                            if (d.newTurns > 0) {
-                                Text("${d.newTurns} new turn${if (d.newTurns == 1) "" else "s"} since you left", style = css(type.ui, 0.7f, 600), color = t.violet)
+                if (phone) {
+                    PhoneRowBody(
+                        entry = entry, name = name, active = active, unseen = unseen, ink = ink, digest = digest,
+                        location = location, now = now, updatedAt = updatedAt, offline = offline, sync = sync,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Column(Modifier.weight(1f).clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(0.2f.rem)) {
+                        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(0.4f.rem)) {
+                            if (unseen) {
+                                Box(Modifier.padding(top = 0.45f.rem).size(7.dp).background(t.violet, RoundedCornerShape(50)))
                             }
-                            val snippet = LabelText.hint(d.snippet)
-                            if (snippet.isNotEmpty()) Text(snippet, style = css(type.ui, 0.7f, 400).copy(textDirection = proseDirection), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            // `.session-item-head strong`: -webkit-line-clamp 2, whole words (globals.css 10917-10923, ta-z4c1).
+                            WholeWordText(
+                                name,
+                                style = (css(type.ui, 0.78f, 600, lineHeight = 1.45f))
+                                    .copy(textDirection = proseDirection),
+                                color = (if (active) Color.White else t.ink),
+                                maxLines = 2,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            if (live?.handedOffTo != null) SmallIcon(TetherIcons.ArrowRightLeft, ink, 12.dp, Modifier.padding(top = 0.2f.rem))
                         }
+                        StatusLine(entry, now, updatedAt, offline, sync)
+                        digest?.let { d -> DigestBlock(d, phone = false) }
+                        // ta-28i: the location is a path: code, LTR.
+                        location?.let { Text(codeLabel(it), style = css(type.ui, 0.64f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount, phone = false) }
                     }
-                    // ta-28i: the location is a path: code, LTR.
-                    location?.let { Text(codeLabel(it), style = css(type.ui, 0.64f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                    entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount) }
+                    // `<ChevronRight size={16}>`, drawn at 16px even in the desktop's 0.75rem grid column.
+                    SmallIcon(TetherIcons.ChevronRight, ink, 16.dp)
                 }
-                // `<ChevronRight size={16}>`, drawn at 16px even in the desktop's 0.75rem grid column.
-                SmallIcon(TetherIcons.ChevronRight, ink, 16.dp)
             }
-            // .session-item-end: two taps by design (no modal); 44dp on a phone (coarse pointer).
+            // .session-item-end: two taps by design (no modal); 48dp on a phone (the drawer's one floor, ta-1jj7).
             if (endable) {
                 val endShape = RoundedCornerShape(t.radiusSm)
                 Box(
                     Modifier
-                        .padding(end = 0.3f.rem)
-                        .size(if (phone) 2.75f.rem else 1.75f.rem)
+                        .padding(end = if (phone) 0.dp else 0.3f.rem)
+                        .size(if (phone) PhoneDrawer.Floor else 1.75f.rem)
                         .onGloballyPositioned { endBounds[entry.key] = it.boundsInRoot() }
                         .semantics {
                             contentDescription = when {
@@ -491,9 +502,127 @@ internal fun SessionRow(
                     if (armed && endLive) {
                         Text("END?", style = css(type.ui, 0.62f, 700, trackingEm = 0.02f), color = t.danger, modifier = Modifier.clearAndSetSemantics { })
                     } else {
-                        SmallIcon(TetherIcons.X, t.faint, 11.dp)
+                        SmallIcon(TetherIcons.X, t.faint, if (phone) 12.dp else 11.dp)
                     }
                 }
+            }
+        }
+    }
+}
+
+/** The digest under a row: "N new turns since you left" and its snippet (the phone draws both at 0.65rem). */
+@Composable
+private fun DigestBlock(d: com.tether.app.protocol.model.HistoryDigest, phone: Boolean) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val rem = if (phone) 0.65f else 0.7f
+    Column(Modifier.padding(top = 0.1f.rem), verticalArrangement = Arrangement.spacedBy(0.05f.rem)) {
+        if (d.newTurns > 0) {
+            Text("${d.newTurns} new turn${if (d.newTurns == 1) "" else "s"} since you left", style = css(type.ui, rem, 600), color = t.violet)
+        }
+        val snippet = LabelText.hint(d.snippet)
+        if (snippet.isNotEmpty()) Text(snippet, style = css(type.ui, rem, 400).copy(textDirection = proseDirection), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * The phone row's text (ta-1jj7, owner-directed design). Line 1: the unseen dot, the name on ONE line
+ * with an end ellipsis (the label carries the whole name), the handoff glyph. Line 2: the status words
+ * and time with the location beside them (see [PhoneMetaLine]). Then the digest and a search snippet,
+ * as the rail draws them, at 0.65rem. No chevron: the row is the target and says nothing more.
+ */
+@Composable
+private fun PhoneRowBody(
+    entry: SidebarEntry,
+    name: String,
+    active: Boolean,
+    unseen: Boolean,
+    ink: Color,
+    digest: com.tether.app.protocol.model.HistoryDigest?,
+    location: String?,
+    now: Long,
+    updatedAt: Long,
+    offline: Boolean,
+    sync: com.tether.app.client.SessionSync?,
+    modifier: Modifier,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Column(modifier.clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (unseen) Box(Modifier.size(7.dp).background(t.violet, RoundedCornerShape(50)))
+            // `.session-item-head strong` with one line: the plain end ellipsis (WholeWordText at maxLines 1);
+            // a one-line name has no line break to put inside a word (ta-z4c1 keeps the rail's two lines).
+            WholeWordText(
+                name,
+                style = css(type.ui, 0.75f, 600, lineHeight = 1.4f).copy(textDirection = proseDirection),
+                color = if (active) Color.White else t.ink,
+                maxLines = 1,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (entry.live?.handedOffTo != null) SmallIcon(TetherIcons.ArrowRightLeft, ink, 12.dp)
+        }
+        PhoneMetaLine(
+            status = { StatusLine(entry, now, updatedAt, offline, sync, phone = true) },
+            // ta-28i: the location is a path: code, LTR.
+            location = location?.let { path -> { Text(codeLabel(path), style = css(type.ui, 0.65f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+        )
+        digest?.let { d -> DigestBlock(d, phone = true) }
+        entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount, phone = true) }
+    }
+}
+
+/** The phone's location is given this much beside the status words before it drops to its own line. */
+internal val PhoneLocationMinWidth = 72.dp
+
+/**
+ * The phone row's second line. Below font scale 1.5 it is one row: the status cluster at its natural
+ * width, a 5.6 dp gap, then the location, which takes what is left (an end ellipsis) and drops to a line
+ * of its own ONLY when less than [PhoneLocationMinWidth] remains. From 1.5x the pieces may wrap (rows
+ * already grow with the text). The location is never absent: it is also in the row's label.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun PhoneMetaLine(status: @Composable () -> Unit, location: (@Composable () -> Unit)?) {
+    if (location == null) {
+        status()
+        return
+    }
+    if (LocalDensity.current.fontScale >= 1.5f) {
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(5.6.dp),
+            verticalArrangement = Arrangement.spacedBy(1.6.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            status()
+            location()
+        }
+        return
+    }
+    androidx.compose.ui.layout.Layout(
+        content = {
+            Box { status() }
+            Box { location() }
+        },
+    ) { measurables, constraints ->
+        val gap = 5.6.dp.roundToPx()
+        val vGap = 1.6.dp.roundToPx()
+        val room = constraints.maxWidth
+        val loose = androidx.compose.ui.unit.Constraints(0, room, 0, constraints.maxHeight)
+        val s = measurables[0].measure(loose)
+        val remaining = room - s.width - gap
+        if (remaining >= PhoneLocationMinWidth.roundToPx()) {
+            val l = measurables[1].measure(androidx.compose.ui.unit.Constraints(0, remaining, 0, constraints.maxHeight))
+            val h = maxOf(s.height, l.height)
+            layout(s.width + gap + l.width, h) {
+                s.placeRelative(0, (h - s.height) / 2)
+                l.placeRelative(s.width + gap, (h - l.height) / 2)
+            }
+        } else {
+            val l = measurables[1].measure(loose)
+            layout(maxOf(s.width, l.width), s.height + vGap + l.height) {
+                s.placeRelative(0, 0)
+                l.placeRelative(0, s.height + vGap)
             }
         }
     }
@@ -520,10 +649,11 @@ private fun ModeTag(mode: String) {
  * AND the words — status is never colour alone. A history-only row shows "8m ago".
  */
 @Composable
-private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline: Boolean, sync: com.tether.app.client.SessionSync?) {
+private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline: Boolean, sync: com.tether.app.client.SessionSync?, phone: Boolean = false) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val style = css(type.ui, 0.68f, 500)
+    // The phone's words and time are 0.65rem (ta-1jj7, owner-directed design); the rail's stay 0.68rem.
+    val style = css(type.ui, if (phone) 0.65f else 0.68f, 500)
     val live = entry.live
     val rel = Format.relativeTime(updatedAt.toDouble(), now.toDouble())
     // T13.2: an offline row carries more (the "was" words and the copy's glyph): its pieces wrap
@@ -621,10 +751,10 @@ private fun rowDescription(
  * the hit counted more than one (session-sidebar.tsx:384-389). The row's description carries it.
  */
 @Composable
-private fun SnippetLine(snippet: String, matchCount: Int) {
+private fun SnippetLine(snippet: String, matchCount: Int, phone: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val style = css(type.ui, 0.7f, 400)
+    val style = css(type.ui, if (phone) 0.65f else 0.7f, 400)
     Row(
         Modifier.padding(top = 0.1f.rem),
         verticalAlignment = Alignment.CenterVertically,
