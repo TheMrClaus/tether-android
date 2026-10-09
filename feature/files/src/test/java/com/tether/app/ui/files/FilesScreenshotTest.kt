@@ -66,9 +66,15 @@ enum class FilesShot(val id: String) {
     NamePrompt("name-prompt"),
     Delete("delete"),
     Destination("destination"),
+
+    /** ta-9jnm: a path the agent named that is no longer there (its own dir, `file-open-missing`; not in the phone matrix). */
+    OpenMissing("open-missing"),
 }
 
 private const val ShotTag = "files-shot"
+
+/** What the server says about a path that is not there: shown to the reader as it came. */
+private const val MISSING_WORDS = "ENOENT: no such file or directory, stat 'release-notes.md'"
 
 /** The L1 ruling's three SVG cases: a viewBox-only wide one (4:1), a viewBox-only tall one (1:2), a small width/height one. */
 private const val SVG_WIDE = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100"><rect width="400" height="100" fill="#5c6ee6"/><circle cx="50" cy="50" r="30" fill="#ecedf4"/><rect x="110" y="35" width="250" height="30" fill="#ecedf4"/></svg>"""
@@ -91,6 +97,7 @@ private fun stateFor(shot: FilesShot): FileBrowserState {
             FilesShot.Loading -> gates["list"] = CompletableDeferred()
             FilesShot.Empty -> listings[ROOT] = FilesResult.Ok(FilesFixtures.listing(entries = emptyList()))
             FilesShot.Error -> listings.remove(ROOT)
+            FilesShot.OpenMissing -> listings["$ROOT/release-notes.md"] = FilesResult.Failed(MISSING_WORDS, 404)
             FilesShot.UploadError -> failures["upload:photo.png"] = FilesResult.Failed("An item with that name already exists here.", 409)
             FilesShot.NamePrompt -> failures["mkdir"] = FilesResult.Failed("An item with that name already exists here.", 409)
             else -> Unit
@@ -108,7 +115,7 @@ private fun stateFor(shot: FilesShot): FileBrowserState {
     return FileBrowserState(files, platform, CoroutineScope(Dispatchers.Unconfined)).apply {
         cwd = ROOT
         sessionName = FilesFixtures.SESSION
-        open()
+        if (shot == FilesShot.OpenMissing) open("$ROOT/release-notes.md") else open()
         when (shot) {
             FilesShot.Text -> selectFile(FilesFixtures.readme)
             FilesShot.Image -> selectFile(FilesFixtures.file("screenshot.png", 18_432))
@@ -194,7 +201,7 @@ class FilesPhoneScreenshotTest(private val shot: FilesShot, private val skin: Te
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = FilesShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = FilesShot.entries.filter { it != FilesShot.OpenMissing }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -263,5 +270,20 @@ class FilesLandscapeScreenshotTest(private val shot: FilesShot, private val skin
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = listOf(FilesShot.List, FilesShot.Text).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+    }
+}
+
+/** ta-9jnm: the browser opened on a mentioned file the server cannot find: the parent lists, the server's words in a banner. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class FileOpenMissingScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun missing() = rule.snapFiles(FilesShot.OpenMissing, skin, "file-open-missing", "phone")
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
     }
 }

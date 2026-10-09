@@ -253,7 +253,9 @@ class MarkdownParserTest {
     @Test fun unsafeLinkSchemesDegradeToTheirLabel() {
         assertEquals(listOf(Span(t("click"))), parseInline("[click](javascript:alert(1))".replace("(1)", "")))
         assertEquals(listOf(Span(t("d"))), parseInline("[d](data:text/html,x)"))
-        assertEquals(listOf(Span(t("rel"))), parseInline("[rel](/docs)"))
+        assertEquals(listOf(Span(t("rel"))), parseInline("[rel](docs/x)"))
+        // ta-9jnm: an absolute path is a link to a file (drawn only where the host can open one), no longer inert.
+        assertEquals(listOf(MdInline.FileLink("/docs", t("rel"))), parseInline("[rel](/docs)"))
         assertEquals(listOf(Link("MAILTO:a@b.test", t("m"))), parseInline("[m](MAILTO:a@b.test)"))
         assertEquals(listOf(Link("HTTP://X.TEST", t("u"))), parseInline("[u](HTTP://X.TEST)"))
     }
