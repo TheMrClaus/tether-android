@@ -12,6 +12,9 @@ import com.tether.app.client.DataStoreSettings
 import com.tether.app.client.KeystoreCredentialKeySource
 import com.tether.app.client.RealTetherClient
 import com.tether.app.client.sync.REDUCER_VERSION
+import com.tether.app.crash.CrashBuildInfo
+import com.tether.app.crash.CrashRecordHandler
+import com.tether.app.crash.CrashRecordStore
 import com.tether.app.mirror.AndroidMirrorDbFactory
 import com.tether.app.mirror.JournalMirror
 import com.tether.app.mirror.MirrorKeyStore
@@ -31,6 +34,28 @@ const val TIMING_TAG = "TetherTiming"
 
 /** Points the UI's ClientLocator at the real protocol client. */
 class TetherApp : Application() {
+    /**
+     * ta-otgf: the crash recorder goes in FIRST, before any ContentProvider (the startup and push
+     * initialisers run before onCreate): the default uncaught-exception handler keeps the last
+     * crash in a private file in noBackupFilesDir, then chains to the platform's handler, so the
+     * process dies exactly as before. The app's own version and the device's Android are captured
+     * here, so the handler asks nobody while the process is dying.
+     */
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        runCatching {
+            CrashRecordHandler.install(
+                store = CrashRecordStore(CrashRecordHandler.fileIn(base.noBackupFilesDir)),
+                build = CrashBuildInfo(
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE.toLong(),
+                    androidRelease = android.os.Build.VERSION.RELEASE.orEmpty(),
+                    androidSdk = android.os.Build.VERSION.SDK_INT,
+                ),
+            )
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         // ta-coik.32: `adb logcat -s TetherTiming` — the connection milestones below, timed in ms.
