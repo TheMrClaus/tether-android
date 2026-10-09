@@ -375,6 +375,8 @@ private fun ChatTranscriptBody(
         when {
             r.segment != null && r.segment.part != ApprovalPart.Head -> 0.dp
             index + leading == 0 -> 0.dp
+            // ta-a5jl: an activity row abuts the row or the group header above it (the 44 dp rows are the rhythm).
+            r.item.isActivityRow && host.rows.getOrNull(index - 1)?.item.let { it != null && (it.isActivityRow || it is ChatItem.ToolGroup) } -> 0.dp
             r.item.startsGroup -> spacing.scrollGap
             r.item.tight -> t.css.spaceSm
             else -> spacing.turnGap
@@ -419,9 +421,13 @@ private fun ChatTranscriptBody(
         reviewShown()
     }
 
+    // ta-a5jl: the detail sheet's host: one sheet at a time, keyed "<turnId>/<blockId>", saved with the screen so it
+    // survives a rotation and a process restore. [activityOpener] is what the rows call to open it.
+    val openActivity = rememberSaveable { mutableStateOf<String?>(null) }
+    val activityOpener = remember { ActivityOpener { openActivity.value = it } }
     val copyNotices = remember { CopyNotices() }
     Box(modifier.fillMaxSize().then(if (wellBackground) Modifier.background(chatWellColor(t)) else Modifier)) {
-        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices) {
+        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices, LocalActivityOpener provides activityOpener) {
         ProvideApprovalState {
         ProvideReviewFocus(review) {
         LazyColumn(
@@ -506,6 +512,36 @@ private fun ChatTranscriptBody(
 
         // ta-coik.64: information only: how many hidden controls the copied (exact) text holds.
         CopyNoticeHost(copyNotices, Modifier.align(Alignment.BottomCenter).padding(horizontal = t.css.spaceLg, vertical = t.css.spaceLg))
+
+        // ta-a5jl: the open sheet reads its block from the projection on every change (never from the row list: an activity
+        // group that closes as its run ends must not close the sheet), and closes when the block has left the projection.
+        val sheetKey = openActivity.value
+        if (sheetKey != null) {
+            val target = remember(projection, tree, sheetKey) { activityTarget(projection, tree, sheetKey) }
+            if (target == null) {
+                LaunchedEffect(sheetKey) { openActivity.value = null }
+            } else {
+                CompositionLocalProvider(LocalCopyNotices provides copyNotices) {
+                    ActivitySheet(
+                        target = target,
+                        flags = toolRender,
+                        onDismiss = {
+                            activityOpener.returnKey = sheetKey
+                            openActivity.value = null
+                        },
+                    )
+                }
+            }
+        }
+        // The row that opened a closed sheet takes focus back (it asks while it is composed); the ask lapses after a frame or two.
+        val returnKey = activityOpener.returnKey
+        LaunchedEffect(returnKey) {
+            if (returnKey != null) {
+                withFrameNanos { }
+                withFrameNanos { }
+                activityOpener.returnKey = null
+            }
+        }
     }
 }
 
@@ -582,18 +618,20 @@ internal fun SelectableRow(content: @Composable () -> Unit) {
 }
 
 /**
- * T6.7: whether a row's words take part in text selection. r2: an ALLOWLIST: the blocks (bubbles,
- * thinking, tool cards), denials, answered questions, outcome and session-error rows, a Codex turn's
+ * T6.7: whether a row's words take part in text selection. r2: an ALLOWLIST: the blocks (bubbles),
+ * denials, answered questions, outcome and session-error rows, a Codex turn's
  * plan / diff / review, and the continuation and retry markers. ta-coik.22: and, as on the web
  * (globals.css 90fbb9f sets no `user-select: none` on them), the cards and notices: the approval,
  * question and limit cards (and the scheduled resume), the provider, compaction and session
- * notices; their keys keep acting on a tap. Out stay the single-control rows (Load earlier, an
+ * notices; their keys keep acting on a tap. Out stay the single-control rows (Load earlier, an activity row (ta-a5jl: a
+ * tool call or thinking block, one button that opens the detail sheet, whose body is the selectable text), an
  * activity group's summary — `user-select: none` on the web too, globals.css :4611-4617 — and a
  * background command chip, a button on the web). A new row kind is out until it is added here.
  */
 internal val ChatItem.selectableText: Boolean
     get() = when (this) {
-        is ChatItem.Block, is ChatItem.Denial, is ChatItem.Answered, is ChatItem.Outcome, is ChatItem.SessionError,
+        is ChatItem.Block -> !isActivityRow
+        is ChatItem.Denial, is ChatItem.Answered, is ChatItem.Outcome, is ChatItem.SessionError,
         is ChatItem.TurnPlan, is ChatItem.TurnDiff, is ChatItem.TurnReview,
         is ChatItem.Continuation, is ChatItem.Retry,
         is ChatItem.Approval, is ChatItem.Question, is ChatItem.RateLimit,
@@ -624,8 +662,9 @@ private fun ChatRowContent(
             is ChatItem.Block -> when (item.block.kind) {
                 Vocab.BLOCK_USER_MESSAGE -> UserBubble(item.block, timeLabel = item.timeLabel, find = find)
                 Vocab.BLOCK_MESSAGE -> AgentBubble(item.block, timeLabel = item.timeLabel, find = find)
-                Vocab.BLOCK_THINKING -> ThinkingCard(item.block)
-                Vocab.BLOCK_TOOL -> ToolBlockView(item.raw ?: remember(item.block) { item.block.asTree() }, toolRender, nested = item.grouped)
+                // ta-a5jl: a tool call and a thinking block are one compact row; the card / text is in the detail sheet.
+                Vocab.BLOCK_THINKING -> ActivityThinkingRow(item.block, item.activityKey)
+                Vocab.BLOCK_TOOL -> ActivityToolRow(item.raw ?: remember(item.block) { item.block.asTree() }, item.activityKey, item.grouped, toolRender.showThinking)
                 // T7.3: the v54 `!` command panel (command_output_started / _delta / _completed).
                 COMMAND_OUTPUT_BLOCK -> remember(item.raw) { commandOutputView(item.raw) }?.let { CommandOutputPanel(it) }
                 else -> {}

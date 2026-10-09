@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -41,6 +42,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -70,6 +72,10 @@ fun TetherSheetSurface(
     /** T7.2: a leading back key (`.settings-sheet-back`, "Back to …"); null = none. */
     onBack: (() -> Unit)? = null,
     backLabel: String = "Back",
+    /** ta-a5jl: a leading glyph before the title (16 dp, muted); null = none (every existing sheet). */
+    icon: ImageVector? = null,
+    /** ta-a5jl: the card's width off the phone class (clamped to the window less 24 dp); the default is the attach sheet's. */
+    cardWidth: Dp = 352.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -79,7 +85,7 @@ fun TetherSheetSurface(
     val shadows: List<CssShadow> = t.css.shadowModal
     // ta-6gw: the sheet's title is its pane title.
     BoxWithConstraints(modifier.semantics { paneTitle = title }) {
-        val boxWidth = if (docked) maxWidth else minOf(352.dp, maxWidth - 24.dp)
+        val boxWidth = if (docked) maxWidth else minOf(cardWidth, maxWidth - 24.dp)
         Column(
             Modifier
                 .width(boxWidth)
@@ -113,6 +119,7 @@ fun TetherSheetSurface(
                 if (onBack != null) {
                     TetherKey(onClick = onBack, classes = KeyClasses.IconButton, icon = TetherIcons.ChevronLeft, iconSize = 18.dp, contentDescription = backLabel)
                 }
+                if (icon != null) Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp).testTag("sheet-icon"))
                 Text(
                     title,
                     color = t.white,
@@ -173,7 +180,7 @@ fun TetherSheetRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
     ) {
-        if (icon != null) Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp))
+        if (icon != null) Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp).testTag("sheet-icon"))
         Text(label, color = t.ink, style = type.body.copy(fontSize = 13.76.sp), modifier = Modifier.clearAndSetSemantics { })
     }
 }
@@ -188,6 +195,8 @@ fun TetherSheet(
     title: String,
     onBack: (() -> Unit)? = null,
     backLabel: String = "Back",
+    icon: ImageVector? = null,
+    cardWidth: Dp = 352.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -202,6 +211,8 @@ fun TetherSheet(
                 onClose = onDismiss,
                 onBack = onBack,
                 backLabel = backLabel,
+                icon = icon,
+                cardWidth = cardWidth,
                 content = content,
                 modifier = Modifier
                     // ta-6gw: a pointer-only tap swallower, not `clickable` (which merged title, hints and keys into one node).

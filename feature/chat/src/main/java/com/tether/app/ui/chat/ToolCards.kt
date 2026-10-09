@@ -89,10 +89,20 @@ import com.tether.app.ui.text.safePreDisplay
 
 private fun rem(r: Float): TextUnit = (r * TetherTypography.SP_PER_REM).sp
 
+/**
+ * ta-a5jl: the clamp a detail sheet gives its cards (a sheet scrolls, so it can afford more height than a transcript
+ * row); null = the transcript's own [toolClamp].
+ */
+internal val LocalToolClamp = androidx.compose.runtime.compositionLocalOf<Dp?> { null }
+
+/** ta-a5jl: true inside a detail sheet, where a card runs the full width of the sheet's body. */
+internal val LocalFullWidthCards = androidx.compose.runtime.compositionLocalOf { false }
+
 /** `--chat-clamp`: 9rem on a phone (globals.css:8464), 16rem wider. */
 @Composable
 internal fun toolClamp(): Dp {
     val t = LocalTetherTokens.current
+    LocalToolClamp.current?.let { return it }
     return if (currentLayoutClass() == TetherLayoutClass.Phone) 144.dp else t.css.chatClamp
 }
 
@@ -100,6 +110,7 @@ internal fun toolClamp(): Dp {
 @Composable
 internal fun cardFraction(nested: Boolean = false): Float {
     val t = LocalTetherTokens.current
+    if (LocalFullWidthCards.current) return 1f
     if (currentLayoutClass() == TetherLayoutClass.Phone) return 1f
     return if (nested) t.css.chatCardWidth * t.css.chatCardWidth else t.css.chatCardWidth
 }
