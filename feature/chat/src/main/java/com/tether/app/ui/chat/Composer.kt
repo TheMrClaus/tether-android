@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -1064,7 +1066,7 @@ fun Composer(
                     )
                     ComposerToolbar(
                         metrics = metrics,
-                        width = deckWidth - deck.start - deck.end,
+                        width = composerToolbarContentWidth(deckWidth - deck.start - deck.end),
                         onAttach = { attachSheetOpen = true },
                         // ta-ceo: on a phone the Stop confirmation takes the attach and settings keys'
                         // room for the moment it is open (its price must be read whole; the web phone
@@ -1207,6 +1209,9 @@ internal fun Modifier.keepsIntrinsicHeight(): Modifier = this
     }
     .clipToBounds()
 
+/** The strip the totals readout sits in (clipped to the leftover between the keys). */
+internal const val COMPOSER_TOTALS_TAG = "composer-totals"
+
 /**
  * `.chat-composer-toolbar`: on a phone one row (attach · flexible options slot · actions); wider,
  * the footer row carries attach, the SESSION readout (only when the toolbar is at least 28rem
@@ -1228,7 +1233,7 @@ private fun ComposerToolbar(
 ) {
     val t = LocalTetherTokens.current
     val gap = 8.dp
-    val padding = Modifier.padding(start = 10.4.dp, top = 4.dp, end = 10.4.dp, bottom = 10.4.dp)
+    val padding = Modifier.padding(start = COMPOSER_TOOLBAR_SIDE, top = 4.dp, end = COMPOSER_TOOLBAR_SIDE, bottom = 10.4.dp)
     Column(Modifier.fillMaxWidth().then(padding)) {
     options?.invoke()
     // ta-8h5k (M1, globals.css 10547-10555 + studio.css:394): from 48rem the toolbar is a column with an 8 px gap, so
@@ -1258,8 +1263,18 @@ private fun ComposerToolbar(
         }
         // Phone (globals.css:11936): the sheet key takes the free width; wider it sits at content width.
         if (settingsKey != null && metrics.phone) settingsKey(Modifier.weight(1f))
-        if (totals != null && !metrics.phone && width >= 448.dp) totals()
-        if (settingsKey == null || !metrics.phone) Spacer(Modifier.weight(1f))
+        // `@container (max-width: 28rem)` hides the totals: they show above 448 of the toolbar's content width.
+        if (totals != null && !metrics.phone && width > 448.dp) {
+            // `.chat-activity-totals { overflow: hidden; white-space: nowrap }` between the keys, its automatic minimum 0, with
+            // the keys at their natural width (`.chat-composer-actions { flex: 0 0 auto }`): the totals take what is left, start
+            // aligned, and clip hard when it is less (no ellipsis, no hidden key). At a scale where they all fit, this is the
+            // totals then the free width then the actions.
+            Box(Modifier.weight(1f).clipToBounds().testTag(COMPOSER_TOTALS_TAG), contentAlignment = Alignment.CenterStart) {
+                Box(Modifier.wrapContentWidth(Alignment.Start, unbounded = true)) { totals() }
+            }
+        } else if (settingsKey == null || !metrics.phone) {
+            Spacer(Modifier.weight(1f))
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs), verticalAlignment = Alignment.CenterVertically, content = actions)
     }
     }

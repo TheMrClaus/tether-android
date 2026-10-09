@@ -178,6 +178,20 @@ internal fun ComposerInput(
 
 private data class Pad(val start: Dp, val top: Dp, val end: Dp, val bottom: Dp)
 
+/** The well's border (`.chat-composer-well`, 1px `--line-strong`): the web's toolbar container sits inside it ([composerToolbarContentWidth]). */
+internal val COMPOSER_WELL_BORDER = 1.dp
+
+/** `.chat-composer-toolbar { padding: 0.25rem 0.65rem 0.65rem }` (studio.css:394), the side padding: 0.65rem. */
+internal val COMPOSER_TOOLBAR_SIDE = 10.4.dp
+
+/**
+ * ta-9mcp: the toolbar's CONTENT width, the box its container query (`@container (max-width: 28rem)`, globals.css:10650-10652,
+ * on `.chat-composer-toolbar { container-type: inline-size }`, :10554) reads: the well less its border and the toolbar's side
+ * padding, both sides. 441.2 at the 800 pane, 486.2 at 845 (the served captures).
+ */
+internal fun composerToolbarContentWidth(well: androidx.compose.ui.unit.Dp): androidx.compose.ui.unit.Dp =
+    well - COMPOSER_WELL_BORDER * 2 - COMPOSER_TOOLBAR_SIDE * 2
+
 /**
  * `.chat-composer-well`: ONE recessed well holding the text field on top and the key bank
  * seated at its foot. Focus belongs to the well, but only for the text field
@@ -203,7 +217,7 @@ internal fun ComposerWell(
         Modifier.cssSurface(
             RoundedCornerShape(16.dp),
             t.dangerWash,
-            CssBorder(1.dp, if (inputFocused) t.danger else t.dangerEdge),
+            CssBorder(COMPOSER_WELL_BORDER, if (inputFocused) t.danger else t.dangerEdge),
             ring, // `--well` (transparent in Studio) was retired at tether 887c222
         )
     } else run {
@@ -215,7 +229,7 @@ internal fun ComposerWell(
         Modifier.cssSurface(
             RoundedCornerShape(16.dp),
             t.graphite,
-            CssBorder(1.dp, if (inputFocused) t.violet else t.lineStrong),
+            CssBorder(COMPOSER_WELL_BORDER, if (inputFocused) t.violet else t.lineStrong),
             listOf(shadow),
         )
     }
