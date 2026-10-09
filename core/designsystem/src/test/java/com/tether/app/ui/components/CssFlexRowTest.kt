@@ -79,11 +79,18 @@ class CssFlexRowTest {
         val (b, l, _) = statusLine(118.dp, density = 1.97f)
         assertTrue("the dot narrows", b[0].w < dotDp && b[0].w > 0f)
         assertEquals("a shrunk dot keeps its full height", dotDp, b[0].h, 0.5f)
-        // Drawn as an oval at its full height (border-radius 50% on a narrowed box): the top row at the
-        // centre column is painted; a circle of the narrow diameter would leave it clear.
+        // Drawn as an oval at its full height (border-radius 50% on a narrowed box), not as a circle of the narrow
+        // diameter: the dot's painted rows run the whole laid-out height (a circle's would stop short by
+        // (height - width) / 2 at each end), and the centre column is painted top to bottom.
         val img = rule.onNodeWithTag("dot").captureToImage().toPixelMap()
-        assertTrue("the oval reaches the top edge", img[img.width / 2, 1].alpha > 0.5f)
-        assertTrue("and the bottom edge", img[img.width / 2, img.height - 2].alpha > 0.5f)
+        val cx = img.width / 2
+        // The capture has an opaque backdrop: the dot is the red pixels.
+        fun red(x: Int, y: Int) = img[x, y].let { it.red > 0.6f && it.green < 0.4f && it.blue < 0.4f }
+        val painted = (0 until img.height).filter { red(cx, it) }
+        assertTrue("the oval's centre column runs the full height: ${painted.firstOrNull()}..${painted.lastOrNull()} of ${img.height}", painted.first() <= 1 && painted.last() >= img.height - 2)
+        val rows = (0 until img.height).filter { y -> (0 until img.width).any { red(it, y) } }
+        assertEquals("painted height = laid-out height", img.height.toFloat(), (rows.last() - rows.first() + 1).toFloat(), 2f)
+        assertTrue("narrower than tall: ${img.width} x ${img.height}", img.width < img.height - 4)
         assertWholeWords(l[1]); assertWholeWords(l[2])
         assertTrue("the last item ends inside the row", b[2].x + b[2].w <= 118.5f)
     }
