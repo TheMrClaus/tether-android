@@ -123,14 +123,18 @@ internal fun bubbleLook(t: TetherTokens, type: TetherTypography, user: Boolean, 
 }
 
 @Composable
-internal fun BubbleBox(look: BubbleLook, alignEnd: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+internal fun BubbleBox(look: BubbleLook, alignEnd: Boolean, modifier: Modifier, shrinkToFit: Boolean = true, content: @Composable () -> Unit) {
     Box(modifier.fillMaxWidth(), contentAlignment = if (alignEnd) Alignment.CenterEnd else Alignment.CenterStart) {
         Column(
             Modifier
                 .maxWidthFraction(look.maxFraction)
                 // Shrink-to-fit like the web's inline-sized bubble: as wide as its widest line
                 // (a short reply is a short bubble), capped at the max; block children fill that.
-                .width(IntrinsicSize.Max)
+                // ta-jtfq: not for a reply that is still streaming. The intrinsic-width pass lays the whole
+                // growing text out once more per delta, and the text sizes itself to its content anyway, so its
+                // bounds, the caret (start-aligned) and the paragraph alignment are the same without it; the
+                // bubble is transparent and borderless, so nothing else shows the column's width.
+                .then(if (shrinkToFit) Modifier.width(IntrinsicSize.Max) else Modifier)
                 .cssSurface(look.shape, background = look.background, border = look.border, shadows = look.shadows)
                 .padding(look.border?.width ?: 0.dp)
                 .padding(look.padding),
@@ -176,6 +180,34 @@ fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Strin
 }
 
 /**
+ * Observes the streaming agent text's intrinsic-size queries (test seam, ta-jtfq): called once for every width or
+ * height the text is asked about before it is measured, each of which lays the whole text out. Null in production.
+ */
+internal val LocalStreamingTextObserver = androidx.compose.runtime.staticCompositionLocalOf<(() -> Unit)?> { null }
+
+private class IntrinsicQueryProbe(private val onQuery: () -> Unit) : androidx.compose.ui.layout.LayoutModifier {
+    override fun androidx.compose.ui.layout.MeasureScope.measure(
+        measurable: androidx.compose.ui.layout.Measurable,
+        constraints: androidx.compose.ui.unit.Constraints,
+    ): androidx.compose.ui.layout.MeasureResult {
+        val placeable = measurable.measure(constraints)
+        return layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+
+    override fun androidx.compose.ui.layout.IntrinsicMeasureScope.minIntrinsicWidth(measurable: androidx.compose.ui.layout.IntrinsicMeasurable, height: Int): Int =
+        measurable.minIntrinsicWidth(height).also { onQuery() }
+
+    override fun androidx.compose.ui.layout.IntrinsicMeasureScope.maxIntrinsicWidth(measurable: androidx.compose.ui.layout.IntrinsicMeasurable, height: Int): Int =
+        measurable.maxIntrinsicWidth(height).also { onQuery() }
+
+    override fun androidx.compose.ui.layout.IntrinsicMeasureScope.minIntrinsicHeight(measurable: androidx.compose.ui.layout.IntrinsicMeasurable, width: Int): Int =
+        measurable.minIntrinsicHeight(width).also { onQuery() }
+
+    override fun androidx.compose.ui.layout.IntrinsicMeasureScope.maxIntrinsicHeight(measurable: androidx.compose.ui.layout.IntrinsicMeasurable, width: Int): Int =
+        measurable.maxIntrinsicHeight(width).also { onQuery() }
+}
+
+/**
  * AGENT bubble (chat-view.tsx:677-702). While streaming (`done !== true`) the text is plain
  * pre-wrap and a violet caret blinks on the line below it; once done the text becomes markdown and
  * the send time appears. An interrupted message says so in words. Nothing renders for a message
@@ -189,7 +221,8 @@ fun AgentBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Stri
     val type = LocalTetherTypography.current
     val look = bubbleLook(t, type, user = false, phone = currentLayoutClass() == TetherLayoutClass.Phone)
     val done = block.done == true
-    BubbleBox(look, alignEnd = false, modifier) {
+    val onIntrinsic = LocalStreamingTextObserver.current
+    BubbleBox(look, alignEnd = false, modifier, shrinkToFit = done) {
         if (text.isNotEmpty()) {
             if (done) {
                 val blocks = remember(text) { parseMarkdown(text) }
@@ -197,7 +230,12 @@ fun AgentBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Stri
             } else if (find != null) {
                 MdText(remember(text, find, t) { markedPlain(text, find, t) }, look.style, look.ink)
             } else {
-                Text(proseText(text), style = look.style, color = look.ink)
+                Text(
+                    proseText(text),
+                    style = look.style,
+                    color = look.ink,
+                    modifier = if (onIntrinsic != null) Modifier.then(IntrinsicQueryProbe(onIntrinsic)) else Modifier,
+                )
             }
         }
         if (!done) StreamingCaret(look.style)
