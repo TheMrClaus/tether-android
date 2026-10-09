@@ -540,7 +540,7 @@ internal fun SubagentThread(window: SubagentWindow, open: DetailsOpen, showThink
                     when (asString(entry["kind"])) {
                         "message" -> asString(entry["text"])?.takeIf { it.isNotEmpty() }?.let { text ->
                             val blocks = remember(text) { parseMarkdown(text) }
-                            MarkdownBody(blocks, LocalTetherTypography.current.chatBody.copy(fontSize = rem(0.82f)), t.ink)
+                            MarkdownBody(blocks, LocalTetherTypography.current.chatBody.copy(fontSize = rem(0.82f)), t.ink, fileLinks = true)
                         }
                         "thinking" -> ThinkingCard(TurnBlock(blockId = asString(entry["key"]) ?: "", kind = "thinking", text = asString(entry["text"])))
                         else -> SubagentToolCard(entry, tileLimits[asString(entry["key"])] ?: 0)

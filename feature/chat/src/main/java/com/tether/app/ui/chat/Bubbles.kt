@@ -193,7 +193,7 @@ fun AgentBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: Stri
         if (text.isNotEmpty()) {
             if (done) {
                 val blocks = remember(text) { parseMarkdown(text) }
-                MarkdownBody(blocks, look.style, look.ink, find = find)
+                MarkdownBody(blocks, look.style, look.ink, find = find, fileLinks = true)
             } else if (find != null) {
                 MdText(remember(text, find, t) { markedPlain(text, find, t) }, look.style, look.ink)
             } else {

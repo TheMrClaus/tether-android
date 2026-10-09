@@ -68,6 +68,7 @@ internal fun countInlineMatches(nodes: List<MdInline>, needle: String): Int = no
         is MdInline.Text -> countPlainMatches(node.text, needle)
         is MdInline.Code -> countPlainMatches(node.text, needle)
         is MdInline.Link -> countInlineMatches(node.children, needle)
+        is MdInline.FileLink -> countInlineMatches(node.children, needle)
         is MdInline.Span -> countInlineMatches(node.children, needle)
         is MdInline.Strong -> countInlineMatches(node.children, needle)
         is MdInline.Em -> countInlineMatches(node.children, needle)

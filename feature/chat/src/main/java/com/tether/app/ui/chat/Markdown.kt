@@ -107,6 +107,24 @@ import com.tether.app.ui.text.copyExact
 /** Tag for the inline-code ranges whose rounded `--tint-md` background [MdText] paints. */
 private const val CODE_TAG = "md-code"
 
+/** ta-9jnm: the tag of a file mention's link (the resolved absolute path follows it). */
+internal const val FILE_LINK_TAG = "file:"
+
+/** ta-9jnm: how a run of prose draws its file mentions: the host's opener and a budget the run shares. */
+internal class FileLinkDraw(val host: WorkspaceFileLinks) {
+    private var left = FileLinks.MAX_LINKS
+
+    /** The mentions in [text] ([source]); each one drawn spends from the budget. */
+    fun detect(text: String, source: FileLinkSource): List<FileLinkRange> {
+        val found = FileLinks.detect(text, source, host.cwd, left)
+        left -= found.size
+        return found
+    }
+}
+
+/** ta-9jnm: set by [MarkdownBody] for the prose that links its file mentions (null: nothing links). */
+internal val LocalFileLinkDraw = androidx.compose.runtime.staticCompositionLocalOf<WorkspaceFileLinks?> { null }
+
 /**
  * T5.3: tags for the in-chat find marks (`<mark className="find-mark">`, `find-mark--active`),
  * painted by [MdText] as `--find-match-bg` / `--find-match-active-bg` rounded 2px boxes behind
@@ -147,21 +165,32 @@ internal fun AnnotatedString.Builder.appendMarked(
     t: TetherTokens,
     rule: SafeText.Rule = SafeText.Rule.Prose,
     plan: ProsePlan? = null,
+    files: List<FileLinkRange> = emptyList(),
+    openFile: (String) -> Unit = {},
 ) {
     val token = tokenStyle(t)
-    if (cursor == null) {
-        appendSafe(text, rule, token, plan)
-        return
-    }
-    val ranges = findRanges(text, cursor.needle)
-    if (ranges.isEmpty()) {
+    val ranges = if (cursor == null) emptyList() else findRanges(text, cursor.needle)
+    if (ranges.isEmpty() && files.isEmpty()) {
         appendSafe(text, rule, token, plan)
         return
     }
     val encoded = SafeText.encodeMapped(text, rule, plan)
     val base = length
     appendStyled(encoded.display, token)
+    // ta-9jnm: a file mention is the same text with a link laid over it (never a changed character);
+    // its ink goes on first, so a find mark inside it still paints its own ink.
+    for (file in files) {
+        val start = base + encoded.displayStart(file.start)
+        val end = base + encoded.displayEnd(file.end)
+        addStyle(SpanStyle(color = t.violet, textDecoration = TextDecoration.Underline), start, end)
+        addLink(
+            LinkAnnotation.Clickable(tag = FILE_LINK_TAG + file.path, linkInteractionListener = { openFile(file.path) }),
+            start,
+            end,
+        )
+    }
     for (range in ranges) {
+        if (cursor == null) break
         val ordinal = cursor.next++
         val start = base + encoded.displayStart(range.first)
         val end = base + encoded.displayEnd(range.last + 1)
@@ -209,7 +238,8 @@ internal fun inlineAnnotated(
     baseWeight: Int,
     onLink: (MdInline.Link) -> Unit,
     cursor: FindCursor? = null,
-): AnnotatedString = buildAnnotatedString { appendInline(nodes, t, type, baseWeight, onLink, cursor, linePlan(nodes)) }
+    files: FileLinkDraw? = null,
+): AnnotatedString = buildAnnotatedString { appendInline(nodes, t, type, baseWeight, onLink, cursor, linePlan(nodes), files) }
 
 /** The line's pieces in reading order (inline code drawn by the code rule), for its [ProsePlan]. */
 internal fun linePlan(nodes: List<MdInline>): ProsePlan {
@@ -219,6 +249,7 @@ internal fun linePlan(nodes: List<MdInline>): ProsePlan {
             is MdInline.Text -> segments.add(ProsePlan.Segment(node.text))
             is MdInline.Code -> segments.add(ProsePlan.Segment(node.text, code = true))
             is MdInline.Link -> walk(node.children)
+            is MdInline.FileLink -> walk(node.children)
             is MdInline.Span -> walk(node.children)
             is MdInline.Strong -> walk(node.children)
             is MdInline.Em -> walk(node.children)
@@ -237,14 +268,24 @@ private fun AnnotatedString.Builder.appendInline(
     onLink: (MdInline.Link) -> Unit,
     cursor: FindCursor?,
     plan: ProsePlan,
+    files: FileLinkDraw? = null,
 ) {
+    val openFile: (String) -> Unit = { path -> files?.host?.open?.invoke(path) }
     for (node in nodes) {
         when (node) {
-            is MdInline.Text -> appendMarked(node.text, cursor, t, plan = plan)
+            is MdInline.Text -> appendMarked(
+                node.text, cursor, t, plan = plan,
+                files = files?.detect(node.text, FileLinkSource.Text).orEmpty(), openFile = openFile,
+            )
             is MdInline.Code -> {
                 val start = length
                 withStyle(SpanStyle(fontFamily = type.mono, fontSize = CODE_PAD_FONT_SIZE)) { append(' ') }
-                withStyle(type.codeInline) { appendMarked(node.text, cursor, t, SafeText.Rule.Code) }
+                withStyle(type.codeInline) {
+                    appendMarked(
+                        node.text, cursor, t, SafeText.Rule.Code,
+                        files = files?.detect(node.text, FileLinkSource.Code).orEmpty(), openFile = openFile,
+                    )
+                }
                 withStyle(SpanStyle(fontFamily = type.mono, fontSize = CODE_PAD_FONT_SIZE)) { append(' ') }
                 addStringAnnotation(CODE_TAG, node.text, start, length)
             }
@@ -255,13 +296,25 @@ private fun AnnotatedString.Builder.appendInline(
                     linkInteractionListener = { onLink(node) },
                 ),
             ) { appendInline(node.children, t, type, weight, onLink, cursor, plan) }
-            is MdInline.Span -> appendInline(node.children, t, type, weight, onLink, cursor, plan)
+            // ta-9jnm: a markdown link to a path is a link only where the host can open it, else its label.
+            is MdInline.FileLink -> if (files == null) {
+                appendInline(node.children, t, type, weight, onLink, cursor, plan)
+            } else {
+                withLink(
+                    LinkAnnotation.Clickable(
+                        tag = FILE_LINK_TAG + node.path,
+                        styles = TextLinkStyles(SpanStyle(color = t.violet, textDecoration = TextDecoration.Underline)),
+                        linkInteractionListener = { openFile(node.path) },
+                    ),
+                ) { appendInline(node.children, t, type, weight, onLink, cursor, plan) }
+            }
+            is MdInline.Span -> appendInline(node.children, t, type, weight, onLink, cursor, plan, files)
             is MdInline.Strong -> {
                 val w = bolder(weight)
-                withStyle(SpanStyle(fontWeight = FontWeight(w))) { appendInline(node.children, t, type, w, onLink, cursor, plan) }
+                withStyle(SpanStyle(fontWeight = FontWeight(w))) { appendInline(node.children, t, type, w, onLink, cursor, plan, files) }
             }
             is MdInline.Em -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                appendInline(node.children, t, type, weight, onLink, cursor, plan)
+                appendInline(node.children, t, type, weight, onLink, cursor, plan, files)
             }
             // A picture is cut out before text is built ([MdInlines]); a caller that did not gets its alt text.
             is MdInline.Image -> appendMarked(node.alt, null, t, plan = plan)
@@ -407,11 +460,17 @@ fun MarkdownBody(
     modifier: Modifier = Modifier,
     /** T5.3: the in-chat find's marks for this message (null: none — the pre-T5.3 paths). */
     find: FindMarks? = null,
+    /**
+     * ta-9jnm: link the file paths this prose names (agent and sub-agent messages). Drawn only when the
+     * host also provides [LocalWorkspaceFileOpener]; otherwise the prose is plain text, never a dead link.
+     */
+    fileLinks: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val density = LocalDensity.current
     val context = LocalContext.current
+    val fileHost = if (fileLinks) LocalWorkspaceFileOpener.current else null
     val opener = LocalLinkOpener.current
     // ta-coik.8: a tap opens the link at once, like the web's `<a target="_blank">` (no sheet).
     // The drawn paragraphs are remembered without the handler in their keys, so the handler reads
@@ -428,6 +487,7 @@ fun MarkdownBody(
         find?.let { f -> blocks.runningFold(0) { acc, b -> acc + countBlockMatches(b, f.needle) } }
     }
 
+    androidx.compose.runtime.CompositionLocalProvider(LocalFileLinkDraw provides fileHost) {
     Column(modifier) {
         var previousBottom: Dp? = null
         blocks.forEachIndexed { index, block ->
@@ -466,6 +526,7 @@ fun MarkdownBody(
                 Spacer(Modifier.height(em(body, 0.15f)))
             }
         }
+    }
     }
 }
 

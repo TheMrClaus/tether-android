@@ -68,6 +68,7 @@ internal fun hasImage(nodes: List<MdInline>): Boolean = nodes.any { node ->
     when (node) {
         is MdInline.Image -> true
         is MdInline.Link -> hasImage(node.children)
+        is MdInline.FileLink -> hasImage(node.children)
         is MdInline.Span -> hasImage(node.children)
         is MdInline.Strong -> hasImage(node.children)
         is MdInline.Em -> hasImage(node.children)
@@ -95,6 +96,7 @@ private fun cut(nodes: List<MdInline>): List<Seg> {
         } else if (hasImage(listOf(node))) {
             val children = when (node) {
                 is MdInline.Link -> node.children
+                is MdInline.FileLink -> node.children
                 is MdInline.Span -> node.children
                 is MdInline.Strong -> node.children
                 is MdInline.Em -> node.children
@@ -109,6 +111,7 @@ private fun cut(nodes: List<MdInline>): List<Seg> {
                     is Seg.Run -> run.add(
                         when (node) {
                             is MdInline.Link -> node.copy(children = seg.nodes)
+                            is MdInline.FileLink -> node.copy(children = seg.nodes)
                             is MdInline.Span -> node.copy(children = seg.nodes)
                             is MdInline.Strong -> node.copy(children = seg.nodes)
                             is MdInline.Em -> node.copy(children = seg.nodes)
@@ -129,6 +132,7 @@ private fun blank(nodes: List<MdInline>): Boolean = nodes.all { it is MdInline.T
 
 private fun withChildren(node: MdInline, children: List<MdInline>): MdInline = when (node) {
     is MdInline.Link -> node.copy(children = children)
+    is MdInline.FileLink -> node.copy(children = children)
     is MdInline.Span -> node.copy(children = children)
     is MdInline.Strong -> node.copy(children = children)
     is MdInline.Em -> node.copy(children = children)
@@ -137,6 +141,7 @@ private fun withChildren(node: MdInline, children: List<MdInline>): MdInline = w
 
 private fun childrenOf(node: MdInline): List<MdInline>? = when (node) {
     is MdInline.Link -> node.children
+    is MdInline.FileLink -> node.children
     is MdInline.Span -> node.children
     is MdInline.Strong -> node.children
     is MdInline.Em -> node.children
@@ -240,14 +245,16 @@ internal fun MdInlines(
     softWrap: Boolean = true,
 ) {
     val pieces = remember(lines) { proseTextPieces(lines) }
-    val texts: List<AnnotatedString?> = remember(pieces, t, type, weight, cursorKey) {
+    val fileHost = LocalFileLinkDraw.current
+    val texts: List<AnnotatedString?> = remember(pieces, t, type, weight, cursorKey, fileHost) {
         val cursor = newCursor()
+        val files = fileHost?.let(::FileLinkDraw)
         pieces.map { piece ->
             (piece as? ProsePiece.Text)?.let { p ->
                 buildAnnotatedString {
                     p.lines.forEachIndexed { i, line ->
                         if (i > 0) append('\n') // <br/>
-                        append(inlineAnnotated(line, t, type, weight, onLink, cursor))
+                        append(inlineAnnotated(line, t, type, weight, onLink, cursor, files))
                     }
                 }
             }

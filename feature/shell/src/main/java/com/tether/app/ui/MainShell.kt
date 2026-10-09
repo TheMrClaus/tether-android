@@ -94,6 +94,8 @@ import com.tether.app.ui.components.ProvideWindowWidthDp
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.windowWidthDp
 import com.tether.app.ui.chat.LocalCardStates
+import com.tether.app.ui.chat.LocalWorkspaceFileOpener
+import com.tether.app.ui.chat.WorkspaceFileLinks
 import com.tether.app.ui.chat.LocalTranscriptScrollStore
 import com.tether.app.ui.chat.TranscriptScrollStore
 import com.tether.app.ui.chat.CardStateStore
@@ -352,6 +354,11 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
         fileBrowser.cwd = session?.cwd.orEmpty()
         fileBrowser.sessionName = session?.name.orEmpty()
     }
+    // ta-9jnm: a file path in the agent's prose opens in this browser (the same capability as the Files key).
+    val fileLinkCwd = session?.cwd.orEmpty()
+    val fileLinks = remember(fileLinkCwd, fileBrowser) {
+        fileLinkCwd.takeIf { it.isNotEmpty() }?.let { cwd -> WorkspaceFileLinks(cwd) { path -> fileBrowser.open(path) } }
+    }
     var renaming by rememberSaveable(stateSaver = RenameTargetSaver) { mutableStateOf<RenameTarget?>(null) }
     var confirmEnd by remember { mutableStateOf<EndTarget?>(null) }
     // T10.1 (dashboard.tsx:1170-1180 `endSession`): Settings → General's "Confirm before ending".
@@ -564,7 +571,11 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                     )
                 },
                 chat = {
-                    CompositionLocalProvider(LocalCardStates provides cardStates, LocalTranscriptScrollStore provides transcriptScroll) {
+                    CompositionLocalProvider(
+                        LocalCardStates provides cardStates,
+                        LocalTranscriptScrollStore provides transcriptScroll,
+                        LocalWorkspaceFileOpener provides fileLinks,
+                    ) {
                         ChatScreen(
                             vm = vm,
                             session = session,

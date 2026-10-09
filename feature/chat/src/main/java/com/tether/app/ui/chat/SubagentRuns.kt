@@ -837,7 +837,7 @@ private fun RunStep(entry: JsObj, showThinking: Boolean) {
     when ((entry["kind"] as? JsStr)?.value) {
         "message" -> (entry["text"] as? JsStr)?.value?.takeIf { it.isNotEmpty() }?.let { text ->
             val blocks = remember(text) { parseMarkdown(text) }
-            MarkdownBody(blocks, type.chatBody.copy(fontSize = rem(0.86f), lineHeight = 1.55.em), t.ink)
+            MarkdownBody(blocks, type.chatBody.copy(fontSize = rem(0.86f), lineHeight = 1.55.em), t.ink, fileLinks = true)
         }
         "thinking" -> if (showThinking) {
             val text = (entry["text"] as? JsStr)?.value

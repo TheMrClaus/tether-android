@@ -44,6 +44,13 @@ sealed interface MdInline {
     /** `<a href target=_blank>` — [href] passed [isSafeHref]. */
     data class Link(val href: String, val children: List<MdInline>) : MdInline
 
+    /**
+     * ta-9jnm: `[label](/abs/path)` or `[label](file:///abs/path)`: a link to a file on the machine the session
+     * runs on ([path] absolute, decoded, any line suffix removed). It is drawn as a link only where the host
+     * can open a file; anywhere else it is a [Span] of its label, as every non-web href always was.
+     */
+    data class FileLink(val path: String, val children: List<MdInline>) : MdInline
+
     /** A link whose href failed the allowlist: `<span>` of its label, no link. */
     data class Span(val children: List<MdInline>) : MdInline
 
@@ -194,7 +201,13 @@ private fun firstInlineMatch(text: String): InlineMatch? {
     ) return best
     if (offer(INLINE_LINK.find(text)) { m ->
             val label = parseInline(m.groupValues[1])
-            if (isSafeHref(m.groupValues[2])) MdInline.Link(m.groupValues[2], label) else MdInline.Span(label)
+            val href = m.groupValues[2]
+            if (isSafeHref(href)) {
+                MdInline.Link(href, label)
+            } else {
+                val path = FileLinks.hrefPath(href)
+                if (path != null) MdInline.FileLink(path, label) else MdInline.Span(label)
+            }
         }
     ) return best
     if (offer(INLINE_STRONG.find(text)) { m -> MdInline.Strong(parseInline(group1or2(m))) }) return best
@@ -367,6 +380,7 @@ private fun StringBuilder.appendPlain(nodes: List<MdInline>) {
         is MdInline.Text -> append(node.text)
         is MdInline.Code -> append(node.text)
         is MdInline.Link -> appendPlain(node.children)
+        is MdInline.FileLink -> appendPlain(node.children)
         is MdInline.Span -> appendPlain(node.children)
         is MdInline.Strong -> appendPlain(node.children)
         is MdInline.Em -> appendPlain(node.children)

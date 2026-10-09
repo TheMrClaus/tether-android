@@ -212,6 +212,7 @@ class FileBrowserState(
 
     private var requestedPath = ""
     private var pendingSelectPath: String? = null
+    private var pendingTargetError: String = ""
     private var listingJob: Job? = null
     private var previewJob: Job? = null
     private var destJob: Job? = null
@@ -231,6 +232,7 @@ class FileBrowserState(
         if (!isOpen) platform.sweep(SweepMode.Expired)
         isOpen = true
         val target = initialPath?.trim()?.takeIf { it.isNotEmpty() } ?: cwd
+        pendingTargetError = ""
         if (target == cwd) {
             loadDirectory(cwd)
             return
@@ -239,6 +241,8 @@ class FileBrowserState(
             if (!openedAsDirectory) {
                 val parent = target.replace(PARENT_TAIL, "").ifEmpty { "/" }
                 pendingSelectPath = target
+                // ta-9jnm: why the target itself would not list, kept for the miss below (verbatim, the server's words).
+                pendingTargetError = error
                 loadDirectory(parent)
             }
         }
@@ -302,8 +306,15 @@ class FileBrowserState(
     private fun selectPending(listing: WorkspaceFileListing) {
         val target = pendingSelectPath ?: return
         pendingSelectPath = null
+        val targetError = pendingTargetError
+        pendingTargetError = ""
         val match = listing.entries.firstOrNull { it.path == target }
-        if (match != null && !match.isDirectory) selectFile(match)
+        if (match != null && !match.isDirectory) {
+            selectFile(match)
+        } else if (match == null && targetError.isNotEmpty()) {
+            // ta-9jnm: the parent lists but the file is not in it: say what the server said about the file.
+            mutationError = targetError
+        }
     }
 
     /**
