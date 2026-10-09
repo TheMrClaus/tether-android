@@ -57,7 +57,13 @@ class TetherViewModel(
      * `lastMessageAt` / `lastSeq` stamps of a streaming reply do not republish it while no age word or order changes
      * ([displayStable]). The shell, the drawer and the chat read this; code that needs the stamps exactly reads the client.
      */
-    val displaySessions: StateFlow<List<AgentSession>> = displayStable(client.sessions, viewModelScope)
+    val displaySessions: StateFlow<List<AgentSession>> = displayStable(
+        client.sessions,
+        viewModelScope,
+        history = client.historiesByCwd
+            .map { byCwd -> byCwd.values.flatten().associate { it.historyId to it.updatedAt } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, client.historiesByCwd.value.values.flatten().associate { it.historyId to it.updatedAt }),
+    )
 
     private val _selectedSessionId = MutableStateFlow<String?>(null)
 

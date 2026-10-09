@@ -62,7 +62,7 @@ class DisplaySessionsTest {
 
     @Test fun theHeldListIsRepublishedAtTheInstantAWordWouldChange() = runTest {
         val source = MutableStateFlow(listOf(session("a", base)))
-        val drawn = displayStable(source, backgroundScope) { base + currentTime }
+        val drawn = displayStable(source, backgroundScope, clock = { base + currentTime })
         val seen = mutableListOf<List<AgentSession>>()
         backgroundScope.launch { drawn.collect { seen += it } }
         runCurrent()
@@ -88,7 +88,7 @@ class DisplaySessionsTest {
 
     @Test fun anotherChangeIsPublishedAtOnceAndEndsTheWait() = runTest {
         val source = MutableStateFlow(listOf(session("a", base)))
-        val drawn = displayStable(source, backgroundScope) { base + currentTime }
+        val drawn = displayStable(source, backgroundScope, clock = { base + currentTime })
         runCurrent()
         source.value = listOf(session("a", base + 40, seq = 1))
         runCurrent()
@@ -98,4 +98,91 @@ class DisplaySessionsTest {
         assertEquals("ready", drawn.value.single().status)
         assertEquals(base + 80, drawn.value.single().updatedAt)
     }
+
+    // ---- round 3: unread, dedupe, every row's order, the hour and day boundary through the flow ----
+
+    @Test fun aSettledRowsStampIsDrawnAsItsUnreadDot() {
+        // `unread = lastSeenAt < updatedAt` for a not-open ready or exited row: a stamp-only bump can flip it.
+        for (status in listOf("ready", "exited")) {
+            val held = listOf(session("a", base, status = status))
+            assertFalse(status, SessionDisplay.equivalent(held, listOf(session("a", base + 40, status = status)), base + 1_000))
+        }
+        // A running or waiting row never shows it, whatever the stamp.
+        for (status in listOf("active", "waiting")) {
+            val held = listOf(session("a", base, status = status))
+            assertTrue(status, SessionDisplay.equivalent(held, listOf(session("a", base + 40, status = status)), base + 1_000))
+        }
+    }
+
+    @Test fun aSettledRowsStampIsPublishedAtOnceThroughTheFlow() = runTest {
+        val source = MutableStateFlow(listOf(session("a", base, status = "ready")))
+        val drawn = displayStable(source, backgroundScope, clock = { base + currentTime })
+        runCurrent()
+        source.value = listOf(session("a", base + 40, status = "ready", seq = 1))
+        runCurrent()
+        assertEquals(base + 40, drawn.value.single().updatedAt)
+    }
+
+    @Test fun theSameChatDedupeKeepsTheSameRow() {
+        // Two rows of one native chat: the more recently active one is the row drawn. Held: a (newer) wins; next: b overtakes.
+        fun chat(id: String, stamp: Long) = session(id, stamp).copy(nativeSessionId = "native")
+        val held = listOf(chat("a", base + 10_000), chat("b", base + 9_000))
+        val flipped = listOf(chat("b", base + 10_500), chat("a", base + 10_000))
+        assertFalse(SessionDisplay.equivalent(held, flipped, base + 12_000))
+        val kept = listOf(chat("a", base + 10_500), chat("b", base + 9_000))
+        assertTrue(SessionDisplay.equivalent(held, kept, base + 12_000))
+    }
+
+    @Test fun aLiveRowCrossingAHistoryOnlyRowIsADifferentDrawing() {
+        val history = mapOf("h1" to base + 10_020)
+        val held = listOf(session("a", base + 10_000))
+        // Still below the history row: the same order of the three rows' stamps.
+        assertTrue(SessionDisplay.equivalent(held, listOf(session("a", base + 10_010)), base + 20_000, history))
+        // Above it now: the live row moved past the history row although the live ids did not move.
+        assertFalse(SessionDisplay.equivalent(held, listOf(session("a", base + 10_040)), base + 20_000, history))
+        // A tie with it is a different order too.
+        assertFalse(SessionDisplay.equivalent(held, listOf(session("a", base + 10_020)), base + 20_000, history))
+    }
+
+    @Test fun aHistoryRowMovingPastTheHeldListIsRecheckedThroughTheFlow() = runTest {
+        val source = MutableStateFlow(listOf(session("a", base + 10_000)))
+        val history = MutableStateFlow(mapOf("h1" to base + 5_000))
+        val drawn = displayStable(source, backgroundScope, history, clock = { base + 20_000 + currentTime })
+        runCurrent()
+        source.value = listOf(session("a", base + 10_040, seq = 1))
+        runCurrent()
+        assertEquals("held: still above the history row", base + 10_000, drawn.value.single().updatedAt)
+        history.value = mapOf("h1" to base + 10_020)
+        runCurrent()
+        assertEquals("the history row moved between the held and the real stamp", base + 10_040, drawn.value.single().updatedAt)
+    }
+
+    /** Stamps arrive every 40 ms from a clock [ageMs] past the held stamp; the held word changes 5 s in (the minute edge of the hour or day word). */
+    private fun runBoundary(ageMs: Long) = runTest {
+        val source = MutableStateFlow(listOf(session("a", base)))
+        val drawn = displayStable(source, backgroundScope, clock = { base + ageMs + currentTime })
+        val seen = mutableListOf<List<AgentSession>>()
+        backgroundScope.launch { drawn.collect { seen += it } }
+        runCurrent()
+        val first = drawn.value
+        var t = 0L
+        while (t < 4_960) {
+            advanceTimeBy(40); t += 40
+            source.value = listOf(session("a", base + t, seq = t))
+            runCurrent()
+        }
+        assertSame("no word has changed yet", first, drawn.value)
+        assertEquals(1, seen.size)
+        advanceTimeBy(39)
+        runCurrent()
+        assertEquals("still before the edge", 1, seen.size)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals("published at the edge", 2, seen.size)
+        assertEquals(source.value, drawn.value)
+    }
+
+    @Test fun theHourWordFlipsAtItsBoundaryThroughTheFlow() = runBoundary(3_595_000)
+
+    @Test fun theDayWordFlipsAtItsBoundaryThroughTheFlow() = runBoundary(86_395_000)
 }
