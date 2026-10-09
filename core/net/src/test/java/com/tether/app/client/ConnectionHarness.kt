@@ -63,10 +63,11 @@ class ManualScheduler : Scheduler {
     }
 }
 
-/** Backoff delays with this base never collide with the ping (8 s) or grace (60 s) timers. */
+/** Backoff delays with this base never collide with the ping (8 s) or grace (180 s) timers. */
 fun testBackoff() = Backoff(baseMs = 1_100, capMs = 30_000, random = { 0.0 })
 
-fun isReconnectDelay(ms: Long) = ms != ConnectionTimings.PING_TIMEOUT_MS && ms != ConnectionTimings.BACKGROUND_GRACE_MS &&
+fun isReconnectDelay(ms: Long) = ms != ConnectionTimings.PING_TIMEOUT_MS && ms != ConnectionTimings.RESUME_PING_TIMEOUT_MS &&
+    ms != ConnectionTimings.BACKGROUND_GRACE_MS &&
     ms != NodeRegistryRules.REQUEST_TIMEOUT_MS && ms != ConnectionTimings.DEFERRED_ATTACH_MAX_WAIT_MS
 
 const val HEALTH_143 = """{"ok":true,"protocolVersion":143,"nativeProtocolFloor":129}"""

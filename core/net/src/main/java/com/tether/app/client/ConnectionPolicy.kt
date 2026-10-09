@@ -19,10 +19,13 @@ object ConnectionTimings {
 
     /**
      * After the app leaves the foreground, how long the socket is kept (quick app
-     * switches, the photo picker, the share sheet) before it is closed and
-     * reconnects stop. FCM covers the background; the foreground re-connects.
+     * switches, the photo picker, the share sheet, a short break) before it is closed and
+     * reconnects stop. FCM covers the background; the foreground re-connects. ta-nl5m (owner
+     * delegated the choice): 3 minutes, so a return inside it finds a live socket instead of a cold
+     * connect. A socket the OS froze costs nothing extra: the server's heartbeat ends it itself, and a
+     * socket lost inside the grace retries with backoff and stops at its end. Reversible: this constant.
      */
-    const val BACKGROUND_GRACE_MS: Long = 60_000
+    const val BACKGROUND_GRACE_MS: Long = 180_000
 
     /**
      * Consecutive connect TIMEOUTS, while the OS restricts local-network access,
@@ -41,11 +44,27 @@ object ConnectionTimings {
 
     /**
      * ta-coik.32 (R1): back in front after at least this long away, an open socket is not pinged
-     * (up to [PING_TIMEOUT_MS]) but replaced at once. A backgrounded app is frozen by the OS and
+     * for [PING_TIMEOUT_MS] but judged at once. A backgrounded app may be frozen by the OS and
      * cannot answer the server's heartbeat (a ping every 30 s, the socket ended at the second
-     * miss), so after this long the link is presumed gone; a shorter trip keeps the web's ping.
+     * miss), so after this long the link may be gone; a shorter trip keeps the web's ping.
+     * ta-nl5m: which of the two it is depends on [BACKGROUND_WIRE_FRESH_MS].
      */
     const val BACKGROUND_REPLACE_AFTER_MS: Long = 25_000
+
+    /**
+     * ta-nl5m: on a return after [BACKGROUND_REPLACE_AFTER_MS] or more, an open socket that heard
+     * from the server (a frame or the WebSocket heartbeat ping) less than this long ago was not frozen
+     * and the server cannot have dropped it (it pings every 30 s and ends the link at the next tick):
+     * it is kept and verified with a ping of [RESUME_PING_TIMEOUT_MS]. Silent for this long or more:
+     * presumed gone and replaced at once (R1).
+     */
+    const val BACKGROUND_WIRE_FRESH_MS: Long = 35_000
+
+    /**
+     * ta-nl5m: the deadline of the verifying ping on that return path ONLY (the process was just
+     * shown alive, so a quick answer is expected). Every other probe keeps [PING_TIMEOUT_MS].
+     */
+    const val RESUME_PING_TIMEOUT_MS: Long = 3_000
 
     /**
      * ta-coik.32 (R3): how long the re-attach of every other session waits for the open chat's

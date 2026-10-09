@@ -739,6 +739,22 @@ class TetherWebSocketTest {
     }
 
     @Test
+    fun aServerPingIsToldToTheHookBeforeItsPongAndNeverReachesTheListenerAsAMessage() {
+        val server = RawServer()
+        val events = Recorder()
+        val told = java.util.concurrent.LinkedBlockingQueue<TetherWebSocket>()
+        val ws = TetherWebSocket.connect(OkHttpClient(), Request.Builder().url(server.url).build(), events, onPing = { told.put(it) })
+        closers += Closeable { ws.cancel() }
+        server.accept()
+        assertEquals("open", events.next())
+        assertTrue("no ping yet", told.isEmpty())
+        server.writeFrame(WebSocketFrames.OPCODE_PING, "beat".toByteArray())
+        assertTrue("the hook saw this socket", told.poll(20, TimeUnit.SECONDS) === ws)
+        assertEquals(WebSocketFrames.OPCODE_PONG, server.readFrame().opcode)
+        assertTrue("a ping is not a message", events.messages.isEmpty())
+    }
+
+    @Test
     fun aClientPingIntervalPingsAndAMissingPongFailsTheSocket() {
         val server = RawServer()
         val events = Recorder()

@@ -87,7 +87,7 @@ class ReconnectLatencyTest {
     fun backAfterALongAbsenceTheOpenSocketIsReplacedAtOnceWithoutAPing() {
         connected()
         h.client.setAppForeground(false)
-        h.now.addAndGet(ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_WIRE_FRESH_MS)
         h.enqueueConnect()
         h.client.setAppForeground(true)
         // A new socket at once: no timer had to fire, and nothing went out on the old one.
@@ -111,7 +111,7 @@ class ReconnectLatencyTest {
     fun eachTripIsTimedOnItsOwnSoAShortOneAfterALongOneIsStillPinged() {
         connected()
         h.client.setAppForeground(false)
-        h.now.addAndGet(ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_WIRE_FRESH_MS)
         h.enqueueConnect()
         h.client.setAppForeground(true)
         h.handshake(h.nextSocket())
@@ -122,6 +122,141 @@ class ReconnectLatencyTest {
         h.client.setAppForeground(true)
         assertEquals("ping", h.expectFrame("ping").type())
         assertEquals("two connects only: the short trip opened none", 4, h.server.requestCount)
+    }
+
+    // ------------------------------------------------------------------
+    // ta-nl5m (C1): a live socket is kept on a return, a frozen one is replaced
+    // ------------------------------------------------------------------
+
+    @Test
+    fun theResumeConstantsAreThePlannedOnes() {
+        assertEquals(35_000L, ConnectionTimings.BACKGROUND_WIRE_FRESH_MS)
+        assertEquals(3_000L, ConnectionTimings.RESUME_PING_TIMEOUT_MS)
+        assertEquals(180_000L, ConnectionTimings.BACKGROUND_GRACE_MS)
+    }
+
+    @Test
+    fun aRecentServerPingKeepsTheSocketAndVerifiesItWithAShortPing() {
+        val ws = connected()
+        val requests = h.server.requestCount
+        h.client.setAppForeground(false)
+        h.now.addAndGet(20_000)
+        // The server's heartbeat reached the thawed process: no frame, only a WebSocket ping.
+        h.client.serverPingForTest()
+        h.now.addAndGet(20_000)
+        h.client.setAppForeground(true)
+        assertEquals("ping", h.expectFrame("ping").type())
+        h.scheduler.await { it == ConnectionTimings.RESUME_PING_TIMEOUT_MS }
+        assertTrue("the web's 8 s is not the deadline here", h.scheduler.pending().none { it.delayMs == ConnectionTimings.PING_TIMEOUT_MS })
+        ws.send("""{"type":"pong"}""")
+        h.await(h.client.connection) { it == ConnectionState.Connected }
+        assertEquals("the socket was kept: no new connect", requests, h.server.requestCount)
+        assertTrue("nothing missed on a live socket, nothing re-attached", h.received.none { it.contains("\"attach\"") })
+        assertTrue("no reconnect timer", h.scheduler.history().none { isReconnectDelay(it.delayMs) })
+    }
+
+    @Test
+    fun aSocketThatHeardFromTheServerJustInsideTheFreshWindowIsKept() {
+        connected()
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_WIRE_FRESH_MS - 1)
+        h.client.setAppForeground(true)
+        assertEquals("ping", h.expectFrame("ping").type())
+        assertEquals("kept: only the first probe and upgrade", 2, h.server.requestCount)
+    }
+
+    @Test
+    fun aSocketThatHeardNothingForTheFreshWindowIsReplacedEvenIfAPingIsAskedFor() {
+        connected()
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_WIRE_FRESH_MS)
+        h.enqueueConnect()
+        h.client.setAppForeground(true)
+        h.handshake(h.nextSocket())
+        assertEquals("replaced: a second probe and upgrade", 4, h.server.requestCount)
+        assertTrue("no resume ping wait", h.scheduler.history().none { it.delayMs == ConnectionTimings.RESUME_PING_TIMEOUT_MS })
+    }
+
+    @Test
+    fun aServerFrameCountsAsFreshAsAPingDoes() {
+        val ws = connected()
+        h.client.setAppForeground(false)
+        h.now.addAndGet(20_000)
+        ws.send("""{"type":"pong"}""")
+        h.await(h.client.connection) { it == ConnectionState.Connected }
+        awaitFrameStamp()
+        h.now.addAndGet(20_000)
+        h.client.setAppForeground(true)
+        assertEquals("ping", h.expectFrame("ping").type())
+        assertEquals("kept", 2, h.server.requestCount)
+    }
+
+    /** Lets the client thread take the frame just sent (the clock is manual, so poll the effect). */
+    private fun awaitFrameStamp() {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (System.nanoTime() < deadline && h.client.lastServerFrameAtForTest() < h.now.get()) Thread.sleep(5)
+    }
+
+    @Test
+    fun aKeptSocketThatDoesNotAnswerTheShortPingIsReplacedAtOnce() {
+        connected()
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS)
+        h.client.setAppForeground(true)
+        h.expectFrame("ping")
+        val deadline = h.scheduler.await { it == ConnectionTimings.RESUME_PING_TIMEOUT_MS }
+        h.now.addAndGet(ConnectionTimings.RESUME_PING_TIMEOUT_MS)
+        h.enqueueConnect()
+        deadline.fire()
+        // A link that worked is replaced with no backoff wait.
+        val retry = h.scheduler.await(::isReconnectDelay)
+        assertEquals("no wait before the new attempt", 0L, retry.delayMs)
+        retry.fire()
+        h.handshake(h.nextSocket())
+        assertTrue("no backoff", h.scheduler.history().none { isReconnectDelay(it.delayMs) && it.delayMs != 0L })
+    }
+
+    @Test
+    fun aLongProbePendingFromBeforeTheTripDoesNotSwallowTheResumeProbe() {
+        connected()
+        h.client.reconnectIfIdle()
+        h.expectFrame("ping")
+        val long = h.scheduler.await { it == ConnectionTimings.PING_TIMEOUT_MS }
+        h.client.setAppForeground(false)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS)
+        h.client.setAppForeground(true)
+        assertEquals("a second ping went out", "ping", h.expectFrame("ping").type())
+        assertTrue("the 8 s probe was superseded", long.cancelled)
+        h.scheduler.await { it == ConnectionTimings.RESUME_PING_TIMEOUT_MS }
+    }
+
+    // ------------------------------------------------------------------
+    // ta-nl5m (C3): the 3-minute grace
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aSocketLostInsideTheGraceRetriesWithBackoffAndStopsWhenTheGraceEnds() {
+        val ws = connected()
+        h.client.setAppForeground(false)
+        val grace = h.scheduler.await { it == ConnectionTimings.BACKGROUND_GRACE_MS }
+        assertEquals(180_000L, grace.delayMs)
+        lose(ws)
+        // In the background the loss backs off (no immediate retry), and the retry still happens.
+        val first = h.scheduler.await(::isReconnectDelay)
+        assertEquals(550L, first.delayMs)
+        h.enqueueAuthFailure()
+        first.fire()
+        val second = h.scheduler.await { isReconnectDelay(it) && it != 550L }
+        assertEquals("a longer wait after a failed retry", 1100L, second.delayMs)
+
+        // The grace ends: no retry is pending any more, and nothing goes out.
+        grace.fire()
+        h.await(h.client.connection) { it == ConnectionState.Disconnected }
+        assertTrue("the pending retry was cancelled", second.cancelled)
+        assertTrue(h.scheduler.pending().none { isReconnectDelay(it.delayMs) })
+        val requests = h.server.requestCount
+        Thread.sleep(100)
+        assertEquals("no background loop after the suspend", requests, h.server.requestCount)
     }
 
     @Test

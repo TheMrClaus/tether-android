@@ -538,6 +538,17 @@ class RealTetherClient(
     @Volatile
     private var lastInboundAt = 0L
 
+    /**
+     * ta-nl5m: when ANYTHING last arrived on the live socket: a server frame (as [lastInboundAt]) or a
+     * WebSocket-level ping (the server's 30 s heartbeat, which is answered below the protocol and
+     * never reaches [handleFrame]). Read only by the resume decision in [setAppForeground]: whether the
+     * process was frozen (the heartbeat went unanswered) or was thawed in time. It is kept apart from
+     * [lastInboundAt] on purpose: that one means "a server FRAME" for the half-open sweep, the pending
+     * rows' verdict and the diagnostics.
+     */
+    @Volatile
+    private var lastWireInboundAt = 0L
+
     // --- protocol state (guarded by lock) ---
     private val tracker = CursorTracker()
     private val subscribed = LinkedHashSet<String>()
@@ -2672,6 +2683,7 @@ class RealTetherClient(
         if (foreground) {
             trace.begin("resume")
             var stale: WebSocket? = null
+            var verify = false
             val resume = synchronized(lock) {
                 inForeground = true
                 backgroundTask?.cancel()
@@ -2682,7 +2694,15 @@ class RealTetherClient(
                 // R1: long enough away that the server's heartbeat has ended the link.
                 val away = backgroundedAt?.let { clock() - it }
                 backgroundedAt = null
-                if (!wasSuspended && socketOpen && away != null && away >= ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS) stale = socket
+                // ta-nl5m, the decision table for an open socket after BACKGROUND_REPLACE_AFTER_MS or more
+                // away: the server's heartbeat (a WS ping every 30 s, the socket ended at the next tick)
+                // reached us less than BACKGROUND_WIRE_FRESH_MS ago -> the process was not frozen and the
+                // server cannot have dropped the link: it is kept and verified with a short ping
+                // (RESUME_PING_TIMEOUT_MS); nothing was missed on a live socket, so nothing re-attaches.
+                // Nothing for that long -> frozen (R1): replaced at once, no ping wait.
+                if (!wasSuspended && socketOpen && away != null && away >= ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS) {
+                    if (clock() - lastWireInboundAt >= ConnectionTimings.BACKGROUND_WIRE_FRESH_MS) stale = socket else verify = true
+                }
                 wasSuspended
             }
             // Web visibilitychange -> reconnectIfIdle: ping an open socket,
@@ -2695,6 +2715,10 @@ class RealTetherClient(
                 stale != null -> {
                     trace.mark("replace-socket")
                     replaceSocketNow(stale!!)
+                }
+                verify -> {
+                    trace.mark("verify-socket")
+                    probeLink(timeoutMs = ConnectionTimings.RESUME_PING_TIMEOUT_MS, supersede = true)
                 }
                 else -> reconnectIfIdle()
             }
@@ -3123,7 +3147,7 @@ class RealTetherClient(
             // No redirects on the credential-bearing upgrade either (see authHttp).
             // ta-coik.16: the app's own WebSocket on authHttp's upgrade (same TLS, same credential),
             // which sends a message the server takes (up to 32 MiB) in fragments; OkHttp's could not.
-            listener.bindLocked(TetherWebSocket.connect(authHttp, request, listener))
+            listener.bindLocked(TetherWebSocket.connect(authHttp, request, listener, onPing = { listener.onServerPing(it) }))
             trace.mark("upgrade-sent")
         }
     }
@@ -3144,18 +3168,25 @@ class RealTetherClient(
      * App-level liveness probe (v105 `ping`, web issue #135): if NOTHING arrives
      * within [ConnectionTimings.PING_TIMEOUT_MS] of the ping the socket is
      * half-open (OPEN over dead TCP), so it is dropped and the reconnect path
-     * takes over. Any inbound frame counts, not only the pong. One probe at a time.
+     * takes over. Any inbound frame counts, not only the pong. One probe at a time, except that
+     * ta-nl5m's resume probe ([supersede], deadline [timeoutMs] = [ConnectionTimings.RESUME_PING_TIMEOUT_MS])
+     * takes over a longer probe still pending from before the app left, so that one cannot swallow it.
      */
-    private fun probeLink() {
+    private fun probeLink(timeoutMs: Long = ConnectionTimings.PING_TIMEOUT_MS, supersede: Boolean = false) {
         val ws: WebSocket
         val sentAt: Long
         synchronized(lock) {
-            if (!socketOpen || pingTask != null) return
+            if (!socketOpen) return
+            if (pingTask != null) {
+                if (!supersede) return
+                pingTask?.cancel()
+                pingTask = null
+            }
             ws = socket ?: return
             sentAt = clock()
             if (!ws.send(ClientMessage.Ping(nonce = UUID.randomUUID().toString()).encode())) return
             trace.mark("ping-sent")
-            pingTask = scheduler.schedule(ConnectionTimings.PING_TIMEOUT_MS) {
+            pingTask = scheduler.schedule(timeoutMs) {
                 val dead = synchronized(lock) {
                     pingTask = null
                     socket === ws && socketOpen && lastInboundAt < sentAt
@@ -3164,6 +3195,15 @@ class RealTetherClient(
             }
         }
     }
+
+    /** Tests only: the server's WebSocket ping reaches the current socket's reader. */
+    internal fun serverPingForTest() {
+        val ws = synchronized(lock) { socket } ?: return
+        socketListener?.onServerPing(ws)
+    }
+
+    /** Tests only: when the last server FRAME arrived (the stamp a WebSocket ping must not move). */
+    internal fun lastServerFrameAtForTest(): Long = lastInboundAt
 
     /** Force a presumed-dead socket down and hand over to the reconnect path. */
     private fun dropSocket(ws: WebSocket) {
@@ -3217,6 +3257,7 @@ class RealTetherClient(
                 reconciledSessions.clear()
                 tracker.clearResyncFlags()
                 lastInboundAt = clock()
+                lastWireInboundAt = lastInboundAt
                 // use-tether.ts 90fbb9f :727-729: everything is back to `waiting` until reconcile
                 // (the assignment republishes the rows, now on an open socket).
                 pendingStore = PendingInput.resetInFlight(pendingStore)
@@ -3235,10 +3276,16 @@ class RealTetherClient(
             if (!synchronized(lock) { bindLocked(webSocket) }) return
             // Stamped before parsing: even an undecodable frame proves traffic.
             lastInboundAt = clock()
+            lastWireInboundAt = lastInboundAt
             val message = ServerMessage.parse(text)
             raceHook?.invoke(RacePoint.FrameAdmitted, message)
             handleFrame(webSocket, message)
             raceHook?.invoke(RacePoint.FrameHandled, message)
+        }
+
+        /** ta-nl5m: a WebSocket ping from the server (its heartbeat) reached this socket's reader. */
+        fun onServerPing(webSocket: WebSocket) {
+            if (synchronized(lock) { bindLocked(webSocket) }) lastWireInboundAt = clock()
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

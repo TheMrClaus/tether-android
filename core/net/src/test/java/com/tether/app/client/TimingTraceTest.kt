@@ -79,7 +79,7 @@ class TimingTraceTest {
         awaitMilestone("connected")
         h.timing.clear()
         h.client.setAppForeground(false)
-        h.now.addAndGet(ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS)
+        h.now.addAndGet(ConnectionTimings.BACKGROUND_WIRE_FRESH_MS)
         h.enqueueConnect()
         h.client.setAppForeground(true)
         h.handshake(h.nextSocket())

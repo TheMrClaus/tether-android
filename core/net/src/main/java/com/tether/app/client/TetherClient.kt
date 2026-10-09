@@ -700,9 +700,11 @@ interface TetherClient {
      * Process lifecycle (ProcessLifecycleOwner ON_START / ON_STOP), the native
      * twin of the web's `visibilitychange`. Foreground: re-check the link at once
      * (ping an open socket, reconnect a dead one); ta-coik.32 (R1): after
-     * [ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS] or more away, an open socket is replaced at once
-     * instead (the server's heartbeat has ended it while the app could not answer). Background: after
-     * [ConnectionTimings.BACKGROUND_GRACE_MS] the socket is closed and reconnects
+     * [ConnectionTimings.BACKGROUND_REPLACE_AFTER_MS] or more away, an open socket that heard from the
+     * server less than [ConnectionTimings.BACKGROUND_WIRE_FRESH_MS] ago is kept and verified with a
+     * [ConnectionTimings.RESUME_PING_TIMEOUT_MS] ping; one that heard nothing for longer is replaced at
+     * once (the server's heartbeat has ended it while the app could not answer). Background: after
+     * [ConnectionTimings.BACKGROUND_GRACE_MS] (3 minutes) the socket is closed and reconnects
      * stop until the next foreground; FCM covers the background.
      */
     fun setAppForeground(foreground: Boolean)

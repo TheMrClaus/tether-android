@@ -64,6 +64,7 @@ import okio.buffer
 internal class TetherWebSocket private constructor(
     private val originalRequest: Request,
     private val listener: WebSocketListener,
+    private val onPing: ((TetherWebSocket) -> Unit)?,
     private val random: SecureRandom,
     private val pingIntervalMillis: Long,
     private val closeTimeoutMillis: Long,
@@ -233,6 +234,9 @@ internal class TetherWebSocket private constructor(
         override fun onBinary(bytes: ByteString) = listener.onMessage(this@TetherWebSocket, bytes)
 
         override fun onPing(payload: ByteString) {
+            // ta-nl5m: the server's heartbeat is a sign of life the listener never sees as a message;
+            // told first, outside the lock, whatever happens to the pong.
+            onPing?.invoke(this@TetherWebSocket)
             lock.withLock {
                 // As OkHttp: answered until the close frame is out (a long message ahead of a queued
                 // close still has the server's heartbeat answered), never after it or a failure.
@@ -430,12 +434,14 @@ internal class TetherWebSocket private constructor(
             random: SecureRandom = SecureRandom(),
             fragmentBytes: Int = FRAGMENT_BYTES,
             maxQueueBytes: Long = MAX_QUEUE_BYTES,
+            onPing: ((TetherWebSocket) -> Unit)? = null,
         ): TetherWebSocket {
             require(request.method == "GET") { "Request must be GET: ${request.method}" }
             require(fragmentBytes > 0)
             val ws = TetherWebSocket(
                 originalRequest = request,
                 listener = listener,
+                onPing = onPing,
                 random = random,
                 pingIntervalMillis = client.pingIntervalMillis.toLong(),
                 closeTimeoutMillis = client.webSocketCloseTimeout.toLong(),
