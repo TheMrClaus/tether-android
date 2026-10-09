@@ -24,6 +24,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.tether.app.client.PairedDevice
 import com.tether.app.client.Passkey
@@ -195,8 +197,11 @@ private fun PasskeysSection(controller: DevicesController?, binding: DevicesBind
         }
         Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (LocalSettingsRowsStack.current) {
-                field(Modifier.fillMaxWidth())
-                addKey(Modifier.fillMaxWidth())
+                // `.settings-devices-actions` gap: 12 (sign-in-security.tsx:184), not the section's 10.
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    field(Modifier.fillMaxWidth())
+                    addKey(Modifier.fillMaxWidth())
+                }
             } else {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     field(Modifier.weight(1f))
@@ -372,7 +377,7 @@ private fun SessionsSection(controller: DevicesController?, binding: DevicesBind
             icon = TetherIcons.MonitorSmartphone,
             iconSize = 15.dp,
             enabled = !busy && others > 0,
-            modifier = Modifier.padding(top = 16.dp).testTag(DevicesTags.SignOutOthers),
+            modifier = Modifier.padding(top = 16.dp).then(if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth() else Modifier).testTag(DevicesTags.SignOutOthers),
         )
     }
 }
@@ -440,16 +445,48 @@ private fun PairedDevicesSection(controller: DevicesController?, binding: Device
         if (devices != null && devices.isEmpty()) MutedLine(DevicesCopy.DEVICES_EMPTY, DevicesTags.DevicesEmpty)
         if (devices == null && !ownerNeeded && c.devicesLine == null) MutedLine(DevicesCopy.DEVICES_CHECKING, DevicesTags.DevicesChecking, status = true)
         c.devicesLine?.takeIf { !it.error }?.let { LineView(it, DevicesTags.line(DevicesArea.Devices)) }
-        Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        PairActions(Modifier.fillMaxWidth().padding(top = 16.dp), fill = LocalSettingsRowsStack.current) {
             TetherKey(
                 onClick = { c.pair() },
                 classes = KeyClasses.ButtonSecondary,
                 label = if (c.devicesBusy == DevicesAction.Pair) DevicesCopy.PAIRING else DevicesCopy.PAIR,
                 enabled = !busy,
-                modifier = Modifier.testTag(DevicesTags.Pair),
+                modifier = Modifier.then(if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth() else Modifier).testTag(DevicesTags.Pair),
             )
             val others = DevicesRules.otherPairings(c.pairings, now, c.shown?.expiresAt)
             MutedLine(DevicesCopy.pairHint(others), DevicesTags.PairHint, rule = false, small = true)
+        }
+    }
+}
+
+/**
+ * `.settings-devices-actions` (globals.css 8711-8723): one wrap row, a 12 gap both ways, the key `flex: 0 0 auto` and
+ * the hint `flex: 1 1 14rem`. The hint sits beside the key while the key, the gap and 224 dp fit the row (the hint then
+ * taking what the key leaves), and otherwise under it, 12 below. At 560 dp and under the key is the row's whole width
+ * (globals.css 8730, [fill]), so the hint is always under it.
+ */
+@Composable
+private fun PairActions(modifier: Modifier, fill: Boolean, content: @Composable () -> Unit) {
+    Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val gap = 12.dp.roundToPx()
+        val basis = 224.dp.roundToPx()
+        val key = measurables[0].measure(if (fill) Constraints.fixedWidth(width) else Constraints(maxWidth = width))
+        val hintM = measurables[1]
+        val beside = !fill && key.width + gap + basis <= width
+        if (beside) {
+            val hint = hintM.measure(Constraints.fixedWidth(width - gap - key.width))
+            val h = maxOf(key.height, hint.height)
+            layout(width, h) {
+                key.place(0, (h - key.height) / 2)
+                hint.place(key.width + gap, (h - hint.height) / 2)
+            }
+        } else {
+            val hint = hintM.measure(Constraints.fixedWidth(width))
+            layout(width, key.height + gap + hint.height) {
+                key.place(0, 0)
+                hint.place(0, key.height + gap)
+            }
         }
     }
 }
@@ -553,18 +590,21 @@ private fun PairingCodeCard(c: DevicesController, shown: ShownCode, now: Long, r
             color = t.muted,
             style = settingsText(type.ui, 12f, 400, lineHeight = 1.6f),
         )
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        val copyKey: @Composable (Modifier) -> Unit = { m ->
             TetherKey(
                 onClick = { if (c.copyCode()) copied = true },
                 classes = KeyClasses.ButtonSecondary,
                 label = if (copied) DevicesCopy.COPIED else DevicesCopy.COPY,
                 icon = if (copied) TetherIcons.Check else TetherIcons.Copy,
                 iconSize = 15.dp,
-                modifier = Modifier.testTag(DevicesTags.CodeCopy),
+                modifier = m.testTag(DevicesTags.CodeCopy),
             )
+        }
+        // [share]: the expired line takes what the key leaves (a Row's weight); the live countdown stays its own width.
+        val expiry: @Composable (Modifier) -> Unit = { share ->
             if (expired) {
                 Row(
-                    Modifier.weight(1f, fill = false).testTag(DevicesTags.CodeExpiry).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Assertive },
+                    share.testTag(DevicesTags.CodeExpiry).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Assertive },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -576,6 +616,19 @@ private fun PairingCodeCard(c: DevicesController, shown: ShownCode, now: Long, r
                     Icon(TetherIcons.Timer, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
                     Text(DevicesCopy.expiresIn(elapsedLabel(left).ifEmpty { "0s" }), color = t.muted, style = settingsText(type.ui, 12f, 500, lineHeight = 1.5f))
                 }
+            }
+        }
+        // `.pairing-code-actions` (globals.css 8624): at 560 dp and under "Copy code" is 100% wide (8731), so the expiry
+        // wraps under it, 12 below; above, they share a line.
+        if (LocalSettingsRowsStack.current) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                copyKey(Modifier.fillMaxWidth())
+                expiry(Modifier)
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                copyKey(Modifier)
+                expiry(Modifier.weight(1f, fill = false))
             }
         }
     }

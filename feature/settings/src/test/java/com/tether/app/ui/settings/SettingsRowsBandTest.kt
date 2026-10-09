@@ -72,6 +72,7 @@ abstract class SettingsRowsBandBase(private val width: Int) {
         server: ServerSettingsBinding = ServerSettingsBinding.None,
         nodes: List<com.tether.app.protocol.NodeSummary>? = null,
         devices: DevicesSeed? = null,
+        accounts: AccountsShot? = null,
     ) {
         val stored = runBlocking { store.prefs.preferences.first() }
         val state = SettingsDialogState(tab, GeneralDraft.of(stored))
@@ -90,6 +91,7 @@ abstract class SettingsRowsBandBase(private val width: Int) {
                         layout = if (narrow) TetherLayoutClass.Phone else TetherLayoutClass.Expanded,
                         initialPreferences = stored,
                         serverSettings = server,
+                        claudeAccounts = accounts?.binding() ?: ClaudeAccountsBinding.None,
                         nodes = if (nodes != null && actions != null) NodesBinding(nodes, NodeFixtures.ORIGIN, actions, NodeFixtures.CONSOLE, now = { NodeFixtures.NOW }) else NodesBinding.None,
                         devices = controller?.let { DevicesBinding(it, now = { DevicesFixtures.NOW }) } ?: DevicesBinding.None,
                     )
@@ -212,6 +214,99 @@ abstract class SettingsRowsBandBase(private val width: Int) {
             assertEquals("560: $what keys are the same width", first.w, second.w, 1f)
         } else {
             assertTrue("$width: $what keys side by side ($first, $second)", second.l >= first.r - 0.5f && Math.abs(second.t - first.t) < 2f)
+        }
+    }
+
+    /** The distance from the lowest text above [key] (the row's caption) to [key]: the stacked row's gap. */
+    private fun gapAbove(key: R): Float {
+        val d = compose.density.density
+        val above = compose.onAllNodes(androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.Text), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .map { n -> val p = n.positionInRoot; R(p.x / d, p.y / d, n.size.width / d, n.size.height / d) }
+            .filter { it.b <= key.t + 0.5f && it.b > key.t - 80f && it.l < key.r && it.r > key.l }
+        return key.t - above.maxOf { it.b }
+    }
+
+    /** ta-bnnz C1 (studio.css 975): a stacked server row sits 12 under its text; a plain row 16. */
+    @Test fun aStackedServerRowIs12UnderItsTextAndAPlainRow16() {
+        show(SettingsTab.Engines, server = ServerShot.EnginesMissing.binding())
+        val key = tag(EngineTags.useDetected(EngineCard.Opencode))
+        if (narrow) assertEquals("$width: server row gap", 12f, gapAbove(key), 0.5f)
+        else assertTrue("641: beside the text", key.l >= text(EngineRows.DETECTED_HOME).r - 0.5f)
+    }
+
+    @Test fun aPlainRowStaysAt16() {
+        show(SettingsTab.General)
+        if (a) assertEquals("560: plain row gap", 16f, gapAbove(tag(SettingsPanelTags.UseCurrent)), 0.5f)
+    }
+
+    /** ta-bnnz C2: at 560 and under a direct-child key of an account's server row spans the row. */
+    @Test fun theTerminalAliasKeyFillsTheRowAtOrBelow560() {
+        show(SettingsTab.Engines, accounts = AccountsShot.Loaded)
+        val show = tag(ClaudeAccountsTags.alias("claude-work"))
+        val card = tag(ClaudeAccountsTags.card("claude-work"))
+        val content = card.w - 2 * (if (narrow) 16f else 20f)
+        if (a) assertEquals("560: Show fills the row", content, show.w, 1f)
+        else assertTrue("$width: Show keeps its own width (${show.w} of $content)", show.w < content / 2f)
+        val logIn = ClaudeAccountsTags.logout("claude-work")
+        assertTrue("$width: Log out keeps its own width", tag(logIn).w < content / 2f)
+    }
+
+    /** ta-bnnz C3: the sync selects are 52% of the row at 560 and under (studio.css 974, globals.css 3223). */
+    @Test fun theSyncSelectsAre52PercentOfTheRowAtOrBelow560() {
+        show(SettingsTab.Engines, accounts = AccountsShot.Sync)
+        for (id in listOf(ClaudeAccountsTags.SyncMode, ClaudeAccountsTags.SyncPrimary)) {
+            val select = tag(id)
+            if (a) assertEquals("560: $id is 0.52 of the row", rowWidth() * 0.52f, select.w, 1f)
+            else assertTrue("$width: $id is at most 0.52 of the row (${select.w})", select.w <= rowWidth() * 0.52f + 1f)
+        }
+        if (narrow) assertEquals("$width: the mode select is 12 under its text", 12f, gapAbove(tag(ClaudeAccountsTags.SyncMode)), 0.5f)
+    }
+
+    /** ta-bnnz F2: the passkey label field and "Add a passkey" are 12 apart at 560 and under (sign-in-security.tsx:184). */
+    @Test fun thePasskeyFieldAndKeyAre12ApartAtOrBelow560() {
+        show(SettingsTab.Devices, devices = DevicesFixtures.seed())
+        if (a) assertEquals("560", 12f, tag(DevicesTags.AddPasskey).t - tag(DevicesTags.PasskeyLabel).b, 0.5f)
+    }
+
+    /** ta-bnnz C2 (Devices): "Sign out everywhere else" and "Pair a device" fill the row at 560 and under. */
+    @Test fun theDevicesKeysFillTheRowAtOrBelow560() {
+        show(SettingsTab.Devices, devices = DevicesFixtures.seed())
+        val out = tag(DevicesTags.SignOutOthers)
+        val pair = tag(DevicesTags.Pair)
+        if (a) {
+            assertEquals("560: Sign out everywhere else fills the row", rowWidth(), out.w, 1f)
+            assertEquals("560: Pair a device fills the row", rowWidth(), pair.w, 1f)
+        } else {
+            assertTrue("$width: Sign out everywhere else keeps its own width (${out.w})", out.w < rowWidth() / 2f)
+            assertTrue("$width: Pair a device keeps its own width (${pair.w})", pair.w < rowWidth() / 2f)
+        }
+    }
+
+    /** ta-bnnz F3 (globals.css 8711-8723): the hint is under "Pair a device" at 560 (12 below), beside it (12) otherwise. */
+    @Test fun thePairHintIsUnderTheKeyAt560AndBesideFrom561() {
+        show(SettingsTab.Devices, devices = DevicesFixtures.seed())
+        val pair = tag(DevicesTags.Pair)
+        val hint = tag(DevicesTags.PairHint)
+        if (a) {
+            assertEquals("560: the hint is 12 under the key", 12f, hint.t - pair.b, 0.5f)
+            assertEquals("560: starting at its left edge", pair.l, hint.l, 1f)
+        } else {
+            assertEquals("$width: the hint is 12 beside the key", 12f, hint.l - pair.r, 0.5f)
+            assertTrue("$width: on the key's line ($pair, $hint)", hint.t < pair.b)
+        }
+    }
+
+    /** ta-bnnz C7a: at 560 and under "Copy code" is the row's width and the expiry wraps 12 under it. */
+    @Test fun theCodeActionsWrapAtOrBelow560() {
+        show(SettingsTab.Devices, devices = DevicesShot.Code.seed())
+        val copy = tag(DevicesTags.CodeCopy)
+        val expiry = tag(DevicesTags.CodeExpiry)
+        if (a) {
+            assertEquals("560: Copy code fills the code card's row", tag(DevicesTags.CodeCard).w - 32f, copy.w, 1f)
+            assertEquals("560: the expiry is 12 under it", 12f, expiry.t - copy.b, 0.5f)
+        } else {
+            assertEquals("$width: the expiry is 12 beside it", 12f, expiry.l - copy.r, 0.5f)
         }
     }
 

@@ -389,7 +389,7 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
                 ProfileRows.outcome(latest.send(p.id, ProfileEdit.Home(p.id, it), quiet = true))
             }
             SettingsRow(
-                narrow = true,
+                narrow = narrow,
                 kind = RowKind.Field,
                 modifier = Modifier.testTag(ProfileTags.row(p.id, ProfileTags.ENV)),
                 text = { m -> SettingsRowText(ProfileRows.ENV, AnnotatedString(ProfileRows.ENV_CAPTION), m) },
@@ -424,7 +424,7 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
             }
             for (list in ModelList.entries) {
                 SettingsRow(
-                    narrow = true,
+                    narrow = narrow,
                     kind = RowKind.Field,
                     modifier = Modifier.testTag(ProfileTags.row(p.id, list.key)),
                     text = { m ->

@@ -555,7 +555,7 @@ private fun LoginRows(card: ClaudeAccountsPresentation.Card, login: LoginPanel, 
             else -> ClaudeAccountsCopy.LOGIN_STARTING
         }
         CardRow(narrow = narrow, title = ClaudeAccountsCopy.LOGIN_TITLE, caption = AnnotatedString(status), captionTag = ClaudeAccountsTags.loginStatus(id), live = true) {
-            TetherKey(onClick = { c.cancelLogin(id) }, classes = KeyClasses.ButtonSecondary, label = ClaudeAccountsCopy.CANCEL, contentDescription = "Cancel login for ${card.title}", modifier = Modifier.testTag(ClaudeAccountsTags.loginCancel(id)))
+            TetherKey(onClick = { c.cancelLogin(id) }, classes = KeyClasses.ButtonSecondary, label = ClaudeAccountsCopy.CANCEL, contentDescription = "Cancel login for ${card.title}", modifier = cardKeyFill().testTag(ClaudeAccountsTags.loginCancel(id)))
         }
         login.link?.let { link ->
             val caption = if (link.web) ClaudeAccountsCopy.openCaption(link.shownHost) else ClaudeAccountsCopy.OPEN_CAPTION_WEB
@@ -567,7 +567,7 @@ private fun LoginRows(card: ClaudeAccountsPresentation.Card, login: LoginPanel, 
                     icon = TetherIcons.ExternalLink,
                     iconSize = 14.dp,
                     contentDescription = "Open the sign-in link in the browser",
-                    modifier = Modifier.testTag(ClaudeAccountsTags.loginOpen(id)),
+                    modifier = cardKeyFill().testTag(ClaudeAccountsTags.loginOpen(id)),
                 )
             }
             // r2 (security P3-1): a host that is not Anthropic's own is said, quietly (a warning, not a refusal).
@@ -625,7 +625,7 @@ private fun AliasRows(card: ClaudeAccountsPresentation.Card, c: ClaudeAccountsCo
             icon = if (open) TetherIcons.ChevronDown else TetherIcons.ChevronRight,
             iconSize = 14.dp,
             contentDescription = "${if (open) ClaudeAccountsCopy.ALIAS_HIDE else ClaudeAccountsCopy.ALIAS_SHOW} the terminal alias for ${card.title}",
-            modifier = Modifier.testTag(ClaudeAccountsTags.alias(id)),
+            modifier = cardKeyFill().testTag(ClaudeAccountsTags.alias(id)),
         )
     }
     if (!open) return
@@ -651,7 +651,7 @@ private fun AliasRows(card: ClaudeAccountsPresentation.Card, c: ClaudeAccountsCo
             val line: @Composable (Modifier) -> Unit = { m ->
                 Text(codeLabel(alias.shellLine), color = t.ink, style = settingsText(type.mono, 12f, 400, lineHeight = 1.6f), modifier = m.testTag(ClaudeAccountsTags.aliasLine(id)))
             }
-            val copy: @Composable () -> Unit = {
+            val copy: @Composable (Modifier) -> Unit = { m ->
                 TetherKey(
                     onClick = {
                         scope.launch {
@@ -665,18 +665,18 @@ private fun AliasRows(card: ClaudeAccountsPresentation.Card, c: ClaudeAccountsCo
                     icon = TetherIcons.Copy,
                     iconSize = 14.dp,
                     contentDescription = "Copy the terminal alias for ${card.title}",
-                    modifier = Modifier.testTag(ClaudeAccountsTags.aliasCopy(id)),
+                    modifier = m.testTag(ClaudeAccountsTags.aliasCopy(id)),
                 )
             }
             if (narrow) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     line(Modifier.fillMaxWidth())
-                    copy()
+                    copy(if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth() else Modifier)
                 }
             } else {
                 Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                     line(Modifier.weight(1f))
-                    copy()
+                    copy(Modifier)
                 }
             }
             if (alias.sourceSnippet.isNotEmpty()) {
@@ -882,6 +882,14 @@ internal fun NoteLine(line: AccountsLine, tag: String) {
 }
 
 /**
+ * C2 (studio.css:975, `align-items: stretch`; globals.css:3217): at 560 dp and under a key that is a direct child of an
+ * account card's server row (Cancel, Open, Show/Hide, Copy) spans the row; above it keeps its own width.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.cardKeyFill(): Modifier =
+    if (LocalSettingsRowsStack.current) Modifier.weight(1f) else Modifier
+
+/**
  * A `.settings-row` inside a card (`.engine-card-body .settings-row:first-child { border-top: 0 }`).
  * [stack]: a field row: the controls get their own line under the text, on every width.
  */
@@ -951,7 +959,7 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
                     placeholder = ClaudeAccountsPresentation.modeLabel(config.mode),
                     // The chosen value is said with the row's name (the trigger's own label is not read out).
                     contentDescription = "Sync across accounts: ${ClaudeAccountsPresentation.modeLabel(config.mode)}",
-                    modifier = (if (LocalSettingsRowsStack.current) m.fillMaxWidth() else m.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ClaudeAccountsTags.SyncMode),
+                    modifier = (if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth(0.52f) else m.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ClaudeAccountsTags.SyncMode),
                 )
             },
         )
@@ -1017,7 +1025,7 @@ private fun SyncRows(sync: ClaudeAccountsPresentation.SyncView, c: ClaudeAccount
                         enabled = editable,
                         placeholder = sync.rows.lastOrNull { it.title == "Primary account" }?.value.orEmpty(),
                         contentDescription = "Primary account for sync: " + sync.rows.lastOrNull { it.title == "Primary account" }?.value.orEmpty(),
-                        modifier = (if (LocalSettingsRowsStack.current) m.fillMaxWidth() else m.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ClaudeAccountsTags.SyncPrimary),
+                        modifier = (if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth(0.52f) else m.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ClaudeAccountsTags.SyncPrimary),
                     )
                 },
             )

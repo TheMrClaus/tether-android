@@ -242,7 +242,9 @@ internal fun Modifier.maxWidthFraction(fraction: Float): Modifier = layout { mea
  * `.settings-row`: at least 78dp, 17dp above and below, the text beside its control 24dp apart
  * (16 below 641). At 560 dp and under (globals.css 3221, the 35rem rule) the control drops under the text and fills
  * the row, unless [inline] (the `.settings-toggle` switch keeps its row, globals.css 3226). A [RowKind.Server] row
- * also stacks at 561-640 ([narrow], studio.css 975), its control at its own width; a [RowKind.Device] row there
+ * also stacks at 561-640 ([narrow], studio.css 975), its control at its own width, and a stacked server row (and a
+ * field row) sits 12 under its text where the plain rows sit 16 (`.settings-server-row { gap: 12px }`, studio.css 975
+ * over the plain 16 of 973); a [RowKind.Device] row there
  * wraps its keys under the text only when both do not fit (studio.css 985). [rule]: the rule above it (ta-dh1: an
  * engine card's first row has none, studio.css 645).
  */
@@ -264,7 +266,7 @@ internal fun SettingsRow(
             val fill = rows35 || kind == RowKind.Field
             Column(
                 modifier.fillMaxWidth().heightIn(min = 78.dp).padding(vertical = 17.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(if (narrow && (kind == RowKind.Server || kind == RowKind.Field)) 12.dp else 16.dp),
             ) {
                 text(Modifier.fillMaxWidth())
                 control?.invoke(if (fill) Modifier.fillMaxWidth() else Modifier)
