@@ -1,6 +1,8 @@
 package com.tether.app
 
 import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
 import android.util.Log
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -14,6 +16,7 @@ import com.tether.app.mirror.AndroidMirrorDbFactory
 import com.tether.app.mirror.JournalMirror
 import com.tether.app.mirror.MirrorKeyStore
 import com.tether.app.net.AndroidLocalNetworkAccess
+import com.tether.app.net.ProcessNetworkWatch
 import com.tether.app.push.PushChannels
 import com.tether.app.push.PushController
 import com.tether.app.ui.ClientLocator
@@ -114,5 +117,8 @@ class TetherApp : Application() {
             },
         )
 
+        // ta-nl5m (C4): a network change reaches the client with no Activity, inside the background grace.
+        ProcessNetworkWatch { ClientLocator.current() }
+            .register(getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)
     }
 }

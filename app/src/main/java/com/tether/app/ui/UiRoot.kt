@@ -1,9 +1,6 @@
 package com.tether.app.ui
 
-import android.content.Context
 import android.content.Intent
-import android.net.ConnectivityManager
-import android.net.Network
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,7 +35,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tether.app.client.ConnectionState
-import com.tether.app.client.DefaultNetworkWatch
 import com.tether.app.client.TetherClient
 import com.tether.app.push.ForegroundState
 import com.tether.app.push.PushScope
@@ -204,33 +199,8 @@ fun UiRoot(client: TetherClient, launchIntent: Intent? = null) {
     // Foreground/background is process-wide (ProcessLifecycleOwner, wired in
     // TetherApp): client.setAppForeground re-checks the link on return.
 
-    // Network: reconnect the moment a default network comes back. ta-coik.32 (R1): when the default
-    // network CHANGED, a socket opened on the previous one is dead: it is replaced at once rather
-    // than pinged for 8 s (the web's `online` only pings).
-    DisposableEffect(client) {
-        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-        val watch = DefaultNetworkWatch<Network>()
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                if (watch.available(network)) client.onDefaultNetworkChanged() else client.reconnectIfIdle()
-            }
-
-            override fun onLost(network: Network) {
-                watch.lost(network)
-            }
-        }
-        try {
-            manager?.registerDefaultNetworkCallback(callback)
-        } catch (_: Exception) {
-            // Missing permission or restricted context: reconnect still happens on resume.
-        }
-        onDispose {
-            try {
-                manager?.unregisterNetworkCallback(callback)
-            } catch (_: Exception) {
-            }
-        }
-    }
+    // Network changes are process-wide (ProcessNetworkWatch, wired in TetherApp): they reach the client
+    // inside the background grace too, with no Activity.
 
     TetherTheme(mode = themeMode) {
         val tokens = LocalTetherTokens.current

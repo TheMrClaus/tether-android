@@ -24,6 +24,9 @@ object ClientLocator {
             cached ?: factory(context.applicationContext).also { cached = it }
         }
 
+    /** The client if one was created already; never creates it. */
+    fun current(): TetherClient? = cached
+
     /** Tests only: the client MainActivity will obtain next (null forgets it). */
     @androidx.annotation.VisibleForTesting
     internal fun installForTest(client: TetherClient?) {
