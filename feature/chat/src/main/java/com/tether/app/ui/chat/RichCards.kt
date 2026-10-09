@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -48,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.tether.app.protocol.tree.JsObj
+import com.tether.app.ui.components.widthMaxContent
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.components.TetherExpandableBlock
@@ -483,7 +483,7 @@ private fun UnifiedDiffRows(allRows: List<UnifiedDiffRow>, label: String, limit:
                 }
             }
             Box(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
-                Column(Modifier.width(IntrinsicSize.Max).widthIn(min = viewport)) {
+                Column(Modifier.widthMaxContent().widthIn(min = viewport)) {
                     rows.forEach { row ->
                         val (bg, ink) = colors(row.kind)
                         Text(

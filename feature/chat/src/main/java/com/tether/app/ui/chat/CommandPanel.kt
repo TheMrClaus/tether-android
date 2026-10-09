@@ -48,6 +48,7 @@ import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
+import com.tether.app.ui.components.widthMaxContent
 import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.appendStyled
@@ -217,7 +218,7 @@ internal fun CommandOutputPanel(view: CommandOutputView) {
         // to the row's width (a long line wraps inside it).
         Column(
             Modifier
-                .width(androidx.compose.foundation.layout.IntrinsicSize.Max)
+                .widthMaxContent()
                 .clip(shape)
                 .background(t.mineralDeep)
                 .border(1.dp, t.line, shape)

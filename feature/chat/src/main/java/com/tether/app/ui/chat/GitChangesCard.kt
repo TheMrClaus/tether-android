@@ -6,7 +6,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.tether.app.protocol.ServerMessage
+import com.tether.app.ui.components.widthMaxContent
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.maxWidthFraction
@@ -336,7 +336,7 @@ private fun HunkPre(hunks: String) {
             .semantics { contentDescription = "Diff hunks" }
             .testTag("git-hunks"),
     ) {
-        Column(Modifier.width(IntrinsicSize.Max).padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm)) {
+        Column(Modifier.widthMaxContent().padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm)) {
             // Round 4: the same caps as the transcript's diffs, so the host (the inspector) cannot ship it
             // uncapped — DIFF_CARD_MAX_ROWS lines, each cut at UNIFIED_LINE_MAX, then "+N more lines".
             // R4-M2: walked with indexOf, at most DIFF_CARD_MAX_ROWS lines built, the rest only counted.

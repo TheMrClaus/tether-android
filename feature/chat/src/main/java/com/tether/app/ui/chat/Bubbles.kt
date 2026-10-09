@@ -14,7 +14,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -61,6 +60,7 @@ import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.currentLayoutClass
 import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.components.maxWidthFraction
+import com.tether.app.ui.components.widthMaxContent
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
@@ -134,7 +134,7 @@ internal fun BubbleBox(look: BubbleLook, alignEnd: Boolean, modifier: Modifier, 
                 // growing text out once more per delta, and the text sizes itself to its content anyway, so its
                 // bounds, the caret (start-aligned) and the paragraph alignment are the same without it; the
                 // bubble is transparent and borderless, so nothing else shows the column's width.
-                .then(if (shrinkToFit) Modifier.width(IntrinsicSize.Max) else Modifier)
+                .then(if (shrinkToFit) Modifier.widthMaxContent() else Modifier)
                 .cssSurface(look.shape, background = look.background, border = look.border, shadows = look.shadows)
                 .padding(look.border?.width ?: 0.dp)
                 .padding(look.padding),

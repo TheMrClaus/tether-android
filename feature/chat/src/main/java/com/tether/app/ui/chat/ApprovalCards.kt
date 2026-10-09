@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,6 +44,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.draw.drawWithCache
+import com.tether.app.ui.components.widthMaxContent
 import com.tether.app.ui.components.focusRing
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -1233,7 +1233,7 @@ internal fun AnsweredQuestionCard(view: AnsweredView, modifier: Modifier = Modif
     Row(modifier.fillMaxWidth()) {
         Column(
             Modifier
-                .width(IntrinsicSize.Max)
+                .widthMaxContent()
                 .widthIn(max = 10_000.dp)
                 .cssSurface(
                     cardShape(t),
