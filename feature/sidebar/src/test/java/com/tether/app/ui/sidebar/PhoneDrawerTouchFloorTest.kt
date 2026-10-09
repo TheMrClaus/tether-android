@@ -1,9 +1,12 @@
 package com.tether.app.ui.sidebar
 
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tether.app.ui.theme.TetherSkin
 import org.junit.Assert.assertTrue
@@ -25,13 +28,18 @@ class PhoneDrawerTouchFloorTest {
     private val F = SidebarFixtures
 
     private fun show(state: SidebarState) {
-        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state) }
+        // Unspecified turns Material's 48 dp inflation off, so a control reaches the floor only by its own size.
+        rule.setContent {
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                SidebarUnderTest(TetherSkin.StudioDark, state)
+            }
+        }
         rule.waitForIdle()
     }
 
     private fun assertEveryControlIs48(state: SidebarState) {
         show(state)
-        val floor = with(rule.density) { PhoneDrawer.Floor.toPx() }
+        val floor = with(rule.density) { 48.dp.toPx() } // the owner-directed 48 dp literal, not the constant under test
         val nodes = rule.onAllNodes(hasClickAction(), useUnmergedTree = true).fetchSemanticsNodes()
         assertTrue("the drawer has controls", nodes.size > 20)
         // The laid-out size, not the bounds clipped to the viewport: a row half scrolled off is still 48 tall.
@@ -51,7 +59,7 @@ class PhoneDrawerTouchFloorTest {
 
     @Test fun consecutiveRowsAreAtLeast48dpApart() {
         show(F.state(F.drawerSessions))
-        val floor = with(rule.density) { PhoneDrawer.Floor.toPx() }
+        val floor = with(rule.density) { 48.dp.toPx() } // the owner-directed 48 dp literal, not the constant under test
         val tops = rule.rowNodes().map { it.boundsInRoot.top }.sorted()
         assertTrue("several rows are drawn: $tops", tops.size >= 6)
         tops.zipWithNext().forEach { (a, b) -> assertTrue("rows $a and $b are under 48dp apart", b - a + 0.5f >= floor) }
