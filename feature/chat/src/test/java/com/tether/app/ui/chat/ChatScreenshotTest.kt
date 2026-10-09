@@ -57,14 +57,19 @@ fun ComposeContentTestRule.snapChat(shot: ChatShot, skin: TetherSkin, name: Stri
     val listState = LazyListState()
     setContent {
         ChatHost(skin, wellHeight, wellWidth) {
-            ChatTranscript(
-                projection = fixture.projection,
-                tree = fixture.tree,
-                showThinking = shot == ChatShot.ThinkingClosed || shot == ChatShot.ThinkingOpen,
-                onFetchTurns = { _, _ -> },
-                zone = ChatFixtures.zone,
-                listState = listState,
-            )
+            if (shot == ChatShot.ThinkingOpen) {
+                // ta-a5jl: the thinking row's sheet, drawn in place over the transcript (a Dialog is not in a node capture).
+                ActivityBoardContent(fixture, activityKey("t1", "t1:th0"), richCodex = false, showThinking = true, docked = true)
+            } else {
+                ChatTranscript(
+                    projection = fixture.projection,
+                    tree = fixture.tree,
+                    showThinking = shot == ChatShot.ThinkingClosed,
+                    onFetchTurns = { _, _ -> },
+                    zone = ChatFixtures.zone,
+                    listState = listState,
+                )
+            }
         }
     }
     mainClock.advanceTimeBy(CaptureAtMs)
@@ -79,7 +84,6 @@ fun ComposeContentTestRule.snapChat(shot: ChatShot, skin: TetherSkin, name: Stri
             mainClock.advanceTimeBy(CaptureAtMs)
             runOnIdle { runBlocking { listState.scrollToItem(0) } }
         }
-        ChatShot.ThinkingOpen -> onNodeWithContentDescription("Thinking").performClick()
         ChatShot.CodeCopied -> onAllNodes(hasContentDescription("Copy code")).onFirst().performClick()
         else -> Unit
     }

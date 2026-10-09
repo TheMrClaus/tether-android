@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.Dp
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.tether.app.protocol.ServerMessage
+import com.tether.app.ui.components.TetherLayoutClass
+import com.tether.app.ui.components.currentLayoutClass
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherSkin
 import kotlinx.coroutines.runBlocking
@@ -61,6 +63,15 @@ private fun fixtureFor(shot: ToolShot): ChatFixtures.Folded = when (shot) {
     ToolShot.GitChanges -> ToolFixtures.tools // unused: the card renders alone
 }
 
+/** The sheet key of the fixture's interrupted tool block (the one whose sheet holds the CLI's evidence). */
+private fun interruptedKey(fixture: ChatFixtures.Folded): String {
+    for (turnId in fixture.projection.turnOrder) {
+        val blocks = ((fixture.tree["turnsById"] as com.tether.app.protocol.tree.JsObj)[turnId] as com.tether.app.protocol.tree.JsObj)["blocksById"] as com.tether.app.protocol.tree.JsObj
+        for (id in blocks.keys) if ((blocks[id] as? com.tether.app.protocol.tree.JsObj)?.isInterrupted() == true) return activityKey(turnId, id)
+    }
+    error("no interrupted tool block in the fixture")
+}
+
 private val gitSummary = WorktreeDiffSummaryView(
     baseRef = "origin/main",
     commitsAhead = 2.0,
@@ -88,6 +99,10 @@ fun ComposeContentTestRule.snapTools(shot: ToolShot, skin: TetherSkin, name: Str
                     Box(Modifier.fillMaxSize().padding(horizontal = LocalTetherTokens.current.css.spaceMd, vertical = LocalTetherTokens.current.css.spaceLg)) {
                         GitChangesCard(gitSummary, gitDiffs, onRequestFile = {})
                     }
+                } else if (shot == ToolShot.Interrupted) {
+                    // ta-a5jl: the interrupted call is a row now; its evidence disclosure lives in the row's sheet, drawn here in place.
+                    val fixture = fixtureFor(shot)
+                    ActivityBoardContent(fixture, interruptedKey(fixture), richCodex = false, showThinking = false, docked = currentLayoutClass() == TetherLayoutClass.Phone)
                 } else {
                     val fixture = fixtureFor(shot)
                     ChatTranscript(
@@ -108,14 +123,15 @@ fun ComposeContentTestRule.snapTools(shot: ToolShot, skin: TetherSkin, name: Str
     waitForIdle()
     mainClock.autoAdvance = true
     when (shot) {
-        ToolShot.ToolsOpen, ToolShot.Interrupted -> {
+        ToolShot.ToolsOpen -> {
             onNodeWithTag("tool-activity-group").performClick()
             waitForIdle()
             onNodeWithTag("chat-transcript").performTouchInput { swipeDown() }
             waitForIdle()
             onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("tool-activity-group"))
-            if (shot == ToolShot.Interrupted) onNodeWithText("What the CLI reported").performClick()
         }
+        // ta-a5jl: the disclosure is inside the sheet now (opened for the interrupted row); expand it there.
+        ToolShot.Interrupted -> onNodeWithText("What the CLI reported").performClick()
         ToolShot.Codex -> {
             onNodeWithTag("chat-transcript").performTouchInput { swipeDown() }
             mainClock.advanceTimeBy(CaptureAtMs)

@@ -23,6 +23,7 @@ import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.protocol.tree.js
 import com.tether.app.ui.theme.TetherSkin
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -106,6 +107,39 @@ class SubagentThreadPagingTest {
             .performClick()
         rule.waitForIdle()
         rule.onAllNodesWithTag("steps-more").assertCountEquals(0)
+    }
+
+    /** ta-a5jl: the paging key through the shipped path: the transcript, the Agent's row, a tap, the sheet. */
+    @Test fun theSheetOfARowPagesTheNextFiftyStepsToo() {
+        val events = ArrayList<com.tether.app.protocol.AgentEvent>()
+        events += com.tether.app.protocol.reduce.ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k") }
+        events += com.tether.app.protocol.reduce.ev("tool_start", "t1", ts = 1) {
+            put("toolId", "task-1"); put("name", "Agent"); put("input", com.tether.app.protocol.TetherJson.parseToJsonElement("""{"description":"Read all"}"""))
+        }
+        val items = (1..120).joinToString(",", "[", "]") { n ->
+            val out = if (n == 110) {
+                """[{"type":"media_ref","mediaKind":"image","mediaType":"image/png","url":"${ToolFixtures.CHART_URL}"}]"""
+            } else {
+                "\"ok $n\""
+            }
+            """{"key":"e$n","kind":"tool","name":"Read","input":{"file_path":"f$n"}},{"key":"e$n","kind":"tool_result","isError":false,"output":$out}"""
+        }
+        events += com.tether.app.protocol.reduce.ev("subagent_message", "t1", ts = 1) {
+            put("parentToolUseId", "task-1"); put("items", com.tether.app.protocol.TetherJson.parseToJsonElement(items))
+        }
+        events += com.tether.app.protocol.reduce.ev("tool_end", "t1", ts = 1) { put("toolId", "task-1"); put("output", "finished") }
+        rule.showTranscript(ChatFixtures.fold(*events.toTypedArray()), groupsOpen = true)
+        rule.openRow("Agent Read all, done")
+        val inSheet = androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog())
+        // Presence first: the sheet's thread holds 50 and counts the rest; then the key pages, and at the end it is gone.
+        rule.onAllNodes(androidx.compose.ui.test.hasText("+70 more steps") and inSheet).fetchSemanticsNodes().single()
+        rule.onNode(androidx.compose.ui.test.hasTestTag("steps-more") and inSheet).performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.onAllNodes(androidx.compose.ui.test.hasText("+20 more steps") and inSheet).fetchSemanticsNodes().single()
+        rule.onNode(androidx.compose.ui.test.hasTestTag("steps-more") and inSheet).performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.onNode(androidx.compose.ui.test.hasText("f120", substring = true) and inSheet, useUnmergedTree = true).assertExists()
+        assertEquals(0, rule.onAllNodes(androidx.compose.ui.test.hasTestTag("steps-more") and inSheet).fetchSemanticsNodes().size)
     }
 }
 

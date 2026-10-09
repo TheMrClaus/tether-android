@@ -84,21 +84,48 @@ class ToolCardBehaviourTest {
     /** The group header, scrolled into view first (follow mode pins the transcript's bottom). */
     private fun group() = rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("tool-activity-group")).let { rule.onNodeWithTag("tool-activity-group") }
 
+    // ta-a5jl: a tool call is a row; its card (head, input, output, evidence, diff) is in the sheet a tap opens.
+    private fun inSheet(m: SemanticsMatcher) = m and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog())
+
+    private fun sheets() = rule.onAllNodes(androidx.compose.ui.test.isDialog()).fetchSemanticsNodes().size
+
+    private fun rows() = rule.onAllNodesWithTag("activity-row").fetchSemanticsNodes().size
+
+    private fun cards() = rule.onAllNodesWithTag("tool-card").fetchSemanticsNodes().size
+
+    /** Taps the row whose name starts [prefix] and checks that its sheet opened. */
+    private fun open(prefix: String) {
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(rowLabel(prefix))
+        rule.onNode(rowLabel(prefix)).performClick()
+        rule.waitForIdle()
+        assertEquals("the sheet of \"$prefix\" opened", 1, sheets())
+    }
+
+    private fun closeSheet() {
+        rule.onNode(inSheet(hasContentDescription("Close"))).performClick()
+        rule.waitForIdle()
+        assertEquals(0, sheets())
+    }
+
     private val summary = "1 file read, 2 searches, 2 shell commands, 2 file edits, 1 file write, 1 web request, 1 tool call"
 
     @Test fun aFinishedRunCollapsesIntoItsSummaryAndExpandsOnTap() {
         show(ToolFixtures.tools)
         group().assert(hasContentDescription(summary)).assert(collapsed)
-        // Only the media card (kept out of the group) is a tool card while collapsed.
-        assertEquals(1, rule.onAllNodesWithTag("tool-card").fetchSemanticsNodes().size)
+        // Only the call kept out of the group (it returned a picture) is on screen, as a row; no call is a card.
+        rule.onNode(rowLabel("Tool mcp__parity__render_chart")).assertExists()
+        assertEquals(1, rows())
+        assertEquals(0, cards())
         group().performClick()
         rule.waitForIdle()
         group().assert(expanded)
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("src/config.ts", substring = true))
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(rowLabel("Edit src/config.ts"))
+        assertTrue("the group's calls are rows now: ${rows()}", rows() > 1)
+        assertEquals(0, cards())
         group().performClick()
         rule.waitForIdle()
         group().assert(collapsed)
-        assertEquals(1, rule.onAllNodesWithTag("tool-card").fetchSemanticsNodes().size)
+        assertEquals(1, rows())
     }
 
     @Test fun aRunningRunIsOpenAndClosesWhenItFinishesLikeReactsDetails() {
@@ -117,7 +144,8 @@ class ToolCardBehaviourTest {
         }
         rule.waitForIdle()
         group().assert(expanded)
-        rule.onNodeWithText("running · 12s").assert(hasContentDescription("running · 12s"))
+        rule.onNode(rowLabel("Shell npm run e2e, running, 12s")).assertExists()
+        rule.onNode(hasTestTag("activity-row-status") and hasText("running · 12s"), useUnmergedTree = true).assertExists()
         // The reader closes it while it runs: it stays closed.
         group().performClick()
         rule.waitForIdle()
@@ -155,18 +183,27 @@ class ToolCardBehaviourTest {
         show(ToolFixtures.codexTools, richCodex = true)
         // The file change keeps its run open after the turn (hasFileChange).
         group().assert(expanded)
-        rule.onAllNodesWithContentDescription("Codex command").onFirst().assertExists()
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasContentDescription("Codex file changes"))
+        rule.onNode(rowLabel("Shell npm test, done")).assertExists()
+        assertEquals(0, rule.onAllNodesWithTag("rich-card").fetchSemanticsNodes().size)
+        // The command's rich card is its sheet's body.
+        open("Shell npm test, done")
+        rule.onNode(inSheet(hasContentDescription("Codex command")), useUnmergedTree = true).assertExists()
+        closeSheet()
+        open("Edit src/config.ts")
+        rule.onNode(inSheet(hasContentDescription("Codex file changes")), useUnmergedTree = true).assertExists()
         // A headerless patch is labelled "Patch 1", as in the web shot.
-        rule.onNodeWithContentDescription("Unified diff for Patch 1").assertExists()
+        rule.onNode(inSheet(hasContentDescription("Unified diff for Patch 1")), useUnmergedTree = true).assertExists()
         assertEquals(0, rule.onAllNodesWithTag("tool-card").fetchSemanticsNodes().size)
     }
 
     @Test fun withoutTheGateCodexToolsRenderAsGenericCards() {
         show(ToolFixtures.codexTools, richCodex = false)
         group().assert(expanded)
+        rule.onNode(rowLabel("Shell npm test, done")).assertExists()
+        open("Shell npm test, done")
+        // The generic card names the tool as the engine called it; no rich card draws.
+        rule.onNode(inSheet(hasText("command_execution")), useUnmergedTree = true).assertExists()
         assertEquals(0, rule.onAllNodesWithTag("rich-card").fetchSemanticsNodes().size)
-        rule.onAllNodesWithText("command_execution").onFirst().assertExists()
     }
 
     @Test fun codexTurnDetailsShowThePlanTheTurnDiffAndReviews() {
@@ -192,18 +229,27 @@ class ToolCardBehaviourTest {
         show(ToolFixtures.corpusFinal("tool-lifecycle-progress"))
         group().assert(hasContentDescription("1 shell command, 1 file read · 1 interrupted")).performClick()
         rule.waitForIdle()
-        rule.onNodeWithText("interrupted").assertExists()
-        assertEquals(0, rule.onAllNodesWithText("[Request interrupted by user for tool use]").fetchSemanticsNodes().size)
-        rule.onNodeWithText("What the CLI reported").performClick()
+        val interrupted = hasTestTag("activity-row") and hasContentDescription(", interrupted", substring = true)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(interrupted)
+        rule.onNode(hasTestTag("activity-row-status") and hasText("interrupted"), useUnmergedTree = true).assertExists()
+        rule.onNode(interrupted).performClick()
         rule.waitForIdle()
-        rule.onNodeWithText("[Request interrupted by user for tool use]").assertExists()
+        assertEquals(1, sheets())
+        rule.onNode(inSheet(hasText("interrupted")), useUnmergedTree = true).assertExists()
+        assertEquals(0, rule.onAllNodes(inSheet(hasText("[Request interrupted by user for tool use]")), useUnmergedTree = true).fetchSemanticsNodes().size)
+        rule.onNode(inSheet(hasText("What the CLI reported"))).performClick()
+        rule.waitForIdle()
+        rule.onNode(inSheet(hasText("[Request interrupted by user for tool use]")), useUnmergedTree = true).assertExists()
     }
 
     @Test fun opencodeTasksUnwrapTheirResultEnvelope() {
         show(ToolFixtures.opencodeTask, richOpencode = true)
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("Two test files: greeting and config."))
-        assertEquals(0, rule.onAllNodesWithText("<task_result>", substring = true).fetchSemanticsNodes().size)
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("Waiting for the subagent…"))
+        open("Agent Survey the tests, done")
+        rule.onNode(inSheet(hasText("Two test files: greeting and config.")), useUnmergedTree = true).assertExists()
+        assertEquals(0, rule.onAllNodes(inSheet(hasText("<task_result>", substring = true)), useUnmergedTree = true).fetchSemanticsNodes().size)
+        closeSheet()
+        open("Agent Check the changelog, running")
+        rule.onNode(inSheet(hasText("Waiting for the subagent…")), useUnmergedTree = true).assertExists()
     }
 
     @Test fun mediaLoadsThroughTheLoaderOnceAndOpensTheViewer() {
@@ -242,11 +288,14 @@ class ToolCardBehaviourTest {
         show(ChatFixtures.Folded(LegacyProjectionAdapter.adaptOnce(tree)!!, tree))
         group().performClick()
         rule.waitForIdle()
-        val toggle = rule.onAllNodesWithContentDescription("more line", substring = true).onFirst()
+        // The row is one line; the long output is in its sheet, clamped behind the toggle there.
+        assertEquals(0, rule.onAllNodesWithContentDescription("more line", substring = true).fetchSemanticsNodes().size)
+        open("Shell seq 60, done")
+        val toggle = rule.onAllNodes(inSheet(hasContentDescription("more line", substring = true))).onFirst()
         toggle.assertExists()
         toggle.performClick()
         rule.waitForIdle()
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasContentDescription("Show less"))
+        rule.onNode(inSheet(hasContentDescription("Show less"))).assertExists()
     }
 
     @Test fun theGitChangesCardRequestsEachFileOnceAndShowsItsState() {

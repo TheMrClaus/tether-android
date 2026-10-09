@@ -222,8 +222,11 @@ class TranscriptBidiBehaviourTest {
             "> quote ${RLO}four$PDF",
         ).joinToString("\n")
         show(fixture("Show me.", reply, thinking = "think ${RLO}deep$PDF"))
-        rule.onNodeWithContentDescription("Thinking").performClick()
+        // ta-a5jl: the thinking is a row; its markdown is in the sheet the row opens.
+        rule.onNode(rowLabel("Thinking, done")).assertExists()
+        rule.onNode(rowLabel("Thinking, done")).performClick()
         rule.waitForIdle()
+        rule.onNode(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Thinking"), useUnmergedTree = true).assertExists()
         for (expected in listOf(
             "Heading ${tok(0x202A)}one${tok(0x202C)}", "Rename ${tok(0x202E)}gnp.exe${tok(0x202C)}", "the ${tok(0x202E)}label${tok(0x202C)}",
             "item ${tok(0x202D)}two${tok(0x202C)}", "cell ${tok(0x202B)}three${tok(0x202C)}", "quote ${tok(0x202E)}four${tok(0x202C)}",
@@ -560,6 +563,10 @@ class TranscriptBidiBehaviourTest {
         show(f)
         rule.onNodeWithTag("tool-activity-group").performClick()
         rule.waitForIdle()
+        // ta-a5jl: the call is a row; its output is drawn as code in the sheet the row opens.
+        rule.onNode(rowLabel("Shell ls, done")).performClick()
+        rule.waitForIdle()
+        rule.onNode(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Shell"), useUnmergedTree = true).assertExists()
         rule.onNodeWithText("out ${tok(0x202E)}txt.exe${tok(0x202C)}$WJ$ZWSP${tok(0x200B)}", substring = true, useUnmergedTree = true).assertExists()
         assertNoRawOverride()
     }
@@ -578,6 +585,9 @@ class TranscriptBidiBehaviourTest {
         )
         show(f, richCodex = true)
         rule.onAllNodesWithTag("tool-activity-group").fetchSemanticsNodes().let { if (it.isNotEmpty()) rule.onNodeWithTag("tool-activity-group").performClick() }
+        rule.waitForIdle()
+        // ta-a5jl: the command is a row; its terminal output is in the sheet.
+        rule.onNode(rowLabel("Shell npm test, done")).performClick()
         rule.waitForIdle()
         rule.onNodeWithText("FAIL ${tok(0x202E)}exe.txt", substring = true, useUnmergedTree = true).assertExists()
         rule.onNodeWithText("${tok(0x1B)}[2Kx", substring = true, useUnmergedTree = true).assertExists()
@@ -723,7 +733,7 @@ class TranscriptBidiBehaviourTest {
         val kinds = ChatItem::class.java.declaredClasses.filter { ChatItem::class.java.isAssignableFrom(it) && it != ChatItem::class.java }.map { it.simpleName }.toSet()
         val present = items.map { it::class.java.simpleName }.toSet()
         assertEquals("selectable kinds missing from the walks", emptySet<String>(), kinds - notSelectable - cardKinds - present)
-        for (item in items) assertEquals(item::class.java.simpleName, item::class.java.simpleName !in notSelectable, item.selectableText)
+        for (item in items) assertEquals(item::class.java.simpleName, if (item is ChatItem.Block) !item.isActivityRow else item::class.java.simpleName !in notSelectable, item.selectableText)
 
         show(f, richCodex = true)
         // Row by row (the well is a lazy list): open every closed group and thinking card, read everything.
@@ -732,13 +742,22 @@ class TranscriptBidiBehaviourTest {
         for (index in 0 until items.size + 8) {
             runCatching { rule.onNodeWithTag("chat-transcript").performScrollToIndex(index) }
             rule.waitForIdle()
-            val toggles = androidx.compose.ui.test.hasTestTag("tool-activity-group") or androidx.compose.ui.test.hasContentDescription("Thinking")
+            val toggles = androidx.compose.ui.test.hasTestTag("tool-activity-group")
             var guard = 0
             while (guard++ < 10 && rule.onAllNodes(toggles and collapsed).fetchSemanticsNodes().isNotEmpty()) {
                 rule.onAllNodes(toggles and collapsed).onFirst().performClick()
                 rule.waitForIdle()
             }
             all += spoken()
+            // ta-a5jl: a tool call and a thinking block are rows; their words are in the sheets: open each row on screen, read its sheet, close it.
+            val labels = rule.onAllNodes(androidx.compose.ui.test.hasTestTag("activity-row")).fetchSemanticsNodes().map { it.config[SemanticsProperties.ContentDescription].first() }
+            for (label in labels) {
+                rule.onNode(androidx.compose.ui.test.hasTestTag("activity-row") and androidx.compose.ui.test.hasContentDescription(label)).performClick()
+                rule.waitForIdle()
+                all += spoken()
+                rule.onNode(androidx.compose.ui.test.hasContentDescription("Close") and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog())).performClick()
+                rule.waitForIdle()
+            }
         }
         val forbidden = (ALL_BIDI.map { it[0] } + (0x00..0x1F).filter { it != 0x09 && it != 0x0A }.map { it.toChar() } + (0x7F..0x9F).map { it.toChar() }).toSet()
         for (word in listOf("user", "think", "reply", "code", "err", "head", "ask", "ans", "plan", "step", "target", "result", "again", "out")) {
@@ -790,7 +809,7 @@ class TranscriptBidiBehaviourTest {
         val items = buildChatItems(f.projection, f.tree, showThinking = true, zone = ChatFixtures.zone, richCodex = true)
         val present = items.map { it::class.java.simpleName }.toSet()
         assertEquals("card kinds missing from the walk", emptySet<String>(), cardKinds - present)
-        for (item in items) assertEquals(item::class.java.simpleName, item::class.java.simpleName !in notSelectable, item.selectableText)
+        for (item in items) assertEquals(item::class.java.simpleName, if (item is ChatItem.Block) !item.isActivityRow else item::class.java.simpleName !in notSelectable, item.selectableText)
 
         show(f, richCodex = true)
         val all = LinkedHashSet<String>()

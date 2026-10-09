@@ -362,6 +362,8 @@ class ToolSafetyTest {
             }
         }
         rule.waitForIdle()
+        // ta-a5jl: the running command is a row (its run holds the group open); its output is in the sheet a tap opens.
+        rule.openRow("Shell yes, running")
         // (A node taller than the viewport sends performScrollToNode round forever: read the tree.)
         fun texts() = rule.onAllNodes(hasText("line", substring = true)).fetchSemanticsNodes()
             .map { it.config[SemanticsProperties.Text].joinToString("") { t -> t.text } }
@@ -397,6 +399,8 @@ class ToolSafetyTest {
         rule.waitForIdle()
         rule.onNodeWithTag("tool-activity-group").performClick()
         rule.waitForIdle()
+        // ta-a5jl: the output is in the row's sheet.
+        rule.openRow("Shell yes, done")
         rule.onNodeWithContentDescription("Show more").performClick()
         rule.waitForIdle()
         val texts = rule.onAllNodes(hasText("line", substring = true)).fetchSemanticsNodes()
@@ -491,8 +495,10 @@ class ToolSafetyTest {
             }
         }
         rule.waitForIdle()
+        // ta-a5jl: the file change is a row (its run is held open); the diff is in the sheet.
+        rule.openRow("Edit big.ts, done")
         rule.onNodeWithContentDescription("Show more").performClick()
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasText("+1,002 more lines")) // 3,001 rows; the path row costs one of the 2,000
+        rule.onNode(hasText("+1,002 more lines")).assertExists() // 3,001 rows; the path row costs one of the 2,000
         // The 5,000-character first line is cut at UNIFIED_LINE_MAX characters (it never wraps).
         val first = rule.onAllNodes(hasText("yyyy", substring = true)).fetchSemanticsNodes()
             .map { it.config[SemanticsProperties.Text].joinToString("") { t -> t.text } }.maxByOrNull { it.length }!!
@@ -542,6 +548,22 @@ class ToolSafetyTest {
         rule.waitForIdle()
         assertEquals("the whole card loads 12 pictures", 12, loader.loads.distinct().size)
         assertTrue(rule.onAllNodesWithTag("tool-media-more").fetchSemanticsNodes().isNotEmpty())
+    }
+
+    /** ta-a5jl: the same card, entered the way a reader does: the transcript, the Task's row, a tap, the sheet. */
+    @Test fun theTaskCardsTileBudgetHoldsInItsRowAndSheet() {
+        val fixture = mediaHeavyTask()
+        val loader = ToolFixtures.FakeLoader()
+        rule.showTranscript(fixture, loader = loader)
+        rule.onNode(rowLabel("Agent shots, done")).assertExists()
+        // The row draws the Task's own result pictures under itself (they were its card's); the sheet is empty of them so far.
+        val inline = loader.loads.distinct().size
+        assertTrue("the row's own result tiles load: $inline", inline in 1..12)
+        rule.openRow("Agent shots, done")
+        rule.onAllNodes(hasTestTag("tool-media-more") and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog()), useUnmergedTree = true).fetchSemanticsNodes().let {
+            assertTrue("the sheet's card keeps its picture budget: more-tile present", it.isNotEmpty())
+        }
+        assertTrue("the sheet loads the sub-agent pictures too: ${loader.loads.distinct().size}", loader.loads.distinct().size > inline)
     }
 
     @Test fun thumbnailsDecodeToWhatATileShows() {

@@ -144,6 +144,24 @@ class ExternalLinkBehaviourTest {
         assertNoSheet("thinking")
     }
 
+    /** ta-a5jl: the same link in thinking, entered the way a reader does: the transcript, the Thinking row, a tap, the sheet. */
+    @Test fun aLinkInThinkingOpensAtOnceFromItsSheet() {
+        val fixture = ChatFixtures.fold(*ChatFixtures.turn("t1", "Look it up.", "Done.", ChatFixtures.T_IDLE, thinking = "Considering\n\n[see](https://example.com)"))
+        rule.setContent {
+            CompositionLocalProvider(LocalLinkOpener provides recorder) {
+                ChatHost(TetherSkin.StudioDark) {
+                    ChatTranscript(projection = fixture.projection, tree = fixture.tree, showThinking = true, onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, showTimeline = false)
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.onNode(hasContentDescription("Thinking, done")).performClick()
+        rule.waitForIdle()
+        rule.onNode(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Thinking"), useUnmergedTree = true).assertExists()
+        tapLink()
+        assertEquals(listOf("https://example.com"), opened)
+    }
+
     // ---- the scheme set is the web renderer's -------------------------------------------------
 
     /** markdown.tsx `SAFE_HREF = /^(https?:\/\/|mailto:)/i`: JS `/i` without `u` folds ASCII only, as Java's CASE_INSENSITIVE alone does. */

@@ -5,6 +5,8 @@ import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -157,20 +159,34 @@ class ChatBehaviourTest {
     }
 
     @Test
-    fun thinkingIsCollapsedByDefaultAndTogglesInPlace() {
+    fun thinkingIsOneRowAndItsTextOpensInASheet() {
         show(ChatFixtures.thinking, showThinking = true)
-        val head = rule.onNodeWithContentDescription("Thinking")
-        head.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
-        assertEquals(0, rule.onAllNodes(androidx.compose.ui.test.hasText("attempt 1 fails", substring = true)).fetchSemanticsNodes().size)
-        head.performClick()
+        // ta-a5jl: the web's collapsed <details> is a row here; the reasoning is in the sheet its tap opens.
+        rule.onNode(rowLabel("Thinking, done")).assertExists()
+        assertEquals(0, rule.onAllNodes(androidx.compose.ui.test.hasText("attempt 1 fails", substring = true), useUnmergedTree = true).fetchSemanticsNodes().size)
+        rule.onNode(rowLabel("Thinking, done")).performClick()
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("Thinking").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
-        rule.onNodeWithText("attempt 1 fails", substring = true).assertIsDisplayed()
+        rule.onNode(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Thinking"), useUnmergedTree = true).assertExists()
+        rule.onNode(androidx.compose.ui.test.hasText("attempt 1 fails", substring = true) and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog()), useUnmergedTree = true).assertExists()
     }
 
     @Test
     fun thinkingHiddenWhenThePreferenceIsOff() {
-        show(ChatFixtures.thinking, showThinking = false)
+        var showThinking by androidx.compose.runtime.mutableStateOf(true)
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) {
+                ChatTranscript(
+                    projection = ChatFixtures.thinking.projection, tree = ChatFixtures.thinking.tree, showThinking = showThinking,
+                    onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone,
+                )
+            }
+        }
+        rule.waitForIdle()
+        // The preference on: the row is there; off: nothing of it is (the web's default: off).
+        rule.onNode(rowLabel("Thinking, done")).assertExists()
+        rule.runOnIdle { showThinking = false }
+        rule.waitForIdle()
+        assertEquals(0, rule.onAllNodes(rowLabel("Thinking")).fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithContentDescription("Thinking").fetchSemanticsNodes().size)
     }
 

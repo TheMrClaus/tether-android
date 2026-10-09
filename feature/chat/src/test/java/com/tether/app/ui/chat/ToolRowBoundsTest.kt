@@ -20,6 +20,7 @@ import com.tether.app.protocol.tree.JsStr
 import com.tether.app.protocol.tree.JsValue
 import com.tether.app.ui.theme.TetherSkin
 import kotlin.random.Random
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -120,6 +121,27 @@ class ToolRowBoundsTest {
         rule.waitForIdle()
         rule.onAllNodes(hasText("+19,953 more steps")).fetchSemanticsNodes().single()
         rule.onAllNodes(hasText("step 0")).fetchSemanticsNodes().single()
+    }
+
+    /** ta-a5jl: the bounded-rows rule, entered through the transcript: the Task's row, a tap, the sheet. */
+    @Test fun aRunningTasksSheetDrawsOnlyItsNewestFiftySteps() {
+        val events = ArrayList<com.tether.app.protocol.AgentEvent>()
+        events += com.tether.app.protocol.reduce.ev("turn_started", "t1", ts = 1) { put("idempotencyKey", "k") }
+        events += com.tether.app.protocol.reduce.ev("tool_start", "t1", ts = 1) {
+            put("toolId", "task"); put("name", "Task"); put("input", com.tether.app.protocol.TetherJson.parseToJsonElement("""{"description":"Walk the tree"}"""))
+        }
+        val items = (0 until 600).joinToString(",", "[", "]") { """{"key":"s$it","kind":"message","text":"step $it"}""" }
+        events += com.tether.app.protocol.reduce.ev("subagent_message", "t1", ts = 1) {
+            put("parentToolUseId", "task"); put("items", com.tether.app.protocol.TetherJson.parseToJsonElement(items))
+        }
+        rule.showTranscript(ChatFixtures.fold(*events.toTypedArray()))
+        rule.onNode(rowLabel("Agent Walk the tree, running")).assertExists()
+        rule.openRow("Agent Walk the tree, running")
+        val inSheet = androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog())
+        rule.onAllNodes(hasText("+550 earlier steps") and inSheet).fetchSemanticsNodes().single()
+        val drawn = rule.onAllNodes(hasText("step ", substring = true) and inSheet).fetchSemanticsNodes().size
+        assertTrue("bounded rows in the sheet: $drawn", drawn in 1..SUBAGENT_ROWS_MAX)
+        rule.onAllNodes(hasText("step 599") and inSheet).fetchSemanticsNodes().single()
     }
 
     @Test fun theTilePlanCoversOnlyTheDrawnSteps() {
