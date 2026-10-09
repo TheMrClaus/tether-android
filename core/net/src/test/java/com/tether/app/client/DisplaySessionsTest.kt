@@ -185,4 +185,31 @@ class DisplaySessionsTest {
     @Test fun theHourWordFlipsAtItsBoundaryThroughTheFlow() = runBoundary(3_595_000)
 
     @Test fun theDayWordFlipsAtItsBoundaryThroughTheFlow() = runBoundary(86_395_000)
+
+    // ---- round 4: the sidebar's own stamps (a missing lastMessageAt sorts by updatedAt) ----
+
+    @Test fun aRowWithoutALastMessageStampCrossingAnotherInLastActiveIsADifferentDrawing() {
+        // SidebarOrder sorts last-active by `lastMessageAt ?: updatedAt`: a has no message stamp, so it sorts by updatedAt.
+        fun a(updatedAt: Long) = session("a", updatedAt).copy(lastMessageAt = null)
+        val b = session("b", base + 9_000).copy(lastMessageAt = base + 9_500)
+        val held = listOf(a(base + 9_400), b)
+        // Still below b's message stamp: the same order.
+        assertTrue(SessionDisplay.equivalent(held, listOf(a(base + 9_450), b), base + 20_000))
+        // Past it: a is now ahead of b in last-active although the updatedAt order (a, b) did not change.
+        assertFalse(SessionDisplay.equivalent(held, listOf(a(base + 9_600), b), base + 20_000))
+    }
+
+    @Test fun aRowWithoutALastMessageStampStaysHeldOnlyWhileTheOrderHolds() = runTest {
+        val b = session("b", base + 9_000).copy(lastMessageAt = base + 9_500)
+        fun a(updatedAt: Long) = session("a", updatedAt).copy(lastMessageAt = null)
+        val source = MutableStateFlow(listOf(a(base + 9_400), b))
+        val drawn = displayStable(source, backgroundScope, clock = { base + 20_000 + currentTime })
+        runCurrent()
+        source.value = listOf(a(base + 9_450), b)
+        runCurrent()
+        assertEquals(base + 9_400, drawn.value.first().updatedAt)
+        source.value = listOf(a(base + 9_600), b)
+        runCurrent()
+        assertEquals(base + 9_600, drawn.value.first().updatedAt)
+    }
 }

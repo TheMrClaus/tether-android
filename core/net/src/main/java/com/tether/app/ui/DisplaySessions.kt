@@ -1,6 +1,7 @@
 package com.tether.app.ui
 
 import com.tether.app.protocol.helpers.Format
+import com.tether.app.protocol.helpers.SidebarOrder
 import com.tether.app.protocol.model.AgentSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -27,7 +28,13 @@ object SessionDisplay {
      * The one equality: [next] draws exactly what [held] draws at [now] (and, by [holdsUntil], until then).
      * [history] is the history rows' `updatedAt` by history id: they sit in the same sidebar orders as the live rows.
      */
-    fun equivalent(held: List<AgentSession>, next: List<AgentSession>, now: Long, history: Map<String, Long> = emptyMap()): Boolean {
+    fun equivalent(
+        held: List<AgentSession>,
+        next: List<AgentSession>,
+        now: Long,
+        history: Map<String, Long> = emptyMap(),
+        heldRanks: Ranks? = null,
+    ): Boolean {
         if (held === next) return true
         if (held.size != next.size) return false
         var stamped = false
@@ -51,7 +58,7 @@ object SessionDisplay {
             }
         }
         if (!stamped) return true
-        return sameDedupe(held, next) && sameOrders(held, next, history)
+        return sameDedupe(held, next) && (heldRanks ?: ranksOf(held, history)) == ranksOf(next, history)
     }
 
     /** The same-chat dedupe keeps "the most recently active one" (`updatedAt >`, first wins a tie): the same row in each group. */
@@ -68,23 +75,44 @@ object SessionDisplay {
         return keeps(held) == keeps(next)
     }
 
+    /** The weak order of every sortable row: one rank map per stamp the sidebar sorts or breaks ties by (see [ranksOf]). */
+    class Ranks internal constructor(internal val updated: Map<String, Int>, internal val lastActive: Map<String, Int>) {
+        override fun equals(other: Any?) = other is Ranks && updated == other.updated && lastActive == other.lastActive
+        override fun hashCode() = updated.hashCode() * 31 + lastActive.hashCode()
+    }
+
     /**
-     * The weak order (ranks, ties kept) of every row the sidebar sorts, by each stamp it sorts or breaks ties by:
-     * `updatedAt` and the "last active" `lastMessageAt`, the live rows among the history rows. Equal ranks in [held] and
-     * [next] means every list drawn from them is in the same order.
+     * The weak order (dense ranks, ties kept) of every row the sidebar sorts, by each stamp it sorts or breaks ties by:
+     * the row's effective `updatedAt` and its "last active" stamp, the live rows among the history rows. The stamps are
+     * the ones SidebarModel puts on a row, taken from the same functions ([SidebarOrder.linkedStamp],
+     * [SidebarOrder.lastActive]): a live row linked to a history row falls back to that row's stamp for a missing or 0 one,
+     * a live-only row sorts last-active by `lastMessageAt ?: updatedAt`. Equal ranks in two lists means every list drawn
+     * from them is in the same order. [history] is the history rows' `updatedAt` by history id.
      */
-    private fun sameOrders(held: List<AgentSession>, next: List<AgentSession>, history: Map<String, Long>): Boolean {
-        fun ranks(list: List<AgentSession>, stamp: (AgentSession) -> Long): Map<String, Int> {
-            val points = ArrayList<Pair<String, Long>>(list.size + history.size)
-            for (session in list) points += "s:${session.id}" to stamp(session)
-            for ((id, at) in history) points += "h:$id" to at
-            val distinct = points.map { it.second }.distinct().sortedDescending()
-            val rank = HashMap<Long, Int>(distinct.size)
-            distinct.forEachIndexed { i, v -> rank[v] = i }
-            return points.associate { it.first to rank.getValue(it.second) }
+    fun ranksOf(list: List<AgentSession>, history: Map<String, Long>): Ranks {
+        val updated = ArrayList<Pair<String, Long>>(list.size + history.size)
+        val lastActive = ArrayList<Pair<String, Long>>(list.size + history.size)
+        for (session in list) {
+            val linked = session.historyId?.let { history[it] }
+            if (linked != null) {
+                updated += "s:${session.id}" to SidebarOrder.linkedStamp(session.updatedAt, linked)
+                lastActive += "s:${session.id}" to SidebarOrder.linkedStamp(session.lastMessageAt, linked)
+            } else {
+                updated += "s:${session.id}" to session.updatedAt
+                lastActive += "s:${session.id}" to SidebarOrder.lastActive(session.lastMessageAt, session.updatedAt)
+            }
         }
-        return ranks(held) { it.updatedAt } == ranks(next) { it.updatedAt } &&
-            ranks(held) { it.lastMessageAt ?: 0L } == ranks(next) { it.lastMessageAt ?: 0L }
+        for ((id, at) in history) {
+            updated += "h:$id" to at
+            lastActive += "h:$id" to at
+        }
+        return Ranks(dense(updated), dense(lastActive))
+    }
+
+    private fun dense(points: List<Pair<String, Long>>): Map<String, Int> {
+        val rank = HashMap<Long, Int>()
+        points.map { it.second }.distinct().sortedDescending().forEachIndexed { i, v -> rank[v] = i }
+        return points.associate { it.first to rank.getValue(it.second) }
     }
 
     /** The first instant at which an age word of [held]'s fields that differ from [next]'s would change; [Long.MAX_VALUE] if none. */
@@ -132,12 +160,20 @@ fun displayStable(
     scope.launch {
         var timer: Job? = null
         var timerAt = Long.MAX_VALUE
+        // The held list's ranks, kept while the held list and the history rows are the ones they were computed for.
+        var ranks: SessionDisplay.Ranks? = null
+        var ranksFor: Pair<List<AgentSession>, Map<String, Long>>? = null
         // A change of a history row is re-checked too: the held list is drawn among the new rows.
         combine(source, history) { list, rows -> list to rows }.collect { (next, rows) ->
             val held = out.value
             if (held === next) return@collect
             val now = clock()
-            if (!SessionDisplay.equivalent(held, next, now, rows)) {
+            if (ranksFor == null || ranksFor!!.first !== held || ranksFor!!.second != rows) {
+                ranks = null
+                ranksFor = held to rows
+            }
+            val heldRanks = ranks ?: SessionDisplay.ranksOf(held, rows).also { ranks = it }
+            if (!SessionDisplay.equivalent(held, next, now, rows, heldRanks)) {
                 timer?.cancel()
                 timer = null
                 timerAt = Long.MAX_VALUE

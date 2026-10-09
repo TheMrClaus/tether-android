@@ -29,6 +29,15 @@ object SidebarOrder {
         )
     }
 
+    // The stamps a sidebar row is sorted by, as numbers: the single place the row model (SidebarModel) and the
+    // held-session-list check (SessionDisplay) take them from, so the two can never drift.
+
+    /** A row's `updatedAt` / `lastMessageAt` when its live session is linked to a history row: the live stamp unless it is absent or 0, else the history's. */
+    fun linkedStamp(live: Long?, historyUpdatedAt: Long): Long = live?.takeIf { it != 0L } ?: historyUpdatedAt
+
+    /** The "last active" key ([lastActiveAt]'s numeric twin): the message stamp when the row carries one, else `updatedAt`. */
+    fun lastActive(lastMessageAt: Long?, updatedAt: Long): Long = lastMessageAt ?: updatedAt
+
     // lib/sidebar-order.mjs:27 — issue #17: a message-based stamp when the entry carries one.
     private fun lastActiveAt(entry: JsValue): JsValue? =
         entry["lastMessageAt"] as? JsNum ?: entry["updatedAt"]
