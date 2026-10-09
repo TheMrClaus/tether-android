@@ -56,6 +56,15 @@ class TetherApp : Application() {
         }
     }
 
+    /**
+     * ta-2vm7: the system is short of memory. The client lets go of the projections of every session
+     * but the open one (they come back, from the saved copy and the server, when one is opened).
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        ClientLocator.current()?.trimMemory(level)
+    }
+
     override fun onCreate() {
         super.onCreate()
         // ta-coik.32: `adb logcat -s TetherTiming` — the connection milestones below, timed in ms.
@@ -126,6 +135,9 @@ class TetherApp : Application() {
                 onLogout = { baseUrl, credential -> push.unregisterAfterLogout(baseUrl, credential) },
                 mirror = mirror,
                 timing = { Log.i(TIMING_TAG, it) },
+                // ta-2vm7: the sessions kept in memory weigh at most a quarter of the app's heap class.
+                retentionBudgetBytes = ((context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)
+                    ?.memoryClass?.toLong()?.times(1L shl 20) ?: Runtime.getRuntime().maxMemory()) / 4,
             )
         }
 

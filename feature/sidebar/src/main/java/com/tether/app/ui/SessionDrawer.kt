@@ -121,18 +121,26 @@ fun SessionDrawer(
     val pinned = controller.pinnedWorkspaces(serverSettings, preferences)
     val workspaces = SidebarModel.sidebarWorkspaces(pinned, current)
     val collator = remember { sidebarCollator() }
-    val rows = SidebarModel.sidebarSessions(
-        visible = SidebarModel.visibleSessions(sessions, preferences.showEndedSessions),
-        historiesByCwd = historiesByCwd,
-        workspaces = workspaces,
-        lastSeen = preferences.lastSeenSessions,
-        sessionOrders = sessionOrders,
-        sort = preferences.sidebarSort,
-        activeId = activeId,
-        openingHistoryId = openingHistoryId,
-        pendingSessionId = pendingSessionId,
-        collator = collator,
-    )
+    // ta-2vm7: the rows are rebuilt only when what they are built from changes. Every other recomposition
+    // (the 30 s tick, a keystroke in the filter, the connection) used to rebuild every block, a JsObj per
+    // row, with the heap already full.
+    val rows = remember(
+        sessions, preferences.showEndedSessions, historiesByCwd, workspaces, preferences.lastSeenSessions,
+        sessionOrders, preferences.sidebarSort, activeId, openingHistoryId, pendingSessionId, collator,
+    ) {
+        SidebarModel.sidebarSessions(
+            visible = SidebarModel.visibleSessions(sessions, preferences.showEndedSessions),
+            historiesByCwd = historiesByCwd,
+            workspaces = workspaces,
+            lastSeen = preferences.lastSeenSessions,
+            sessionOrders = sessionOrders,
+            sort = preferences.sidebarSort,
+            activeId = activeId,
+            openingHistoryId = openingHistoryId,
+            pendingSessionId = pendingSessionId,
+            collator = collator,
+        )
+    }
     val state = SidebarState(
         connected = connected,
         currentWorkspace = current.orEmpty(),
