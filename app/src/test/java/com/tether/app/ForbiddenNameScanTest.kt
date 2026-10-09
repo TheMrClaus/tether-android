@@ -21,8 +21,8 @@ class ForbiddenNameScanTest {
     /** The product's digest (length 5), made outside the repository. */
     private val real = Forbidden("68a32dd6b2c35412abbf319675fa086748a052cb8693e503111c32179e921d48", 5, 106437836)
 
-    /** The files that still hold the name, until the separate bead that clears them lands; nothing else may. */
-    private val allowlist = setOf("feature/shell/src/test/java/com/tether/app/ui/inspector/InspectorBoards.kt")
+    /** Files that may name the product: none. No file legitimately needs to. */
+    private val allowlist = emptySet<String>()
 
     private val binaryExtensions = setOf("png", "jpg", "jpeg", "webp", "jar", "so", "apk", "ttf", "otf", "aab", "gz", "zip", "keystore", "jks")
 
