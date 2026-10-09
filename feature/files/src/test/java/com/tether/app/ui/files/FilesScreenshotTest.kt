@@ -73,8 +73,8 @@ enum class FilesShot(val id: String) {
 
 private const val ShotTag = "files-shot"
 
-/** What the server says about a path that is not there: shown to the reader as it came. */
-private const val MISSING_WORDS = "ENOENT: no such file or directory, stat 'release-notes.md'"
+/** What the server's file route says about a path that is not there: shown to the reader as it came. */
+private const val MISSING_WORDS = "That file is not available."
 
 /** The L1 ruling's three SVG cases: a viewBox-only wide one (4:1), a viewBox-only tall one (1:2), a small width/height one. */
 private const val SVG_WIDE = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100"><rect width="400" height="100" fill="#5c6ee6"/><circle cx="50" cy="50" r="30" fill="#ecedf4"/><rect x="110" y="35" width="250" height="30" fill="#ecedf4"/></svg>"""
@@ -97,7 +97,11 @@ private fun stateFor(shot: FilesShot): FileBrowserState {
             FilesShot.Loading -> gates["list"] = CompletableDeferred()
             FilesShot.Empty -> listings[ROOT] = FilesResult.Ok(FilesFixtures.listing(entries = emptyList()))
             FilesShot.Error -> listings.remove(ROOT)
-            FilesShot.OpenMissing -> listings["$ROOT/release-notes.md"] = FilesResult.Failed(MISSING_WORDS, 404)
+            FilesShot.OpenMissing -> {
+                // The two routes' real answers for a path that is not there: the folder list's, then the file route's.
+                listings["$ROOT/release-notes.md"] = FilesResult.Failed("That folder is not available.", 404)
+                probes["$ROOT/release-notes.md"] = FilesResult.Failed(MISSING_WORDS, 404)
+            }
             FilesShot.UploadError -> failures["upload:photo.png"] = FilesResult.Failed("An item with that name already exists here.", 409)
             FilesShot.NamePrompt -> failures["mkdir"] = FilesResult.Failed("An item with that name already exists here.", 409)
             else -> Unit

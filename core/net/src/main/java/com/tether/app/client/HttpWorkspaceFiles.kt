@@ -137,6 +137,14 @@ class HttpWorkspaceFiles(
         }
     }
 
+    override suspend fun probe(path: String): FilesResult<Unit> {
+        val fallback = FilesCopy.FILE_FALLBACK
+        return call(fallback, { route("/api/files", "path" to path).header("Range", "bytes=0-0").header("Accept-Encoding", "identity") }, streaming = true) { response ->
+            // 200/206: served. 416: an empty file (nothing to range over) is still a file.
+            if (response.isSuccessful || response.code == 416) FilesResult.Ok(Unit) else failure(response, fallback)
+        }
+    }
+
     override suspend fun readText(path: String, listedSize: Long): FilesResult<String> {
         val fallback = FilesCopy.TEXT_FALLBACK
         val cap = WorkspaceFiles.MAX_TEXT_PREVIEW_BYTES

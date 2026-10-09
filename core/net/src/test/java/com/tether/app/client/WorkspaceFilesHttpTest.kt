@@ -252,6 +252,24 @@ class WorkspaceFilesHttpTest {
         assertEquals("Bearer tthr_test", req.getHeader("Authorization"))
     }
 
+    @Test fun probeAsksTheFileRouteForOneByteAndCarriesItsErrorVerbatim() = runBlocking {
+        server.enqueue(err(404, """{"error":"That file is not available."}"""))
+        assertEquals(FilesResult.Failed("That file is not available.", 404), files.probe("/w/gone.png"))
+        val req = take()
+        assertEquals("GET", req.method)
+        assertEquals("/api/files?path=%2Fw%2Fgone.png", req.path)
+        assertEquals("bytes=0-0", req.getHeader("Range"))
+        server.enqueue(err(403, """{"error":"That file is outside the configured allowed roots."}"""))
+        assertEquals(FilesResult.Failed("That file is outside the configured allowed roots.", 403), files.probe("/etc/x.conf"))
+        take()
+        // Served (a dotfile the listing hides), and an empty file (416 for any range): both exist.
+        server.enqueue(MockResponse().setResponseCode(206).setBody("x"))
+        assertEquals(FilesResult.Ok(Unit), files.probe("/w/.env"))
+        take()
+        server.enqueue(MockResponse().setResponseCode(416))
+        assertEquals(FilesResult.Ok(Unit), files.probe("/w/empty.txt"))
+    }
+
     @Test fun textPreviewAsksForTheFirstMegabyteAndReadsNoMore() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(206).setBody("# hello\n"))
         assertEquals(FilesResult.Ok("# hello\n"), files.readText("/w/README.md", listedSize = 8))

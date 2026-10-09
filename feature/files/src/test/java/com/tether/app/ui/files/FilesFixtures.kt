@@ -101,6 +101,14 @@ class FakeFiles : WorkspaceFiles {
 
     override suspend fun head(path: String): FilesResult<FileHead> = enter("head", path).let { FilesResult.Ok(FileHead(0, null)) }
 
+    /** What the file route says about a path ([probe]); a path without an entry is served. */
+    val probes = mutableMapOf<String, FilesResult<Unit>>()
+
+    override suspend fun probe(path: String): FilesResult<Unit> {
+        enter("probe", path)
+        return probes[path] ?: FilesResult.Ok(Unit)
+    }
+
     override suspend fun readText(path: String, listedSize: Long): FilesResult<String> {
         enter("readText", path, listedSize.toString())
         return texts[path] ?: FilesResult.Failed("This text file could not be opened.", 404)

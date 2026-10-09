@@ -49,6 +49,16 @@ interface WorkspaceFiles {
     suspend fun head(path: String): FilesResult<FileHead>
 
     /**
+     * Does the file route serve [path]? A failure carries the server's own `{error}` (a HEAD has no body to read it
+     * from, so this is a one-byte GET); the default asks [head]. A file the server will not list but does serve
+     * (a dotfile, a symlink) is a success.
+     */
+    suspend fun probe(path: String): FilesResult<Unit> = when (val r = head(path)) {
+        is FilesResult.Ok -> FilesResult.Ok(Unit)
+        is FilesResult.Failed -> r
+    }
+
+    /**
      * The text preview (workspace-file-browser.tsx selectFile): `GET /api/files?path=` with
      * `Range: bytes=0-(MAX_TEXT_PREVIEW_BYTES-1)` when [listedSize] > 0, and at most
      * [MAX_TEXT_PREVIEW_BYTES] read even if the server ignores the range, decoded as UTF-8.
