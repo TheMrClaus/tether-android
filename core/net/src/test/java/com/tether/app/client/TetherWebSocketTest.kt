@@ -755,6 +755,21 @@ class TetherWebSocketTest {
     }
 
     @Test
+    fun aHookThatThrowsOnAServerPingNeitherEndsTheSocketNorSilencesThePong() {
+        // ta-qm8b: the hook runs on the reader thread before the pong; an exception from it must not cost the heartbeat answer.
+        val server = RawServer()
+        val events = Recorder()
+        val ws = TetherWebSocket.connect(OkHttpClient(), Request.Builder().url(server.url).build(), events, onPing = { throw IllegalStateException("hook") })
+        closers += Closeable { ws.cancel() }
+        server.accept()
+        assertEquals("open", events.next())
+        server.writeFrame(WebSocketFrames.OPCODE_PING, "beat".toByteArray())
+        assertEquals(WebSocketFrames.OPCODE_PONG, server.readFrame().opcode)
+        server.writeFrame(WebSocketFrames.OPCODE_TEXT, "still here".toByteArray())
+        assertEquals("still here", events.messages.poll(20, TimeUnit.SECONDS))
+    }
+
+    @Test
     fun aClientPingIntervalPingsAndAMissingPongFailsTheSocket() {
         val server = RawServer()
         val events = Recorder()

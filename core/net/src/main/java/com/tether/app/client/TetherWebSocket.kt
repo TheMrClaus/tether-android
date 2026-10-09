@@ -236,7 +236,11 @@ internal class TetherWebSocket private constructor(
         override fun onPing(payload: ByteString) {
             // ta-nl5m: the server's heartbeat is a sign of life the listener never sees as a message;
             // told first, outside the lock, whatever happens to the pong.
-            onPing?.invoke(this@TetherWebSocket)
+            // ta-qm8b: a hook that throws must not cost the heartbeat answer (the reader would end and the server drop the link).
+            try {
+                onPing?.invoke(this@TetherWebSocket)
+            } catch (_: Exception) {
+            }
             lock.withLock {
                 // As OkHttp: answered until the close frame is out (a long message ahead of a queued
                 // close still has the server's heartbeat answered), never after it or a failure.

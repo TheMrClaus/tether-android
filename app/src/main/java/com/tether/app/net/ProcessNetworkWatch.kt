@@ -2,6 +2,7 @@ package com.tether.app.net
 
 import android.net.ConnectivityManager
 import android.net.Network
+import android.util.Log
 import com.tether.app.client.DefaultNetworkWatch
 import com.tether.app.client.TetherClient
 
@@ -22,12 +23,22 @@ class ProcessNetworkWatch(
 ) {
     private val watch = DefaultNetworkWatch<Network>()
 
+    private companion object {
+        const val TAG = "ProcessNetworkWatch"
+    }
+
     internal val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             // Always seen by the watch, so the first network (reported on registration) is not a change.
             val changed = watch.available(network)
             val target = client() ?: return
-            if (changed) target.onDefaultNetworkChanged() else target.reconnectIfIdle()
+            // ta-qm8b: this runs on the system's connectivity thread, where an exception ends the process; a failed
+            // reconnect nudge costs nothing (the resume and the backoff reconnect on their own). Only the class is logged.
+            try {
+                if (changed) target.onDefaultNetworkChanged() else target.reconnectIfIdle()
+            } catch (e: Exception) {
+                Log.w(TAG, "Network change handling failed: ${e.javaClass.simpleName}")
+            }
         }
 
         override fun onLost(network: Network) {

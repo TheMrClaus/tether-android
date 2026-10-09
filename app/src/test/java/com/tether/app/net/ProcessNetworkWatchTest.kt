@@ -72,4 +72,19 @@ class ProcessNetworkWatchTest {
         watch.callback.onAvailable(network(2))
         assertEquals(1, calls.changed)
     }
+
+    @Test
+    fun aClientThatThrowsNeverTakesTheConnectivityThreadDown() {
+        // ta-qm8b: the callback runs on the system's connectivity thread, where an exception ends the process.
+        val client: TetherClient = object : TetherClient by FakeTetherClient() {
+            override fun reconnectIfIdle() = throw IllegalStateException("idle")
+            override fun onDefaultNetworkChanged() = throw IllegalStateException("changed")
+        }
+        val watch = ProcessNetworkWatch { client }
+        watch.callback.onAvailable(network(1))
+        watch.callback.onAvailable(network(2))
+        // And the watch still tells a change from a first network afterwards.
+        watch.callback.onLost(network(2))
+        watch.callback.onAvailable(network(2))
+    }
 }
