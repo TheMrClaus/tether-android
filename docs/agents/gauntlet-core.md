@@ -43,7 +43,10 @@ A wave **ends** when all of this is true:
 1. every live piece has its evidence — a gate line, a harness/benchmark JSON, or captures + critics,
    with `design-director`'s ruling on any disagreement;
 2. every bead is closed with its evidence and verified by a different actor; the human tracker
-   (GitHub issues) and the journal are updated, and the lead has rewritten STATUS;
+   (GitHub issues) and the journal are updated, the lead has rewritten STATUS, **and the markdown
+   tracker/digest is under 40k chars with no line over 2k** (`~/bin/gauntlet-tracker check
+   <tracker…>`; over either, demote first — `~/gauntlet/tools/jev_triage.py done --tracker <digest>` holds on an
+   oversize one, and no wave report is posted on one);
 3. anything user-visible is **deployed and the served artifact verified**;
 4. the models line is recorded (`game-orchestration models --fleet app <session-id>`, routing rule
    6) — and once the run is over budget, or the owner asks, the wave report carries the per-role
@@ -77,16 +80,31 @@ that record, never the chat.
   it may touch, "read CLAUDE.md first", whether it holds the **image lane** (one lane at a time) and
   the exact command, "never start/stop the shared dev instance", and a deliverable path in the
   run-artefacts dir or a named repo path — **never an `artifacts/` folder in the repo**.
+- **Judge briefs are run-relative.** A `wave-check`, `design-director` or critic brief names THIS run's
+  record (plan/state file), its bar (reference screen/mock), its capture dir and its SETTLED list. A
+  judge given none of them refuses the case and says so; it never falls back to a previous run's
+  references, captures or defect list, and a role file may cite another run's paths only as history.
 - **The tracker is beads, and every brief names its bead:** the lead claims the bead before writing
   the brief and hands over the ID; the leaf checkpoints it as it goes and closes it with evidence; a
   different lane verifies. A lane that dies leaves a checkpointed bead, not a mystery.
 - **Run artefacts live outside git** — plans, verdicts, captures, pairs — in `~/gauntlet/<project>/`
   unless the run doc names another out-of-git path. Generated images are the same: the committed
   artefact is the asset plus its recipe, never a scratch render tree.
+- **The tracker is an INDEX, never a store.** One line per item — what it is, the verdict, and the
+  path to the body — and the body lives in its own file in the run-artefacts dir
+  (`w<N>/deltas/D<NNN>.md`, `w<N>/gate-int<NN>.log`, …). Pasting a judge's review, a gate log or a
+  brief INTO the tracker is the one habit that reliably blows the ceiling: on 2026-10-06 seven whole
+  `wave-check` DELTA reviews took a live tracker from 12k to 33k chars (47 lines over 2k in the
+  archive, the longest 5.5k). `~/bin/gauntlet-tracker check <tracker>` before you write a brief —
+  the ceiling is a per-write budget, not a wave-end exam — and `… demote <tracker> <records-dir>
+  --apply` moves every over-long line out and leaves the pointer.
 - **Context hygiene:** never read a file over 15k chars whole, and keep docs under 15k — a run doc
   fits because this file carries the shared part. A beads graph has no size ceiling (`bd list
   --json`), so where beads is the writer the markdown tracker becomes a generated digest and the
-  40k rule applies to that digest alone.
+  40k rule applies to that digest alone. **Enforced at every wave end** (`wc -c`, item 2 above): a
+  digest, plan or handover over 40k is archived (`<name>.archive-<date>.md`; the live file keeps LIVE
+  STATUS plus the last wave's log) before the wave report goes out — a tracker that has to be read in
+  windows has already failed the rule.
 - **Budget — policy, not advice, and it goes into every brief:** one pass, one check, a written
   receipt, then stop. A lane never iterates against its own taste (the judges judge) and never
   re-reads the corpus or its own transcript on later turns; a doubt is a candidate in the receipt
@@ -108,4 +126,4 @@ inside a workflow. On top of them:
    integrating: a session that dies leaves commits, not dirty trees.
 3. **Scale the checking to the change.** A trivial change (about 20 lines or fewer, no behaviour
    change) gets no refuters — the gate and the lead's own read are enough. A real lane gets 2
-   read-only refuters. One wave-check panel per wave, plus at most one delta.
+   read-only refuters, spawned as `scout` (never `builder`, policy › Cost discipline). One wave-check panel per wave, plus at most one delta.

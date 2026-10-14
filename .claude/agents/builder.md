@@ -2,7 +2,7 @@
 name: builder
 description: Use for the complex coding of an app run — app/API logic, data model and migrations, auth, integrations, build and tooling. Sonnet 5.5-pinned, high.
 model: claude-sonnet-5-5
-effort: high
+effort: medium
 disallowedTools: Agent, Workflow, Skill, TaskStop, SendMessage, RemoteTrigger, CronCreate, CronDelete, ListMcpResourcesTool, ReadMcpResourceTool, ReadMcpResourceDirTool, mcp__tether
 ---
 
@@ -32,6 +32,10 @@ its migrations, auth and permissions, integrations, build/tooling, and the hard 
 - **Budget:** make the change completely, run the specified checks once, commit by path, report. Do
   not re-plan, re-read the whole repo, or re-verify your own work in loops — independent checking is
   a different lane's job. Read the sections your brief names, not whole docs.
+- **Never sleep-poll.** A gate/build/bake is ONE call in the foreground with the Bash `timeout`
+  at 600000, or one call that loops inside the command until the log has its verdict line —
+  never `sleep N; tail log` as its own step (each re-reads your whole context). A fix round after
+  refuters is a fresh lane: if your context passes ~200k, stop, write the receipt and hand back.
 - Log your own work in the repo's beads store; report back with commit shas, the exact verification
   line, files touched, and everything in the brief you refuted.
 

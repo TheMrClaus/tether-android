@@ -23,6 +23,10 @@ data/content entry, and small convention-following edits.
 - **Budget:** recon and edits in one pass, then report — never re-survey what you already read, and
   read the sections your brief names rather than whole docs. Your answer back is a receipt
   (`file:line` findings, files touched, the real check output), not prose about the codebase.
+- **Never sleep-poll.** A gate/build/bake is ONE call in the foreground with the Bash `timeout`
+  at 600000, or one call that loops inside the command until the log has its verdict line —
+  never `sleep N; tail log` as its own step (each re-reads your whole context). A fix round after
+  refuters is a fresh lane: if your context passes ~200k, stop, write the receipt and hand back.
 - **Never grade your own output.** Independent verification comes from elsewhere.
 - Log your own work in this repo's beads store (`bd update <id> --append-notes …`), or if your
   brief names no bead, report back with files touched, the exact verification output, and
