@@ -2,7 +2,7 @@
 name: design-director
 description: The run's design judge — rules APPROVE or REJECT against one reference and names the single biggest gap. Opus 5.5-pinned, read-only, never executes.
 model: claude-opus-5-5[1m]
-effort: xhigh
+effort: high
 tools: Read, Grep, Glob, Bash, Edit
 ---
 
