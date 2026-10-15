@@ -72,6 +72,10 @@ single-file, non-design, non-core edit itself (policy rule 3).
   pushes and the deploys — and verifies a deploy against the served artifact.
 - Jev (TypeSafe) is **advisory**: triage, evidence filtering and the tool-call gate — never the
   design critic, never a verdict, never who does the work.
+- **Hand over at 300k — every session, overnight or not:** check `tether_context` at each clean
+  point; at ≥300k reach a clean point (no lane in flight, nothing half-integrated or unpushed), then
+  ONE `tether_handover` with the mandate verbatim + full state + the chain, and end the turn
+  (orchestration.md › Cost discipline). Lanes keep ~200k → receipt → hand back.
 - Full policy: `docs/agents/orchestration.md`; how a run works: `docs/agents/gauntlet-core.md`.
 <!-- app-orchestration:end -->
 

@@ -139,6 +139,23 @@ Rules — binding in every brief:
    steps as well as output, which a Sonnet→Haiku switch would trade for quality the judges then
    have to buy back in extra rounds.
 
+9. **Hand over at 300k — every Tether session, overnight or not** (owner 2026-10-15). Leads,
+   gauntlet leads and interactive sessions alike call `tether_context` at every clean point: a wave
+   end, a lane hand-back, a commit/push, before starting the next piece. The moment it reports
+   **≥300k tokens**, the session reaches the nearest clean point and hands over: no lane in flight
+   (a background lane reports to the session that spawned it, which is read-only after a handover),
+   no half-integrated work, no gated sha left unpushed; state written to the tracker/run doc. Then ONE
+   `tether_handover` call whose prompt is the complete handover — the operator's mandate and
+   standing instructions **copied verbatim**, run doc + tracker paths, open beads, the engine/editor
+   or dev-instance grant, what is gated/pushed/deployed, the exact next step, and the chain so far
+   (`<id> → <id> → …`) — and the turn ends right there (the successor starts only when the turn
+   ends cleanly). The successor's first turn checks `tether_context` and the run doc, then continues;
+   it cannot hand over in that first turn. The final/morning report lists the chain. Lanes have no
+   `tether_handover`: they keep rule 7 (~200k → receipt → hand back). Outside Tether (no
+   `tether_context`), write the same handover to the run-artefacts dir and tell the operator. Why:
+   every step re-reads the whole context — measured 2026-10-15, a successor started at 36k against
+   its source's 356k, ~10× cheaper per step for the same work.
+
 ## Verification discipline (every claim)
 
 - A claim is verified against the artifact, not against the agent's summary. Independent context,

@@ -113,6 +113,11 @@ that record, never the chat.
   before re-spawning it. **Cache reads cost the same on Opus and Sonnet**, so a model downgrade
   changes the output line and never the cache-read line: trajectory length is the lever.
 
+- **Hand over at 300k — every session, overnight or not:** check `tether_context` at each clean
+  point; at ≥300k reach a clean point (no lane in flight, nothing half-integrated or unpushed), then
+  ONE `tether_handover` with the mandate verbatim + full state + the chain, and end the turn
+  (orchestration.md › Cost discipline). Lanes keep ~200k → receipt → hand back.
+
 ## Running in ultracode
 
 Ultracode (dashboard Effort row "Ultra code") integrates lanes about 1.8× faster per hour at about
