@@ -77,6 +77,8 @@ fun ShellUnderTest(
     slots: PhoneShellSlots = placeholderSlots(),
     /** ta-3e7: the link the top bar prints (the welcome's offline goldens). */
     link: LinkReadout = LinkReadout.Connected,
+    /** #273: the links menu's Hand over row (null: not drawn). */
+    handover: com.tether.app.client.Handover.MenuState? = null,
 ) {
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides reducedMotion) {
@@ -104,6 +106,8 @@ fun ShellUnderTest(
                     onTogglePinned = { onEvent("pin") },
                     onCopyPath = { onEvent("copyPath") },
                     onCopyTetherId = { onEvent("copyId") },
+                    handover = handover,
+                    onHandOver = { onEvent("handover") },
                 ),
                 slots = slots,
                 link = link,

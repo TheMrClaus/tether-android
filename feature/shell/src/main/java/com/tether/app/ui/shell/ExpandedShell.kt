@@ -290,6 +290,7 @@ private fun WorkspaceColumn(
                     linksOpen = state.linksOpen,
                     onToggleTelemetry = state::toggleTelemetry,
                     onToggleLinks = state::toggleLinks,
+                    linksFocus = state.linksKeyFocus,
                     actions = header,
                     gauge = slots.gauge,
                     expanded = true,

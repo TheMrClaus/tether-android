@@ -142,6 +142,29 @@ internal fun BubbleBox(look: BubbleLook, alignEnd: Boolean, modifier: Modifier, 
     }
 }
 
+/** #273: first line of a handover row's bubble: 0.7rem muted, uppercase with 0.04em tracking (the name keeps its casing). */
+@Composable
+private fun HandoverAttributionLabel(attribution: UserAttribution, ink: Color) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val shown = when (attribution.kind) {
+        UserAttribution.Kind.Instruction -> androidx.compose.ui.text.AnnotatedString(attribution.label.uppercase())
+        UserAttribution.Kind.Prompt -> androidx.compose.ui.text.buildAnnotatedString {
+            append(HANDOVER_PROMPT_LABEL_PREFIX.uppercase())
+            append(attribution.label.removePrefix(HANDOVER_PROMPT_LABEL_PREFIX))
+        }
+    }
+    Text(
+        shown,
+        style = type.chatBody.copy(fontSize = 11.2.sp, fontWeight = FontWeight(600), letterSpacing = 0.04.em, lineHeight = 1.25.em),
+        color = t.muted,
+        modifier = Modifier
+            .padding(bottom = 4.dp)
+            .semantics { contentDescription = attribution.label }
+            .testTag("handover-attribution"),
+    )
+}
+
 /** `.chat-msg-time`: block, 0.2rem above, right-aligned, 0.65rem tabular, the bubble ink at 0.55. */
 @Composable
 private fun MessageTime(label: String, ink: Color) {
@@ -162,11 +185,17 @@ private fun MessageTime(label: String, ink: Color) {
  * turn.startedAt)`; "" hides it.
  */
 @Composable
-fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: String = "", find: FindMarks? = null) {
+fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: String = "", find: FindMarks? = null) =
+    UserBubble(block, modifier, timeLabel, find, attribution = null)
+
+/** #273: [attribution] is the handover label over the text ("HANDOVER FROM <name>" / "HANDOVER INSTRUCTION · FROM TETHER"). */
+@Composable
+internal fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLabel: String = "", find: FindMarks? = null, attribution: UserAttribution?) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val look = bubbleLook(t, type, user = true, phone = currentLayoutClass() == TetherLayoutClass.Phone)
     BubbleBox(look, alignEnd = true, modifier) {
+        if (attribution != null) HandoverAttributionLabel(attribution, look.ink)
         val text = block.text
         if (!text.isNullOrEmpty()) {
             // T5.3: `HighlightedText` — the find marks over the plain text, when it has any.

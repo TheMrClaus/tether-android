@@ -36,6 +36,9 @@ class PhoneShellState(
     var telemetryOpen: Boolean by mutableStateOf(telemetryOpen)
         private set
 
+    /** #273: the "Session links" trigger's focus handle: a closed Hand over dialog returns focus to it. Not saved state. */
+    val linksKeyFocus: androidx.compose.ui.focus.FocusRequester = androidx.compose.ui.focus.FocusRequester()
+
     /** The header's "Session links" popover. */
     var linksOpen: Boolean by mutableStateOf(linksOpen)
         private set

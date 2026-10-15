@@ -470,7 +470,7 @@ class ComposerLockBehaviourTest {
     @Test
     fun aBusyHandedOffSourceHasNoInterruptKeyEvenLive() {
         show(ComposerFixtures.session.copy(handedOffTo = target.id), target, ComposerFixtures.queued, ComposerLiveness.Live)
-        rule.onNodeWithTag("composer-handoff-lock").assertExists()
+        rule.onNodeWithTag("handoff-notice-to").assertExists()
         rule.onAllNodes(hasSetTextAction()).assertCountEquals(0)
         rule.onAllNodesWithTag(INTERRUPT_KEY_TAG).assertCountEquals(0)
         rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(0)
@@ -481,7 +481,7 @@ class ComposerLockBehaviourTest {
     @Test
     fun aBusyHandedOffSavedCopyKeepsTheLockRowAndSaysWasRunning() {
         show(ComposerFixtures.session.copy(handedOffTo = target.id), target, ComposerFixtures.queued, savedCopy)
-        rule.onNodeWithTag("composer-handoff-lock").assertExists()
+        rule.onNodeWithTag("handoff-notice-to").assertExists()
         rule.onAllNodes(hasSetTextAction()).assertCountEquals(0)
         rule.onAllNodesWithTag(INTERRUPT_KEY_TAG).assertCountEquals(0)
         rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(0)
@@ -504,7 +504,7 @@ class ComposerLockBehaviourTest {
     fun aBusyDrivableSavedCopyKeepsItsInputButBothInterruptKeysAreLocked() {
         // The control case: neither T6.6 lock applies, so the composer is drawn and T13.2's lock holds.
         show(ComposerFixtures.session, null, ComposerFixtures.queued, savedCopy)
-        rule.onAllNodesWithTag("composer-handoff-lock").assertCountEquals(0)
+        rule.onAllNodesWithTag("handoff-notice-to").assertCountEquals(0)
         rule.onAllNodesWithTag("composer-read-only").assertCountEquals(0)
         rule.onNodeWithText(PLACEHOLDER_BUSY).assertExists()
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsNotEnabled().performClick()
@@ -516,7 +516,7 @@ class ComposerLockBehaviourTest {
     @Test
     fun aHandedOffSourceLinksToItsTargetAndTakesNoInput() {
         show(ComposerFixtures.session.copy(handedOffTo = target.id), target)
-        rule.onNodeWithTag("composer-handoff-lock").assertExists()
+        rule.onNodeWithTag("handoff-notice-to").assertExists()
         rule.onAllNodes(hasSetTextAction()).assertCountEquals(0)
         rule.onNodeWithText("Parser rewrite").performClick()
         assertEquals(listOf(target.id), opened)
@@ -526,7 +526,7 @@ class ComposerLockBehaviourTest {
     @Test
     fun aHandedOffSourceWhoseTargetIsGoneSaysAnotherSession() {
         show(ComposerFixtures.session.copy(handedOffTo = "gone"), null)
-        rule.onNodeWithText("another session").assertExists()
+        rule.onNodeWithText("Handed off to another session").assertExists()
         rule.onNodeWithTag("handoff-link").assertDoesNotExist()
     }
 

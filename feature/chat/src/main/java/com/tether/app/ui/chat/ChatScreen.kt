@@ -324,6 +324,9 @@ fun ChatScreen(
     // T6.6: a handed-off source names (and links to) the session it continued in.
     val allSessions by vm.displaySessions.collectAsStateWithLifecycle()
     val handoffTarget = session?.handedOffTo?.takeIf { it.isNotEmpty() }?.let { id -> allSessions.firstOrNull { it.id == id } }
+    // #273: a successor's "Continued from" strip names (and links to) the session it continued, while that is listed.
+    val handoffSource = session?.handedOffFrom?.takeIf { it.isNotEmpty() }?.let { id -> allSessions.firstOrNull { it.id == id } }
+    val handoverUnderWay by remember(vm, session?.id) { session?.id?.let { vm.handoverUnderWay(it) } ?: kotlinx.coroutines.flow.flowOf(false) }.collectAsStateWithLifecycle(initialValue = false)
     // T8.5 (chat-view.tsx 90fbb9f :156-165, dashboard.tsx :1683-1686): the `@` picker's takeover —
     // the live roster, the derived briefs, and the brief / handoff frames with THIS session as target.
     val handoffBriefs by vm.client.handoffBriefs.collectAsStateWithLifecycle()
@@ -515,6 +518,9 @@ fun ChatScreen(
                     wellBackground = false,
                     reviewFocus = reviewFocus,
                     onReviewShown = onReviewShown,
+                    handedOffFrom = session.handedOffFrom,
+                    handoffPeer = handoffSource,
+                    onOpenSession = { id -> vm.selectSession(id) },
                 ) } }
             }
             // ta-coik.68: the full-size viewer is hosted here, not in the tool card's row: a lazy transcript may
@@ -557,7 +563,9 @@ fun ChatScreen(
                 // ta-coik.55: written to the record of the server this picker reads (chat-view.tsx 90fbb9f :2281-2286).
                 onToggleModelPin = { id -> prefsScope.launchPreferenceWrite { prefs.toggleModelPin(com.tether.app.client.serverOrigin(serverUrl), id) } },
                 handoffTarget = handoffTarget,
-                onOpenSession = { id -> vm.selectSession(id) },
+                // #273: following "Handed off to" ends this device's claim on the source (the focus rule's own navigation).
+                onOpenSession = { id -> vm.openHandoverPeer(session?.id, id) },
+                handoverUnderWay = handoverUnderWay,
                 runActions = runActions,
                 onWarmControls = { session?.let { vm.client.requestWarmSessionControls(it.id) } },
                 sendRows = sends.pending,

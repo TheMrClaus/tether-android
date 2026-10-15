@@ -1,8 +1,11 @@
 package com.tether.app.ui.chat
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -12,6 +15,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import com.tether.app.ui.components.focusRing
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -80,42 +88,90 @@ internal fun ReplayOnlyFlag(provider: String, modifier: Modifier = Modifier) {
     )
 }
 
+/** #273 (U1-spec §4): which of the one notice's three states is drawn. */
+internal enum class HandoffVariant(val tag: String) {
+    Pending("handoff-notice-pending"),
+    To("handoff-notice-to"),
+    From("handoff-notice-from"),
+}
+
+internal const val HANDOFF_PENDING_LINE = "Handover under way — a new lead takes over when this lead finishes."
+internal const val HANDOFF_PENDING_SUB = "Stop cancels it · new messages go to the new lead."
+
+/** The notice's one sentence for [variant] and [peer], the words a screen reader reads (the link's name included). */
+internal fun handoffNoticeText(variant: HandoffVariant, peer: AgentSession?): String = when (variant) {
+    HandoffVariant.Pending -> "$HANDOFF_PENDING_LINE $HANDOFF_PENDING_SUB"
+    HandoffVariant.To -> peer?.let { "Handed off to ${LabelText.label(it.name).ifEmpty { "another session" }}" } ?: "Handed off to another session"
+    HandoffVariant.From -> peer?.let { "Continued from ${LabelText.label(it.name).ifEmpty { "an earlier session" }}" } ?: "Continued from an earlier session"
+}
+
 /**
- * `.chat-handoff-lock` in place of the composer: ArrowRightLeft, "Continued in →" and the target —
- * a link (violet, underlined, ≥44dp) when it is still listed, else its name or "another session".
- * The link only opens that session; it sends nothing to the agent.
+ * `components/handoff-notice.tsx` (web fe4aa8c0): the ONE notice for every handoff state, replacing the old
+ * "Continued in →" lock row. `to` takes the source's composer slot ("Handed off to <name> →"), `from` is the
+ * successor's first transcript item ("Continued from <name>"), `pending` sits above the composer while a handover is
+ * requested ("Handover under way", two lines, no link). The link only opens that session; it sends nothing. An
+ * unlisted peer reads as words only. [linkFocus] lets the host move focus to the link when the composer under the
+ * keyboard went away.
  */
 @Composable
-internal fun HandoffLockRow(target: AgentSession?, onOpenSession: (String) -> Unit, modifier: Modifier = Modifier) {
+internal fun HandoffNotice(
+    variant: HandoffVariant,
+    peer: AgentSession?,
+    onOpenSession: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    linkFocus: FocusRequester? = null,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.82f))
-    val name = target?.let { LabelText.label(it.name).ifEmpty { "another session" } }
+    val linked = variant != HandoffVariant.Pending && peer != null
     Row(
         modifier
             .fillMaxWidth()
             .padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm)
             .semantics { liveRegion = LiveRegionMode.Polite }
-            .testTag("composer-handoff-lock"),
-        verticalAlignment = Alignment.CenterVertically,
+            .testTag(variant.tag),
+        verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-        Icon(TetherIcons.ArrowRightLeft, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
-        Text("Continued in →", style = style, color = t.muted)
-        if (target != null) {
-            Text(
-                name!!,
-                style = style.copy(fontWeight = FontWeight(650), textDecoration = TextDecoration.Underline),
-                color = t.violet,
-                maxLines = 1,
-                modifier = Modifier
-                    .heightIn(min = 44.dp)
-                    .clickable(role = Role.Button, onClickLabel = "Open $name") { onOpenSession(target.id) }
-                    .padding(vertical = 12.dp)
-                    .testTag("handoff-link"),
-            )
+        Icon(
+            TetherIcons.ArrowRightLeft,
+            contentDescription = null,
+            tint = t.muted,
+            modifier = Modifier.padding(top = if (linked) 17.dp else 3.dp).size(14.dp),
+        )
+        if (variant == HandoffVariant.Pending) {
+            Column {
+                Text(HANDOFF_PENDING_LINE, style = style, color = t.muted)
+                Text(HANDOFF_PENDING_SUB, style = style.copy(fontSize = rem(0.75f)), color = t.muted)
+            }
         } else {
-            Text("another session", style = style.copy(fontWeight = FontWeight(650)), color = t.ink)
+            val lead = if (variant == HandoffVariant.To) "Handed off to" else "Continued from"
+            if (peer == null) {
+                Text(handoffNoticeText(variant, null), style = style, color = t.muted)
+            } else {
+                val name = LabelText.label(peer.name).ifEmpty { if (variant == HandoffVariant.To) "another session" else "an earlier session" }
+                val interaction = remember { MutableInteractionSource() }
+                val focused by interaction.collectIsFocusedAsState()
+                val linkShape = RoundedCornerShape(t.radiusSm)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
+                    Text("$lead ", style = style, color = t.muted)
+                    Row(
+                        Modifier
+                            .heightIn(min = 48.dp)
+                            .then(if (linkFocus != null) Modifier.focusRequester(linkFocus) else Modifier)
+                            .focusRing(focused, linkShape, t.violet)
+                            .clickable(interaction, indication = null, role = Role.Button, onClickLabel = "Open $name") { onOpenSession(peer.id) }
+                            .padding(horizontal = t.css.spaceXs)
+                            .testTag("handoff-link"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(name, style = style.copy(fontWeight = FontWeight(650), textDecoration = TextDecoration.Underline), color = t.white, modifier = Modifier.weight(1f, fill = false))
+                        if (variant == HandoffVariant.To) Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.white, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
         }
     }
 }

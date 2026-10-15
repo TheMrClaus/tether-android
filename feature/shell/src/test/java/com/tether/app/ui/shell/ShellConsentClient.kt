@@ -41,6 +41,11 @@ class ShellConsentClient : TetherClient {
     override val configured: StateFlow<Boolean> = MutableStateFlow(true)
     override val trimmedBefore: StateFlow<Map<String, Int>> = MutableStateFlow(emptyMap())
 
+    /** #273: the server speaks v150 (the Hand over row shows); every handover-request frame the UI sent, in order. */
+    override val serverProtocolVersion = MutableStateFlow<Int?>(150)
+    val handoverCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun handoverRequest(sessionId: String): Boolean = handoverCalls.add(sessionId)
+
     /** T7.1: the configured server (drafts are kept per its origin); null = none, as before. */
     val server = MutableStateFlow<String?>(null)
     override val serverUrl: StateFlow<String?> get() = server

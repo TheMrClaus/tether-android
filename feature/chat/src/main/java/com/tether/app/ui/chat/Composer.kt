@@ -30,6 +30,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -228,6 +230,8 @@ fun Composer(
     handoffTarget: AgentSession? = null,
     /** T6.6: open another session (the handoff lock's link). Navigation only, never a wire mutation. */
     onOpenSession: (String) -> Unit = {},
+    /** #273: a handover is requested here or pending on the server (and not yet handed off): the "under way" notice shows. */
+    handoverUnderWay: Boolean = false,
     /**
      * T7.3: the `!` command mode, the foreground command's Background key and the `@` Agents
      * (run-command / background-command / a delegated send): taps and explicit submits only, guarded.
@@ -896,6 +900,19 @@ fun Composer(
     val inputInteraction = remember { MutableInteractionSource() }
     val inputFocused by inputInteraction.collectIsFocusedAsState()
 
+    // #273 focus rule: when the composer is replaced by "Handed off to" while focus was inside it, focus moves to the
+    // notice's link (else the keyboard user lands on nothing). Nothing moves when focus was elsewhere.
+    val handoffLinkFocus = remember { FocusRequester() }
+    val handedOffAtFocus by rememberUpdatedState(handedOffNow)
+    val focusHeld = remember { booleanArrayOf(false) }
+    var focusToLink by remember(session?.id) { mutableStateOf(false) }
+    LaunchedEffect(handedOffNow, focusToLink, handoffTarget) {
+        if (handedOffNow && focusToLink && handoffTarget != null) {
+            focusToLink = false
+            runCatching { handoffLinkFocus.requestFocus() }
+        }
+    }
+
     Column(modifier = modifier.fillMaxWidth().background(t.graphite)) {
         // `.chat-composer { border-top: 1px solid var(--line-strong); box-shadow: inset 0 1px 0
         // var(--seam-lip) }`; Studio's deck has no border (studio.css:383).
@@ -905,6 +922,10 @@ fun Composer(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .onFocusChanged { state ->
+                        if (!state.hasFocus && focusHeld[0] && handedOffAtFocus) focusToLink = true
+                        focusHeld[0] = state.hasFocus
+                    }
                     .navigationBarsPadding()
                     .imePadding()
                     .padding(start = deck.start, top = deck.top, end = deck.end, bottom = deck.bottom),
@@ -961,11 +982,13 @@ fun Composer(
                 progress?.let { TodoBar(it, session?.id) }
                 val runningCommands = remember(tree) { runningBackgroundCommands(tree) }
                 if (session != null) RunningCommandsBar(runningCommands, commandActions)
+                // #273: "Handover under way" (the composer stays usable: new messages go to the new lead).
+                if (session != null && !handedOffNow && handoverUnderWay) HandoffNotice(HandoffVariant.Pending, null, onOpenSession)
                 // T6.6 (chat-view.tsx:3814-3833): a handed-off source's composer is replaced by
                 // "Continued in →"; a read-only session's by the replay-only flag. No input, no keys.
                 val handedOff = !session?.handedOffTo.isNullOrEmpty()
                 if (session != null && handedOff) {
-                    HandoffLockRow(handoffTarget, onOpenSession)
+                    HandoffNotice(HandoffVariant.To, handoffTarget, onOpenSession, linkFocus = handoffLinkFocus)
                 } else if (session?.readOnly == true) {
                     ReplayOnlyFlag(session.provider)
                 } else {

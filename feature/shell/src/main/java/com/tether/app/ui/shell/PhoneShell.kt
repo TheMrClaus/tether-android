@@ -40,6 +40,8 @@ object ShellTags {
     const val ResumeCommandKey = "shell-resume-command"
     const val LinksPopover = "shell-links-popover"
     const val PinKey = "shell-pin"
+    const val HandoverRow = "handover-row"
+    const val HandoverReason = "handover-reason"
     const val EndSessionKey = "shell-end-session"
     const val TelemetrySheet = "shell-telemetry-sheet"
     const val TelemetryClose = "shell-telemetry-close"
@@ -202,6 +204,7 @@ fun PhoneShell(
                         linksOpen = state.linksOpen,
                         onToggleTelemetry = state::toggleTelemetry,
                         onToggleLinks = state::toggleLinks,
+                        linksFocus = state.linksKeyFocus,
                         actions = header,
                         gauge = slots.gauge,
                         badge = slots.headerBadge?.let { badge -> { badge(session) } },

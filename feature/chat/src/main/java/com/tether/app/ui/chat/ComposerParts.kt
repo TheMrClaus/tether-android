@@ -265,6 +265,12 @@ internal const val QUEUE_INTERRUPT_TAG = "queue-interrupt-now"
 internal const val QUEUE_STOP_ANYWAY_TAG = "queue-stop-anyway"
 internal const val QUEUE_KEEP_WAITING_TAG = "queue-keep-waiting"
 
+/** #273: Tether's handover instruction row (lib/queued-message.ts isHandoverRequestQueuedMessage), read-only and removable. */
+internal const val HANDOVER_QUEUE_ROW_TAG = "handover-queue-row"
+internal const val HANDOVER_QUEUE_ROW_DESCRIPTION = "Tether's handover instruction (read-only)"
+internal const val HANDOVER_QUEUE_REMOVE_DESCRIPTION = "Remove the handover instruction to cancel the handover"
+internal const val HANDOVER_QUEUE_WAIT_COPY = "Queued — Tether's handover instruction, sent after the current turn. Remove it to cancel the handover."
+
 /** chat-view.tsx:1468: an end-of-turn row's wait line. */
 internal const val QUEUED_AFTER_TURN_COPY = "Queued — sends after the current turn"
 
@@ -299,7 +305,8 @@ internal fun QueuedMessages(
             androidx.compose.runtime.key(message.queueId) {
                 QueuedMessageRow(
                     text = message.text,
-                    atToolBoundary = message.atToolBoundary,
+                    atToolBoundary = message.atToolBoundary && !message.isHandoverRequest,
+                    handoverRequest = message.isHandoverRequest,
                     onSave = { onSave(message.queueId, it) },
                     onRemove = { onRemove(message.queueId) },
                     onInterruptNow = onInterruptNow,
@@ -365,6 +372,8 @@ internal fun QueuedMessageRow(
     liveWork: QueueWait.LiveWork = QueueWait.LiveWork.None,
     serverNow: () -> Long = { 0L },
     stale: Boolean = false,
+    /** #273: Tether's own handover instruction: read-only (no edit, no interrupt-now), removable (= cancels the handover). */
+    handoverRequest: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val focusManager = LocalFocusManager.current
@@ -410,7 +419,7 @@ internal fun QueuedMessageRow(
     }
     val confirming = confirmingInterrupt && cost.isNotEmpty() && interruptLock == null
     val choice = atToolBoundary && wait.needsChoice && !choiceAcknowledged
-    val waitLabel = if (atToolBoundary) wait.label else QUEUED_AFTER_TURN_COPY
+    val waitLabel = if (handoverRequest) HANDOVER_QUEUE_WAIT_COPY else if (atToolBoundary) wait.label else QUEUED_AFTER_TURN_COPY
     val shape = RoundedCornerShape(t.radiusMd)
     val rowHeight = 30.4.dp // 1.9rem
     Column(
@@ -430,7 +439,18 @@ internal fun QueuedMessageRow(
             // The web's icon carries the label as a tooltip only; the words are the line below.
             Icon(TetherIcons.Loader, contentDescription = null, tint = t.violet, modifier = Modifier.size(13.dp))
         }
-        BasicTextField(
+        if (handoverRequest) {
+            Text(
+                text,
+                style = LocalTetherTypography.current.body.copy(color = t.ink, fontSize = 13.6.sp, lineHeight = 20.4.sp),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = rowHeight)
+                    .padding(vertical = t.css.spaceXs)
+                    .semantics { contentDescription = HANDOVER_QUEUE_ROW_DESCRIPTION }
+                    .testTag(HANDOVER_QUEUE_ROW_TAG),
+            )
+        } else BasicTextField(
             value = value,
             onValueChange = { value = it },
             modifier = Modifier
@@ -460,7 +480,7 @@ internal fun QueuedMessageRow(
             Modifier
                 .minimumInteractiveComponentSize()
                 .clickable(onClick = onRemove)
-                .semantics { contentDescription = "Remove queued message" }
+                .semantics { contentDescription = if (handoverRequest) HANDOVER_QUEUE_REMOVE_DESCRIPTION else "Remove queued message" }
                 .size(rowHeight),
             contentAlignment = Alignment.Center,
         ) {

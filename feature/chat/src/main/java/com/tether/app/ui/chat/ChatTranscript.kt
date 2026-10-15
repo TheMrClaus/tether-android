@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.model.Vocab
+import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
@@ -151,11 +152,16 @@ internal fun ChatTranscript(
      */
     reviewFocus: String? = null,
     onReviewShown: () -> Unit = {},
+    /** #273: AgentSession.handedOffFrom of the session shown: its "Continued from" strip leads the list and its first prompt row is labelled. */
+    handedOffFrom: String? = null,
+    /** #273: the session [handedOffFrom] names, while it is listed (null: unlisted, so the strip is words only). */
+    handoffPeer: AgentSession? = null,
+    onOpenSession: (String) -> Unit = {},
 ) {
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground, reviewFocus, onReviewShown)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground, reviewFocus, onReviewShown, handedOffFrom, handoffPeer, onOpenSession)
     }
 }
 
@@ -184,6 +190,9 @@ private fun ChatTranscriptBody(
     wellBackground: Boolean,
     reviewFocus: String?,
     onReviewShown: () -> Unit,
+    handedOffFrom: String?,
+    handoffPeer: AgentSession?,
+    onOpenSession: (String) -> Unit,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -198,8 +207,8 @@ private fun ChatTranscriptBody(
     // Everything the build reads is captured here, on the main thread, as immutable values: the toggles
     // as a snapshot of the map, never `groupToggles::resolve`.
     val observer = LocalChatDerivationObserver.current
-    val rowInputs = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentSessionId, observer) {
-        ChatRowsInputs(projection, tree, showThinking, zone, richCodex, showApprovals, consentSessionId, observer)
+    val rowInputs = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentSessionId, observer, handedOffFrom) {
+        ChatRowsInputs(projection, tree, showThinking, zone, richCodex, showApprovals, consentSessionId, observer, handedOffFrom)
     }
     val rows = rememberDerived(
         sessionKey = consentSessionId ?: projection.tetherSessionId,
@@ -222,7 +231,9 @@ private fun ChatTranscriptBody(
     val host = remember(items) { hostRows(items) }
     val onToggleGroup: (ChatItem.ToolGroup) -> Unit = remember(groupToggles) { { group -> groupToggles.toggle(group) } }
     val toolRender = remember(richCodex, richOpencode, showThinking) { ToolRenderFlags(richCodex, richOpencode, showThinking) }
-    val leading = if (roster != null) 1 else 0
+    // #273: the successor's "Continued from" strip is the list's first item, before the roster.
+    val fromStrip = if (!handedOffFrom.isNullOrEmpty()) 1 else 0
+    val leading = (if (roster != null) 1 else 0) + fromStrip
 
     // Story points: the conversation timeline rail (T6.5) indexes operator prompts. They come from
     // the tree (T2.2's faithful port of lib/conversation-story-points.ts) at the owner's limits.
@@ -262,7 +273,7 @@ private fun ChatTranscriptBody(
     val restored = remember { booleanArrayOf(restore == null) }
     if (!restored[0] && restore != null && items.isNotEmpty()) {
         restored[0] = true
-        val at = if (restore.key == "subagent-roster") 0 else lazyKeys.indexOf(restore.key).takeIf { it >= 0 }?.plus(leading)
+        val at = if (restore.key == "subagent-roster") fromStrip else lazyKeys.indexOf(restore.key).takeIf { it >= 0 }?.plus(leading)
         // ta-gvyf: a place that names no row any more (trimmed, a pending-send / failed-send row, no key at all) puts the
         // reader at the latest message, as a chat opens; a list left at index 0 would open a non-following reader at the top.
         if (at != null) listState.requestScrollToItem(at, restore.offset) else sticky = true
@@ -458,6 +469,11 @@ private fun ChatTranscriptBody(
                 .testTag("chat-transcript"),
             contentPadding = layoutPadding,
         ) {
+            if (fromStrip == 1) {
+                item(key = "handoff-from", contentType = "handoff-from") {
+                    HandoffNotice(HandoffVariant.From, handoffPeer, onOpenSession, Modifier.padding(top = t.css.spaceMd))
+                }
+            }
             if (roster != null) {
                 item(key = "subagent-roster", contentType = "roster") { roster() }
             }
@@ -682,7 +698,7 @@ private fun ChatRowContent(
             is ChatItem.Block -> CompositionLocalProvider(
                 LocalFileMentionAnchor provides remember(item.turnId, item.block.blockId) { FileMentionAnchor(item.turnId, item.block.blockId) },
             ) { when (item.block.kind) {
-                Vocab.BLOCK_USER_MESSAGE -> UserBubble(item.block, timeLabel = item.timeLabel, find = find)
+                Vocab.BLOCK_USER_MESSAGE -> UserBubble(item.block, timeLabel = item.timeLabel, find = find, attribution = item.attribution)
                 Vocab.BLOCK_MESSAGE -> AgentBubble(item.block, timeLabel = item.timeLabel, find = find)
                 // ta-a5jl: a tool call and a thinking block are one compact row; the card / text is in the detail sheet.
                 Vocab.BLOCK_THINKING -> ActivityThinkingRow(item.block, item.activityKey)

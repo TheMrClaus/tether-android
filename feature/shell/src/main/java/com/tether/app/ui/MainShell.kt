@@ -163,6 +163,9 @@ private const val CopiedFeedbackMs = 1_500L
 /** T13.2 r3: an open End session confirmation: the session, and the server origin it was opened for. */
 private data class EndTarget(val session: AgentSession, val drawnFor: String?)
 
+/** #273: the session and the server a Hand over confirmation was opened for. */
+private data class HandoverDraw(val sessionId: String, val drawnFor: String?)
+
 /**
  * The signed-in app wired to the view model: below the 768dp layout cutoff (the web's 48rem) the phone shell (the
  * web's mobile layout, [PhoneShell]); at or above it the expanded shell (the web's desktop layout,
@@ -380,6 +383,19 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     }
     var renaming by rememberSaveable(stateSaver = RenameTargetSaver) { mutableStateOf<RenameTarget?>(null) }
     var confirmEnd by remember { mutableStateOf<EndTarget?>(null) }
+    // #273: the Hand over confirmation, and the live row state it is checked against (the menu row reads the same flow).
+    var confirmHandover by remember { mutableStateOf<HandoverDraw?>(null) }
+    var handoverClosed by remember { mutableStateOf(0) }
+    val handoverState by remember(vm, session?.id) {
+        session?.id?.let { vm.handoverMenuState(it) } ?: kotlinx.coroutines.flow.flowOf(null)
+    }.collectAsStateWithLifecycle(initialValue = null)
+    // A closed confirmation (Cancel, back, an auto-dismiss or the send) puts focus back on the "Session links" trigger.
+    LaunchedEffect(handoverClosed) {
+        if (handoverClosed > 0) {
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { shell.linksKeyFocus.requestFocus() }
+        }
+    }
     // T10.1 (dashboard.tsx:1170-1180 `endSession`): Settings → General's "Confirm before ending".
     // Off, the header's End session sends at once; on (and until the stored value is read), it asks.
     val confirmBeforeEndFlow = remember(prefs) { prefs.preferencesFor(vm.client.serverUrl).map { it.confirmBeforeEnd }.distinctUntilChanged() }
@@ -526,6 +542,10 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                 onLogout = { vm.logout() },
             )
         val headerActions = WorkspaceHeaderActions(
+                handover = handoverState,
+                onHandOver = {
+                    session?.let { confirmHandover = HandoverDraw(it.id, com.tether.app.ui.chat.endSessionServer(consentOrigin, vm.client.serverUrl.value)) }
+                },
                 onRename = { renaming = session?.let { RenameTarget(it.id, it.name) } },
                 // r3: the confirmation is bound to the session AND the server it was opened for.
                 onEndSession = {
@@ -876,6 +896,24 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
         ) {
             TetherInputWell(value = name, onValueChange = { name = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
         }
+    }
+
+    confirmHandover?.let { drawn ->
+        com.tether.app.ui.chat.HandOverDialog(
+            identity = drawn,
+            // Only while the row is enabled for THIS session (ignoring this device's own request): else it closes, sending nothing.
+            eligible = session?.id == drawn.sessionId && handoverState is com.tether.app.client.Handover.MenuState.Enabled,
+            endable = com.tether.app.ui.chat.endConfirmLive(drawn.drawnFor, consentOrigin),
+            onConfirm = {
+                confirmHandover = null
+                handoverClosed++
+                vm.requestHandover(drawn.sessionId)
+            },
+            onCancel = {
+                confirmHandover = null
+                handoverClosed++
+            },
+        )
     }
 
     confirmEnd?.let { drawn ->

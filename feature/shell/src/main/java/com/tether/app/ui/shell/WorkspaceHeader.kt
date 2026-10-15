@@ -1,6 +1,12 @@
 package com.tether.app.ui.shell
 
 import androidx.compose.foundation.clickable
+import com.tether.app.ui.components.focusRing
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.background
 import com.tether.app.ui.components.softShadow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.TextUnit
@@ -158,6 +164,9 @@ data class WorkspaceHeaderActions(
     val onCopyTetherId: () -> Unit,
     /** workspace-header.tsx `onCopyResumeCommand` (v52): copies [AgentSession.resumeCommand]. */
     val onCopyResumeCommand: () -> Unit = {},
+    /** #273: the menu's Hand over row (null / Hidden: not drawn). Enabled opens the host's confirmation; Blocked says why. */
+    val handover: com.tether.app.client.Handover.MenuState? = null,
+    val onHandOver: () -> Unit = {},
 )
 
 /**
@@ -196,6 +205,8 @@ fun WorkspaceHeader(
     badge: (@Composable () -> Unit)? = null,
     /** ta-7njx: the cluster's yield state, shared with the "Session links" menu (the shell hoists it). */
     fit: HeaderFit = remember { HeaderFit() },
+    /** #273: the "Session links" trigger's focus handle (a closed Hand over dialog returns focus to it). */
+    linksFocus: androidx.compose.ui.focus.FocusRequester? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -276,7 +287,7 @@ fun WorkspaceHeader(
                     width = 44.dp,
                     height = 44.dp,
                     iconSize = 18.dp,
-                    modifier = Modifier.testTag(ShellTags.LinksKey),
+                    modifier = (if (linksFocus != null) Modifier.focusRequester(linksFocus) else Modifier).testTag(ShellTags.LinksKey),
                 )
                 if (expanded && step < HeaderFit.STEP_PIN_IN_MENU) PinKey(session.pinned, actions.onTogglePinned)
                 // `.end-session`: the brick key, glyph only below 48rem; Studio's rail forces 2.75rem
@@ -667,6 +678,71 @@ fun SessionLinksPopover(
                     Text(if (pinned) "Unpin session" else "Pin session", color = ink, style = cssText(type.ui, 0.74f, 400))
                 }
             }
+            // #273: the rare one-way action is the menu's last row, after a divider.
+            val handover = actions.handover
+            if (handover != null && handover !is com.tether.app.client.Handover.MenuState.Hidden) {
+                Spacer(Modifier.height(t.css.spaceSm))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+                Spacer(Modifier.height(t.css.spaceSm))
+                HandoverMenuRow(handover) {
+                    onDismiss()
+                    actions.onHandOver()
+                }
+            }
+        }
+    }
+}
+
+/**
+ * #273 (U1-spec §3, A1 §1): "Hand over to a new lead", the links menu's last row. Enabled it is plain ink and acts; blocked
+ * it stays in the keyboard and TalkBack order (never removed, never a tooltip), muted, with the reason in words under the
+ * label, and does nothing. One merged node: "Hand over to a new lead, <reason>, disabled".
+ */
+@Composable
+internal fun HandoverMenuRow(state: com.tether.app.client.Handover.MenuState, onOpen: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val blocked = state as? com.tether.app.client.Handover.MenuState.Blocked
+    val shape = RoundedCornerShape(t.radiusSm)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .focusRing(focused, shape, t.violet)
+            .cssSurface(shape, if (pressed && blocked == null) t.graphiteRaised else Color.Transparent)
+            .clickable(interaction, indication = null, role = Role.Button) { if (blocked == null) onOpen() }
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                if (blocked != null) disabled()
+            }
+            .testTag(ShellTags.HandoverRow),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = t.css.spaceSm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+        ) {
+            Icon(TetherIcons.ArrowRightLeft, contentDescription = null, tint = if (blocked != null) t.faint else t.ink, modifier = Modifier.size(16.dp))
+            Text(
+                "Hand over to a new lead",
+                color = if (blocked != null) t.muted else t.ink,
+                style = cssText(type.ui, 0.82f, 650),
+                maxLines = 1,
+            )
+        }
+        if (blocked != null) {
+            Text(
+                blocked.reason,
+                color = t.muted,
+                style = cssText(type.ui, 0.75f, 400),
+                modifier = Modifier
+                    .padding(start = t.css.spaceSm + 16.dp + t.css.spaceSm, end = t.css.spaceSm, bottom = t.css.spaceXs)
+                    .testTag(ShellTags.HandoverReason),
+            )
         }
     }
 }
