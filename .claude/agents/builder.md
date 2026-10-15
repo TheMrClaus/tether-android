@@ -35,7 +35,7 @@ its migrations, auth and permissions, integrations, build/tooling, and the hard 
 - **Never sleep-poll.** A gate/build/bake is ONE call in the foreground with the Bash `timeout`
   at 600000, or one call that loops inside the command until the log has its verdict line —
   never `sleep N; tail log` as its own step (each re-reads your whole context). A fix round after
-  refuters is a fresh lane: if your context passes ~200k, stop, write the receipt and hand back.
+  refuters is a fresh lane: if your context passes ~200k, stop, write the receipt and hand back. Your final message to the lead is a hand-back of at most ~1.5k chars: the verdict line and the receipt path. Every caveat or doubt goes under the receipt's `## Open items`, which the lead always reads.
 - Log your own work in the repo's beads store; report back with commit shas, the exact verification
   line, files touched, and everything in the brief you refuted.
 

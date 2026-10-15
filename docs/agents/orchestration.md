@@ -155,6 +155,23 @@ Rules — binding in every brief:
    `tether_context`), write the same handover to the run-artefacts dir and tell the operator. Why:
    every step re-reads the whole context — measured 2026-10-15, a successor started at 36k against
    its source's 356k, ~10× cheaper per step for the same work.
+10. **Keep the lead's context lean — it sets the handover clock** (owner 2026-10-15). Measured on
+   realms13/14: an xhigh lead grows ~150–165k tokens an hour — ~40% its own reasoning (the price of
+   xhigh, kept), ~30% inbound text (lane reports of 6–8k, whole receipts, its own analysis output),
+   ~20% its own briefs. Four rules, each with its guard; none touches effort, the judges or rule 9:
+   - **Hand-backs are pointers.** A lane's or judge's final message is at most ~1.5k chars: the
+     verdict line and the receipt/verdict path. *Guard:* every caveat, doubt or "only if…" goes under
+     the receipt's `## Open items`, which the lead always reads — a caveat buried elsewhere is a
+     receipt defect the lead sends back.
+   - **The lead runs no analysis.** Scripts, image/pixel measurements, log digging and receipt
+     cross-checks go to `scout` with one exact question; the lead reads the answer line. *Guard:*
+     one-line checks stay the lead's — a `grep`, `git show --stat`, a gate's `RESULT:` line, `wc -c`.
+   - **Receipts are read by section.** The verdict line and `## Open items` (`grep -n` + a `sed`
+     window), never `cat` or `head -c` of a whole receipt; a judge's file only where its verdict needs
+     a lead decision.
+   - **The handover prompt names exact sections** (file + heading or line window) for the successor.
+     *Guard:* the successor always reads the run doc's LIVE STATUS and the open items, whatever the
+     prompt says.
 
 ## Verification discipline (every claim)
 

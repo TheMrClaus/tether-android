@@ -76,6 +76,10 @@ single-file, non-design, non-core edit itself (policy rule 3).
   point; at ≥300k reach a clean point (no lane in flight, nothing half-integrated or unpushed), then
   ONE `tether_handover` with the mandate verbatim + full state + the chain, and end the turn
   (orchestration.md › Cost discipline). Lanes keep ~200k → receipt → hand back.
+- **Lead context diet** (orchestration.md › Cost discipline): hand-backs are ≤~1.5k pointers
+  (verdict + receipt path; caveats under the receipt's `## Open items`, always read); the lead runs
+  no analysis — `scout` does, one-line checks excepted; receipts are read by section; the handover
+  prompt names exact sections and the successor always reads LIVE STATUS + open items.
 - Full policy: `docs/agents/orchestration.md`; how a run works: `docs/agents/gauntlet-core.md`.
 <!-- app-orchestration:end -->
 

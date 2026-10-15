@@ -28,6 +28,9 @@ Check, at minimum:
   starting or stopping the shared instance, a lane pointing a script at production, a lane touching
   another workstream's files.
 
+Your message back to the lead is that same ONE line plus any blocking finding (at most ~1.5k
+chars) — never the review itself.
+
 Report as: `PASS` or `RE-CHECK`, then the ranked findings with `file:line` evidence and the smallest
 change that would close each one.
 

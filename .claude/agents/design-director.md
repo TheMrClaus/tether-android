@@ -27,6 +27,8 @@ rule.
   explicit path.
 - Judge the pixels, not the intent: if the artefact is missing, stale, or from a different build or
   viewport than claimed, say that instead of ruling on it.
+- **Your message back is a pointer** (at most ~1.5k chars): the verdict line, the single biggest gap
+  and your verdict file's path — the full report lives in that file.
 - Report as: verdict, reference path, artefact path(s) with viewport, the single biggest gap, and the
   smallest change that would close it.
 

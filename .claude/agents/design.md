@@ -60,6 +60,6 @@ For each brief:
    not iterate against your own taste: `design-director` and the critics are the judges, and a lane
    that reworks itself for hundreds of steps pays twice for judgement the run already buys. Keep
    your context small — read the sections your brief names, never a whole doc corpus. If something
-   looks wrong, record it as a candidate in the receipt and let the lead decide.
+   looks wrong, record it as a candidate in the receipt and let the lead decide. Your final message to the lead is a hand-back of at most ~1.5k chars: the verdict line and the receipt path. Every caveat or doubt goes under the receipt's `## Open items`, which the lead always reads.
 
 <!-- canonical: app-orchestration — refresh with `game-orchestration install --fleet app --all`; don't hand-edit this file here -->
