@@ -99,6 +99,8 @@ fun TetherKey(
     trailing: (@Composable RowScope.() -> Unit)? = null,
     /** The legend's line limit: 1 (a key's legend never wraps) unless a caller must show a long legend whole. */
     maxLines: Int = 1,
+    /** False: focus is held but its ring stays unpainted (`:focus-visible`: a touch user's programmatic focus shows none). */
+    showFocusRing: Boolean = true,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -160,7 +162,7 @@ fun TetherKey(
                 alpha = look.alpha
                 compositingStrategy = CompositingStrategy.ModulateAlpha
             }
-            .focusRing(focused, keyShape, t.violet)
+            .focusRing(focused && showFocusRing, keyShape, t.violet)
             .cssSurface(keyShape, face, CssBorder(1.dp, look.border), look.shadows)
             .padding(horizontal = contentPadding ?: if (iconOnly) 0.dp else t.css.spaceLg),
         verticalAlignment = Alignment.CenterVertically,

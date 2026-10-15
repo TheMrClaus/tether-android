@@ -1,5 +1,6 @@
 package com.tether.app.ui.chat
 
+import androidx.compose.ui.test.performKeyInput
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.CompositionLocalProvider
@@ -83,7 +84,7 @@ class HandoverUiScreenshotTest(private val shot: HandoverShot, private val skin:
             HandoverShot.Confirm -> rule.setContent {
                 TetherTheme(choiceFor(skin)) {
                     CompositionLocalProvider(LocalReducedMotion provides true) {
-                        HandOverDialog(identity = "s1", eligible = true, endable = true, onConfirm = {}, onCancel = {}, keyboardFocus = true)
+                        HandOverDialog(identity = "s1", eligible = true, endable = true, onConfirm = {}, onCancel = {})
                     }
                 }
             }
@@ -96,6 +97,15 @@ class HandoverUiScreenshotTest(private val shot: HandoverShot, private val skin:
         }
         rule.mainClock.advanceTimeBy(700)
         rule.waitForIdle()
+        if (shot == HandoverShot.Confirm) {
+            // A keyboard user's dialog: a key event puts the dialog's own window in keyboard input mode, so Cancel's ring paints.
+            rule.onNodeWithTag(HANDOVER_CANCEL_TAG).performKeyInput {
+                keyDown(androidx.compose.ui.input.key.Key.ShiftLeft)
+                keyUp(androidx.compose.ui.input.key.Key.ShiftLeft)
+            }
+            rule.mainClock.advanceTimeBy(300)
+            rule.waitForIdle()
+        }
         val path = "src/test/screenshots/${shot.id}/${skin.id}-phone.png"
         when (shot) {
             HandoverShot.Confirm -> captureScreenRoboImage(path, roborazziOptions = exact)

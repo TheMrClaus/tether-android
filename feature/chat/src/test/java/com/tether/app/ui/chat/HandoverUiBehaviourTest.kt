@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.requestFocus
 import com.tether.app.client.Handover
 import com.tether.app.protocol.model.AgentSession
@@ -54,7 +55,7 @@ class HandoverUiBehaviourTest {
         rule.setContent {
             TetherTheme(choiceFor(TetherSkin.Studio)) {
                 androidx.compose.runtime.CompositionLocalProvider(LocalReducedMotion provides true) {
-                    HandOverDialog(identity = "s1", eligible = true, endable = true, onConfirm = { confirms++ }, onCancel = { cancels++ }, keyboardFocus = true)
+                    HandOverDialog(identity = "s1", eligible = true, endable = true, onConfirm = { confirms++ }, onCancel = { cancels++ })
                 }
             }
         }
@@ -69,6 +70,36 @@ class HandoverUiBehaviourTest {
         rule.waitForIdle()
         assertEquals(1, confirms)
         assertEquals(0, cancels)
+    }
+
+    @Test
+    fun cancelIsFocusedWhenAKeyboardUserOpensTheDialog() {
+        rule.setContent {
+            val input = androidx.compose.ui.platform.LocalInputModeManager.current
+            androidx.compose.runtime.SideEffect { input.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard) }
+            TetherTheme(choiceFor(TetherSkin.Studio)) {
+                HandOverDialog(identity = "s1", eligible = true, endable = true, onConfirm = {}, onCancel = {})
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag(HANDOVER_CANCEL_TAG).assertIsFocused()
+    }
+
+    @Test
+    fun cancelIsFocusedWhenATapOpensTheDialogAndEnterOnItSendsNothing() {
+        var confirms = 0
+        var cancels = 0
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.Studio)) {
+                HandOverDialog(identity = "s1", eligible = true, endable = true, onConfirm = { confirms++ }, onCancel = { cancels++ })
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag(HANDOVER_CANCEL_TAG).assertIsFocused()
+        rule.onNodeWithTag(HANDOVER_CANCEL_TAG).performKeyInput { keyDown(androidx.compose.ui.input.key.Key.Enter); keyUp(androidx.compose.ui.input.key.Key.Enter) }
+        rule.waitForIdle()
+        assertEquals(0, confirms)
+        assertEquals(1, cancels)
     }
 
     @Test

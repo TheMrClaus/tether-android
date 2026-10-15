@@ -985,7 +985,7 @@ fun Composer(
                 // #273: "Handover under way" (the composer stays usable: new messages go to the new lead).
                 if (session != null && !handedOffNow && handoverUnderWay) HandoffNotice(HandoffVariant.Pending, null, onOpenSession)
                 // T6.6 (chat-view.tsx:3814-3833): a handed-off source's composer is replaced by
-                // "Continued in →"; a read-only session's by the replay-only flag. No input, no keys.
+                // the HandoffNotice ("Handed off to <name> →"); a read-only session's by the replay-only flag. No input, no keys.
                 val handedOff = !session?.handedOffTo.isNullOrEmpty()
                 if (session != null && handedOff) {
                     HandoffNotice(HandoffVariant.To, handoffTarget, onOpenSession, linkFocus = handoffLinkFocus)

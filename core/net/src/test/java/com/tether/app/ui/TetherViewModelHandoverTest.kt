@@ -75,6 +75,15 @@ class TetherViewModelHandoverTest {
         assertTrue(vm.handoverRequested.value.isEmpty())
     }
 
+    @Test fun aSecondRequestForTheSameSessionSendsNothing() = runTest(dispatcher) {
+        val client = HandoverClient()
+        val vm = vm(client)
+        open(client, vm, "a")
+        assertTrue(vm.requestHandover("a"))
+        assertFalse(vm.requestHandover("a"))
+        assertEquals(listOf("a"), client.requests)
+    }
+
     @Test fun successorCreatedBeforeTheSourceUpdateNavigates() = runTest(dispatcher) {
         val client = HandoverClient()
         val vm = vm(client)

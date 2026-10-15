@@ -9,7 +9,7 @@ these surfaces). Montages rebuilt by `tools/compare-screens/notice-montages.sh`;
 | File | Web scenario | Android golden |
 |---|---|---|
 | `outcome-unknown-<skin>-phone.png` / `-tablet.png` | `notices` (a turn recovered as outcome_unknown) | `notice-outcome-unknown` |
-| `handoff-lock-<skin>-phone.png` / `-tablet.png` | `handoff-source-locked` (the composer's "Continued in →") | `notice-handoff` |
+| `handoff-lock-<skin>-phone.png` / `-tablet.png` | `handoff-source-locked` (the composer's "Continued in →") | `notice-handoff` — **superseded (#273, ta-ozn2.4):** the old lock row is gone, `notice-handoff` now shows the HandoffNotice ("Handed off to <name> →"); these montages pair that with the pre-#273 web frame and are historical, not regenerated (the web reference predates the notice) |
 
 6 skins × phone + tablet = 24 montages. Remaining differences:
 

@@ -436,6 +436,7 @@ class TetherViewModel(
      * frame went out; a failed send (the client says LINK_RECONNECTING) sets no flag. Returns whether it was sent.
      */
     fun requestHandover(sessionId: String): Boolean {
+        if (sessionId in handoverClaims.requested.value) return false // already asked: a second tap sends nothing
         if (!client.handoverRequest(sessionId)) return false
         handoverClaims.add(sessionId)
         return true

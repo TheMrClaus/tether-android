@@ -107,7 +107,7 @@ internal fun handoffNoticeText(variant: HandoffVariant, peer: AgentSession?): St
 
 /**
  * `components/handoff-notice.tsx` (web fe4aa8c0): the ONE notice for every handoff state, replacing the old
- * "Continued in →" lock row. `to` takes the source's composer slot ("Handed off to <name> →"), `from` is the
+ * pre-#273 lock row. `to` takes the source's composer slot ("Handed off to <name> →"), `from` is the
  * successor's first transcript item ("Continued from <name>"), `pending` sits above the composer while a handover is
  * requested ("Handover under way", two lines, no link). The link only opens that session; it sends nothing. An
  * unlisted peer reads as words only. [linkFocus] lets the host move focus to the link when the composer under the

@@ -35,8 +35,6 @@ fun HandOverDialog(
     endable: Boolean,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
-    /** Test seam (the Robolectric windows start in touch mode): open as a keyboard user's dialog, so Cancel's focus ring shows. */
-    keyboardFocus: Boolean = false,
 ) {
     val cancelFocus = remember { FocusRequester() }
     val dismiss by rememberUpdatedState(onCancel)
@@ -47,14 +45,21 @@ fun HandOverDialog(
         footer = {
             // Inside the dialog's own composition, so the key is attached when focus is asked for.
             val input = androidx.compose.ui.platform.LocalInputModeManager.current
+            // Cancel takes focus whatever opened the dialog (the web's showModal does). A clickable key is focusable only in
+            // keyboard input mode, so ask for it, focus, then give a touch user's mode back; the ring follows the mode.
             LaunchedEffect(Unit) {
-                if (keyboardFocus) input.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard)
+                androidx.compose.runtime.withFrameNanos { } // the key is placed and attached before focus is asked for
+                val prior = input.inputMode
+                input.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard)
                 runCatching { cancelFocus.requestFocus() }
+                if (prior != androidx.compose.ui.input.InputMode.Keyboard) input.requestInputMode(prior)
             }
+            val keyboardMode = input.inputMode == androidx.compose.ui.input.InputMode.Keyboard
             TetherKey(
                 onClick = onCancel,
                 classes = KeyClasses.ButtonSecondary,
                 label = "Cancel",
+                showFocusRing = keyboardMode,
                 modifier = Modifier.focusRequester(cancelFocus).testTag(HANDOVER_CANCEL_TAG),
             )
             StaleTapGuard(identity) { guard ->
