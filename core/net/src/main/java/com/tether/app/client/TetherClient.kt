@@ -15,6 +15,7 @@ import com.tether.app.protocol.overview.OverviewSubscription
 import com.tether.app.protocol.tree.JsObj
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.StateFlow
@@ -919,6 +920,16 @@ interface TetherClient {
      */
     fun handoff(sourceId: String, targetId: String, engineText: String): Boolean = false
 
+    /**
+     * v150 (#273, use-tether.ts requestHandover): the operator's "Hand over to a new lead", `{ type, sessionId }`.
+     * True when the frame went out (a failed send says so in [errors]); a refusal comes back as a server error, which
+     * [handoverRefusals] also signals. A default method, so a client that cannot send it needs no edit.
+     */
+    fun handoverRequest(sessionId: String): Boolean = false
+
+    /** v150: ticks once per refused `handover-request` (use-tether.ts handoverRefusalSeq), so a device can drop its local flag. */
+    val handoverRefusals: SharedFlow<Unit> get() = NO_HANDOVER_REFUSALS
+
     /** T8.5 (use-tether.ts:1906-1913): drop [sourceId]'s brief from [handoffBriefs]; client-side only. */
     fun clearHandoffBrief(sourceId: String) {}
 
@@ -1269,6 +1280,7 @@ data class WorkspaceSelectStatus(val cwd: String, val requestId: String, val pha
 
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
 private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)
+private val NO_HANDOVER_REFUSALS: SharedFlow<Unit> = MutableSharedFlow()
 private val NO_SERVER_PROTOCOL: StateFlow<Int?> = MutableStateFlow(null)
 private val NO_GIT_FILE_DIFFS: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = MutableStateFlow(emptyMap())
 private val NO_WORKTREE_DIFFS: StateFlow<Map<String, kotlinx.serialization.json.JsonObject?>> = MutableStateFlow(emptyMap())

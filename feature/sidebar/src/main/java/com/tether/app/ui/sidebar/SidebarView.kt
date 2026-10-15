@@ -122,7 +122,7 @@ object SidebarViewModel {
                 grouped[workspace] = drag.order.mapNotNull { groupByKey[it] }
             }
         }
-        val groupedRows = Web.groupedByWorkspace(grouped, filtering)
+        val groupedRows = Web.groupedByWorkspace(grouped, filtering, state.sessionOrders)
         val childKeys = Web.delegateChildKeys(state.sidebarSessions.map { it.js })
 
         val blocks = ArrayList<BlockView>()

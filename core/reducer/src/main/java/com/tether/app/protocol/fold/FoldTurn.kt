@@ -94,6 +94,7 @@ private fun foldUserMessageAccepted(state: JsObj, event: JsObj): JsObj {
     val engineText = boundedDisplayText(event["engineText"], Limits.PROVIDER_PROJECTION_LIMITS.commandChars)
     val blockId = JsStr("user:${jsToString(event["turnId"])}")
     val attachments = event["attachments"]
+    val from = peerFrom(event["from"])
     return updateTurn(state) { turn ->
         upsertBlockKeep(turn, blockId) {
             JsObj.of(
@@ -106,10 +107,21 @@ private fun foldUserMessageAccepted(state: JsObj, event: JsObj): JsObj {
                 } else {
                     JsObj.EMPTY
                 },
-            ).spread(blockEventTs(event))
+            ).spread(if (from != null) JsObj.of("from" to from) else JsObj.EMPTY)
+                .spread(blockEventTs(event))
                 .spread(if (attachments is JsArr && attachments.isNotEmpty()) JsObj.of("attachments" to attachments) else JsObj.EMPTY)
         }
     }
+}
+
+// engines/events.ts peerFrom (v149, fe4aa8c0): `{ sessionId, name }` bounded; a missing or empty id drops the whole `from`.
+private const val PEER_FROM_NAME_CHARS = 80
+
+private fun peerFrom(value: JsValue?): JsObj? {
+    val o = value as? JsObj ?: return null
+    val sessionId = boundedIdentifier(o["sessionId"]) ?: return null
+    val name = boundedDisplayText(o["name"] as? JsStr ?: JsStr(""), PEER_FROM_NAME_CHARS)
+    return JsObj.of("sessionId" to js(sessionId), "name" to js(name ?: ""))
 }
 
 // events.mjs:2156

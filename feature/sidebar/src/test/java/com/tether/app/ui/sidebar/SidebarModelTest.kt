@@ -39,6 +39,27 @@ class SidebarModelTest {
         assertEquals(listOf("live:s03", "live:s01", "live:s02", "live:s04"), out.map { it.key })
     }
 
+    @Test fun aHandedOffSourceCarriesItsGlyphWordsAndASuccessorKeepsItsOwnRow() {
+        val successor = F.live("b", "Beta", ago = 1).copy(handedOffFrom = "a")
+        val source = F.live("a", "Alpha", ago = 5, handedOffTo = "b")
+        val out = rows(listOf(source, successor))
+        assertEquals("Handed off to Beta", out.single { it.key == "live:a" }.handedOffDescription)
+        assertNull(out.single { it.key == "live:b" }.handedOffDescription)
+        val lone = rows(listOf(F.live("a", "Alpha", ago = 5, handedOffTo = "gone")))
+        assertEquals("Handed off to another session", lone.single().handedOffDescription)
+    }
+
+    @Test fun theSuccessorRowIsPlacedDirectlyAboveItsSourceInTheBrowsingView() {
+        // Recency would list x, the source a, then the successor b (oldest); placeSuccessors lifts b above a.
+        val x = F.live("x", "X", ago = 1)
+        val a = F.live("a", "A", ago = 2, handedOffTo = "b")
+        val b = F.live("b", "B", ago = 3).copy(handedOffFrom = "a")
+        val sorted = rows(listOf(x, a, b))
+        val byWs = com.tether.app.protocol.helpers.SessionSidebar.rowsByWorkspace(sorted.map { it.js })
+        val placed = com.tether.app.protocol.helpers.SessionSidebar.groupedByWorkspace(byWs, filtering = false).values.single().rows
+        assertEquals(listOf("live:x", "live:b", "live:a"), placed.map { ((it as com.tether.app.protocol.tree.JsObj)["key"] as com.tether.app.protocol.tree.JsStr).value })
+    }
+
     @Test fun lastActiveSortKeysOnLastMessageAt() {
         val a = F.live("a", "a", ago = 10).copy(startedAt = F.NOW - 1_000, lastMessageAt = F.NOW - 900_000)
         val b = F.live("b", "b", ago = 20).copy(startedAt = F.NOW - 2_000, lastMessageAt = F.NOW - 100_000)

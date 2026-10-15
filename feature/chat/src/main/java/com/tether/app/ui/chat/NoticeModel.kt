@@ -67,6 +67,33 @@ internal fun providerNoticeHeading(providerLabel: String, code: String?): String
     return if (shown.isEmpty()) providerLabel else "$providerLabel · $shown"
 }
 
+/** The heading of a handover notice (#273): one plain "Tether" line, never the raw code. */
+internal const val HANDOVER_NOTICE_HEADING = "Tether"
+
+private val HANDOVER_NOTICE_QUIET = setOf("handover_scheduled", "handover_done", "handover_from")
+private val HANDOVER_NOTICE_WORDS = mapOf(
+    "handover_cancelled" to "The handover did not complete. Nothing more will be sent automatically.",
+    "handover_not_delivered" to "The handover prompt was not delivered to the new lead.",
+    "handover_prompt_failed" to "The handover prompt could not be started.",
+    "handover_row_not_moved" to "A queued message could not be moved to the new lead.",
+)
+internal const val HANDOVER_NOTICE_GENERIC = "The handover did not complete as planned."
+
+/**
+ * lib/handover-ui.mjs handoverNoticeView: null for a notice that is not a handover one (render as usual); the quiet
+ * success codes are hidden (the banners carry that state); any other `handover_*` code reads as ONE plain line.
+ */
+internal sealed interface HandoverNoticeView {
+    data object Hide : HandoverNoticeView
+    data class Words(val text: String) : HandoverNoticeView
+}
+
+internal fun handoverNoticeView(code: String?): HandoverNoticeView? {
+    if (code == null || !code.startsWith("handover_")) return null
+    if (code in HANDOVER_NOTICE_QUIET) return HandoverNoticeView.Hide
+    return HandoverNoticeView.Words(HANDOVER_NOTICE_WORDS[code] ?: HANDOVER_NOTICE_GENERIC)
+}
+
 /** A `providerNotices` list (session- or turn-scoped), in order; rows without an id or message are skipped. */
 fun providerNotices(list: JsValue?, providerLabel: String): List<ProviderNoticeView> =
     (list as? JsArr)?.mapNotNull { item ->
@@ -74,6 +101,12 @@ fun providerNotices(list: JsValue?, providerLabel: String): List<ProviderNoticeV
         val id = o["noticeId"].str()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
         val message = LabelText.clean(o["message"].str(), NOTICE_BODY_MAX)
         val level = o["level"].str().takeIf { it == "info" || it == "error" } ?: "warning"
+        when (val handover = handoverNoticeView(o["code"].str())) {
+            HandoverNoticeView.Hide -> return@mapNotNull null
+            is HandoverNoticeView.Words ->
+                return@mapNotNull ProviderNoticeView(id, level, HANDOVER_NOTICE_HEADING, handover.text, dismissKeyOf(o["dismissKey"]))
+            null -> Unit
+        }
         ProviderNoticeView(id, level, providerNoticeHeading(providerLabel, o["code"].str()), message, dismissKeyOf(o["dismissKey"]))
     }?.take(LabelText.MAX_ITEMS).orEmpty()
 

@@ -72,7 +72,20 @@ data class AgentSession(
      * a malformed stamp never drops the session row; read it with [createdViaStamp].
      */
     val createdVia: JsonElement? = null,
+    /** v150 (#273): the source session this one continues after a handover (the successor's back-link). */
+    val handedOffFrom: String? = null,
+    /** v150: an accepted handover (operator request or the agent's own tool call) until link or cancel. */
+    val handoverPending: Boolean = false,
+    /**
+     * v150: a STABLE CODE (null = eligible, absent = not a live managed session). Raw so a malformed value never
+     * drops the session row; read it with [handoverBlockedCode].
+     */
+    val handoverBlockedReason: JsonElement? = null,
 ) {
+    /** [handoverBlockedReason] when it is a non-empty JSON string (an unknown future code is kept), else null. */
+    val handoverBlockedCode: String?
+        get() = (handoverBlockedReason as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
+
     /** [createdVia] when it is a JSON string (an unknown future stamp is kept as-is), else null. */
     val createdViaStamp: String?
         get() = (createdVia as? JsonPrimitive)?.takeIf { it.isString }?.content

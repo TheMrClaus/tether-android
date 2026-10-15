@@ -130,6 +130,8 @@ internal class ChatRowsInputs(
     val showApprovals: Boolean,
     val consentSessionId: String?,
     val observer: ((String) -> Unit)?,
+    /** #273: AgentSession.handedOffFrom of the session shown (B2 threads it from the chat screen); null = none. */
+    val handedOffFrom: String? = null,
 )
 
 internal fun deriveChatRows(i: ChatRowsInputs, toggles: Map<String, GroupToggle>): ChatRows {
@@ -142,7 +144,7 @@ internal fun deriveChatRows(i: ChatRowsInputs, toggles: Map<String, GroupToggle>
             if (toggle != null && toggle.default != default) reads.add(ToggleRead(key, default))
             if (toggle == null || toggle.default != default) default else toggle.open
         },
-        i.showApprovals, i.consentSessionId,
+        i.showApprovals, i.consentSessionId, i.handedOffFrom,
     )
     return ChatRows(items, TimelineModel.points(i.tree), reads, touchedFilesOf(cardTree(i.projection, i.tree)))
 }

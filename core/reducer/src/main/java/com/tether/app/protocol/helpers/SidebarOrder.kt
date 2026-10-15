@@ -70,4 +70,44 @@ object SidebarOrder {
         keys.add(to, dragged)
         return JsArr.of(keys)
     }
+
+    /**
+     * lib/sidebar-order.mjs placeSuccessors (GH #273): a handover successor sits IMMEDIATELY ABOVE its source,
+     * recursively (a chain stacks newest-first). Render-only, never persisted. A row whose `live.handedOffFrom` names
+     * another row of the SAME list is lifted out of its own rank and placed above that source, unless its key is in
+     * [keepKeys] (the operator dragged it, so its explicit rank wins). Rows with no listed source, and any row caught
+     * in a cycle, keep their place.
+     */
+    fun placeSuccessors(entries: List<JsValue>, keepKeys: Set<String> = emptySet()): List<JsValue> {
+        fun keyOf(entry: JsValue): String? = (entry["key"] as? JsStr)?.value
+        val keyByLiveId = HashMap<String, String>()
+        for (entry in entries) {
+            val id = (entry["live"]["id"] as? JsStr)?.value?.takeIf { it.isNotEmpty() } ?: continue
+            keyOf(entry)?.let { keyByLiveId[id] = it }
+        }
+        val successorsOf = LinkedHashMap<String, MutableList<JsValue>>()
+        val lifted = HashSet<String>()
+        for (entry in entries) {
+            val key = keyOf(entry) ?: continue
+            val from = (entry["live"]["handedOffFrom"] as? JsStr)?.value?.takeIf { it.isNotEmpty() } ?: continue
+            val sourceKey = keyByLiveId[from] ?: continue
+            if (sourceKey == key || key in keepKeys) continue
+            lifted += key
+            successorsOf.getOrPut(sourceKey) { ArrayList() }.add(entry)
+        }
+        if (lifted.isEmpty()) return entries
+        val out = ArrayList<JsValue>()
+        val emitted = HashSet<String>()
+        fun emit(entry: JsValue) {
+            val key = keyOf(entry) ?: run { out.add(entry); return }
+            if (!emitted.add(key)) return
+            // Marked first so a cycle cannot recurse forever; successors render before the source.
+            successorsOf[key]?.forEach(::emit)
+            out.add(entry)
+        }
+        for (entry in entries) if (keyOf(entry) !in lifted) emit(entry)
+        // Rows only reachable through a cycle: kept rather than lose a session.
+        for (entry in entries) emit(entry)
+        return out
+    }
 }

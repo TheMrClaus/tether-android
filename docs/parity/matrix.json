@@ -1138,6 +1138,13 @@
   },
   {
    "kind": "client-msg",
+   "artifact": "handover-request",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "ta-ozn2"
+  },
+  {
+   "kind": "client-msg",
    "artifact": "queue-remove",
    "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
    "android": "PARTIAL",

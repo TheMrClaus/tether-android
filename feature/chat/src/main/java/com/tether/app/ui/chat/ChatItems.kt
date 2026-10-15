@@ -52,6 +52,8 @@ internal sealed interface ChatItem {
         override val startsGroup: Boolean,
         val raw: JsObj? = null,
         val grouped: Boolean = false,
+        /** #273: the handover label of a user row ("Handover from <name>" / "Handover instruction · from Tether"), or null. */
+        val attribution: UserAttribution? = null,
     ) : ChatItem {
         override val key: String get() = "$turnId/${block.blockId}"
         override val tight: Boolean get() = grouped
@@ -254,6 +256,8 @@ internal fun buildChatItems(
     showApprovals: Boolean = true,
     /** I-1: the client's key for this session (the cards' identity); null = the tree's own id (tests). */
     consentSessionId: String? = null,
+    /** #273: the session this one continues after a handover (AgentSession.handedOffFrom), for the "Handover from" label. */
+    handedOffFrom: String? = null,
 ): List<ChatItem> {
     val items = ArrayList<ChatItem>(projection.turnOrder.size * 3)
     // T6.6 r2: the session the notice / limit rows belong to (their lazy keys carry it).
@@ -263,6 +267,7 @@ internal fun buildChatItems(
     // T6.3: the cards read the tree (the typed projection's when there is none).
     val state = cardTree(projection, tree)
     val placement = placeDenials(state)
+    val firstUserTurn by lazy(LazyThreadSafetyMode.NONE) { firstUserTurnId(state) }
     val runs by lazy(LazyThreadSafetyMode.NONE) { collectSubagentRuns(state) }
     val denialKeys = HashMap<String, Int>()
     fun runFor(d: DenialView): RunRef? =
@@ -357,7 +362,10 @@ internal fun buildChatItems(
                     }
                     // T7.3: a `!` command's output block reads the tree too (its fields are not typed).
                     val raw = if (block.kind == Vocab.BLOCK_TOOL || block.kind == COMMAND_OUTPUT_BLOCK) rawFor(blockId) else null
-                    items.add(ChatItem.Block(turnId, block, time, opens(), raw = raw))
+                    val attribution = if (block.kind == Vocab.BLOCK_USER_MESSAGE) {
+                        userMessageAttribution(rawFor(blockId), scope, handedOffFrom, firstUserBlock = turnId == firstUserTurn)
+                    } else null
+                    items.add(ChatItem.Block(turnId, block, time, opens(), raw = raw, attribution = attribution))
                     turnDenials?.byBlock?.get(blockId)?.forEach { d -> items.add(denialItem(turnId, cardTurn, d, nested = false, startsGroup = opens(), tight = false)) }
                 }
             }

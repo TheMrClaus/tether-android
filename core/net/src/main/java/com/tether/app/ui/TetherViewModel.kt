@@ -11,6 +11,8 @@ import com.tether.app.client.CreatedReply
 import com.tether.app.client.DraftComposerModel
 import com.tether.app.client.DraftSubmitResult
 import com.tether.app.client.EventLog
+import com.tether.app.client.Handover
+import com.tether.app.client.HandoverRequests
 import com.tether.app.client.LogoutResult
 import com.tether.app.client.NewSessionChoice
 import com.tether.app.client.TetherClient
@@ -423,7 +425,60 @@ class TetherViewModel(
     private val anchors = HashMap<String, Anchor>()
     private var globalAnchor: Anchor? = null
 
+    // ta-ozn2.3 (#273): this device's handover claims (dashboard.tsx:1214-1290), in memory only.
+    private val handoverClaims = HandoverRequests()
+
+    /** The source ids this device asked to hand over and has not settled: drives the local "requested" flag. */
+    val handoverRequested: StateFlow<Set<String>> = handoverClaims.requested
+
+    /**
+     * The single UI entry point of "Hand over to a new lead" (the dialog's confirm). A claim is kept only when the
+     * frame went out; a failed send (the client says LINK_RECONNECTING) sets no flag. Returns whether it was sent.
+     */
+    fun requestHandover(sessionId: String): Boolean {
+        if (!client.handoverRequest(sessionId)) return false
+        handoverClaims.add(sessionId)
+        return true
+    }
+
+    /** The session menu's Hand over row for [sessionId] (null while it is not listed), live. */
+    fun handoverMenuState(sessionId: String): kotlinx.coroutines.flow.Flow<Handover.MenuState?> =
+        combine(client.sessions, handoverClaims.requested, client.serverProtocolVersion) { sessions, requested, protocol ->
+            sessions.firstOrNull { it.id == sessionId }?.let { Handover.menuState(it, sessionId in requested, sessions, protocol) }
+        }.distinctUntilChanged()
+
+    /** The "Handover under way" banner: asked here (not yet settled) or the server's own `handoverPending`, and not yet handed off. */
+    fun handoverUnderWay(sessionId: String): kotlinx.coroutines.flow.Flow<Boolean> =
+        combine(client.sessions, handoverClaims.requested) { sessions, requested ->
+            val row = sessions.firstOrNull { it.id == sessionId }
+            row != null && row.handedOffTo == null && (sessionId in requested || row.handoverPending)
+        }.distinctUntilChanged()
+
+    /** Following the banner's link ends this device's claim on the source it was viewing (openSessionFromNotice). */
+    fun openHandoverPeer(fromSessionId: String?, peerId: String) {
+        fromSessionId?.let { handoverClaims.drop(listOf(it)) }
+        selectSession(peerId)
+    }
+
+    private fun onHandoverState(sessions: List<AgentSession>, resolvedSelected: String?) {
+        handoverClaims.settle(sessions)
+        for (decision in handoverClaims.decide(resolvedSelected, sessions)) {
+            if (decision.action == Handover.NavigationDecision.Action.Navigate) decision.to?.let(::selectSession)
+        }
+    }
+
     init {
+        // The focus rule runs on the RESOLVED selection, never on a pending open request.
+        viewModelScope.launch {
+            combine(client.sessions, _selectedSessionId) { sessions, selected -> sessions to selected }
+                .collect { (sessions, selected) -> onHandoverState(sessions, selected) }
+        }
+        viewModelScope.launch {
+            client.handoverRefusals.collect { handoverClaims.onRefusal(client.sessions.value) }
+        }
+        viewModelScope.launch {
+            client.configured.collect { configured -> if (!configured) handoverClaims.clear() }
+        }
         viewModelScope.launch {
             client.sessions.collect { list -> onSessions(list) }
         }

@@ -3587,7 +3587,10 @@ class RealTetherClient(
                 // Every error of the live link is shown, as the web does (use-tether.ts setError),
                 // T6.7: cleaned and attributed to the server; one that echoes a node request's
                 // requestId also ends that request.
-                emitServerErrorIfCurrent(webSocket, message.message)
+                // v150 (#273, use-tether.ts:1241-1250): a handover refusal reads as its operator sentence, and
+                // signals the device to drop its requested flag; every other error stays verbatim.
+                val reading = Handover.readError(message.message, handoverRequestedAt, clock())
+                if (emitServerErrorIfCurrent(webSocket, reading.text) && reading.refusal) handoverRefusalsFlow.tryEmit(Unit)
                 // ta-8cv: use-tether.ts:1201 setCreateError — every error, with its echo; the draft
                 // composer acts only on the one that names its in-flight create.
                 var errorReply: CreateErrorReply? = null
@@ -5568,6 +5571,17 @@ class RealTetherClient(
     // T8.5: use-tether.ts:1889-1901. Fire-and-forget as the web's `send`; a frame not sent says so (337-341).
     override fun requestHandoffBrief(sourceId: String, targetId: String): Boolean =
         sendFrame(ClientMessage.HandoffBriefRequest(sourceId, targetId)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
+
+    /** use-tether.ts:1984-1987: the clock reading of the last handover-request that went out (never: far in the past). */
+    @Volatile private var handoverRequestedAt = Long.MIN_VALUE / 2
+    private val handoverRefusalsFlow = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
+    override val handoverRefusals: SharedFlow<Unit> = handoverRefusalsFlow
+
+    override fun handoverRequest(sessionId: String): Boolean {
+        val sent = sendFrame(ClientMessage.HandoverRequest(sessionId))
+        if (sent) handoverRequestedAt = clock() else emitError(LINK_RECONNECTING)
+        return sent
+    }
 
     override fun handoff(sourceId: String, targetId: String, engineText: String): Boolean =
         sendFrame(ClientMessage.Handoff(sourceId, targetId, engineText)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }

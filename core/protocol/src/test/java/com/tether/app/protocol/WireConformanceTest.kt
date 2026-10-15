@@ -229,6 +229,7 @@ class WireConformanceTest {
         ClientMessage.Create(provider = "claude", useWorktree = true, worktree = WorktreeCreateRequest(mode = "branch-off"), setupConsent = "none"),
         ClientMessage.WorktreeInspect("/w", "r1", WorktreeCreateRequest(mode = "checkout-pr", prNumber = 42)),
         ClientMessage.WorktreeInspect("/w"),
+        ClientMessage.HandoverRequest("s1"),
         ClientMessage.ArchiveInspect("s1", "r2"),
         ClientMessage.ArchiveInspect("s1"),
         ClientMessage.Archive("s1"),

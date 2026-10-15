@@ -308,6 +308,17 @@ data class QueuedMessage(
 
     /** [noticeKind] when it is a JSON string (an unknown kind is kept as-is), else null. */
     val noticeKindValue: String? get() = (noticeKind as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+    /**
+     * v150 (#273, lib/queued-message.ts isHandoverRequestQueuedMessage): the operator's handover instruction row
+     * (origin "system", noticeKind "handover-request"). Listed in the composer queue but READ-ONLY: withdrawable
+     * (queue-remove cancels the request), never editable or sendable now.
+     */
+    val isHandoverRequest: Boolean
+        get() = originKind == QueuedOrigin.SYSTEM && noticeKindValue == QueuedOrigin.HANDOVER_REQUEST
+
+    /** The rows the composer queue lists: the operator's drafts plus the handover instruction row, in order. */
+    val isListedInComposer: Boolean get() = isOperatorMessage || isHandoverRequest
 }
 
 /** v133 (issue #211): lib/queued-message.mjs, the queued-message provenance vocabulary. */
@@ -315,7 +326,11 @@ object QueuedOrigin {
     const val USER = "user"
     const val SYSTEM = "system"
     val ORIGINS: Set<String> = setOf(USER, SYSTEM)
-    val NOTICE_KINDS: Set<String> = setOf("spawn", "command", "continuation")
+    /** v150: the operator's handover instruction row on the source. */
+    const val HANDOVER_REQUEST = "handover-request"
+    /** v150: the successor's first prompt row; hidden from the composer queue, as the web. */
+    const val HANDOVER = "handover"
+    val NOTICE_KINDS: Set<String> = setOf("spawn", "command", "continuation", HANDOVER, HANDOVER_REQUEST)
 
     /**
      * queuedMessageOrigin: [absent] (JS undefined) -> "user"; a known string -> itself; anything
@@ -326,11 +341,11 @@ object QueuedOrigin {
 }
 
 /**
- * Port of lib/queued-message.mjs operatorQueuedMessages: the operator's own queued drafts (origin
- * "user" or absent), in order. What the web composer lists; a system notice and an unknown or
+ * Port of lib/queued-message.ts operatorQueuedMessages: the operator's own queued drafts (origin
+ * "user" or absent) plus (v150) the read-only handover instruction row, in ONE ordered list. What the web composer lists; a system notice and an unknown or
  * explicitly null origin are left out. Display only.
  */
-fun operatorQueuedMessages(messages: List<QueuedMessage>): List<QueuedMessage> = messages.filter { it.isOperatorMessage }
+fun operatorQueuedMessages(messages: List<QueuedMessage>): List<QueuedMessage> = messages.filter { it.isListedInComposer }
 
 /**
  * A raw optional [JsonElement] field that keeps JS `null` apart from `undefined`: an explicit JSON

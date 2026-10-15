@@ -746,6 +746,14 @@ sealed interface ClientMessage {
         }
     }
 
+    /**
+     * v150 (tether #273): the operator's "Hand over to a new lead". `{ type, sessionId }` ONLY: the server owns the
+     * instruction text and strips extra keys. Owner-grade principals only; a refusal is an `error` frame "<code>: detail".
+     */
+    data class HandoverRequest(val sessionId: String) : ClientMessage {
+        override fun toJsonObject() = frame("handover-request") { put("sessionId", sessionId) }
+    }
+
     companion object {
         /** Every `type` discriminator of the v132 ClientMessage union this module models. */
         val TYPES: Set<String> get() = ClientDecoders.decoders.keys
@@ -1102,6 +1110,7 @@ private object ClientDecoders {
         "stop-command" to { r -> ClientMessage.StopCommand(r.str("sessionId"), r.str("commandId")) },
         "queue-add" to { r -> ClientMessage.QueueAdd(r.str("sessionId"), r.str("queueId"), r.str("text")) },
         "queue-edit" to { r -> ClientMessage.QueueEdit(r.str("sessionId"), r.str("queueId"), r.str("text")) },
+        "handover-request" to { r -> ClientMessage.HandoverRequest(r.str("sessionId")) },
         "queue-remove" to { r -> ClientMessage.QueueRemove(r.str("sessionId"), r.str("queueId")) },
         "interrupt" to { r -> ClientMessage.Interrupt(r.str("sessionId")) },
         "dismiss-notice" to { r -> ClientMessage.DismissNotice(r.str("sessionId"), r.str("dismissKey")) },

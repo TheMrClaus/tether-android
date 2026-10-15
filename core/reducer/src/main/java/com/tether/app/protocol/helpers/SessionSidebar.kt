@@ -165,8 +165,17 @@ object SessionSidebar {
     }
 
     // components/session-sidebar.tsx:631 — per block: flat while filtering, else delegate children grouped.
-    fun groupedByWorkspace(rowsByWorkspace: Map<String, List<JsValue>>, filtering: Boolean): Map<String, GroupedRows> =
-        rowsByWorkspace.mapValues { (_, entries) -> if (filtering) GroupedRows(entries, emptyMap()) else groupDelegateChildren(entries) }
+    // GH #273 (U1-spec §6): a handover successor sits right above its source (render-only), before the delegate
+    // grouping; a row the operator dragged keeps its explicit rank (it is in the block's saved order, [sessionOrders]).
+    fun groupedByWorkspace(
+        rowsByWorkspace: Map<String, List<JsValue>>,
+        filtering: Boolean,
+        sessionOrders: Map<String, List<String>> = emptyMap(),
+    ): Map<String, GroupedRows> =
+        rowsByWorkspace.mapValues { (workspace, entries) ->
+            if (filtering) GroupedRows(entries, emptyMap())
+            else groupDelegateChildren(SidebarOrder.placeSuccessors(entries, sessionOrders[workspace].orEmpty().toSet()))
+        }
 
     // components/session-sidebar.tsx:641 — child rows whose parent is also listed never join a drag order.
     fun delegateChildKeys(sidebarSessions: List<JsValue>): Set<String> {

@@ -17,6 +17,7 @@ import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.protocol.tree.JsValue
 import com.tether.app.protocol.tree.js
+import com.tether.app.client.Handover
 import com.tether.app.ui.prefs.SidebarSort
 import kotlinx.serialization.json.Json
 import java.util.Locale
@@ -26,7 +27,16 @@ import kotlin.math.max
  * One sidebar row: the web's `SidebarSession` ([js], what the verified helpers in
  * protocol.helpers read) plus the typed session / history it was built from.
  */
-data class SidebarEntry(val js: JsObj, val live: AgentSession?, val history: HistorySession?) {
+data class SidebarEntry(
+    val js: JsObj,
+    val live: AgentSession?,
+    val history: HistorySession?,
+    /**
+     * ta-ozn2.3 (#273): "Handed off to <successor name>" ("another session" if unlisted) for a handed-off source's
+     * glyph and merged row description; null for any other row. Built here, the row composable only reads it.
+     */
+    val handedOffDescription: String? = null,
+) {
     val key: String get() = (js["key"] as JsStr).value
     val workspace: String? get() = (js["workspace"] as? JsStr)?.value
     val unread: Boolean get() = truthy(js["unread"])
@@ -102,7 +112,7 @@ object SidebarModel {
             val histories = historiesByCwd[workspace].orEmpty().filter { workspaceGroupFor(it.cwd, workspaces) == workspace }
             rows += buildBlock(workspace, liveRows, histories, lastSeen, sessionOrders[workspace].orEmpty(), sort, activeId, openingHistoryId, pendingSessionId, collator)
         }
-        return rows
+        return rows.map { entry -> entry.live?.let { Handover.handedOffDescription(it, visible) }?.let { entry.copy(handedOffDescription = it) } ?: entry }
     }
 
     private fun buildBlock(
