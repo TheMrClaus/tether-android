@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
@@ -70,6 +71,39 @@ class ClipboardWrapperSelectionTest {
         rule.waitForIdle()
         field.performTouchInput { longClick(center) }
         rule.waitForIdle()
+        // ta-bp5u r2: the field is NOT inside the card's selection container (the one holding SafeCopyClipboard), so the
+        // long press above never reached the wrapper; the card's words are.
+        rule.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("question-words")), useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithText("The agent needs your input", useUnmergedTree = true).assertExists()
+    }
+
+    /** ta-bp5u r2: one selection container (one SelectableRow) holds title, header and question, so one drag spans them. */
+    @Test fun theTitleHeaderAndQuestionShareOneSelectionRegionAndTheOptionsAndFieldDoNot() {
+        val fixture = ApprovalFixtures.question
+        val consent = ConsentActions(
+            sessionId = "s1", origin = TEST_ORIGIN, lock = null, decided = emptySet(), questionUnavailable = null,
+            onApproval = { _, _, _, _, _ -> ConsentResult.Sent },
+            onAnswer = { _, _, _, _ -> ConsentResult.Sent },
+            onOpenRun = {},
+        )
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
+                CompositionLocalProvider(LocalCardStates provides CardStateStore()) {
+                    ChatTranscript(
+                        projection = fixture.projection, tree = fixture.tree, showThinking = false,
+                        onFetchTurns = { _, _ -> }, zone = ChatFixtures.zone, consent = consent,
+                    )
+                }
+            }
+        }
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
+        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag("question-next"))
+        val words = hasAnyAncestor(hasTestTag("question-words"))
+        rule.onNode(hasText("The agent needs your input") and words, useUnmergedTree = true).assertExists()
+        rule.onNode(hasText(ApprovalFixtures.Q_DB) and words, useUnmergedTree = true).assertExists()
+        rule.onNode(hasText("Postgres") and words, useUnmergedTree = true).assertDoesNotExist()
+        rule.onNode(hasTestTag("question-other") and words, useUnmergedTree = true).assertDoesNotExist()
+        rule.onNode(hasTestTag("question-other"), useUnmergedTree = true).assertExists()
     }
 
     @Test fun aLongPressInAnyTextFieldUnderTheSafeCopyClipboardDoesNotCrash() {
