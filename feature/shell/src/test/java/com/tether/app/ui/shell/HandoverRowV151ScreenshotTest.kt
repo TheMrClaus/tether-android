@@ -32,7 +32,7 @@ private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.snapStop(shot
     mainClock.advanceTimeBy(600)
     waitForIdle()
     onRoot().captureRoboImage(
-        "src/test/screenshots/${shot.id}/${skin.id}-${if (shot.expanded) "tablet" else "phone"}.png",
+        "src/test/screenshots/${shot.id}/${skin.id}-${if (shot.expanded) "expanded" else "phone"}.png",
         roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),
     )
 }

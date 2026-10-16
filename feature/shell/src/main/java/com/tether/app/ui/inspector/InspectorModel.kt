@@ -446,6 +446,8 @@ fun inspectorModel(
     serverOrigin: String? = null,
     /** T8.5 (dashboard.tsx:1460): `serverSettings?.settings.metadataGenerationEnabled === true`. */
     metadataGenerationEnabled: Boolean = false,
+    /** W34: the server speaks protocol >= 151 ([com.tether.app.client.Handover.v151]): the handover notices read the web's new words (inspector.tsx:884). */
+    handoverV151: Boolean = false,
 ): InspectorModel {
     val activeRun = selectedRunId?.let { id -> runs.firstOrNull { it.runId == id } }
     val metrics = TelemetryMetrics.from(session.metrics)
@@ -469,7 +471,7 @@ fun inspectorModel(
         services = if (session.worktree != null) services(replies.worktreeScripts, session.id, serverOrigin, replies.worktreeLogs) else null,
         codexNotices = if (session.engineGeneration == "codex-app-server-v2" && state != null) {
             // Render-only here: the transcript's copy of each notice carries the dismiss X.
-            providerNotices(state.obj["providerNotices"], "Codex").map { it.copy(dismissKey = null) }
+            providerNotices(state.obj["providerNotices"], "Codex", handoverV151).map { it.copy(dismissKey = null) }
         } else {
             emptyList()
         },

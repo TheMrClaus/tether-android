@@ -571,6 +571,7 @@ fun ChatScreen(
                 // #273: following "Handed off to" ends this device's claim on the source (the focus rule's own navigation).
                 onOpenSession = { id -> vm.openHandoverPeer(session?.id, id) },
                 handoverUnderWay = handoverUnderWay,
+                handoverV151 = com.tether.app.client.Handover.v151(chatProtocol),
                 handoverStage = handoverStage,
                 runActions = runActions,
                 onWarmControls = { session?.let { vm.client.requestWarmSessionControls(it.id) } },

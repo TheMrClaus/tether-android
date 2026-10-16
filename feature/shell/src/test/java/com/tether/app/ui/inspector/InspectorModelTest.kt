@@ -61,6 +61,39 @@ class InspectorModelTest {
         assertEquals("sleeping", m.identity.statusText.text)
     }
 
+    // ---- W34: the handover notices (inspector.tsx:884 shares handoverNoticeView) ----
+
+    private fun codexNotices(v151: Boolean): List<String> {
+        val state = com.tether.app.protocol.model.SessionView(
+            com.tether.app.protocol.tree.JsCodec.parse(
+                """{"providerNotices":[
+                    {"noticeId":"a","code":"handover_operator_stopped","message":"x"},
+                    {"noticeId":"b","code":"handover_cancelled","message":"y"}]}""",
+            ) as com.tether.app.protocol.tree.JsObj,
+        )
+        val session = InspectorBoards.session(provider = "codex", engineGeneration = "codex-app-server-v2")
+        return InspectorBoards.model(session, state, handoverV151 = v151).codexNotices.map { it.message }
+    }
+
+    @Test
+    fun theInspectorsHandoverNoticesReadTheWebsNewWordsAt151() {
+        assertEquals(
+            listOf(
+                "You stopped the handover. Nothing was sent.",
+                "The handover could not continue and has ended. Nothing was sent to a new session; waiting messages run here.",
+            ),
+            codexNotices(v151 = true),
+        )
+    }
+
+    @Test
+    fun theInspectorsHandoverNoticesBelow151AreUnchanged() {
+        assertEquals(
+            listOf("The handover did not complete as planned.", "The handover did not complete. Nothing more will be sent automatically."),
+            codexNotices(v151 = false),
+        )
+    }
+
     // ---- partial ----------------------------------------------------------------------------
 
     @Test

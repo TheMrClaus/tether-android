@@ -70,6 +70,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.text
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -604,7 +605,7 @@ fun DraftComposerFrame(
         Column(
             case
                 .testTag(DraftComposerTags.Sheet)
-                .semantics { paneTitle = inputs.draft.handover?.let { com.tether.app.client.Handover.modeTitle(com.tether.app.client.LabelText.label(it.sourceName)) } ?: DRAFT_TITLE }
+                .semantics { paneTitle = inputs.draft.handover?.let { com.tether.app.client.Handover.modeTitle("\u2068" + com.tether.app.client.LabelText.label(it.sourceName) + "\u2069") } ?: DRAFT_TITLE }
                 // Phone: `border-width: 1px 0 0` (a top edge only); desktop: the 1px case.
                 .cssSurface(shape, t.graphite, if (sheet) null else CssBorder(1.dp, t.lineStrong), if (sheet) emptyList() else StudioDialog.shadows)
                 .then(if (sheet) Modifier.drawBehind { drawRect(t.lineStrong, Offset.Zero, Size(size.width, 1.dp.toPx())) } else Modifier)
@@ -742,9 +743,9 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
     }
     // draft-composer.tsx: the hook's error, else the attachment flash.
     // W34 (dc:584-592): the source changed while choosing (polite), then the refusal (ASSERTIVE in this mode).
-    handover?.blockedLine?.let { StatusLine(TetherIcons.TriangleAlert, it, DraftComposerTags.Blocked, topAligned = true) }
+    handover?.blockedLine?.let { StatusLine(TetherIcons.ArrowRightLeft, it, DraftComposerTags.Blocked, topAligned = true) }
     if (draft.error.isNotEmpty()) {
-        StatusLine(TetherIcons.TriangleAlert, draft.error, DraftComposerTags.Error, assertive = handover != null, topAligned = inputs.v151 || handover != null)
+        StatusLine(if (handover != null) TetherIcons.ArrowRightLeft else TetherIcons.TriangleAlert, draft.error, DraftComposerTags.Error, assertive = handover != null, topAligned = inputs.v151 || handover != null)
     } else if (inputs.notice != null) {
         StatusLine(TetherIcons.Paperclip, inputs.notice, DraftComposerTags.Notice)
     }
@@ -1106,7 +1107,8 @@ private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover:
             style = cssText(type.ui, 0.75f, 650),
             modifier = m
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { runCatching { focus.requestFocus() } }
-                .clearAndSetSemantics { },
+                // The label is read as its own node ahead of the field; the field keeps its typed value for TalkBack.
+                .clearAndSetSemantics { text = androidx.compose.ui.text.AnnotatedString(com.tether.app.client.Handover.NAME_FIELD_LABEL) },
         )
     }
     val input: @Composable (Modifier) -> Unit = { m ->
@@ -1125,7 +1127,6 @@ private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover:
                 .tetherWell(t, RoundedCornerShape(t.radiusSm), focused)
                 .alpha(if (pending) 0.6f else 1f)
                 .focusRequester(focus)
-                .semantics { contentDescription = com.tether.app.client.Handover.NAME_FIELD_LABEL }
                 .testTag(DraftComposerTags.NameField),
             textStyle = style,
             cursorBrush = SolidColor(t.violet),
@@ -1136,7 +1137,8 @@ private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover:
             ),
             keyboardActions = KeyboardActions(
                 onNext = { focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Next) },
-                onDone = { focusManager.clearFocus() },
+                // dc:405-410: Enter in handover mode does nothing (the field keeps focus).
+                onDone = { },
             ),
             interactionSource = interaction,
             decorationBox = { inner ->

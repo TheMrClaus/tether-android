@@ -7,7 +7,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onParent
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import com.tether.app.client.Handover
@@ -127,5 +130,35 @@ class HandoverComposerBehaviourTest {
         }
         rule.waitForIdle()
         assertFalse(rule.onAllNodesWithTag(DraftComposerTags.NameRow).fetchSemanticsNodes().isNotEmpty())
+    }
+
+    @Test
+    fun theNameFieldExposesItsTypedValueNotAMaskingDescription() {
+        show(HandoverComposerShot.Default, DraftSheetActions())
+        val config = rule.onNodeWithTag(DraftComposerTags.NameField).fetchSemanticsNode().config
+        assertEquals(null, config.getOrNull(SemanticsProperties.ContentDescription))
+        assertEquals("Parser rewrite 2", config.getOrNull(SemanticsProperties.EditableText)?.text)
+        // The label is its own readable node, ahead of the field.
+        rule.onNodeWithText(Handover.NAME_FIELD_LABEL).assertExists()
+    }
+
+    @Test
+    fun imeDoneInHandoverModeDoesNothingAndTheFieldKeepsFocus() {
+        var submits = 0
+        show(HandoverComposerShot.Default, DraftSheetActions(onSubmitHandover = { submits++ }))
+        val field = rule.onNodeWithTag(DraftComposerTags.NameField)
+        field.performClick()
+        field.assertIsFocused()
+        field.performImeAction()
+        rule.waitForIdle()
+        field.assertIsFocused()
+        assertEquals(0, submits)
+    }
+
+    @Test
+    fun theSheetsPaneTitleIsBidiIsolatedLikeTheHeader() {
+        show(HandoverComposerShot.Default, DraftSheetActions())
+        val title = rule.onNodeWithTag(DraftComposerTags.Sheet).fetchSemanticsNode().config.getOrNull(SemanticsProperties.PaneTitle)
+        assertTrue(title.orEmpty(), title.orEmpty().contains("\u2068") && title.orEmpty().contains("\u2069"))
     }
 }

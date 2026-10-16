@@ -238,6 +238,8 @@ fun Composer(
      * nothing else is accepted, the placeholder / Queue key / Interrupt say so, and queued rows say where they go.
      */
     handoverStage: com.tether.app.client.Handover.StageView? = null,
+    /** W34: the server speaks protocol >= 151 ([com.tether.app.client.Handover.v151]): the handover instruction row has no X (chat-view.tsx:1632). */
+    handoverV151: Boolean = false,
     /**
      * T7.3: the `!` command mode, the foreground command's Background key and the `@` Agents
      * (run-command / background-command / a delegated send): taps and explicit submits only, guarded.
@@ -1000,7 +1002,9 @@ fun Composer(
                 } else if (session?.readOnly == true) {
                     ReadOnlyRow()
                 }
-                notice?.let { ComposerNotice(it) }
+                notice?.let {
+                    ComposerNotice(it, if (com.tether.app.client.Handover.isUnderwayRefusal(it)) TetherIcons.ArrowRightLeft else TetherIcons.Terminal)
+                }
                 // T6.4 (chat-view.tsx:3780-3830): the todo bar, then the RUNNING background commands.
                 val progress = remember(tree) { selectProgress(tree) }
                 progress?.let { TodoBar(it, session?.id) }
@@ -1053,6 +1057,7 @@ fun Composer(
                         serverNow = serverNow,
                         stale = liveness.stale != null,
                         handoverStage = handoverStage.takeIf { handoverHolding },
+                        handoverV151 = handoverV151,
                     )
                 }
 

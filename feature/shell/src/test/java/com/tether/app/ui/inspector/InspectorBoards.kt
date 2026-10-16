@@ -159,7 +159,8 @@ object InspectorBoards {
         selectedRunId: String? = null,
         serverOrigin: String? = ORIGIN,
         metadataGenerationEnabled: Boolean = false,
-    ): InspectorModel = inspectorModel(session, providers, state, collectSubagentRuns(state?.obj), selectedRunId, replies, env, serverOrigin, metadataGenerationEnabled)
+        handoverV151: Boolean = false,
+    ): InspectorModel = inspectorModel(session, providers, state, collectSubagentRuns(state?.obj), selectedRunId, replies, env, serverOrigin, metadataGenerationEnabled, handoverV151)
 
     val sparseModel: InspectorModel get() = model(sparse)
     val fullModel: InspectorModel get() = model(full, fullState, fullReplies)

@@ -22,6 +22,7 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -134,7 +135,7 @@ class HandoverV151UiBehaviourTest {
 
     // ---- the strip, the queue and the composer ----
 
-    private fun composer(stage: HandoverV151Fixtures.Stage?, v151: Boolean = true) = rule.setContent {
+    private fun composer(stage: HandoverV151Fixtures.Stage?, v151: Boolean = true, withStageView: Boolean = true) = rule.setContent {
         ComposerHost(TetherSkin.Studio) {
             Composer(
                 session = stage?.session ?: ComposerFixtures.session,
@@ -148,7 +149,8 @@ class HandoverV151UiBehaviourTest {
                 onRequestControls = {},
                 liveness = ComposerLiveness.Live,
                 handoverUnderWay = stage != null,
-                handoverStage = if (v151) stage?.view else null,
+                handoverStage = if (v151 && withStageView) stage?.view else null,
+                handoverV151 = v151,
             )
         }
     }
@@ -199,6 +201,19 @@ class HandoverV151UiBehaviourTest {
         // The operator's own row keeps its X.
         rule.onNodeWithContentDescription("Remove queued message").performClick()
         assertEquals(listOf("mine"), removed)
+    }
+
+    @Test
+    fun v151DropsTheInstructionRowsXOnTheRequestAloneEvenWithNoStageToShow() {
+        composer(HandoverV151Fixtures.requestedQueued, withStageView = false)
+        rule.waitForIdle()
+        rule.onAllNodesWithContentDescription(HANDOVER_QUEUE_REMOVE_DESCRIPTION).assertCountEquals(0)
+    }
+
+    @Test
+    fun theUnderwayRefusalsAreRecognisedForTheArrowGlyph() {
+        for (kind in listOf("command", "delegate", "attachments")) assertTrue(Handover.isUnderwayRefusal(Handover.underwayCopy(kind)))
+        assertFalse(Handover.isUnderwayRefusal("Type a command after “!” to run it."))
     }
 
     @Test

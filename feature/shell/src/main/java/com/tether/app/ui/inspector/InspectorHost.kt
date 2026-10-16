@@ -50,6 +50,8 @@ fun ColumnScope.InspectorHost(
     // T8.5 dashboard.tsx:1460: `serverSettings?.settings.metadataGenerationEnabled === true` (strictly true).
     val serverSettings by vm.client.serverSettings.collectAsStateWithLifecycle()
     val metadataGeneration = metadataGenerationEnabled(serverSettings)
+    val protocol by vm.client.serverProtocolVersion.collectAsStateWithLifecycle()
+    val handoverV151 = com.tether.app.client.Handover.v151(protocol)
     val now = rememberTickingNow(60_000)
     // ta-coik.10: the attention strip's rate-limit / wrap-up alerts expire on their own at the
     // window's reset (the web's RateLimitNotice / WrapUpNotice timers; the CLI may never send the
@@ -58,8 +60,8 @@ fun ColumnScope.InspectorHost(
     val runs = remember(view) { collectSubagentRuns(view?.obj) }
     val replies = InspectorReplies(diffs[session.id], scripts[session.id], changeRequests[session.id], logs[session.id])
     // Keyed on the minute tick and the expiry; derived at the real instant it recomputes.
-    val model = remember(session, providers, view, runs, selected[session.id], replies, now, origin, expiry, metadataGeneration) {
-        inspectorModel(session, providers, view, runs, selected[session.id], replies, ReadingEnv.current(), origin, metadataGeneration)
+    val model = remember(session, providers, view, runs, selected[session.id], replies, now, origin, expiry, metadataGeneration, handoverV151) {
+        inspectorModel(session, providers, view, runs, selected[session.id], replies, ReadingEnv.current(), origin, metadataGeneration, handoverV151)
     }
     Inspector(
         model = model,

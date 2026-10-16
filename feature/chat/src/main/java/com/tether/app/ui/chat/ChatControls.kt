@@ -52,16 +52,16 @@ import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherDimens
 import com.tether.app.ui.theme.TetherWeights
 
-/** The in-composer flash notice (web chat-notice): Terminal icon + text. */
+/** The in-composer flash notice (web chat-notice): Terminal icon + text; a handover refusal passes the web's ⇄ instead. */
 @Composable
-fun ComposerNotice(message: String) {
+fun ComposerNotice(message: String, icon: androidx.compose.ui.graphics.vector.ImageVector = TetherIcons.Terminal) {
     val t = LocalTetherTokens.current
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(TetherIcons.Terminal, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
+        Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
         Text(message, color = t.ink, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.8.sp)
     }
 }

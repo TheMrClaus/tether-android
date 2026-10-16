@@ -297,6 +297,8 @@ internal fun QueuedMessages(
     stale: Boolean = false,
     /** W34 (v151): the handover stage underway; rows then say where they go and the instruction row has no X. */
     handoverStage: com.tether.app.client.Handover.StageView? = null,
+    /** W34: v151: the instruction row has no X, whatever the stage (chat-view.tsx:1632 `!handoverRequest`). */
+    handoverV151: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val instructionIndex = queued.indexOfFirst { it.isHandoverRequest }
@@ -313,6 +315,7 @@ internal fun QueuedMessages(
                     text = message.text,
                     atToolBoundary = message.atToolBoundary && !message.isHandoverRequest,
                     handoverRequest = message.isHandoverRequest,
+                    handoverV151 = handoverV151,
                     onSave = { onSave(message.queueId, it) },
                     onRemove = { onRemove(message.queueId) },
                     onInterruptNow = onInterruptNow,
@@ -382,6 +385,7 @@ internal fun QueuedMessageRow(
     handoverRequest: Boolean = false,
     /** W34 (v151): the wait line this row reads while a handover is underway (null = its own); also drops the instruction row's X. */
     handoverWaitLabel: String? = null,
+    handoverV151: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val focusManager = LocalFocusManager.current
@@ -485,7 +489,7 @@ internal fun QueuedMessageRow(
             )
         }
         // v151: Stop handover (the Session links menu) is the one stop, so Tether's instruction row has no X.
-        if (!(handoverRequest && handoverWaitLabel != null)) Box(
+        if (!(handoverRequest && handoverV151)) Box(
             Modifier
                 .minimumInteractiveComponentSize()
                 .clickable(onClick = onRemove)

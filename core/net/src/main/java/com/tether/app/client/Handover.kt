@@ -295,6 +295,9 @@ object Handover {
     const val QUEUE_ARIA = "Queue message for the new session"
     const val QUEUE_TITLE = "Queue this message (it goes to the new session after the handover)"
 
+    /** True for one of the [underwayCopy] refusals (the composer draws the web's ⇄ on it). */
+    fun isUnderwayRefusal(message: String): Boolean = listOf("command", "delegate", "attachments").any { underwayCopy(it) == message }
+
     /** handoverUnderwayCopy: the composer's inline refusal by what the operator tried to send. [kind]: "command" | "delegate" | other. */
     fun underwayCopy(kind: String): String {
         val subject = when (kind) { "command" -> "Commands"; "delegate" -> "A delegation"; else -> "Attachments" }
