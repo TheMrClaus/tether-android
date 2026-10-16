@@ -1,5 +1,15 @@
 package com.tether.app.protocol
 
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.builtins.nullable
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -173,5 +183,33 @@ internal class Req(val o: JsonObject) {
     fun objOrNull(key: String): JsonObject? {
         if (!o.containsKey(key)) missing(key, "object | null")
         return o.obj(key)
+    }
+}
+
+/**
+ * ta-28ll: epoch-ms field the server may fill from `statSync().mtimeMs` (fractional). Decodes an
+ * integer or fractional JSON number via [asLong] (truncate == floor for positive ms: monotone, so
+ * `lastSeenAt < updatedAt` ordering holds and it matches every hand-read field). null, strings and
+ * non-finite values still throw, so a genuinely broken row drops. Encodes as an integer, never a decimal.
+ */
+object LenientEpochMsSerializer : KSerializer<Long> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("LenientEpochMs", PrimitiveKind.LONG)
+    override fun deserialize(decoder: Decoder): Long {
+        val el = (decoder as? JsonDecoder)?.decodeJsonElement() ?: return decoder.decodeLong()
+        return el.asLong() ?: throw SerializationException("epoch ms must be a finite number: $el")
+    }
+    override fun serialize(encoder: Encoder, value: Long) = encoder.encodeLong(value)
+}
+
+/** [LenientEpochMsSerializer] for an optional field: absent/JSON null stay null. */
+object LenientEpochMsOrNullSerializer : KSerializer<Long?> {
+    override val descriptor: SerialDescriptor = Long.serializer().nullable.descriptor
+    override fun deserialize(decoder: Decoder): Long? {
+        val el = (decoder as? JsonDecoder)?.decodeJsonElement() ?: return decoder.decodeLong()
+        if (el is JsonNull) return null
+        return el.asLong() ?: throw SerializationException("epoch ms must be a finite number: $el")
+    }
+    override fun serialize(encoder: Encoder, value: Long?) {
+        if (value == null) encoder.encodeNull() else encoder.encodeLong(value)
     }
 }
