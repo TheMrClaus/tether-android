@@ -1242,26 +1242,29 @@ private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone
     }
     val name = "${chain.label} of $headName" + if (showSuffix) ", ${chain.suffixText}" else ""
     val style = css(type.ui, 0.72f, 400, lineHeight = 1.3889f).ltrWords()
+    // The anchor IS the toggle: the tooltip's long-press semantics and the button's click/role/state/name live on ONE node
+    // (an inner clickable under the anchor Box left a separate non-clickable anchor node on device, ta-btv8).
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text("Earlier sessions in this handover chain, newest first") } },
         state = rememberTooltipState(),
-        modifier = Modifier.padding(start = 0.9f.rem).fillMaxWidth(),
+        modifier = Modifier
+            .padding(start = 0.9f.rem)
+            .fillMaxWidth()
+            .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
+            .focusRing(focused && keyboardMode, shape, t.violet, offset = (-2).dp)
+            .clip(shape)
+            .semantics(mergeDescendants = true) {
+                contentDescription = name
+                stateDescription = if (open) "Expanded" else "Collapsed"
+            }
+            .focusRequester(focusRequester)
+            .clickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Button, onClick = onToggle)
+            .padding(start = t.css.spaceMd, end = t.css.spaceMd, top = t.css.spaceXs)
+            .testTag(tag),
     ) {
         FlowRow(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
-                .focusRing(focused && keyboardMode, shape, t.violet, offset = (-2).dp)
-                .clip(shape)
-                .semantics(mergeDescendants = true) {
-                    contentDescription = name
-                    stateDescription = if (open) "Expanded" else "Collapsed"
-                }
-                .focusRequester(focusRequester)
-                .clickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Button, onClick = onToggle)
-                .padding(start = t.css.spaceMd, end = t.css.spaceMd, top = t.css.spaceXs)
-                .testTag(tag),
+            Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         ) {
             SmallIcon(TetherIcons.ChevronDown, ink, 12.dp, Modifier.padding(top = 0.125f.rem).rotate(rotation))
