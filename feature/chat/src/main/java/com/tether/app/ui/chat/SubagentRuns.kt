@@ -647,7 +647,7 @@ private fun SubagentRunTabBody(
         }
         itemsIndexed(pendingQuestions, key = { _, q -> "question/${q.requestId}/${q.contentFp}" }) { qi, q ->
             Box(Modifier.padding(top = if (rows.isNotEmpty() || pending.isNotEmpty() || qi > 0) gap else 0.dp)) {
-                SelectableRow { QuestionCard(q, answered = q.requestId in answeredIds) }
+                QuestionCard(q, answered = q.requestId in answeredIds)
             }
         }
     }

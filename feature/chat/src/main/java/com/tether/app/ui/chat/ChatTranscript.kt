@@ -633,7 +633,7 @@ private fun ChatRow(
         // runaway selection the web fixed, globals.css:136-160). Rows that are controls, not
         // reading, stay out of it. ta-coik.64: a copy is the exact source text, as the browser's
         // ([SafeCopyClipboard] decodes the drawn tokens; the copy notice only informs).
-        if (item.selectableText) {
+        if (item.selectableText && item !is ChatItem.Question /* ta-bp5u: QuestionCard wraps its own words */) {
             SelectableRow { ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone, segment) }
         } else {
             ChatRowContent(item, onFetchTurns, find, toolRender, onToggleGroup, onOpenCommand, zone, segment)
