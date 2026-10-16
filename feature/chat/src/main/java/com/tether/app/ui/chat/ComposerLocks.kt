@@ -5,6 +5,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import com.tether.app.ui.components.focusRing
+import com.tether.app.ui.components.SpinnerRing
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -98,6 +100,9 @@ internal enum class HandoffVariant(val tag: String) {
 internal const val HANDOFF_PENDING_LINE = "Handover under way — a new lead takes over when this lead finishes."
 internal const val HANDOFF_PENDING_SUB = "Stop cancels it · new messages go to the new lead."
 
+internal const val HANDOFF_STAGE_LINE_TAG = "handoff-stage-line"
+internal const val HANDOFF_STAGE_SUB_TAG = "handoff-stage-sub"
+
 /** The notice's one sentence for [variant] and [peer], the words a screen reader reads (the link's name included). */
 internal fun handoffNoticeText(variant: HandoffVariant, peer: AgentSession?): String = when (variant) {
     HandoffVariant.Pending -> "$HANDOFF_PENDING_LINE $HANDOFF_PENDING_SUB"
@@ -120,6 +125,8 @@ internal fun HandoffNotice(
     onOpenSession: (String) -> Unit,
     modifier: Modifier = Modifier,
     linkFocus: FocusRequester? = null,
+    /** W34 (server protocol >= 151): the Pending notice's stage line (null = the W33 two lines, as shipped). */
+    stage: com.tether.app.client.Handover.StageView? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -134,13 +141,23 @@ internal fun HandoffNotice(
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-        Icon(
+        val stopping = variant == HandoffVariant.Pending && stage?.key == com.tether.app.client.Handover.StageKey.Stopping
+        if (stopping) {
+            // gc:7631: the spinner takes the glyph's place, about 2dp higher.
+            Box(Modifier.padding(top = 1.dp).size(14.dp), contentAlignment = Alignment.Center) { SpinnerRing(t.muted, 9.6.dp) }
+        } else Icon(
             TetherIcons.ArrowRightLeft,
             contentDescription = null,
             tint = t.muted,
             modifier = Modifier.padding(top = if (linked) 17.dp else 3.dp).size(14.dp),
         )
-        if (variant == HandoffVariant.Pending) {
+        if (variant == HandoffVariant.Pending && stage != null) {
+            // gc:7630: the stage line is ink, 650, never violet and never muted; the sub line is muted.
+            Column {
+                Text(stage.line, style = style.copy(fontWeight = FontWeight(650)), color = t.ink, modifier = Modifier.testTag(HANDOFF_STAGE_LINE_TAG))
+                if (!stopping) Text(com.tether.app.client.Handover.STRIP_SUB, style = style.copy(fontSize = rem(0.75f)), color = t.muted, modifier = Modifier.testTag(HANDOFF_STAGE_SUB_TAG))
+            }
+        } else if (variant == HandoffVariant.Pending) {
             Column {
                 Text(HANDOFF_PENDING_LINE, style = style, color = t.muted)
                 Text(HANDOFF_PENDING_SUB, style = style.copy(fontSize = rem(0.75f)), color = t.muted)

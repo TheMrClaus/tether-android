@@ -102,7 +102,16 @@ object DraftSessionOptionsModel {
     fun of(state: DraftComposerState): DraftSessionOptions {
         val key = (state.form["key"] as? JsStr)?.value.orEmpty()
         val entry = state.entries.firstOrNull { it.key == key } ?: return DraftSessionOptions.None
-        return of(entry, state.form)
+        val base = of(entry, state.form)
+        // W34 (df:869-896): Codex "Current (custom)" is the FIRST, selected Mode row while the source's triple matches no preset.
+        val current = state.handover?.codexCurrentOption?.takeIf { entry.provider == "codex" } ?: return base
+        val mode = base.mode ?: return base
+        val row = ControlOption(current.value, current.label, current.hint, danger = current.danger)
+        val withCurrent = mode.copy(options = listOf(row) + mode.options.filter { it.value != current.value })
+        return base.copy(
+            mode = withCurrent,
+            modeDanger = base.modeDanger || (mode.value == current.value && current.danger),
+        )
     }
 
     fun of(entry: ProviderCatalogEntry, form: JsObj): DraftSessionOptions {

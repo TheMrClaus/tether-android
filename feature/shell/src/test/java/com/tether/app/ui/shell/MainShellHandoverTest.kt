@@ -164,4 +164,66 @@ class MainShellHandoverTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithTag(ShellTags.LinksPopover).fetchSemanticsNodes().isNotEmpty() }
         rule.onAllNodesWithTag(ShellTags.HandoverRow).assertCountEquals(0)
     }
+
+    // ---- W34: v151 (three actions, Change settings, Stop handover) ----
+
+    @Test
+    fun v151TheConfirmationHasThreeActionsAndHandOverAsIsSendsThePlainFrameOnce() {
+        val client = ShellConsentClient().also { it.show(session, tree); it.serverProtocolVersion.value = 151 }
+        host(client)
+        openMenuThenRow()
+        rule.onNodeWithTag(ShellTags.HandoverRow).performClick()
+        rule.waitForIdle()
+        settle()
+        rule.onNodeWithText(Handover.DIALOG_BODY_V151).assertExists()
+        rule.onNodeWithTag(com.tether.app.ui.chat.HANDOVER_CHANGE_TAG).assertExists()
+        rule.onNodeWithTag(com.tether.app.ui.chat.HANDOVER_CONFIRM_TAG).performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithText(Handover.DIALOG_TITLE).fetchSemanticsNodes().isEmpty() }
+        assertEquals(listOf("s1"), client.handoverCalls)
+    }
+
+    @Test
+    fun v151ChangeSettingsWithNoEngineInTheCatalogKeepsTheDialogOpenWithItsLine() {
+        val client = ShellConsentClient().also { it.show(session, tree); it.serverProtocolVersion.value = 151 }
+        host(client)
+        openMenuThenRow()
+        rule.onNodeWithTag(ShellTags.HandoverRow).performClick()
+        rule.waitForIdle()
+        settle()
+        rule.onNodeWithTag(com.tether.app.ui.chat.HANDOVER_CHANGE_TAG).performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText(Handover.NO_ENGINE_LINE).assertExists()
+        rule.onNodeWithText(Handover.DIALOG_TITLE).assertExists()
+        assertTrue(client.handoverCalls.isEmpty())
+    }
+
+    @Test
+    fun v151AnUnderwayHandoverIsTheStopRowAndOnePressSendsHandoverCancelAndTheRowReadsStopping() {
+        val underway = session.copy(handoverPending = true, handoverStage = kotlinx.serialization.json.JsonPrimitive("scheduled"))
+        val client = ShellConsentClient().also { it.show(underway, tree); it.serverProtocolVersion.value = 151 }
+        host(client)
+        openMenuThenRow()
+        rule.onNodeWithText(Handover.STOP_LABEL).assertExists()
+        rule.onNodeWithText(Handover.STOP_EFFECT).assertExists()
+        rule.onNodeWithTag(ShellTags.HandoverRow).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("s1"), client.handoverCancels.map { it.first })
+        assertTrue(client.handoverCancels.single().second.isNotEmpty())
+        rule.onAllNodesWithText(Handover.DIALOG_TITLE).assertCountEquals(0)
+        openMenuThenRow()
+        rule.onNodeWithText(Handover.STOPPING_LABEL).assertExists()
+        rule.onNodeWithTag(ShellTags.HandoverRow).performClick()
+        rule.waitForIdle()
+        assertEquals("a Stopping row does not send a second cancel", 1, client.handoverCancels.size)
+    }
+
+    @Test
+    fun at150AnUnderwayHandoverIsStillTheBlockedRowWithNoStop() {
+        val underway = session.copy(handoverPending = true, handoverStage = kotlinx.serialization.json.JsonPrimitive("scheduled"))
+        val client = ShellConsentClient().also { it.show(underway, tree) }
+        host(client)
+        openMenuThenRow()
+        rule.onNodeWithText(Handover.UNDER_WAY).assertExists()
+        rule.onAllNodesWithText(Handover.STOP_LABEL).assertCountEquals(0)
+    }
 }

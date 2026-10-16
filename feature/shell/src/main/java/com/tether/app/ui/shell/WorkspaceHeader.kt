@@ -90,6 +90,7 @@ import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.KeyState
 import com.tether.app.ui.components.TetherKey
+import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.FreshnessChip
 import com.tether.app.ui.components.FreshnessCopy
 import com.tether.app.ui.components.TetherStatusPill
@@ -167,6 +168,8 @@ data class WorkspaceHeaderActions(
     /** #273: the menu's Hand over row (null / Hidden: not drawn). Enabled opens the host's confirmation; Blocked says why. */
     val handover: com.tether.app.client.Handover.MenuState? = null,
     val onHandOver: () -> Unit = {},
+    /** W34 (v151): the Stop handover row (no confirm). */
+    val onStopHandover: () -> Unit = {},
 )
 
 /**
@@ -684,10 +687,17 @@ fun SessionLinksPopover(
                 Spacer(Modifier.height(t.css.spaceSm))
                 Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
                 Spacer(Modifier.height(t.css.spaceSm))
-                HandoverMenuRow(handover) {
-                    onDismiss()
-                    actions.onHandOver()
-                }
+                HandoverMenuRow(
+                    handover,
+                    onOpen = {
+                        onDismiss()
+                        actions.onHandOver()
+                    },
+                    onStop = {
+                        onDismiss()
+                        actions.onStopHandover()
+                    },
+                )
             }
         }
     }
@@ -699,10 +709,15 @@ fun SessionLinksPopover(
  * label, and does nothing. One merged node: "Hand over to a new lead, <reason>, disabled".
  */
 @Composable
-internal fun HandoverMenuRow(state: com.tether.app.client.Handover.MenuState, onOpen: () -> Unit) {
+internal fun HandoverMenuRow(state: com.tether.app.client.Handover.MenuState, onOpen: () -> Unit, onStop: () -> Unit = {}) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val blocked = state as? com.tether.app.client.Handover.MenuState.Blocked
+    // W34 (workspace-header.tsx 62ceca46 :153-179): underway, the SAME last row is Stop handover (no confirm); once
+    // pressed it reads Stopping handover... (muted, a spinner, focusable and disabled).
+    val stop = state as? com.tether.app.client.Handover.MenuState.Stop
+    val stopping = state is com.tether.app.client.Handover.MenuState.Stopping
+    val inert = blocked != null || stopping
     val shape = RoundedCornerShape(t.radiusSm)
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -712,11 +727,16 @@ internal fun HandoverMenuRow(state: com.tether.app.client.Handover.MenuState, on
             .fillMaxWidth()
             .heightIn(min = 44.dp)
             .focusRing(focused, shape, t.violet)
-            .cssSurface(shape, if (pressed && blocked == null) t.graphiteRaised else Color.Transparent)
-            .clickable(interaction, indication = null, role = Role.Button) { if (blocked == null) onOpen() }
+            .cssSurface(shape, if (pressed && !inert) t.graphiteRaised else Color.Transparent)
+            .clickable(interaction, indication = null, role = Role.Button) {
+                when {
+                    stop != null -> onStop()
+                    !inert -> onOpen()
+                }
+            }
             .semantics(mergeDescendants = true) {
                 role = Role.Button
-                if (blocked != null) disabled()
+                if (inert) disabled()
             }
             .testTag(ShellTags.HandoverRow),
         verticalArrangement = Arrangement.Center,
@@ -726,22 +746,51 @@ internal fun HandoverMenuRow(state: com.tether.app.client.Handover.MenuState, on
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
         ) {
-            Icon(TetherIcons.ArrowRightLeft, contentDescription = null, tint = if (blocked != null) t.faint else t.ink, modifier = Modifier.size(16.dp))
+            if (stopping) {
+                Box(Modifier.size(16.dp), contentAlignment = Alignment.Center) { SpinnerRing(t.muted, 12.dp) }
+            } else {
+                Icon(
+                    if (stop != null) TetherIcons.CircleX else TetherIcons.ArrowRightLeft,
+                    contentDescription = null,
+                    tint = if (blocked != null) t.faint else t.ink,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
             Text(
-                "Hand over to a new lead",
-                color = if (blocked != null) t.muted else t.ink,
+                when {
+                    stop != null -> com.tether.app.client.Handover.STOP_LABEL
+                    stopping -> com.tether.app.client.Handover.STOPPING_LABEL
+                    else -> "Hand over to a new lead"
+                },
+                color = if (inert) t.muted else t.ink,
                 style = cssText(type.ui, 0.82f, 650),
                 maxLines = 1,
             )
         }
+        val start = t.css.spaceSm + 16.dp + t.css.spaceSm
         if (blocked != null) {
             Text(
                 blocked.reason,
                 color = t.muted,
                 style = cssText(type.ui, 0.75f, 400),
                 modifier = Modifier
-                    .padding(start = t.css.spaceSm + 16.dp + t.css.spaceSm, end = t.css.spaceSm, bottom = t.css.spaceXs)
+                    .padding(start = start, end = t.css.spaceSm, bottom = t.css.spaceXs)
                     .testTag(ShellTags.HandoverReason),
+            )
+        }
+        if (stop != null) {
+            // Line 1 carries the stage (4.dp top: the director's focus-ring fix, gc:11247); line 2 the effect (2.dp top).
+            Text(
+                stop.stageLine,
+                color = t.muted,
+                style = cssText(type.ui, 0.75f, 400),
+                modifier = Modifier.padding(start = start, end = t.css.spaceSm, top = 4.dp).testTag(ShellTags.HandoverReason),
+            )
+            Text(
+                com.tether.app.client.Handover.STOP_EFFECT,
+                color = t.muted,
+                style = cssText(type.ui, 0.75f, 400),
+                modifier = Modifier.padding(start = start, end = t.css.spaceSm, top = 2.dp, bottom = t.css.spaceXs).testTag(ShellTags.HandoverEffect),
             )
         }
     }

@@ -58,6 +58,17 @@ class DraftTestClient(
     private val failOnSend: Boolean = false,
 ) : TetherClient by inner {
     override val providers = MutableStateFlow(DraftFixtures.providers)
+    /** W34: the server's protocol (null = unknown, as every older fixture; a handover test sets 151). */
+    override val serverProtocolVersion = MutableStateFlow<Int?>(null)
+    override val snapshotSeq = MutableStateFlow(1L)
+    val handoverRequests = CopyOnWriteArrayList<Triple<String, String, kotlinx.serialization.json.JsonObject>>()
+    val abandoned = CopyOnWriteArrayList<String>()
+    override fun handoverRequestWithSettings(sessionId: String, requestId: String, successor: kotlinx.serialization.json.JsonObject): Boolean {
+        if (failOnSend) throw AssertionError("a golden must not hand over")
+        handoverRequests += Triple(sessionId, requestId, successor)
+        return true
+    }
+    override fun abandonHandoverRequest(requestId: String) { abandoned += requestId }
     override val providerCatalog = MutableStateFlow(DraftFixtures.catalog)
     override val providerCatalogLive = MutableStateFlow(true)
     override val consentOrigin = MutableStateFlow<String?>(DraftFixtures.ORIGIN)

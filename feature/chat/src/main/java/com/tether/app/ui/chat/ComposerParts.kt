@@ -295,15 +295,21 @@ internal fun QueuedMessages(
     serverNow: () -> Long = { 0L },
     /** ta-ceo: the copy is not live — a deferred row's wait stops counting (it claims nothing about now). */
     stale: Boolean = false,
+    /** W34 (v151): the handover stage underway; rows then say where they go and the instruction row has no X. */
+    handoverStage: com.tether.app.client.Handover.StageView? = null,
 ) {
     val t = LocalTetherTokens.current
+    val instructionIndex = queued.indexOfFirst { it.isHandoverRequest }
     Column(
         Modifier.fillMaxWidth().semantics { contentDescription = "Queued messages" },
         verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
-        for (message in queued) {
+        for ((index, message) in queued.withIndex()) {
             androidx.compose.runtime.key(message.queueId) {
                 QueuedMessageRow(
+                    handoverWaitLabel = com.tether.app.client.Handover.queueRowLabel(
+                        handoverStage, instruction = message.isHandoverRequest, index = index, instructionIndex = instructionIndex,
+                    ),
                     text = message.text,
                     atToolBoundary = message.atToolBoundary && !message.isHandoverRequest,
                     handoverRequest = message.isHandoverRequest,
@@ -374,6 +380,8 @@ internal fun QueuedMessageRow(
     stale: Boolean = false,
     /** #273: Tether's own handover instruction: read-only (no edit, no interrupt-now), removable (= cancels the handover). */
     handoverRequest: Boolean = false,
+    /** W34 (v151): the wait line this row reads while a handover is underway (null = its own); also drops the instruction row's X. */
+    handoverWaitLabel: String? = null,
 ) {
     val t = LocalTetherTokens.current
     val focusManager = LocalFocusManager.current
@@ -419,7 +427,7 @@ internal fun QueuedMessageRow(
     }
     val confirming = confirmingInterrupt && cost.isNotEmpty() && interruptLock == null
     val choice = atToolBoundary && wait.needsChoice && !choiceAcknowledged
-    val waitLabel = if (handoverRequest) HANDOVER_QUEUE_WAIT_COPY else if (atToolBoundary) wait.label else QUEUED_AFTER_TURN_COPY
+    val waitLabel = handoverWaitLabel ?: if (handoverRequest) HANDOVER_QUEUE_WAIT_COPY else if (atToolBoundary) wait.label else QUEUED_AFTER_TURN_COPY
     val shape = RoundedCornerShape(t.radiusMd)
     val rowHeight = 30.4.dp // 1.9rem
     Column(
@@ -476,7 +484,8 @@ internal fun QueuedMessageRow(
                 turnId = interruptTurnId,
             )
         }
-        Box(
+        // v151: Stop handover (the Session links menu) is the one stop, so Tether's instruction row has no X.
+        if (!(handoverRequest && handoverWaitLabel != null)) Box(
             Modifier
                 .minimumInteractiveComponentSize()
                 .clickable(onClick = onRemove)

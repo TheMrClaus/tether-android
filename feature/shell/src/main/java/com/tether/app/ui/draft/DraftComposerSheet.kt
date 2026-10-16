@@ -89,6 +89,13 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.semantics.disabled
+import com.tether.app.ui.components.tetherWell
+import com.tether.app.client.HandoverDraftState
+import com.tether.app.ui.shell.cssText
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.DraftComposerState
 import com.tether.app.client.DraftSessionOptions
@@ -187,6 +194,15 @@ object DraftComposerTags {
     const val Send = "draft-send"
     /** The sheet's foot (inside its padding): the sheet's bottom less this one's is the composer's bottom padding. */
     const val Composer = "draft-composer"
+    /** W34: the Session name row (label, field, helper) and, in handover mode, the isolation note, explainer, Pi note, CTA. */
+    const val NameRow = "draft-name-row"
+    const val NameField = "draft-name"
+    const val NameHint = "draft-name-hint"
+    const val IsolationNote = "draft-handover-folder-note"
+    const val Explainer = "draft-handover-explainer"
+    const val PiNote = "draft-handover-pi-note"
+    const val HandoverCta = "draft-handover-cta"
+    const val Blocked = "draft-handover-blocked"
     const val Launching = "draft-launching"
     fun quickPick(path: String) = "draft-quick-pick:$path"
 }
@@ -247,6 +263,8 @@ class DraftSheetInputs(
     val browserOpen: Boolean = false,
     /** ta-xki: the draft's Effort and Mode ([com.tether.app.client.DraftSessionOptionsModel]). */
     val options: DraftSessionOptions = DraftSessionOptions.None,
+    /** W34: the server speaks protocol >= 151 ([com.tether.app.client.Handover.v151]): the Session name row is drawn (ordinary New Session too). */
+    val v151: Boolean = false,
 )
 
 /** What the sheet's controls do. */
@@ -260,6 +278,10 @@ class DraftSheetActions(
     val onAttach: () -> Unit = {},
     val onRemoveAttachment: (Long) -> Unit = {},
     val onSubmit: () -> Unit = {},
+    /** W34: the Session name field's text. */
+    val onName: (String) -> Unit = {},
+    /** W34: the CTA of handover mode ("Hand over"): one-way, never sent from the name field. */
+    val onSubmitHandover: () -> Unit = {},
     /** ta-xki: an Effort pick (a variant value). */
     val onSelectEffort: (String) -> Unit = {},
     /**
@@ -322,6 +344,7 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHu
     val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
     val preferences by remember(prefs, client) { prefs.preferencesFor(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
     val linkEpoch by client.linkEpoch.collectAsStateWithLifecycle()
+    val serverProtocol by client.serverProtocolVersion.collectAsStateWithLifecycle()
     val connected = connection == ConnectionState.Connected
     LaunchedEffect(connected) { if (connected) client.requestProviderCatalog() }
     // ta-23f: draft-composer.tsx's effect on [useWorktree, cwd]: ask what the folder's repo offers while
@@ -375,8 +398,11 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHu
         notice = notice,
         browserOpen = if (wideRow) browser.open else settings.open,
         options = DraftSessionOptionsModel.of(draft),
+        v151 = com.tether.app.client.Handover.v151(serverProtocol),
     )
     val actions = DraftSheetActions(
+        onName = composer::setName,
+        onSubmitHandover = { composer.submitHandover() },
         onClose = vm::closeDraft,
         onText = composer::setText,
         onModelChip = {
@@ -578,7 +604,7 @@ fun DraftComposerFrame(
         Column(
             case
                 .testTag(DraftComposerTags.Sheet)
-                .semantics { paneTitle = DRAFT_TITLE }
+                .semantics { paneTitle = inputs.draft.handover?.let { com.tether.app.client.Handover.modeTitle(com.tether.app.client.LabelText.label(it.sourceName)) } ?: DRAFT_TITLE }
                 // Phone: `border-width: 1px 0 0` (a top edge only); desktop: the 1px case.
                 .cssSurface(shape, t.graphite, if (sheet) null else CssBorder(1.dp, t.lineStrong), if (sheet) emptyList() else StudioDialog.shadows)
                 .then(if (sheet) Modifier.drawBehind { drawRect(t.lineStrong, Offset.Zero, Size(size.width, 1.dp.toPx())) } else Modifier)
@@ -587,7 +613,7 @@ fun DraftComposerFrame(
                 // not a clickable, so its text is never merged into one node.
                 .pointerInput(Unit) { detectTapGestures { } },
         ) {
-            DraftHeader(narrow, subtitle, actions.onClose)
+            DraftHeader(narrow, subtitle, actions.onClose, inputs.draft.handover, sheet)
             val side = if (narrow) t.css.spaceMd else t.css.spaceXl
             // The options scroll; the message well stays put at the sheet's foot (r2, F1), so Send is
             // always on screen, above the keyboard, whatever the rows above it hold.
@@ -618,9 +644,12 @@ fun DraftComposerFrame(
 
 /** `.draft-dialog-head` (Studio): the title over its subtitle, and Close. */
 @Composable
-private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit) {
+private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit, handover: HandoverDraftState? = null, sheet: Boolean = false) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
+    // W34 (hu:32): `Hand over “{source name}”`, the name bidi-isolated; it wraps anywhere and clamps to 2 lines on the sheet.
+    val title = if (handover != null) com.tether.app.client.Handover.modeTitle("\u2068" + com.tether.app.client.LabelText.label(handover.sourceName) + "\u2069") else DRAFT_TITLE
+    val subtitleText = if (handover != null) com.tether.app.client.Handover.MODE_SUBTITLE else DRAFT_SUBTITLE
     Column {
         Row(
             Modifier.fillMaxWidth().padding(if (narrow) t.css.spaceLg else t.css.spaceXl),
@@ -629,7 +658,9 @@ private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit)
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    DRAFT_TITLE,
+                    title,
+                    maxLines = if (handover != null && sheet) 2 else Int.MAX_VALUE,
+                    overflow = TextOverflow.Ellipsis,
                     color = t.white,
                     // `:root .draft-dialog-head h2`: 1.3rem / 700.
                     style = androidx.compose.ui.text.TextStyle(fontFamily = type.ui, fontSize = 20.8.sp, fontWeight = androidx.compose.ui.text.font.FontWeight(700), letterSpacing = (-0.02).em),
@@ -637,7 +668,7 @@ private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit)
                 )
                 if (subtitle) {
                     Text(
-                        DRAFT_SUBTITLE,
+                        subtitleText,
                         color = t.muted,
                         style = type.body.copy(fontSize = 12.48.sp, lineHeight = 1.6.em),
                         modifier = Modifier.padding(top = 6.4.dp),
@@ -649,7 +680,7 @@ private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit)
                 classes = KeyClasses.IconButton,
                 icon = TetherIcons.X,
                 iconSize = 17.dp,
-                contentDescription = "Close new session",
+                contentDescription = if (handover != null) com.tether.app.client.Handover.MODE_CLOSE_LABEL else "Close new session",
                 modifier = Modifier.testTag(DraftComposerTags.Close),
             )
         }
@@ -663,6 +694,13 @@ private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit)
 private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, wideRow: Boolean) {
     val t = LocalTetherTokens.current
     val draft = inputs.draft
+    val handover = draft.handover
+    val pending = handover?.pending == true
+    // W34 (dc:390): the Session name is the FIRST row, above the project, in both widths (v151 only; handover mode is v151).
+    if (inputs.v151 || handover != null) {
+        SessionNameRow(draft, narrow, handover, actions.onName)
+        Box(Modifier.height(if (narrow) t.css.spaceMd else t.css.spaceLg))
+    }
     // `.chat-project-row`: which folder and, beside it, the worktree select (ta-23f) and the GitHub
     // issues / pull requests buttons (T8.4). A hairline under it sets the group off.
     Column(
@@ -676,19 +714,24 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
             verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
         ) {
-            WorkspaceSelector(draft.cwd(), inputs.quickPicks, inputs.workspaceRoot, actions.onPickFolder, actions.onBrowse)
-            WorktreeSelect(draft.form, actions.onSelectIsolation)
-            GitHubWorkButtons(draft.cwd(), draft.creating, actions.onGitHub)
+            Box(Modifier.pendingDim(pending)) { WorkspaceSelector(draft.cwd(), inputs.quickPicks, inputs.workspaceRoot, actions.onPickFolder, actions.onBrowse) }
+            if (handover != null) {
+                // dc:426-452: no worktree select, GitHub buttons or details; isolation is always off in this mode.
+                IsolationNote()
+            } else {
+                WorktreeSelect(draft.form, actions.onSelectIsolation)
+                GitHubWorkButtons(draft.cwd(), draft.creating, actions.onGitHub)
+            }
         }
     }
     Box(Modifier.height(if (narrow) t.css.spaceMd else t.css.spaceLg))
 
     // ta-23f: WorktreeDetails, its own row between the project row and the live row (absent when local).
-    WorktreeDetails(draft.form, draft.worktreeSource, actions.onWorktreeField)
+    if (handover == null) WorktreeDetails(draft.form, draft.worktreeSource, actions.onWorktreeField)
 
     // ta-2uq / ta-xki: `.chat-mode-row-live` ("Session options"): the ModelSelector chip, Effort and
     // Mode (and opencode's Auto); below 64rem the SessionSettingsSheet trigger row carries all three.
-    if (wideRow) DraftLiveRow(inputs, actions) else DraftSettingsTriggerRow(inputs, actions)
+    Box(Modifier.pendingDim(pending)) { if (wideRow) DraftLiveRow(inputs, actions) else DraftSettingsTriggerRow(inputs, actions) }
     Box(Modifier.height(t.css.spaceMd))
 
     // ta-m7ef (draft-composer.tsx 1bf4a465): the project's setup, waiting for the operator's approval, and the
@@ -698,8 +741,10 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
         StatusLine(TetherIcons.Loader, "Checking what this project's setup would run…", DraftComposerTags.SetupChecking)
     }
     // draft-composer.tsx: the hook's error, else the attachment flash.
+    // W34 (dc:584-592): the source changed while choosing (polite), then the refusal (ASSERTIVE in this mode).
+    handover?.blockedLine?.let { StatusLine(TetherIcons.TriangleAlert, it, DraftComposerTags.Blocked, topAligned = true) }
     if (draft.error.isNotEmpty()) {
-        StatusLine(TetherIcons.TriangleAlert, draft.error, DraftComposerTags.Error)
+        StatusLine(TetherIcons.TriangleAlert, draft.error, DraftComposerTags.Error, assertive = handover != null, topAligned = inputs.v151 || handover != null)
     } else if (inputs.notice != null) {
         StatusLine(TetherIcons.Paperclip, inputs.notice, DraftComposerTags.Notice)
     }
@@ -723,6 +768,12 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
 private fun DraftComposerFoot(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, keyboardOpen: Boolean, focusOnOpen: Boolean) {
     val t = LocalTetherTokens.current
     val draft = inputs.draft
+    val handover = draft.handover
+    if (handover != null) {
+        // W34 (dc:624-644): no message box, no attach, no Enter hint: the current lead writes the first message.
+        HandoverWell(handover, (draft.form["provider"] as? JsStr)?.value.orEmpty().ifEmpty { inputs.options.provider }, narrow, actions.onSubmitHandover)
+        return
+    }
     MessageWell(draft, inputs.readiness, narrow, keyboardOpen, actions, focusOnOpen)
     // App addition: the web only disables Send; the reason it is disabled is said in words here.
     if (draft.error.isEmpty() && inputs.readiness.isNotEmpty()) {
@@ -753,19 +804,20 @@ private fun SectionLabel(text: String) {
 
 /** `.chat-waiting` (role=status): a glyph and the words. */
 @Composable
-private fun StatusLine(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, tag: String) {
+private fun StatusLine(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, tag: String, assertive: Boolean = false, topAligned: Boolean = false) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Row(
         Modifier
             .fillMaxWidth()
             .padding(bottom = t.css.spaceSm)
-            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }
+            .semantics(mergeDescendants = true) { liveRegion = if (assertive) LiveRegionMode.Assertive else LiveRegionMode.Polite }
             .testTag(tag),
-        verticalAlignment = Alignment.CenterVertically,
+        // sc:1210-1211 (v151 only; the W33 line stays centred): the text wraps and the icon is top-aligned.
+        verticalAlignment = if (topAligned) Alignment.Top else Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
-        Icon(icon, contentDescription = null, tint = t.warning, modifier = Modifier.size(14.dp))
+        Icon(icon, contentDescription = null, tint = t.warning, modifier = (if (topAligned) Modifier.padding(top = 2.dp) else Modifier).size(14.dp))
         // ta-28i: the server's words (a refusal) are prose: any bidi control is a token.
         Text(com.tether.app.ui.text.proseText(text), style = type.body.copy(fontSize = 12.48.sp), color = t.ink)
     }
@@ -1013,6 +1065,199 @@ fun DraftLaunching(text: String, attachments: List<com.tether.app.protocol.Attac
         ) {
             Icon(TetherIcons.Loader, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
             Text("Opening the $providerLabel session…", color = t.muted, style = type.body.copy(fontSize = 13.12.sp))
+        }
+    }
+}
+
+/** sc:1207 / sc:1146: while a handover request is pending the option chips sit at alpha 0.6 and take no input. */
+private fun Modifier.pendingDim(pending: Boolean): Modifier =
+    if (!pending) this else this
+        .alpha(0.6f)
+        .focusProperties { canFocus = false }
+        .pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial).changes.forEach { it.consume() }
+            }
+        }
+
+/**
+ * `.draft-name-row` (dc:390-410, sc:1118-1150, 1220-1232): label + one-line field (80 max, no autocorrect). The card puts
+ * the label inline left of the input, the sheet above it. The helper line ("Automatic name: ...") shows only in handover mode
+ * while the field is cleared and a hint exists, as real selectable text. Enter never submits: IME Next moves to the
+ * message box (New Session) or Done (handover); a pending handover disables the field (alpha 0.6).
+ */
+@Composable
+private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover: HandoverDraftState?, onName: (String) -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val sheet = windowWidthDp() <= DRAFT_SHEET_MAX_WIDTH_DP
+    val pending = handover?.pending == true
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    var field by remember { mutableStateOf(TextFieldValue(draft.name, TextRange(draft.name.length))) }
+    if (field.text != draft.name) field = TextFieldValue(draft.name, TextRange(draft.name.length))
+    val hint = handover?.let { com.tether.app.client.Handover.nameHintView(draft.name, it.hint) }
+    val label: @Composable (Modifier) -> Unit = { m ->
+        Text(
+            com.tether.app.client.Handover.NAME_FIELD_LABEL,
+            color = t.muted,
+            style = cssText(type.ui, 0.75f, 650),
+            modifier = m
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { runCatching { focus.requestFocus() } }
+                .clearAndSetSemantics { },
+        )
+    }
+    val input: @Composable (Modifier) -> Unit = { m ->
+        val style = type.body.copy(fontSize = 16.sp, fontWeight = androidx.compose.ui.text.font.FontWeight(560), color = t.ink)
+        BasicTextField(
+            value = field,
+            onValueChange = { next ->
+                val text = next.text.filter { it != '\n' }
+                field = next.copy(text = text)
+                if (text != draft.name) onName(text)
+            },
+            enabled = !pending,
+            singleLine = true,
+            modifier = m
+                .heightIn(min = 44.dp)
+                .tetherWell(t, RoundedCornerShape(t.radiusSm), focused)
+                .alpha(if (pending) 0.6f else 1f)
+                .focusRequester(focus)
+                .semantics { contentDescription = com.tether.app.client.Handover.NAME_FIELD_LABEL }
+                .testTag(DraftComposerTags.NameField),
+            textStyle = style,
+            cursorBrush = SolidColor(t.violet),
+            keyboardOptions = KeyboardOptions(
+                capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+                imeAction = if (handover != null) ImeAction.Done else ImeAction.Next,
+            ),
+            keyboardActions = KeyboardActions(
+                onNext = { focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Next) },
+                onDone = { focusManager.clearFocus() },
+            ),
+            interactionSource = interaction,
+            decorationBox = { inner ->
+                Box(Modifier.padding(horizontal = t.css.spaceMd).heightIn(min = 44.dp), contentAlignment = Alignment.CenterStart) {
+                    if (field.text.isEmpty()) {
+                        Text(
+                            com.tether.app.client.Handover.NAME_PLACEHOLDER,
+                            style = style.copy(fontWeight = androidx.compose.ui.text.font.FontWeight(500)),
+                            color = t.faint,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    inner()
+                }
+            },
+        )
+    }
+    Column(Modifier.fillMaxWidth().testTag(DraftComposerTags.NameRow)) {
+        if (sheet) {
+            Column(verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
+                label(Modifier)
+                input(Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd)) {
+                label(Modifier)
+                input(Modifier.weight(1f))
+            }
+        }
+        if (hint != null) {
+            androidx.compose.foundation.text.selection.SelectionContainer {
+                Text(
+                    hint,
+                    color = t.muted,
+                    style = cssText(type.ui, 0.75f, 400).copy(lineHeight = 1.4.em),
+                    modifier = Modifier.fillMaxWidth().padding(top = t.css.spaceXs).testTag(DraftComposerTags.NameHint),
+                )
+            }
+        }
+    }
+}
+
+/** hu:22 / sc:1162-1172: "Works in this folder — a handover never creates a worktree." beside the folder chip. */
+@Composable
+private fun IsolationNote() {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Row(
+        Modifier.heightIn(min = 40.dp).testTag(DraftComposerTags.IsolationNote),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.2.dp),
+    ) {
+        Icon(TetherIcons.Split, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+        Text(
+            com.tether.app.client.Handover.ISOLATION_NOTE,
+            color = t.muted,
+            style = cssText(type.ui, 0.75f, 400).copy(lineHeight = 1.4.em),
+        )
+    }
+}
+
+/**
+ * dc:624-644 + sc:1175-1217: handover mode's well. NO text box: the current lead writes the first message, so the well is
+ * an explainer (title, body, Pi's note) over the CTA. Pending: "Handing over..." (disabled). Blocked (the source turned
+ * ineligible): the CTA takes the disabled look, does nothing, and stays focusable (the web's aria-disabled).
+ */
+@Composable
+private fun HandoverWell(handover: HandoverDraftState, provider: String, narrow: Boolean, onSubmit: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val source = com.tether.app.client.LabelText.label(handover.sourceName)
+    val body = com.tether.app.client.Handover.explainerBody("\u2068" + source + "\u2069")
+    val blocked = handover.blockedLine != null
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .cssSurface(RoundedCornerShape(t.radiusMd), t.mineralDeep, CssBorder(1.dp, t.lineStrong), emptyList())
+            .padding(t.css.spaceMd),
+        verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    ) {
+        Column(Modifier.testTag(DraftComposerTags.Explainer), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
+                Icon(TetherIcons.FileText, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp))
+                Text(com.tether.app.client.Handover.EXPLAINER_TITLE, color = t.ink, style = cssText(type.ui, 0.9f, 680))
+            }
+            Text(body, color = t.muted, style = type.body.copy(fontSize = 14.sp, lineHeight = 1.6.em))
+        }
+        if (provider == "pi") {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+            Row(
+                Modifier.testTag(DraftComposerTags.PiNote),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+            ) {
+                Icon(TetherIcons.Info, contentDescription = null, tint = t.muted, modifier = Modifier.padding(top = 2.dp).size(15.dp))
+                Text(com.tether.app.client.Handover.PI_NOTE, color = t.ink, style = type.body.copy(fontSize = 13.sp, lineHeight = 1.4.em))
+            }
+        }
+        val cta = if (narrow) Modifier.fillMaxWidth() else Modifier
+        val label = if (handover.pending) com.tether.app.client.Handover.PENDING_LABEL else com.tether.app.client.Handover.CTA_LABEL
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+            val key: @Composable (Modifier) -> Unit = { m ->
+                TetherKey(
+                    onClick = { if (!handover.pending && !blocked) onSubmit() },
+                    classes = KeyClasses.ChatSend,
+                    label = label,
+                    icon = TetherIcons.ArrowRightLeft,
+                    iconSize = 18.dp,
+                    enabled = !handover.pending && !blocked,
+                    minHeight = 44.dp,
+                    contentDescription = "$label. $body",
+                    modifier = m.widthIn(min = 44.dp).testTag(DraftComposerTags.HandoverCta),
+                )
+            }
+            if (blocked && !handover.pending) {
+                // aria-disabled, not disabled: still in the focus and TalkBack order, and it does nothing.
+                Box(cta.focusable().semantics(mergeDescendants = true) { disabled() }) { key(cta) }
+            } else {
+                key(cta)
+            }
         }
     }
 }

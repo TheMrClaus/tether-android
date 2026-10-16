@@ -76,4 +76,35 @@ class HandoverRowTest {
         show(Handover.MenuState.Hidden)
         rule.onAllNodesWithTag(ShellTags.HandoverRow).let { assertEquals(0, it.fetchSemanticsNodes().size) }
     }
+
+    // ---- W34: Stop handover (v151) ----
+
+    private val stage = "Handover prompt written. The new session starts when this turn ends."
+
+    @Test
+    fun theStopRowIsTheSameLastRowWithTheStageAndTheEffectAndPressingItStopsAtOnceWithNoConfirm() {
+        show(Handover.MenuState.Stop(stage))
+        val node = rule.onNodeWithTag(ShellTags.HandoverRow).fetchSemanticsNode()
+        val text = node.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString(" ") { it.text }
+        assertTrue(text, text.contains("Stop handover") && text.contains(stage) && text.contains(Handover.STOP_EFFECT))
+        assertEquals(androidx.compose.ui.semantics.Role.Button, node.config.getOrNull(SemanticsProperties.Role))
+        assertTrue("enabled", !node.config.contains(SemanticsProperties.Disabled))
+        rule.onNodeWithTag(ShellTags.HandoverEffect, useUnmergedTree = true).assertExists()
+        rule.onNodeWithTag(ShellTags.HandoverRow).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("stop-handover"), events)
+    }
+
+    @Test
+    fun theStoppingRowReadsStoppingStaysFocusableDisabledAndTapsDoNothing() {
+        show(Handover.MenuState.Stopping)
+        rule.onNodeWithText(Handover.STOPPING_LABEL).assertExists()
+        rule.onAllNodesWithTag(ShellTags.HandoverEffect, useUnmergedTree = true).let { assertEquals(0, it.fetchSemanticsNodes().size) }
+        val node = rule.onNodeWithTag(ShellTags.HandoverRow).fetchSemanticsNode()
+        assertTrue("disabled", node.config.contains(SemanticsProperties.Disabled))
+        assertTrue(node.config.contains(androidx.compose.ui.semantics.SemanticsActions.RequestFocus))
+        rule.onNodeWithTag(ShellTags.HandoverRow).performClick()
+        rule.waitForIdle()
+        assertTrue("a Stopping row sends nothing: $events", events.isEmpty())
+    }
 }

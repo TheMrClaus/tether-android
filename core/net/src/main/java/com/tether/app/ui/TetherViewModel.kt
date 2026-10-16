@@ -1021,13 +1021,15 @@ class TetherViewModel(
      * through [sendAttachments] alone, so a non-empty [attachments] is refused here (false, the
      * draft and the chips kept) and never reaches the durable outbox.
      */
-    fun sendOrQueue(sessionId: String, text: String, attachments: List<Attachment> = emptyList()): Boolean {
+    fun sendOrQueue(sessionId: String, text: String, attachments: List<Attachment> = emptyList(), holding: Boolean = false): Boolean {
         if (attachments.isNotEmpty()) {
             reportLocalError(ATTACHMENTS_REFUSED_COPY)
             return false
         }
         val projection = client.projections.value[sessionId]
-        if (projection?.activeTurnId != null) {
+        // W34 (chat-view.tsx 62ceca46 :3488 `holding ? queueMessage : sendText`): while a handover is underway (v151) a
+        // message is HELD, not sent, even when no turn runs (waiting_background); the server moves it to the new session.
+        if (projection?.activeTurnId != null || holding) {
             client.queueAdd(sessionId, text)
             return true
         }

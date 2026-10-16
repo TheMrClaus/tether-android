@@ -33,6 +33,7 @@ import com.composables.icons.lucide.CircleCheck
 import com.composables.icons.lucide.CircleDot
 import com.composables.icons.lucide.CircleHelp
 import com.composables.icons.lucide.CircleStop
+import com.composables.icons.lucide.CircleX
 import com.composables.icons.lucide.ClipboardCheck
 import com.composables.icons.lucide.ClipboardPaste
 import com.composables.icons.lucide.Clock
@@ -162,6 +163,9 @@ object TetherIcons {
     val ArrowLeft: ImageVector get() = Lucide.ArrowLeft
     val ArrowRight: ImageVector get() = Lucide.ArrowRight
     val ArrowRightLeft: ImageVector get() = Lucide.ArrowRightLeft
+
+    /** W34: Stop handover's glyph. */
+    val CircleX: ImageVector get() = Lucide.CircleX
     val ArrowUp: ImageVector get() = Lucide.ArrowUp
     val ArrowUpRight: ImageVector get() = Lucide.ArrowUpRight
     val Ban: ImageVector get() = Lucide.Ban

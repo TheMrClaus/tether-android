@@ -386,12 +386,27 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     // #273: the Hand over confirmation, and the live row state it is checked against (the menu row reads the same flow).
     var confirmHandover by remember { mutableStateOf<HandoverDraw?>(null) }
     var handoverClosed by remember { mutableStateOf(0) }
+    val serverProtocol by vm.client.serverProtocolVersion.collectAsStateWithLifecycle()
+    val handoverV151 = com.tether.app.client.Handover.v151(serverProtocol)
     val handoverState by remember(vm, session?.id) {
         session?.id?.let { vm.handoverMenuState(it) } ?: kotlinx.coroutines.flow.flowOf(null)
     }.collectAsStateWithLifecycle(initialValue = null)
     // A closed confirmation (Cancel, back, an auto-dismiss or the send) puts focus back on the "Session links" trigger.
     LaunchedEffect(handoverClosed) {
         if (handoverClosed > 0) {
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { shell.linksKeyFocus.requestFocus() }
+        }
+    }
+    // W34 (db:430-436): the handover composer leaving (sent, Close, Back, the scrim) puts focus on the "Session links" trigger.
+    val handoverComposerOpen by remember(vm) { vm.draftComposer.state.map { it.handover != null }.distinctUntilChanged() }
+        .collectAsStateWithLifecycle(initialValue = false)
+    var handoverComposerWasOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(handoverComposerOpen) {
+        if (handoverComposerOpen) {
+            handoverComposerWasOpen = true
+        } else if (handoverComposerWasOpen) {
+            handoverComposerWasOpen = false
             androidx.compose.runtime.withFrameNanos { }
             runCatching { shell.linksKeyFocus.requestFocus() }
         }
@@ -545,6 +560,11 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                 handover = handoverState,
                 onHandOver = {
                     session?.let { confirmHandover = HandoverDraw(it.id, com.tether.app.ui.chat.endSessionServer(consentOrigin, vm.client.serverUrl.value)) }
+                },
+                onStopHandover = {
+                    // W34 (db:1301-1306): no confirm; send handover-cancel, the row reads Stopping, focus to the trigger.
+                    session?.let { vm.stopHandover(it.id) }
+                    handoverClosed++
                 },
                 onRename = { renaming = session?.let { RenameTarget(it.id, it.name) } },
                 // r3: the confirmation is bound to the session AND the server it was opened for.
@@ -912,6 +932,14 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
             onCancel = {
                 confirmHandover = null
                 handoverClosed++
+            },
+            v151 = handoverV151,
+            // W34 (db:1321-1338): the composer opens FIRST, then the dialog closes WITHOUT returning focus to the trigger
+            // (the sheet owns focus). No engine in the catalog: the dialog stays open with its line.
+            onChangeSettings = {
+                val opened = vm.openHandoverDraft(drawn.sessionId)
+                if (opened) confirmHandover = null
+                opened
             },
         )
     }

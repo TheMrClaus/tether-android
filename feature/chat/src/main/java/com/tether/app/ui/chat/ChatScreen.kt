@@ -326,6 +326,10 @@ fun ChatScreen(
     val handoffTarget = session?.handedOffTo?.takeIf { it.isNotEmpty() }?.let { id -> allSessions.firstOrNull { it.id == id } }
     // #273: a successor's "Continued from" strip names (and links to) the session it continued, while that is listed.
     val handoffSource = session?.handedOffFrom?.takeIf { it.isNotEmpty() }?.let { id -> allSessions.firstOrNull { it.id == id } }
+    // W34: the v151 stage strip (Legacy = the W33 notice, as shipped).
+    val handoverStrip by remember(vm, session?.id) { session?.id?.let { vm.handoverStrip(it) } ?: kotlinx.coroutines.flow.flowOf(null) }.collectAsStateWithLifecycle(initialValue = null)
+    val chatProtocol by vm.client.serverProtocolVersion.collectAsStateWithLifecycle()
+    val handoverStage = (handoverStrip as? com.tether.app.client.Handover.Strip.Stage)?.view
     val handoverUnderWay by remember(vm, session?.id) { session?.id?.let { vm.handoverUnderWay(it) } ?: kotlinx.coroutines.flow.flowOf(false) }.collectAsStateWithLifecycle(initialValue = false)
     // T8.5 (chat-view.tsx 90fbb9f :156-165, dashboard.tsx :1683-1686): the `@` picker's takeover —
     // the live roster, the derived briefs, and the brief / handoff frames with THIS session as target.
@@ -520,6 +524,7 @@ fun ChatScreen(
                     onReviewShown = onReviewShown,
                     handedOffFrom = session.handedOffFrom,
                     handoffPeer = handoffSource,
+                    handoverV151 = com.tether.app.client.Handover.v151(chatProtocol),
                     onOpenSession = { id -> vm.selectSession(id) },
                 ) } }
             }
@@ -536,7 +541,7 @@ fun ChatScreen(
                 projection = composerProjection,
                 controls = session?.let { controlsMap[it.id] },
                 serverNow = { vm.serverNow(session?.id) },
-                onSend = { text, attachments -> session?.let { vm.sendOrQueue(it.id, text, attachments) } ?: false },
+                onSend = { text, attachments -> session?.let { vm.sendOrQueue(it.id, text, attachments, holding = handoverStage != null) } ?: false },
                 onInterrupt = onInterrupt,
                 onQueueEdit = { queueId, text -> session?.let { vm.client.queueEdit(it.id, queueId, text) } },
                 onQueueRemove = { queueId -> session?.let { vm.client.queueRemove(it.id, queueId) } },
@@ -566,6 +571,7 @@ fun ChatScreen(
                 // #273: following "Handed off to" ends this device's claim on the source (the focus rule's own navigation).
                 onOpenSession = { id -> vm.openHandoverPeer(session?.id, id) },
                 handoverUnderWay = handoverUnderWay,
+                handoverStage = handoverStage,
                 runActions = runActions,
                 onWarmControls = { session?.let { vm.client.requestWarmSessionControls(it.id) } },
                 sendRows = sends.pending,

@@ -108,6 +108,7 @@ fun ShellUnderTest(
                     onCopyTetherId = { onEvent("copyId") },
                     handover = handover,
                     onHandOver = { onEvent("handover") },
+                    onStopHandover = { onEvent("stop-handover") },
                 ),
                 slots = slots,
                 link = link,

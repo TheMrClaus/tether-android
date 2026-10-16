@@ -62,6 +62,9 @@ object StudioDialog {
     val scrim: Color = Color(16, 25, 44).copy(alpha = 0.34f)
 }
 
+/** Studio's dialog width, `min(440px, 100vw - 32px)`. */
+val DEFAULT_DIALOG_WIDTH: Dp = 440.dp
+
 /** The skin's modal backdrop (`--scrim`; Studio's literal). */
 fun dialogScrim(t: TetherTokens): Color = StudioDialog.scrim
 
@@ -81,6 +84,10 @@ fun TetherDialogSurface(
     scrollable: Boolean = true,
     /** ta-28i: a title that carries server text drawn by a SafeText rule (wins over [title]). */
     styledTitle: AnnotatedString? = null,
+    /** W34: the card's widest width (default [DEFAULT_DIALOG_WIDTH], the whole family's); only the Hand over dialog widens it. */
+    width: Dp = DEFAULT_DIALOG_WIDTH,
+    /** W34: lays the footer keys out itself (the Hand over dialog stacks them on a phone); null = the right-aligned row. */
+    footerContent: (@Composable ColumnScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -88,11 +95,11 @@ fun TetherDialogSurface(
     // ta-5tb: the dialog's title is its pane title, so a screen reader announces the window by name.
     val paneName = styledTitle?.text ?: title
     BoxWithConstraints(if (paneName != null) modifier.semantics { paneTitle = paneName } else modifier) {
-        val width = minOf(440.dp, maxWidth - 32.dp)
+        val cardWidth = minOf(width, maxWidth - 32.dp)
         val shape = RoundedCornerShape(StudioDialog.radius)
         Column(
             Modifier
-                .width(width)
+                .width(cardWidth)
                 .cssSurface(
                     shape, t.graphite,
                     null,
@@ -121,7 +128,10 @@ fun TetherDialogSurface(
                 }
                 content()
             }
-            if (footer != null) {
+            if (footerContent != null) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+                Column(Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 18.dp), content = footerContent)
+            } else if (footer != null) {
                 Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
                 Row(
                     Modifier
@@ -163,6 +173,8 @@ fun TetherDialog(
     onDismiss: () -> Unit,
     title: String? = null,
     footer: (@Composable RowScope.() -> Unit)? = null,
+    width: Dp = DEFAULT_DIALOG_WIDTH,
+    footerContent: (@Composable ColumnScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -173,6 +185,8 @@ fun TetherDialog(
             TetherDialogSurface(
                 title = title,
                 footer = footer,
+                width = width,
+                footerContent = footerContent,
                 content = content,
                 modifier = Modifier
                     // ta-5tb: a pointer-only tap swallower, not `clickable` (which merged the whole dialog into one button).

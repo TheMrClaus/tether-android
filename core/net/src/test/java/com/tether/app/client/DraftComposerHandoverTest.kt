@@ -391,4 +391,24 @@ class DraftComposerHandoverTest {
         h.model.selectProvider("claude")
         assertNull("a provider change drops the held triple", h.model.state.value.handover!!.codexCurrent)
     }
+
+    // W34: the Mode control lists "Current (custom)" FIRST and selected, with the web's hint and the danger look only when the sandbox is off.
+    @Test fun theCodexModeControlListsCurrentCustomFirstAndSelected() = runTest {
+        val h = harness(); h.live()
+        val codex = source { it.copy(provider = "codex", model = null, permissionMode = null, sandboxPolicy = "off", approvalPolicy = "on-request") }
+        h.client.sessions.value = listOf(codex); h.model.refresh()
+        assertTrue(h.model.openHandover(codex))
+        val mode = DraftSessionOptionsModel.of(h.model.state.value).mode!!
+        assertEquals("current", mode.value)
+        assertEquals(listOf("current"), mode.options.take(1).map { it.value })
+        assertEquals("Current (custom)", mode.options.first().label)
+        assertTrue(mode.options.first().description!!.startsWith("Kept from "))
+        assertTrue(mode.options.first().description!!.endsWith("Pick a mode to replace it."))
+        assertTrue("sandbox off is the danger look", mode.options.first().danger)
+        assertTrue(DraftSessionOptionsModel.of(h.model.state.value).modeDanger)
+        // An ordinary draft (no handover) lists the three presets only.
+        h.model.closeHandover()
+        h.model.selectProvider("codex")
+        assertTrue(DraftSessionOptionsModel.of(h.model.state.value).mode!!.options.none { it.value == "current" })
+    }
 }

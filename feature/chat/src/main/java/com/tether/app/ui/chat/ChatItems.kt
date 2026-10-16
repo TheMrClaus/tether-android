@@ -258,6 +258,8 @@ internal fun buildChatItems(
     consentSessionId: String? = null,
     /** #273: the session this one continues after a handover (AgentSession.handedOffFrom), for the "Handover from" label. */
     handedOffFrom: String? = null,
+    /** W34: the server speaks protocol >= 151 ([com.tether.app.client.Handover.v151]): the handover notices read the web's new words. */
+    handoverV151: Boolean = false,
 ): List<ChatItem> {
     val items = ArrayList<ChatItem>(projection.turnOrder.size * 3)
     // T6.6 r2: the session the notice / limit rows belong to (their lazy keys carry it).
@@ -381,11 +383,11 @@ internal fun buildChatItems(
             reviews(turnObj).forEach { items.add(ChatItem.TurnReview(turnId, it, opens(), tight())) }
             // T6.6: `CodexNotices` (compactions first, then the turn's provider notices), same stack.
             compactions(turnObj).forEach { items.add(ChatItem.Compaction(scope, turnId, it, opens(), tight())) }
-            providerNotices(turnObj["providerNotices"], "Codex").forEach { items.add(ChatItem.ProviderNotice(scope, turnId, it, opens(), tight())) }
+            providerNotices(turnObj["providerNotices"], "Codex", handoverV151).forEach { items.add(ChatItem.ProviderNotice(scope, turnId, it, opens(), tight())) }
         } else if (noticeLabel == "Claude" && turnObj != null) {
             // issue #179 (chat-view.tsx:3438): a Claude CLI model fallback, one `.notices` stack.
             var inStack = false
-            providerNotices(turnObj["providerNotices"], "Claude").forEach {
+            providerNotices(turnObj["providerNotices"], "Claude", handoverV151).forEach {
                 items.add(ChatItem.ProviderNotice(scope, turnId, it, opens(), inStack))
                 inStack = true
             }
@@ -404,7 +406,7 @@ internal fun buildChatItems(
     // T6.6 (chat-view.tsx:3537-3539): the session's own provider notices, one `.notices` stack.
     if (noticeLabel != null) {
         var inStack = false
-        providerNotices(state["providerNotices"], noticeLabel).forEach {
+        providerNotices(state["providerNotices"], noticeLabel, handoverV151).forEach {
             items.add(ChatItem.ProviderNotice(scope, null, it, startsGroup = !inStack, tight = inStack))
             inStack = true
         }

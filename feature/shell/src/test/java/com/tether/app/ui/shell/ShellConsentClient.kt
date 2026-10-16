@@ -46,6 +46,10 @@ class ShellConsentClient : TetherClient {
     val handoverCalls = java.util.concurrent.CopyOnWriteArrayList<String>()
     override fun handoverRequest(sessionId: String): Boolean = handoverCalls.add(sessionId)
 
+    /** W34: every `handover-cancel` the UI sent (session id, request id). */
+    val handoverCancels = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+    override fun handoverCancel(sessionId: String, requestId: String): Boolean = handoverCancels.add(sessionId to requestId)
+
     /** T7.1: the configured server (drafts are kept per its origin); null = none, as before. */
     val server = MutableStateFlow<String?>(null)
     override val serverUrl: StateFlow<String?> get() = server

@@ -157,11 +157,13 @@ internal fun ChatTranscript(
     /** #273: the session [handedOffFrom] names, while it is listed (null: unlisted, so the strip is words only). */
     handoffPeer: AgentSession? = null,
     onOpenSession: (String) -> Unit = {},
+    /** W34: the server speaks protocol >= 151: the handover notices read the web's new words. */
+    handoverV151: Boolean = false,
 ) {
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground, reviewFocus, onReviewShown, handedOffFrom, handoffPeer, onOpenSession)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground, reviewFocus, onReviewShown, handedOffFrom, handoffPeer, onOpenSession, handoverV151)
     }
 }
 
@@ -193,6 +195,7 @@ private fun ChatTranscriptBody(
     handedOffFrom: String?,
     handoffPeer: AgentSession?,
     onOpenSession: (String) -> Unit,
+    handoverV151: Boolean,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -207,8 +210,8 @@ private fun ChatTranscriptBody(
     // Everything the build reads is captured here, on the main thread, as immutable values: the toggles
     // as a snapshot of the map, never `groupToggles::resolve`.
     val observer = LocalChatDerivationObserver.current
-    val rowInputs = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentSessionId, observer, handedOffFrom) {
-        ChatRowsInputs(projection, tree, showThinking, zone, richCodex, showApprovals, consentSessionId, observer, handedOffFrom)
+    val rowInputs = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentSessionId, observer, handedOffFrom, handoverV151) {
+        ChatRowsInputs(projection, tree, showThinking, zone, richCodex, showApprovals, consentSessionId, observer, handedOffFrom, handoverV151)
     }
     val rows = rememberDerived(
         sessionKey = consentSessionId ?: projection.tetherSessionId,

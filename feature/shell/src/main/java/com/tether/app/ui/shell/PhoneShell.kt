@@ -42,6 +42,7 @@ object ShellTags {
     const val PinKey = "shell-pin"
     const val HandoverRow = "handover-row"
     const val HandoverReason = "handover-reason"
+    const val HandoverEffect = "handover-effect"
     const val EndSessionKey = "shell-end-session"
     const val TelemetrySheet = "shell-telemetry-sheet"
     const val TelemetryClose = "shell-telemetry-close"

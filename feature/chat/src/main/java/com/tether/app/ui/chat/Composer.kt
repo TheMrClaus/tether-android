@@ -233,6 +233,12 @@ fun Composer(
     /** #273: a handover is requested here or pending on the server (and not yet handed off): the "under way" notice shows. */
     handoverUnderWay: Boolean = false,
     /**
+     * W34 (server protocol >= 151, [com.tether.app.client.Handover.v151]): the stage of the handover underway, or null.
+     * Set, the strip is the stage line, plain text QUEUES even with no turn running (a message is held, not sent) and
+     * nothing else is accepted, the placeholder / Queue key / Interrupt say so, and queued rows say where they go.
+     */
+    handoverStage: com.tether.app.client.Handover.StageView? = null,
+    /**
      * T7.3: the `!` command mode, the foreground command's Background key and the `@` Agents
      * (run-command / background-command / a delegated send): taps and explicit submits only, guarded.
      */
@@ -336,10 +342,16 @@ fun Composer(
     val commandLock = liveness.interruptLock
     val readOnly = session?.readOnly == true
     val handedOffNow = !session?.handedOffTo.isNullOrEmpty()
+    // W34 (chat-view.tsx 62ceca46 :2118-2124): `holding = busy || handoverView !== null`.
+    val handoverHolding = handoverStage != null && !handedOffNow
 
     /** chat-view.tsx:3083-3102 dispatchCommand: `background` = the "Background" key. */
     fun dispatchCommand(background: Boolean) {
         if (session == null) return
+        if (handoverHolding) {
+            flash(com.tether.app.client.Handover.underwayCopy("command"))
+            return
+        }
         if (picked.isNotEmpty()) {
             flash("Command mode can’t include attachments — remove them to run a command.")
             return
@@ -727,6 +739,10 @@ fun Composer(
         // descriptor block, their screenshots as attachments. Idle only, never queued (a pick is
         // reference content for THIS prompt, not a standing instruction).
         if (hasPicks && browserPicks != null) {
+            if (handoverHolding) {
+                flash(com.tether.app.client.Handover.underwayCopy("attachments"))
+                return
+            }
             if (busy) {
                 flash("Wait for the current turn to finish before sending selected elements.")
                 return
@@ -756,6 +772,10 @@ fun Composer(
                 flash("Describe what the delegated agent should do — the text goes to it as its prompt.")
                 return
             }
+            if (handoverHolding) {
+                flash(com.tether.app.client.Handover.underwayCopy("delegate"))
+                return
+            }
             if (busy) {
                 flash("Wait for the current turn to finish before delegating.")
                 return
@@ -779,13 +799,17 @@ fun Composer(
             }
             return
         }
+        if (handoverHolding && hasAttachments) {
+            flash(com.tether.app.client.Handover.underwayCopy("attachments"))
+            return
+        }
         if (busy && hasAttachments) {
             // Attachments only ride an idle send — ask the operator to wait
             // rather than silently dropping the files (web submit()).
             flash("Wait for the current turn to finish before sending attachments.")
             return
         }
-        if (busy) {
+        if (busy || handoverHolding) {
             // Queue path is text-only; attachments are only attachable while
             // idle, so none are pending here.
             if (text.isNotEmpty() && onSend(text, emptyList())) setDraft("")
@@ -983,7 +1007,8 @@ fun Composer(
                 val runningCommands = remember(tree) { runningBackgroundCommands(tree) }
                 if (session != null) RunningCommandsBar(runningCommands, commandActions)
                 // #273: "Handover under way" (the composer stays usable: new messages go to the new lead).
-                if (session != null && !handedOffNow && handoverUnderWay) HandoffNotice(HandoffVariant.Pending, null, onOpenSession)
+                if (session != null && !handedOffNow && handoverStage != null) HandoffNotice(HandoffVariant.Pending, null, onOpenSession, stage = handoverStage)
+                else if (session != null && !handedOffNow && handoverUnderWay) HandoffNotice(HandoffVariant.Pending, null, onOpenSession)
                 // T6.6 (chat-view.tsx:3814-3833): a handed-off source's composer is replaced by
                 // the HandoffNotice ("Handed off to <name> →"); a read-only session's by the replay-only flag. No input, no keys.
                 val handedOff = !session?.handedOffTo.isNullOrEmpty()
@@ -1027,6 +1052,7 @@ fun Composer(
                         liveWork = liveWork,
                         serverNow = serverNow,
                         stale = liveness.stale != null,
+                        handoverStage = handoverStage.takeIf { handoverHolding },
                     )
                 }
 
@@ -1073,7 +1099,11 @@ fun Composer(
                             if (next.text != field.text && atDismissed) atDismissed = false
                             field = next
                         },
-                        placeholder = if (busy) PLACEHOLDER_BUSY else PLACEHOLDER_IDLE,
+                        placeholder = when {
+                            handoverHolding -> if (metrics.phone) com.tether.app.client.Handover.PLACEHOLDER_COARSE else com.tether.app.client.Handover.PLACEHOLDER_FINE
+                            busy -> PLACEHOLDER_BUSY
+                            else -> PLACEHOLDER_IDLE
+                        },
                         enabled = session != null,
                         metrics = metrics,
                         onKey = ::onComposerKey,
@@ -1137,6 +1167,8 @@ fun Composer(
                         ComposerActions(
                             metrics = metrics,
                             busy = busy,
+                            handoverQueue = handoverHolding,
+                            interruptDescription = handoverStage?.takeIf { handoverHolding }?.let { com.tether.app.client.Handover.interruptTitle(it.underlyingKey) },
                             canQueue = draft.isNotBlank(),
                             canSend = session != null && (draft.isNotBlank() || picked.isNotEmpty()),
                             onSubmit = ::submit,
@@ -1314,6 +1346,10 @@ private fun ComposerToolbar(
 private fun RowScope.ComposerActions(
     metrics: ComposerMetrics,
     busy: Boolean,
+    /** W34: a handover is underway (v151): the Queue key is drawn (and says "for the new session") even with no turn. */
+    handoverQueue: Boolean,
+    /** W34: Interrupt's words per handover stage (null = the ordinary ones). */
+    interruptDescription: String?,
     canQueue: Boolean,
     canSend: Boolean,
     onSubmit: () -> Unit,
@@ -1395,7 +1431,7 @@ private fun RowScope.ComposerActions(
                 contentDescription = if (interruptLock == null) "Stop the command" else "Stop the command, unavailable: $interruptLock",
             )
         }
-    } else if (busy) {
+    } else if (busy || handoverQueue) {
         if (labelled || canQueue) {
             TetherKey(
                 onClick = onSubmit,
@@ -1408,9 +1444,11 @@ private fun RowScope.ComposerActions(
                 minHeight = height,
                 modifier = keyModifier,
                 contentPadding = padding,
-                contentDescription = "Queue message",
+                contentDescription = if (handoverQueue) com.tether.app.client.Handover.QUEUE_ARIA else "Queue message",
             )
         }
+        // waiting_background: no turn runs, so there is nothing to interrupt (the web draws Interrupt only while busy).
+        if (!busy) return
         // T13.2 r2: a copy that is not live cannot interrupt (its "busy" is not a turn running now).
         // T6.7: bound to the turn it is drawn for. ta-coik.13: it acts on the first tap, as on the web
         // (chat-view.tsx 90fbb9f :4559-4573, no arm delay); a press that began before the turn changed
@@ -1480,7 +1518,7 @@ private fun RowScope.ComposerActions(
                     .semantics { if (!live) disabled() }
                     .testTag(INTERRUPT_KEY_TAG),
                 contentPadding = padding,
-                contentDescription = if (interruptLock == null) "Interrupt the current turn" else "Interrupt the current turn, unavailable: $interruptLock",
+                contentDescription = (interruptDescription ?: "Interrupt the current turn").let { if (interruptLock == null) it else "$it, unavailable: $interruptLock" },
             )
         }
     } else if (commandMode) {
