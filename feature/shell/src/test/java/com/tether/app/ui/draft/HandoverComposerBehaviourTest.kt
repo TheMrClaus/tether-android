@@ -133,14 +133,14 @@ class HandoverComposerBehaviourTest {
     }
 
     @Test
-    fun theNameFieldExposesItsTypedValueNotAMaskingDescription() {
+    fun theNameFieldIsAnEditableFieldNamedSessionNameWithItsValueRead() {
         show(HandoverComposerShot.Default, DraftSheetActions())
         val config = rule.onNodeWithTag(DraftComposerTags.NameField).fetchSemanticsNode().config
-        assertEquals(null, config.getOrNull(SemanticsProperties.ContentDescription))
+        // Editable (the platform maps SetText/EditableText to EditText), value read, name is the label.
+        assertTrue(config.contains(androidx.compose.ui.semantics.SemanticsActions.SetText))
         assertEquals("Parser rewrite 2", config.getOrNull(SemanticsProperties.EditableText)?.text)
-        // The label merges into the field's node: it is the field's accessible name, the typed value still read.
-        val texts = config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
-        assertTrue(texts.toString(), texts.contains(Handover.NAME_FIELD_LABEL))
+        assertEquals(listOf(Handover.NAME_FIELD_LABEL), config.getOrNull(SemanticsProperties.ContentDescription))
+        assertEquals(null, config.getOrNull(SemanticsProperties.Text))
     }
 
     @Test

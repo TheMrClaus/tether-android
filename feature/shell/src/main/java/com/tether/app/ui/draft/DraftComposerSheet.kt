@@ -1107,8 +1107,9 @@ private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover:
             color = t.muted,
             style = cssText(type.ui, 0.75f, 650),
             modifier = m
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { runCatching { focus.requestFocus() } }
-                // Visual only: the FIELD carries the name, so the label is not a second a11y node.
+                // A pointer tap focuses the field (the web's label htmlFor) without a click semantic, so the label is
+                // not an unnamed clickable a11y focus stop; the FIELD carries the name.
+                .pointerInput(Unit) { detectTapGestures { runCatching { focus.requestFocus() } } }
                 .clearAndSetSemantics { },
         )
     }
@@ -1131,7 +1132,7 @@ private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover:
                 // The field's own name is the label (the web's label htmlFor) in its Text; the typed value stays its
                 // EditableText (no contentDescription to mask it). The helper is its description (aria-describedby).
                 .semantics {
-                    text = androidx.compose.ui.text.AnnotatedString(com.tether.app.client.Handover.NAME_FIELD_LABEL)
+                    contentDescription = com.tether.app.client.Handover.NAME_FIELD_LABEL
                     if (hint != null) stateDescription = hint
                 }
                 .testTag(DraftComposerTags.NameField),
