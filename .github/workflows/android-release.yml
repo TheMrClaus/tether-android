@@ -179,7 +179,13 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Assemble release APK
-        run: ./gradlew :app:assembleRelease --stacktrace
+        # :feature:chat compile OOMs at the 4g in gradle.properties (1.4.0 run). Release-only heap:
+        # Gradle daemon 5g + Kotlin daemon 7g = 12g peak on the 16 GB public-repo runner (the
+        # Kotlin daemon is the 7g local gates prove; the Gradle daemon only orchestrates).
+        run: >-
+          ./gradlew :app:assembleRelease --stacktrace
+          "-Dorg.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8 -XX:+UseParallelGC"
+          "-Pkotlin.daemon.jvmargs=-Xmx7g -Dfile.encoding=UTF-8 -XX:+UseParallelGC"
 
       - name: Locate APK
         id: apk
