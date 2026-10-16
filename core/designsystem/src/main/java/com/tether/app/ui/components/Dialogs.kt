@@ -10,6 +10,11 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -183,9 +188,9 @@ fun TetherDialog(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         NoWindowDim()
-        ModalScrim(if (dismissOnScrimTap) onDismiss else null, dialogScrim(t)) {
+        ModalScrim(if (dismissOnScrimTap) onDismiss else null, dialogScrim(t), insets = true) {
             val progress = rememberEnterProgress()
             TetherDialogSurface(
                 title = title,
@@ -216,7 +221,7 @@ internal fun NoWindowDim() {
 }
 
 @Composable
-internal fun ModalScrim(onDismiss: (() -> Unit)?, color: Color, alignment: Alignment = Alignment.Center, content: @Composable () -> Unit) {
+internal fun ModalScrim(onDismiss: (() -> Unit)?, color: Color, alignment: Alignment = Alignment.Center, insets: Boolean = false, content: @Composable () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
@@ -225,7 +230,18 @@ internal fun ModalScrim(onDismiss: (() -> Unit)?, color: Color, alignment: Align
             // whole dialog or sheet above the scrim back into one node). The window's back press still dismisses.
             .pointerInput(onDismiss) { detectTapGestures { onDismiss?.invoke() } },
         contentAlignment = alignment,
-    ) { content() }
+    ) {
+        if (insets) {
+            // The card fits the space above the keyboard and between the system bars (the web `<dialog>` is centred in
+            // the visible viewport): the surface is height-bounded, so its body scrolls and the footer stays pinned.
+            Box(
+                Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.ime.union(WindowInsets.systemBars)).padding(vertical = 16.dp),
+                contentAlignment = alignment,
+            ) { content() }
+        } else {
+            content()
+        }
+    }
 }
 
 /** 0 → 1 over `--duration` with `--ease-out`; 1 at once under reduced motion. */

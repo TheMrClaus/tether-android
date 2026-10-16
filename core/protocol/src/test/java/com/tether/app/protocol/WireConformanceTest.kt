@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -147,6 +148,11 @@ class WireConformanceTest {
         // The matrix is re-baselined at tether 29537e0 (PROTOCOL 143) and so lists every type; the corpus
         // (and SINCE_PARITY_BASE_*) stays at 887c222 — see TRACKER.md PARITY_BASE.
         assertEquals(kind("server-msg"), WireTypeLists.SERVER_TYPES - WireTypeLists.SINCE_MATRIX_SERVER)
+        // The exception must not outlive its reason: once the matrix is rebuilt past v143 (or simply lists one of these
+        // types) the types belong in the equality above, and SINCE_MATRIX_SERVER must be emptied.
+        val protocolVersion = TetherJson.parseToJsonElement(matrixFile.readText()).jsonObject["protocolVersion"]!!.jsonPrimitive.int
+        assertTrue("the matrix was rebuilt (PROTOCOL $protocolVersion): empty WireTypeLists.SINCE_MATRIX_SERVER", protocolVersion <= 143)
+        assertEquals("matrix.json now lists these: empty SINCE_MATRIX_SERVER", emptySet<String>(), WireTypeLists.SINCE_MATRIX_SERVER.intersect(kind("server-msg")))
         assertEquals(kind("client-msg"), WireTypeLists.CLIENT_TYPES)
     }
 

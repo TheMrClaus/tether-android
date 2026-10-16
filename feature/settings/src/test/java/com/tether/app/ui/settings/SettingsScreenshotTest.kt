@@ -421,6 +421,8 @@ fun ComposeContentTestRule.snapSettings(
     name: String = shot.id,
     /** The shell's own switch: the existing shots say it by their size name; the band shots (ta-smj8) by the width. */
     layout: TetherLayoutClass = if (size == "tablet") TetherLayoutClass.Expanded else TetherLayoutClass.Phone,
+    /** After the section is at the top, scroll on until this node's bottom edge is inside the body (W38 L3r: the 2.0x token keys). */
+    ensureVisible: String? = null,
 ) {
     // The stored mode is the skin shown (the web reference's seeded state), so Appearance agrees.
     store.seed(PreferenceKeys.THEME_MODE to skin.mode.id)
@@ -481,6 +483,18 @@ fun ComposeContentTestRule.snapSettings(
         repeat(2) {
             val delta = target.fetchSemanticsNode().positionInRoot.y - body.fetchSemanticsNode().positionInRoot.y
             if (kotlin.math.abs(delta) > 0.5f) body.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, delta) }
+            mainClock.advanceTimeBy(1_000)
+            waitForIdle()
+        }
+    }
+    ensureVisible?.let { tag ->
+        val body = onNodeWithTag(SettingsDialogTags.Body)
+        val target = onNodeWithTag(tag, useUnmergedTree = true)
+        repeat(2) {
+            val b = body.fetchSemanticsNode()
+            val t = target.fetchSemanticsNode()
+            val delta = (t.positionInRoot.y + t.size.height) - (b.positionInRoot.y + b.size.height) + 24f
+            if (delta > 0.5f) body.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, delta) }
             mainClock.advanceTimeBy(1_000)
             waitForIdle()
         }

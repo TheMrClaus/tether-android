@@ -23,6 +23,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
@@ -141,6 +142,35 @@ class ServerSecretsBehaviourTest {
         assertFalse(all.any { it.startsWith("Reveal") || it == "Login password" || it.startsWith("Reverse-proxy pre-auth token") })
         // The captions and tips are the web's: the tip names the immediate effect.
         assertTrue(all.contains(ServerSecretCopy.PASSWORD_TIP))
+    }
+
+    /** As the browser does for a `type=password` input: while masked, copy and cut (semantics actions and hardware keys) write and delete nothing, in every dialog field. */
+    @Config(shadows = [DeviceKeyCharacterMap::class])
+    @Test fun theDialogsMaskedFieldsCannotBeCopiedOrCut() {
+        show(binding())
+        openPasswordDialog()
+        fillPassword()
+        val typed = mapOf(SecretField.Current to current, SecretField.New to fresh, SecretField.Confirm to fresh)
+        for ((f, text) in typed) {
+            val field = tag(ServerSecretTags.field(f))
+            assertTrue("masked", field.fetchSemanticsNode().config.contains(SemanticsProperties.Password))
+            field.performClick()
+            compose.waitForIdle()
+            NoCopyProbe.seed()
+            for (action in listOf(SemanticsActions.CopyText, SemanticsActions.CutText)) {
+                field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, text.length, false) }
+                compose.waitForIdle()
+                if (field.fetchSemanticsNode().config.contains(action)) field.performSemanticsAction(action)
+                compose.waitForIdle()
+            }
+            for (keys in ClipKeys.entries) {
+                field.selectAllAndPress(keys)
+                compose.waitForIdle()
+            }
+            assertEquals("something reached the clipboard from $f", NoCopyProbe.MARKER, NoCopyProbe.clip())
+            // The masked EditableText is dots; the test-side InputText property carries the raw typed text.
+            assertEquals("a cut deleted the secret in $f", text, field.fetchSemanticsNode().config.getOrNull(SemanticsProperties.InputText)?.text)
+        }
     }
 
     @Test fun noPlaintextCredentialIsEverDrawnEvenFromAnOlderServersFrame() {
