@@ -553,10 +553,13 @@ data class SearchHit(
     val provider: String = "",
     val name: String = "",
     val cwd: String = "",
+    @Serializable(with = LenientEpochMsSerializer::class)
     val updatedAt: Long = 0,
     val snippet: String = "",
     val matchCount: Int = 0,
+    @Serializable(with = LenientEpochMsOrNullSerializer::class)
     val createdAt: Long? = null,
+    @Serializable(with = LenientEpochMsOrNullSerializer::class)
     val lastSeenAt: Long? = null,
     val origin: String? = null,
     val spawnedBy: com.tether.app.protocol.model.HistorySpawnLink? = null,

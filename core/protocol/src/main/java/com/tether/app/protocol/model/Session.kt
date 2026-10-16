@@ -299,11 +299,14 @@ data class HistorySession(
     val provider: String,
     val name: String,
     val cwd: String,
+    @Serializable(with = com.tether.app.protocol.LenientEpochMsSerializer::class)
     val updatedAt: Long,
     val digest: HistoryDigest? = null,
     // T5.1: the sidebar fields (lib/protocol.ts HistorySession). v68 `lastSeenAt` is the
     // server's authoritative seen stamp; v122 `origin` / `spawnedBy` drive the agent-CLI lens.
+    @Serializable(with = com.tether.app.protocol.LenientEpochMsOrNullSerializer::class)
     val createdAt: Long? = null,
+    @Serializable(with = com.tether.app.protocol.LenientEpochMsOrNullSerializer::class)
     val lastSeenAt: Long? = null,
     val origin: String? = null,
     val spawnedBy: HistorySpawnLink? = null,
