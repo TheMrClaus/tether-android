@@ -232,7 +232,7 @@ Vendor: TypeSafe's Jev via **OpenRouter** (`typesafe/jev-1.13`, `POST /api/v1/sy
 provider serves a **dated snapshot**, so log `response.model` and treat the date as part of the
 version). Two independent implementations, each with its **own question set**: the leaf gate
 (`~/bin/jev-gate.py` — a Claude Code + Codex hook) and the orchestrator-side judge
-(`plugins/jev-judge`, `pre_tool_call`, shadow). **A question fix must be applied twice.**
+(`~/.hermes/profiles/games/plugins/jev-judge`, `pre_tool_call`, shadow). **A question fix must be applied twice.**
 
 - **What it is for:** cheap (≈$0.00002), fast (≈0.35 s) typed answers — triage between waves,
   evidence filtering *before* a critic sees it, a net over destructive/exfiltration-shaped calls.
