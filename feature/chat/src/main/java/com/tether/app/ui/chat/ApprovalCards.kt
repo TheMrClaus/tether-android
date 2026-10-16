@@ -1031,22 +1031,26 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                     .testTag("question-card"),
                 verticalArrangement = Arrangement.spacedBy(t.css.spaceMd),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
-                    Icon(TetherIcons.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(15.dp))
-                    Text(
-                        "The agent needs your input",
-                        style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.92f), fontWeight = FontWeight(700)),
-                        color = t.white,
-                        modifier = Modifier.weight(1f).semantics { heading(); liveRegion = LiveRegionMode.Polite },
-                    )
-                    if (total > 1) {
-                        // `.chat-question-page { margin-left: auto }`: pushed to the row's end.
+                // ta-bp5u: the card's words select in their own containers (the row no longer wraps the whole card), so the
+                // answer field below is outside any selection container and its toolbar lists Select all once.
+                SelectableRow {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
+                        Icon(TetherIcons.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(15.dp))
                         Text(
-                            "Question ${pageIndex + 1} of $total",
-                            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), fontWeight = FontWeight(500)),
-                            color = t.muted,
-                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("question-page"),
+                            "The agent needs your input",
+                            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.92f), fontWeight = FontWeight(700)),
+                            color = t.white,
+                            modifier = Modifier.weight(1f).semantics { heading(); liveRegion = LiveRegionMode.Polite },
                         )
+                        if (total > 1) {
+                            // `.chat-question-page { margin-left: auto }`: pushed to the row's end.
+                            Text(
+                                "Question ${pageIndex + 1} of $total",
+                                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), fontWeight = FontWeight(500)),
+                                color = t.muted,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("question-page"),
+                            )
+                        }
                     }
                 }
                 if (question != null) {
@@ -1057,21 +1061,25 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                         Modifier.fillMaxWidth().padding(start = if (highlight) t.css.spaceSm else 0.dp),
                         verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
                     ) {
-                        // ta-28i: the agent's question, header and options are prose (SafeText), as on the answered card.
-                        question.header?.let {
-                            Text(
-                                proseText(cut4k(it).uppercase()),
-                                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
-                                color = t.muted,
-                                modifier = Modifier.padding(vertical = pMargin(0.72f)).originalWords(proseText(cut4k(it)).text), // server text: the SafeText-drawn words, never the raw string
-                            )
+                        SelectableRow {
+                            Column(verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
+                                // ta-28i: the agent's question, header and options are prose (SafeText), as on the answered card.
+                                question.header?.let {
+                                    Text(
+                                        proseText(cut4k(it).uppercase()),
+                                        style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
+                                        color = t.muted,
+                                        modifier = Modifier.padding(vertical = pMargin(0.72f)).originalWords(proseText(cut4k(it)).text), // server text: the SafeText-drawn words, never the raw string
+                                    )
+                                }
+                                Text(
+                                    proseText(cut4k(question.question)),
+                                    style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)),
+                                    color = t.ink,
+                                    modifier = Modifier.padding(vertical = pMargin(0.9f)),
+                                )
+                            }
                         }
-                        Text(
-                            proseText(cut4k(question.question)),
-                            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.9f)),
-                            color = t.ink,
-                            modifier = Modifier.padding(vertical = pMargin(0.9f)),
-                        )
                         Column(Modifier.fillMaxWidth().padding(top = t.css.spaceXs), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
                             val slot = slotOf(question)
                             val multi = slots.single[slot] != true
