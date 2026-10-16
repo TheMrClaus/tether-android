@@ -1081,6 +1081,15 @@ interface TetherClient {
      */
     fun setServerSettings(patch: JsonObject, origin: String): Boolean = false
 
+    /**
+     * v144: one console-credential write, `set-server-settings {settings: patch, currentPassword, requestId}` (the
+     * patch holds ONE secret key, see [ServerSettingsPatch.secret]), bound to [origin] like [setServerSettings].
+     * Suspends until the `server-settings-result` carrying its requestId ([ServerSecretOutcome.Saved] / `Refused`),
+     * [ServerSecretOutcome.NO_REPLY_TIMEOUT_MS] with none, or at once when no socket for [origin] is open
+     * ([ServerSecretOutcome.NoReply], as the web). Never queued or retried; the secrets are in no log or state.
+     */
+    suspend fun changeServerSecret(patch: JsonObject, currentPassword: String, origin: String): ServerSecretOutcome = ServerSecretOutcome.NoReply
+
     /** ta-t7l: v16 `set-advanced-settings` (the Claude CLI picker), bound to [origin] like [setServerSettings]. */
     fun setAdvancedSettings(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = false
 

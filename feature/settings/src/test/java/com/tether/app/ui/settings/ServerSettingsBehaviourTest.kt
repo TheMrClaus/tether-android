@@ -336,11 +336,9 @@ class ServerSettingsBehaviourTest {
         assertEquals(2 * forced.size, texts().count { it == ServerRowCopy.SET_BY_ENV })
         tag(ServerSettingsTags.input(ServerSetting.Host)).assertIsNotEnabled()
         tag(ServerSettingsTags.input(ServerSetting.StateDir)).assertIsNotEnabled()
-        // A forced secret is masked, disabled and has no Reveal (the web hides its eye then).
-        assertMasked(ServerSetting.Password)
-        tag(ServerSettingsTags.input(ServerSetting.Password)).assertIsNotEnabled()
-        tag(ServerSettingsTags.reveal(ServerSetting.Password)).assertDoesNotExist()
-        tag(ServerSettingsTags.reveal(ServerSetting.ProxyToken)).assertExists()
+        // A forced secret has no key at all (the web hides them), the token (not forced) does.
+        tag(ServerSecretTags.opener(ServerSetting.Password)).assertDoesNotExist()
+        tag(ServerSecretTags.opener(ServerSetting.ProxyToken)).assertExists()
         // A forced toggle does nothing; a forced list has no remove or add.
         tag(ServerSettingsTags.row(ServerSetting.ClaudePersistent)).performScrollTo().performClick()
         tag(ServerSettingsTags.remove(ServerSetting.AllowedRoots, "/srv/work")).assertDoesNotExist()
@@ -392,174 +390,7 @@ class ServerSettingsBehaviourTest {
         assertEquals(emptyList<Any>(), (b.writer as RecordingWriter).patches)
     }
 
-    // ---- the secrets -------------------------------------------------------------------------------
-
-    /** A secret field drawn masked (the web's `type="password"`): its semantics mark it a password and show no plaintext. */
-    private fun assertMasked(s: ServerSetting) {
-        val field = tag(ServerSettingsTags.input(s)).fetchSemanticsNode().config
-        assertTrue("${s.key} is drawn masked", field.contains(SemanticsProperties.Password))
-    }
-
-    private fun assertRevealed(s: ServerSetting) {
-        val field = tag(ServerSettingsTags.input(s)).fetchSemanticsNode().config
-        assertFalse("${s.key} is drawn revealed", field.contains(SemanticsProperties.Password))
-    }
-
-    private fun clipboard() = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
-        .getSystemService(android.content.ClipboardManager::class.java)
-
-    /**
-     * settings-dialog.tsx 90fbb9f :140-155: masked by default, typed into directly; the plaintext is in
-     * no log, preference or saved state (the field's own value is the web's `defaultValue`).
-     */
-    @Test fun theSecretsAreMaskedByDefaultAndInNoLogPreferenceOrSavedState() {
-        ShadowLog.clear()
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
-        assertMasked(ServerSetting.Password)
-        assertMasked(ServerSetting.ProxyToken)
-        assertTrue(texts().contains("Reveal Password"))
-        assertFalse("the drawn text is masked", texts().any { it.contains(SENTINEL) || it.contains(TOKEN_SENTINEL) })
-        val saved = savedState()
-        val logs = ShadowLog.getLogs().joinToString("\n") { "${it.tag} ${it.msg} ${it.throwable}" }
-        for (leak in listOf(SENTINEL, TOKEN_SENTINEL)) {
-            assertFalse(saved.contains(leak))
-            assertFalse(logs.contains(leak))
-            assertFalse(store.stored().toString().contains(leak))
-        }
-    }
-
-    @Test fun revealShowsOnlyThatSecretAndHideMasksItAgain() {
-        ShadowLog.clear()
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
-        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
-        compose.waitForIdle()
-        assertRevealed(ServerSetting.Password)
-        assertEquals(SENTINEL, tag(ServerSettingsTags.input(ServerSetting.Password)).editableText())
-        assertMasked(ServerSetting.ProxyToken)
-        assertTrue(texts().contains("Hide Password"))
-        // Revealed, it is still in no log, preference or saved state.
-        assertFalse(savedState().contains(SENTINEL))
-        assertFalse(store.stored().toString().contains(SENTINEL))
-        assertFalse(ShadowLog.getLogs().any { "${it.tag} ${it.msg}".contains(SENTINEL) })
-        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
-        compose.waitForIdle()
-        assertMasked(ServerSetting.Password)
-    }
-
-    /** ta-coik.5: the web's password input is typed into while masked; no reveal first. */
-    @Test fun aMaskedSecretIsTypedIntoDirectlyLikeTheWebs() {
-        val writer = RecordingWriter()
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings()), writer = writer))
-        val field = tag(ServerSettingsTags.input(ServerSetting.ProxyToken))
-        field.performScrollTo()
-        field.assertIsEnabled()
-        assertMasked(ServerSetting.ProxyToken)
-        field.performTextReplacement("new-token")
-        field.performImeAction()
-        compose.waitForIdle()
-        assertEquals(listOf(json("""{"type":"set-server-settings","settings":{"proxyToken":"new-token"}}""")), writer.frames())
-        assertMasked(ServerSetting.ProxyToken)
-    }
-
-    @Test fun aRevealedSecretCanBeChangedAndSendsOnlyItsKey() {
-        val writer = RecordingWriter()
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings()), writer = writer))
-        tag(ServerSettingsTags.reveal(ServerSetting.ProxyToken)).performScrollTo().performClick()
-        tag(ServerSettingsTags.input(ServerSetting.ProxyToken)).performTextReplacement("new-token")
-        tag(ServerSettingsTags.input(ServerSetting.ProxyToken)).performImeAction()
-        compose.waitForIdle()
-        assertEquals(listOf(json("""{"type":"set-server-settings","settings":{"proxyToken":"new-token"}}""")), writer.frames())
-    }
-
-    /** :149 `onBlur={commit}`: a secret is written when its field loses focus, as every text row is. */
-    @Test fun aSecretIsSentOnBlurLikeTheWebs() {
-        val writer = RecordingWriter()
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings()), writer = writer))
-        tag(ServerSettingsTags.input(ServerSetting.Password)).performScrollTo().performClick()
-        tag(ServerSettingsTags.input(ServerSetting.Password)).performTextReplacement("ab")
-        tag(ServerSettingsTags.input(ServerSetting.WorkspaceRoot)).performScrollTo().performClick()
-        compose.waitForIdle()
-        assertEquals(listOf(json("""{"type":"set-server-settings","settings":{"password":"ab"}}""")), writer.frames())
-    }
-
-    /**
-     * ta-coik.5: a revealed secret copies and cuts as the web's revealed input does, onto a clip marked
-     * `ClipDescription.EXTRA_IS_SENSITIVE` (kept out of the clipboard preview).
-     */
-    @Test fun aRevealedSecretIsCopiedOntoASensitiveClip() {
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
-        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
-        val field = tag(ServerSettingsTags.input(ServerSetting.Password))
-        field.performClick()
-        NoCopyProbe.seed()
-        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
-        compose.waitForIdle()
-        field.performSemanticsAction(SemanticsActions.CopyText)
-        compose.waitForIdle()
-        assertEquals("the copy reached the clipboard", SENTINEL, NoCopyProbe.clip())
-        assertTrue("the clip is marked sensitive", clipboard().primaryClipDescription?.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true)
-        NoCopyProbe.seed()
-        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
-        compose.waitForIdle()
-        field.performSemanticsAction(SemanticsActions.CutText)
-        compose.waitForIdle()
-        assertEquals("the cut reached the clipboard", SENTINEL, NoCopyProbe.clip())
-        assertEquals("the cut removed the text", "", field.editableText())
-        assertTrue(clipboard().primaryClipDescription?.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true)
-    }
-
-    /** As the browser does for a password field: while MASKED, copy and cut put nothing on the clipboard. */
-    @Test fun aMaskedSecretCannotBeCopiedAsInTheBrowser() {
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
-        val field = tag(ServerSettingsTags.input(ServerSetting.Password))
-        field.performScrollTo().performClick()
-        NoCopyProbe.seed()
-        for (action in listOf(SemanticsActions.CopyText, SemanticsActions.CutText)) {
-            field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, SENTINEL.length, false) }
-            compose.waitForIdle()
-            if (field.fetchSemanticsNode().config.contains(action)) field.performSemanticsAction(action)
-            compose.waitForIdle()
-        }
-        assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
-        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
-        compose.waitForIdle()
-        assertEquals("a cut deleted the masked secret", SENTINEL, field.editableText())
-    }
-
-    /** ta-78a (1): on a MASKED secret the hardware copy and cut keys write nothing and delete nothing. */
-    @Config(shadows = [DeviceKeyCharacterMap::class])
-    @Test fun aMaskedSecretSurvivesTheCopyAndCutKeysAndNothingReachesTheClipboard() {
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
-        val field = tag(ServerSettingsTags.input(ServerSetting.Password))
-        field.performScrollTo().performClick()
-        compose.waitForIdle()
-        NoCopyProbe.seed()
-        for (keys in ClipKeys.entries) {
-            field.selectAllAndPress(keys)
-            compose.waitForIdle()
-        }
-        assertEquals("something was written to the clipboard", NoCopyProbe.MARKER, NoCopyProbe.clip())
-        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
-        compose.waitForIdle()
-        assertEquals("a key changed the secret", SENTINEL, field.editableText())
-    }
-
-    /**
-     * ta-78a (2), r2: a MASKED secret's REAL menus (the long-press toolbar and the right-click dropdown)
-     * hold no Copy and no Cut, and still Paste, as a browser's password field. The plain field beside
-     * them (Workspace root) is the control.
-     */
-    @Config(shadows = [NoMagnifier::class])
-    @Test fun theMaskedSecretsRealMenusOfferNothingThatReadsThem() {
-        val menus = MenuSpies()
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())), menus = menus)
-        val plain = tag(ServerSettingsTags.input(ServerSetting.WorkspaceRoot))
-        plain.performScrollTo()
-        plain.performTextReplacement("/srv/workspaces")
-        for (secret in listOf(ServerSetting.Password, ServerSetting.ProxyToken)) {
-            assertSecretMenus(compose, menus, plain, tag(ServerSettingsTags.input(secret)), secret.key)
-        }
-    }
+    // ---- the secrets: write-only since v144 (ServerSecretsBehaviourTest); the no-copy guard stays for the Nodes and Profiles fields ----
 
     /** The masked field's text menu offers neither Copy nor Cut (paste and select-all stay). */
     @Test fun theMaskedFieldsMenuOffersNoCopyOrCut() {
@@ -580,37 +411,6 @@ class ServerSettingsBehaviourTest {
         val guarded = NoCopyToolbar(platform)
         guarded.showMenu(androidx.compose.ui.geometry.Rect.Zero, {}, {}, {}, {})
         assertEquals(listOf(listOf(false, true, false, true)), seen)
-    }
-
-    @Test fun closingSettingsMasksTheSecretAgain() {
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
-        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
-        compose.waitForIdle()
-        shown = false
-        compose.waitForIdle()
-        shown = true
-        compose.waitForIdle()
-        assertMasked(ServerSetting.Password)
-    }
-
-    @Test fun leavingTheTabMasksTheSecretAgain() {
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
-        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
-        compose.waitForIdle()
-        state.tab = SettingsTab.General
-        compose.waitForIdle()
-        state.tab = SettingsTab.Advanced
-        compose.waitForIdle()
-        assertMasked(ServerSetting.Password)
-    }
-
-    @Test fun anotherServerStartsMasked() {
-        show(ServerFixtures.binding(view = ServerFixtures.view(secretSettings())))
-        tag(ServerSettingsTags.reveal(ServerSetting.Password)).performScrollTo().performClick()
-        compose.waitForIdle()
-        binding = binding.copy(origin = OTHER_ORIGIN)
-        compose.waitForIdle()
-        assertMasked(ServerSetting.Password)
     }
 
     // ---- Metadata --------------------------------------------------------------------------------
@@ -691,7 +491,7 @@ class ServerSettingsRecreationTest {
     private fun recreateWithHalfTyped(setting: ServerSetting, typed: String) {
         val writer = RecordingWriter()
         val state = SettingsDialogState(SettingsTab.Advanced)
-        val binding = ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(password = SENTINEL)), writer = writer)
+        val binding = ServerFixtures.binding(view = ServerFixtures.view(), writer = writer)
         compose.setContent { SettingsUnderTest(store.prefs, state, serverSettings = binding) }
         compose.waitUntil(5_000) { state.draft != null }
         fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
@@ -705,38 +505,7 @@ class ServerSettingsRecreationTest {
         assertEquals(emptyList<Any>(), writer.patches)
     }
 
-    @Test fun recreatingTheActivitySendsNoHalfTypedSecret() = recreateWithHalfTyped(ServerSetting.Password, "ab")
-
     @Test fun recreatingTheActivitySendsNoHalfTypedNumber() = recreateWithHalfTyped(ServerSetting.Port, "41")
-}
-
-/** A rotation (saved-instance-state restore) masks a revealed secret: the reveal is never saved state. */
-@RunWith(RobolectricTestRunner::class)
-@Config(qualifiers = "w412dp-h915dp-420dpi")
-class ServerSettingsRotationTest {
-    private val tmp = TemporaryFolder()
-    private val store = PrefsStore(tmp)
-    private val compose = createComposeRule()
-
-    @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
-
-    @Test fun aRotationMasksTheSecret() {
-        val restoration = StateRestorationTester(compose)
-        val binding = ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(password = SENTINEL)))
-        restoration.setContent {
-            val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Advanced) }
-            SettingsUnderTest(store.prefs, state, serverSettings = binding)
-        }
-        compose.waitForIdle()
-        compose.onNodeWithTag(ServerSettingsTags.reveal(ServerSetting.Password), useUnmergedTree = true).performClick()
-        compose.waitForIdle()
-        assertFalse(compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Password), useUnmergedTree = true).fetchSemanticsNode().config.contains(SemanticsProperties.Password))
-        restoration.emulateSavedInstanceStateRestore()
-        compose.waitForIdle()
-        // The tab is restored (saved state), the reveal is not.
-        compose.onNodeWithTag(SettingsDialogTags.panel(SettingsTab.Advanced), useUnmergedTree = true).assertExists()
-        assertTrue(compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Password), useUnmergedTree = true).fetchSemanticsNode().config.contains(SemanticsProperties.Password))
-    }
 }
 
 /**
@@ -753,9 +522,9 @@ class ServerSettingsTypedStateRotationTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    @Test fun aRotationKeepsAHalfTypedPortAndSavesNoSecret() {
+    @Test fun aRotationKeepsAHalfTypedPort() {
         val restoration = StateRestorationTester(compose)
-        val binding = ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(password = SENTINEL)))
+        val binding = ServerFixtures.binding(view = ServerFixtures.view())
         var saved: String? = null
         restoration.setContent {
             val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Advanced) }
@@ -767,13 +536,11 @@ class ServerSettingsTypedStateRotationTest {
         fun typed(setting: ServerSetting) = compose.onNodeWithTag(ServerSettingsTags.input(setting), useUnmergedTree = true).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text
         compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Port), useUnmergedTree = true).performScrollTo()
         compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Port), useUnmergedTree = true).performTextReplacement("41")
-        compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Password), useUnmergedTree = true).performScrollTo()
-        compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.Password), useUnmergedTree = true).performTextReplacement("typed-secret-b7e4")
         compose.waitForIdle()
         restoration.emulateSavedInstanceStateRestore()
         compose.waitForIdle()
         assertEquals("41", typed(ServerSetting.Port))
-        assertFalse("the saved state holds a typed secret", saved.orEmpty().contains("typed-secret-b7e4") || saved.orEmpty().contains(SENTINEL))
+        assertFalse("the saved state holds a secret", saved.orEmpty().contains(SENTINEL))
         assertTrue("the port is in the saved state (the check can see strings)", saved.orEmpty().contains("41"))
     }
 }

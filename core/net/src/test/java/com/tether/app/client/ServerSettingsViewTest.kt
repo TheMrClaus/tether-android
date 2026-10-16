@@ -40,8 +40,8 @@ class ServerSettingsViewTest {
         val v = ServerSettingsView.of(ServerMessage.parse(raw) as ServerMessage.ServerSettings)
         assertEquals("127.0.0.1", v.text(ServerSetting.Host))
         assertEquals(0.0, v.number(ServerSetting.Port))
-        assertEquals("verify-pass", v.secret(ServerSetting.Password).reveal())
-        assertTrue(v.secret(ServerSetting.ProxyToken).isEmpty)
+        // v144: no value of a credential is ever exposed; only whether the server holds one.
+        assertEquals("", v.text(ServerSetting.Password))
         assertEquals(8.0, v.number(ServerSetting.WarmMaxSessions))
         assertEquals("end", v.choice(ServerSetting.MessageInterruptMode))
         assertEquals("", v.choice(ServerSetting.DefaultSandboxPolicy))
@@ -66,10 +66,10 @@ class ServerSettingsViewTest {
         // Absent everything: no throw, the empty value.
         val empty = view("{}")
         for (s in ServerSetting.entries) {
-            empty.text(s); empty.number(s); empty.toggle(s); empty.choice(s); empty.paths(s); empty.secret(s)
+            empty.text(s); empty.number(s); empty.toggle(s); empty.choice(s); empty.paths(s); empty.secretSet(s)
             assertFalse(empty.forced(s))
         }
-        assertEquals("", empty.secret(ServerSetting.Password).reveal())
+        assertFalse(empty.secretSet(ServerSetting.Password))
     }
 
     @Test fun onlyATrueEnvFlagLocks() {
@@ -79,13 +79,15 @@ class ServerSettingsViewTest {
 
     @Test fun noSecretIsEverPrinted() {
         val v = view("""{"password":"$sentinel","proxyToken":"$tokenSentinel","host":"h"}""")
-        for (text in listOf(v.toString(), v.secret(ServerSetting.Password).toString(), v.secret(ServerSetting.ProxyToken).toString())) {
-            assertFalse(text, text.contains(sentinel))
-            assertFalse(text, text.contains(tokenSentinel))
-        }
-        assertEquals("SecretText(***)", v.secret(ServerSetting.Password).toString())
-        // Two secrets compare by value (a re-sent frame keeps the reveal row as it was).
-        assertEquals(v.secret(ServerSetting.Password), SecretText(sentinel))
+        assertFalse(v.toString(), v.toString().contains(sentinel) || v.toString().contains(tokenSentinel))
+    }
+
+    @Test fun secretsSetSaysWhetherTheServerHoldsEachCredential() {
+        val v = ServerSettingsView.of(frame("""{"type":"server-settings","settings":{"password":"","proxyToken":""},"envForced":{},"restartRequired":false,"discovered":[],"detected":{},"secretsSet":{"password":true,"proxyToken":false}}"""))
+        assertTrue(v.secretSet(ServerSetting.Password))
+        assertFalse(v.secretSet(ServerSetting.ProxyToken))
+        // A server before v139 sends none: not set.
+        assertFalse(view("{}").secretSet(ServerSetting.Password))
     }
 
     // ---- the patches: exactly the changed key, valued as the web's row sends it ------------------
@@ -100,13 +102,6 @@ class ServerSettingsViewTest {
             """{"type":"set-server-settings","settings":{"host":"127.0.0.1"}}""",
             ClientMessage.SetServerSettings(ServerSettingsPatch.text(v, ServerSetting.Host, "127.0.0.1", "0.0.0.0")!!).encode(),
         )
-    }
-
-    @Test fun aSecretRowSendsTheNewSecretUnderItsOwnKeyOnly() {
-        val v = view("""{"password":"$sentinel","proxyToken":""}""")
-        assertNull(ServerSettingsPatch.text(v, ServerSetting.Password, sentinel, sentinel))
-        assertEquals(json("""{"password":"n3w"}"""), ServerSettingsPatch.text(v, ServerSetting.Password, "n3w", sentinel))
-        assertEquals(json("""{"proxyToken":"tok"}"""), ServerSettingsPatch.text(v, ServerSetting.ProxyToken, "tok", ""))
     }
 
     @Test fun aNumberRowSendsTheParsedNumberOrNull() {
@@ -283,15 +278,25 @@ class ServerSettingsViewTest {
         assertNull(h.client.advancedSettings.value)
     }
 
-    /** r2: `text()` never hands out a secret; only `secret()` does. */
+    /** r2: `text()` never hands out a secret, whatever a (pre-v144) frame holds. */
     @Test fun textNeverReadsASecret() {
         val v = view("""{"password":"$sentinel","proxyToken":"$tokenSentinel"}""")
         assertEquals("", v.text(ServerSetting.Password))
         assertEquals("", v.text(ServerSetting.ProxyToken))
         assertEquals("", v.choice(ServerSetting.Password))
-        assertEquals(sentinel, v.secret(ServerSetting.Password).reveal())
-        // The secret rows' patch still sends the edited secret (built from the revealed value).
-        assertEquals(json("""{"password":"x"}"""), ServerSettingsPatch.text(v, ServerSetting.Password, "x", v.secret(ServerSetting.Password).reveal()))
+    }
+
+    /** v144: the generic text path never carries a credential; only [ServerSettingsPatch.secret] does. */
+    @Test fun theGenericPatchNeverCarriesACredentialAndTheSecretPatchIsTheOnlyWay() {
+        val v = view("""{"password":"","proxyToken":""}""")
+        assertNull(ServerSettingsPatch.text(v, ServerSetting.Password, "x", ""))
+        assertNull(ServerSettingsPatch.text(v, ServerSetting.ProxyToken, "x", ""))
+        assertNull(ServerSettingsPatch.choice(v, ServerSetting.Password, "x"))
+        assertEquals(json("""{"password":"x"}"""), ServerSettingsPatch.secret(v, ServerSetting.Password, "x"))
+        assertEquals(json("""{"proxyToken":""}"""), ServerSettingsPatch.secret(v, ServerSetting.ProxyToken, ""))
+        assertNull("not a secret", ServerSettingsPatch.secret(v, ServerSetting.Host, "x"))
+        val forced = view("{}", envForced = """{"password":true}""")
+        assertNull("the environment forces it", ServerSettingsPatch.secret(forced, ServerSetting.Password, "x"))
     }
 
     @Test fun nothingIsSentWithoutAHandshakenSocket() {

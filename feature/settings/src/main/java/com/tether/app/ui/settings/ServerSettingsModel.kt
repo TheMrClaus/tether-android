@@ -3,6 +3,7 @@ package com.tether.app.ui.settings
 import com.tether.app.client.EngineCard
 import com.tether.app.client.EngineDetection
 import com.tether.app.client.LabelText
+import com.tether.app.client.ServerSecretOutcome
 import com.tether.app.client.ServerSetting
 import com.tether.app.client.ServerSettingsView
 import com.tether.app.protocol.ClientMessage
@@ -23,6 +24,12 @@ interface ServerSettingsWriter {
 
     /** ta-dh1: `detect-engines` ("Scan again"), bound to [origin] like the writes. */
     fun detectEngines(origin: String): Boolean
+
+    /**
+     * v144: one console-credential write (see [com.tether.app.client.TetherClient.changeServerSecret]), bound to
+     * [origin]; the only path a `password` / `proxyToken` ever travels. No client: no reply.
+     */
+    suspend fun changeSecret(patch: JsonObject, currentPassword: String, origin: String): ServerSecretOutcome = ServerSecretOutcome.NoReply
 
     /** No client (previews, a signed-out frame): nothing is ever sent. */
     object None : ServerSettingsWriter {
@@ -48,7 +55,21 @@ data class ServerSettingsBinding(
     val writer: ServerSettingsWriter = ServerSettingsWriter.None,
     /** ta-dh1: how many `server-settings` replies have arrived ("Scan again" is busy until the next). */
     val replies: Long = 0L,
+    /** v144: the Authentication rows' open dialog and saved lines (above the tab level, wiped with Settings). */
+    val secrets: ServerSecretsState = ServerSecretsState(),
+    /** v144: where a credential write runs: the Settings-level scope, so a result after Back closed the dialog still lands. */
+    val scope: kotlinx.coroutines.CoroutineScope? = null,
+    /** v144: a password change signs the other sessions out: the Devices tab's Signed-in sessions are read again. */
+    val onPasswordChanged: () -> Unit = {},
 ) {
+    /** v144: send the open credential dialog's write to the server this binding was drawn from. */
+    fun submitSecret() {
+        val view = settings ?: return
+        val server = origin ?: return
+        val runIn = scope ?: return
+        secrets.submit(runIn, view, { patch, current -> writer.changeSecret(patch, current, server) }, onPasswordChanged)
+    }
+
     /** A write to the server this binding was drawn from; false (nothing sent) without one. */
     fun send(patch: JsonObject?): Boolean =
         patch != null && origin != null && writer.patch(patch, origin)
@@ -83,9 +104,11 @@ object AdvancedRows {
     val port = ServerRow(ServerSetting.Port, "Port", "Listen port (1–65535)", "TCP port for HTTP and WebSocket connections. Requires restart. Default: 4173.", "4173")
 
     const val AUTH = "Authentication"
-    const val AUTH_CAPTION = "Access credentials for the web console."
-    val password = ServerRow(ServerSetting.Password, "Password", "Login password", "Login password for the Tether web console. Requires a server restart to take effect.", "tether")
-    val proxyToken = ServerRow(ServerSetting.ProxyToken, "Proxy token", "Reverse-proxy pre-auth token (e.g. Authelia)", "A pre-shared token from a reverse proxy such as Authelia. When the proxy sends this token in its auth header, the password login page is bypassed. Requires restart.")
+    const val AUTH_CAPTION = ServerSecretCopy.SECTION_CAPTION
+
+    /** v144: the two credentials are write-only status rows (ServerSecretsUi.kt): a label and a tip, no description or placeholder. */
+    val password = ServerRow(ServerSetting.Password, ServerSecretCopy.label(ServerSetting.Password), "", ServerSecretCopy.PASSWORD_TIP)
+    val proxyToken = ServerRow(ServerSetting.ProxyToken, ServerSecretCopy.label(ServerSetting.ProxyToken), "", ServerSecretCopy.PROXY_TOKEN_TIP)
 
     const val STORAGE = "Storage"
     const val STORAGE_CAPTION = "Directories for state files and workspaces."

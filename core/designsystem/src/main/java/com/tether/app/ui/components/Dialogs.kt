@@ -175,12 +175,17 @@ fun TetherDialog(
     footer: (@Composable RowScope.() -> Unit)? = null,
     width: Dp = DEFAULT_DIALOG_WIDTH,
     footerContent: (@Composable ColumnScope.() -> Unit)? = null,
+    /**
+     * True (every dialog's default): a tap on the scrim dismisses. False: the web `<dialog>` whose backdrop does not
+     * close it (the credential dialog: a stray tap must not drop typed secrets); Back still dismisses.
+     */
+    dismissOnScrimTap: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val t = LocalTetherTokens.current
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         NoWindowDim()
-        ModalScrim(onDismiss, dialogScrim(t)) {
+        ModalScrim(if (dismissOnScrimTap) onDismiss else null, dialogScrim(t)) {
             val progress = rememberEnterProgress()
             TetherDialogSurface(
                 title = title,
@@ -211,14 +216,14 @@ internal fun NoWindowDim() {
 }
 
 @Composable
-internal fun ModalScrim(onDismiss: () -> Unit, color: Color, alignment: Alignment = Alignment.Center, content: @Composable () -> Unit) {
+internal fun ModalScrim(onDismiss: (() -> Unit)?, color: Color, alignment: Alignment = Alignment.Center, content: @Composable () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
             .background(color)
             // ta-5tb/ta-6gw: a pointer-only tap-to-dismiss, not `clickable` (its mergeDescendants would fold the
             // whole dialog or sheet above the scrim back into one node). The window's back press still dismisses.
-            .pointerInput(onDismiss) { detectTapGestures { onDismiss() } },
+            .pointerInput(onDismiss) { detectTapGestures { onDismiss?.invoke() } },
         contentAlignment = alignment,
     ) { content() }
 }

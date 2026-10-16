@@ -56,6 +56,8 @@ enum class SettingsShot(
     val github: GitHubShot? = null,
     /** T12.2: the push registration's status behind the Devices tab's push row. */
     val push: com.tether.app.push.PushRegistrationStatus = com.tether.app.push.PushRegistrationStatus.Registered,
+    /** v144: the Authentication shots (ServerSecretScreenshotTest sets their own sizes and skins; the generic classes skip them). */
+    val own: Boolean = false,
 ) {
     General("settings-general", SettingsTab.General),
     Appearance("settings-appearance", SettingsTab.Appearance),
@@ -87,7 +89,10 @@ enum class SettingsShot(
     EnginesRename("settings-engines-rename", SettingsTab.Engines, accounts = AccountsShot.Rename),
     Restart("settings-restart", SettingsTab.General, restart = true),
     Advanced("settings-advanced", SettingsTab.Advanced, server = ServerShot.Advanced, github = GitHubShot.Fresh),
-    AdvancedRevealed("settings-advanced-revealed", SettingsTab.Advanced, server = ServerShot.Revealed, github = GitHubShot.Fresh),
+    AdvancedAuth("settings-advanced-auth", SettingsTab.Advanced, server = ServerShot.Auth, github = GitHubShot.Fresh, own = true),
+    AdvancedAuthEnv("settings-advanced-auth-env", SettingsTab.Advanced, server = ServerShot.AuthEnv, github = GitHubShot.Fresh, own = true),
+    AdvancedAuthUnset("settings-advanced-auth-unset", SettingsTab.Advanced, server = ServerShot.AuthUnset, github = GitHubShot.Fresh, own = true),
+    AdvancedAuthSaved("settings-advanced-auth-saved", SettingsTab.Advanced, server = ServerShot.AuthSaved, github = GitHubShot.Fresh, own = true),
     AdvancedLocked("settings-advanced-locked", SettingsTab.Advanced, server = ServerShot.Locked, github = GitHubShot.Fresh),
     AdvancedLifecycle("settings-advanced-lifecycle", SettingsTab.Advanced, server = ServerShot.Lifecycle, github = GitHubShot.Fresh),
     AdvancedDefaults("settings-advanced-defaults", SettingsTab.Advanced, server = ServerShot.Defaults, github = GitHubShot.Fresh),
@@ -222,9 +227,16 @@ private object NeverWritesProviders : ProvidersWriter {
  * `-missing` OpenCode (not found, no home: its switch blocked, the detected home offered),
  * `-locked` the engines and Codex's home and command set by the environment.
  */
-enum class ServerShot(val scrollTo: String? = null, val reveal: Boolean = false) {
+enum class ServerShot(val scrollTo: String? = null) {
     Advanced,
-    Revealed(ServerSettingsTags.section("auth"), reveal = true),
+    /** v144: Authentication scrolled to the top: password configured + token configured (P-ok + T-on). */
+    Auth(ServerSettingsTags.section("auth")),
+    /** v144: both credentials set by the environment (P-env + T-env). */
+    AuthEnv(ServerSettingsTags.section("auth")),
+    /** v144: no password (P-unset), so the token row has no keys either (T-nopw). */
+    AuthUnset(ServerSettingsTags.section("auth")),
+    /** v144: each write just succeeded: the password's saved line and the token's caption + line. */
+    AuthSaved(ServerSettingsTags.section("auth")),
     Locked,
     Lifecycle(ServerSettingsTags.section("lifecycle")),
     Defaults(ServerSettingsTags.section("defaults")),
@@ -241,6 +253,21 @@ enum class ServerShot(val scrollTo: String? = null, val reveal: Boolean = false)
     ;
 
     fun binding(): ServerSettingsBinding = when (this) {
+        AuthEnv -> ServerFixtures.binding(
+            view = ServerFixtures.view(envForced = mapOf("password" to true, "proxyToken" to true, "stateDir" to true)),
+            writer = NeverWrites,
+        )
+        AuthUnset -> ServerFixtures.binding(
+            view = ServerFixtures.view(secretsSet = mapOf("password" to false, "proxyToken" to true)),
+            writer = NeverWrites,
+        )
+        AuthSaved -> ServerFixtures.binding(
+            writer = NeverWrites,
+            secrets = ServerSecretsState().apply {
+                saved[ServerSetting.Password] = SecretSaved.PasswordChanged
+                saved[ServerSetting.ProxyToken] = SecretSaved.TokenSaved
+            },
+        )
         Locked -> ServerFixtures.binding(
             view = ServerFixtures.view(envForced = mapOf("host" to true, "port" to true, "password" to true, "stateDir" to true, "workspaceRoot" to true)),
             advanced = ServerFixtures.ADVANCED_FORCED,
@@ -445,11 +472,6 @@ fun ComposeContentTestRule.snapSettings(
         mainClock.advanceTimeBy(600)
         waitForIdle()
     }
-    if (shot.server?.reveal == true) {
-        onNodeWithTag(ServerSettingsTags.reveal(ServerSetting.Password), useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnClick)
-        mainClock.advanceTimeBy(600)
-        waitForIdle()
-    }
     (shot.accounts?.scrollTo ?: shot.server?.scrollTo ?: shot.profiles?.scrollTo ?: shot.nodes?.scrollTo ?: shot.devices?.scrollTo)?.let { scrollTo ->
         // Bring the section (or its sync rows) to the top of the dialog's body: the offset is
         // measured on the laid-out frame (positionInRoot: boundsInRoot is clipped to what the body
@@ -497,7 +519,8 @@ class SettingsTabletScreenshotTest(private val shot: SettingsShot, private val s
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = SettingsShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        // v144: of the Authentication shots only the main one is shot on a tablet.
+        fun params(): List<Array<Any>> = SettingsShot.entries.filter { !it.own || it == SettingsShot.AdvancedAuth }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 

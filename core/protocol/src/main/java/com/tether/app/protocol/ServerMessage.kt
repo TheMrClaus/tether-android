@@ -263,6 +263,18 @@ sealed interface ServerMessage {
     }
 
     /**
+     * v144 (protocol.ts:891-902): the answer to a `set-server-settings` that carried a `requestId` (a credential
+     * write). [ok] false: [reason] (`bad_current_password`, `weak`, `throttled`, `env_forced`, `no_password`,
+     * `persist_failed`, ...) and the server's own [message]; both absent are the client's to default.
+     */
+    data class ServerSettingsResult(
+        val requestId: String?,
+        val ok: Boolean,
+        val reason: String?,
+        val message: String?,
+    ) : ServerMessage
+
+    /**
      * Retired server-side (server.mjs 887c222 never sends it; the request is answered with
      * `error`), still in the TS union. [agents]: AcpAgentEntry[], raw. ta-q6p: decoded tolerantly
      * (a missing or non-array `agents` is empty, a non-object entry dropped) and routed nowhere.
@@ -876,6 +888,9 @@ private object ServerDecoders {
                 detected = r.o.obj("detected") ?: JsonObject(emptyMap()),
                 secretsSet = if (r.o.obj("secretsSet") != null) r.boolMap("secretsSet") else emptyMap(),
             )
+        },
+        "server-settings-result" to { r ->
+            ServerMessage.ServerSettingsResult(r.o.str("requestId"), r.o.boolOrNull("ok") == true, r.o.str("reason"), r.o.str("message"))
         },
         // ta-q6p: both carry plaintext env values, so neither ever becomes an Unknown holding its raw frame.
         "acp-agents" to { r -> ServerMessage.AcpAgents(r.o.objList("agents").orEmpty()) },

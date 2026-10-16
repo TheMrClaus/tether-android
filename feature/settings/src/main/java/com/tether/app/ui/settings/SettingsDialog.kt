@@ -109,6 +109,7 @@ object SettingsDialogTags {
 internal object SettingsTags {
     const val TipBubble = "settings-tip-bubble"
     const val EnvLock = "settings-env-lock"
+    const val StatusTag = "settings-status-tag"
 }
 
 /**
@@ -195,6 +196,10 @@ fun SettingsDialog(
     // ta-dh1 (ta-cc5, the engines part): the frame is read once per frame, not per recomposition.
     val signedIn = origin != null
     val view = remember(serverSettings, signedIn) { serverSettings?.takeIf { signedIn }?.let(ServerSettingsView::of) }
+    // v144: the credential rows' dialog and saved lines, kept above the tab level (the web keeps the section mounted);
+    // a write runs on this scope so an answer after Back closed its dialog still lands.
+    val secretsState = rememberServerSecretsState(origin)
+    val secretsScope = androidx.compose.runtime.rememberCoroutineScope()
     val serverBinding = ServerSettingsBinding(
         // r2: signed out (no origin), no settings: the client also drops the frames then.
         settings = view,
@@ -202,6 +207,8 @@ fun SettingsDialog(
         origin = origin,
         writer = writer,
         replies = replies,
+        secrets = secretsState,
+        scope = secretsScope,
     )
     // ta-q6p: the custom-providers registry, asked for on open (the web asks on connect); every
     // write goes through the client's set-providers check, built from its newest list.
@@ -267,7 +274,7 @@ fun SettingsDialog(
             onClose = onDismiss,
             layout = layout,
             claudeAccounts = claudeAccounts,
-            serverSettings = serverBinding,
+            serverSettings = serverBinding.copy(onPasswordChanged = { devicesController?.refresh() }),
             providers = providersBinding,
             nodes = nodesBinding,
             devices = devicesBinding,
@@ -637,6 +644,7 @@ private class ClientSettingsWriter(private val client: TetherClient) : ServerSet
     override fun patch(patch: JsonObject, origin: String) = client.setServerSettings(patch, origin)
     override fun cliVersion(message: ClientMessage.SetAdvancedSettings, origin: String) = client.setAdvancedSettings(message, origin)
     override fun detectEngines(origin: String) = client.detectEngines(origin)
+    override suspend fun changeSecret(patch: JsonObject, currentPassword: String, origin: String) = client.changeServerSecret(patch, currentPassword, origin)
 }
 
 /** ta-coik.52: a [SettingsFrame] with no server configured (the screenshot harness). */

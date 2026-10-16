@@ -657,12 +657,31 @@ sealed interface ClientMessage {
     }
 
     /**
-     * [settings]: a Partial<ServerSettings> patch (only present keys change), raw. ta-t7l: a patch
-     * may carry a new `password` or `proxyToken`, so [toString] names the keys and no value.
+     * [settings]: a Partial<ServerSettings> patch (only present keys change), raw. v144: a write of `password` or
+     * `proxyToken` also carries [currentPassword] (the owner re-authenticates every change) and a [requestId] the
+     * server echoes in `server-settings-result`; both are optional and additive on the wire. [toString] names the
+     * keys and whether a requestId is present, never a value: [currentPassword] and the new secret never print.
      */
-    data class SetServerSettings(val settings: JsonObject) : ClientMessage {
-        override fun toJsonObject() = frame("set-server-settings") { put("settings", settings) }
-        override fun toString(): String = "SetServerSettings(settings=${settings.keys.sorted()})"
+    class SetServerSettings(
+        val settings: JsonObject,
+        currentPassword: String? = null,
+        val requestId: String? = null,
+    ) : ClientMessage {
+        internal val currentPassword: String? = currentPassword
+
+        override fun toJsonObject() = frame("set-server-settings") {
+            put("settings", settings)
+            opt("currentPassword", currentPassword)
+            opt("requestId", requestId)
+        }
+
+        override fun toString(): String =
+            "SetServerSettings(settings=${settings.keys.sorted()}, currentPassword=${if (currentPassword != null) "***" else "none"}, requestId=$requestId)"
+
+        override fun equals(other: Any?): Boolean = other is SetServerSettings && other.settings == settings &&
+            other.currentPassword == currentPassword && other.requestId == requestId
+
+        override fun hashCode(): Int = listOf(settings, currentPassword, requestId).hashCode()
     }
 
     data object DetectEngines : ClientMessage {
@@ -1190,7 +1209,7 @@ private object ClientDecoders {
             ClientMessage.SetAdvancedSettings(r.o.str("claudeCliVersion"))
         },
         "server-settings" to { _ -> ClientMessage.ServerSettingsRequest },
-        "set-server-settings" to { r -> ClientMessage.SetServerSettings(r.obj("settings")) },
+        "set-server-settings" to { r -> ClientMessage.SetServerSettings(r.obj("settings"), r.o.str("currentPassword"), r.o.str("requestId")) },
         "detect-engines" to { _ -> ClientMessage.DetectEngines },
         "acp-agents" to { _ -> ClientMessage.AcpAgentsRequest },
         "providers" to { _ -> ClientMessage.ProvidersRequest },

@@ -29,7 +29,8 @@ object ServerFixtures {
     const val PROVIDERS = """[{"provider":"anthropic","model":"claude-3-5-haiku-latest"},{"provider":"openai","model":"gpt-4o-mini"},{"provider":"ollama","model":""}]"""
 
     fun settingsJson(
-        password: String = FAKE_PASSWORD,
+        // v144: the server never sends a credential's value, only `secretsSet`.
+        password: String = "",
         proxyToken: String = "",
         overrides: Map<String, Any?> = emptyMap(),
     ): JsonObject {
@@ -85,14 +86,16 @@ object ServerFixtures {
         envForced: Map<String, Boolean> = mapOf("stateDir" to true),
         restartRequired: Boolean = false,
         detected: JsonObject = DETECTED,
-    ) = ServerMessage.ServerSettings(settings, envForced, restartRequired, emptyList(), detected)
+        secretsSet: Map<String, Boolean> = mapOf("password" to true, "proxyToken" to true),
+    ) = ServerMessage.ServerSettings(settings, envForced, restartRequired, emptyList(), detected, secretsSet)
 
     fun view(
         settings: JsonObject = settingsJson(),
         envForced: Map<String, Boolean> = mapOf("stateDir" to true),
         restartRequired: Boolean = false,
         detected: JsonObject = DETECTED,
-    ) = ServerSettingsView.of(frame(settings, envForced, restartRequired, detected))
+        secretsSet: Map<String, Boolean> = mapOf("password" to true, "proxyToken" to true),
+    ) = ServerSettingsView.of(frame(settings, envForced, restartRequired, detected, secretsSet))
 
     /** [settings] with [patch] applied, as the server's reply would carry it. */
     fun applied(settings: JsonObject, patch: JsonObject) = JsonObject(settings + patch)
@@ -114,13 +117,23 @@ object ServerFixtures {
         origin: String? = ORIGIN,
         writer: ServerSettingsWriter = ServerSettingsWriter.None,
         replies: Long = 0L,
-    ) = ServerSettingsBinding(view, advanced, origin, writer, replies)
+        secrets: ServerSecretsState = ServerSecretsState(),
+        scope: kotlinx.coroutines.CoroutineScope? = null,
+        onPasswordChanged: () -> Unit = {},
+    ) = ServerSettingsBinding(view, advanced, origin, writer, replies, secrets, scope, onPasswordChanged)
 
     fun json(text: String): JsonObject = TetherJson.parseToJsonElement(text).jsonObject
 }
 
 /** Records every write with the origin it was bound to; [reply] plays the server's answer. */
-class RecordingWriter(private val reply: (JsonObject) -> Unit = {}) : ServerSettingsWriter {
+class RecordingWriter(
+    /** v144: the answer a credential write gets; suspend, so a test can hold it open. */
+    private val secretReply: suspend (JsonObject, String) -> com.tether.app.client.ServerSecretOutcome = { _, _ -> com.tether.app.client.ServerSecretOutcome.Saved },
+    private val reply: (JsonObject) -> Unit = {},
+) : ServerSettingsWriter {
+    /** v144: each credential write as sent (the patch, the current password, the origin). */
+    val secrets = mutableListOf<Triple<JsonObject, String, String>>()
+
     val patches = mutableListOf<Pair<JsonObject, String>>()
     val cli = mutableListOf<Pair<ClientMessage.SetAdvancedSettings, String>>()
 
@@ -144,5 +157,10 @@ class RecordingWriter(private val reply: (JsonObject) -> Unit = {}) : ServerSett
     override fun detectEngines(origin: String): Boolean {
         scans += origin
         return true
+    }
+
+    override suspend fun changeSecret(patch: JsonObject, currentPassword: String, origin: String): com.tether.app.client.ServerSecretOutcome {
+        secrets += Triple(patch, currentPassword, origin)
+        return secretReply(patch, currentPassword)
     }
 }

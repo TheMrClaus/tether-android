@@ -109,7 +109,12 @@ class ServerSettingsView private constructor(
     val restartRequired: Boolean,
     /** `detected`: Record<string, EngineDetection>, raw; read only for the [EngineCard] ids. */
     private val detected: JsonObject = JsonObject(emptyMap()),
+    /** v139 `secretsSet`: whether the server holds each console credential (the values themselves are never sent, v144). */
+    private val secretsSet: Map<String, Boolean> = emptyMap(),
 ) {
+    /** v144: whether the server holds a [SettingKind.Secret] (`secretsSet[key] === true`; absent reads as not set, as the web's row). */
+    fun secretSet(setting: ServerSetting): Boolean = secretsSet[setting.key] == true
+
     fun forced(setting: ServerSetting): Boolean = setting.key in envForced
 
     /**
@@ -136,13 +141,9 @@ class ServerSettingsView private constructor(
     fun needsHome(engine: EngineCard): Boolean = text(engine.home).isEmpty() && !engine.homeOptional
 
     /**
-     * ServerTextRow: `String(settings[field] ?? "")`. r2: a [SettingKind.Secret] reads "" here, so the
-     * plaintext can only be had through [secret] (and its [SecretText.reveal]), never by mistake.
+     * ServerTextRow: `String(settings[field] ?? "")`. r2: a [SettingKind.Secret] reads "" here: since v144 the server never sends a credential's value.
      */
     fun text(setting: ServerSetting): String = if (setting.kind == SettingKind.Secret) "" else stringOf(raw[setting.key])
-
-    /** The secret rows' value, the same coercion as [text], kept in a [SecretText]. */
-    fun secret(setting: ServerSetting): SecretText = SecretText(stringOf(raw[setting.key]))
 
     /** ServerNumberRow (settings-dialog.tsx:177-178): the value when it is a number (`typeof === "number"`), else null. */
     fun number(setting: ServerSetting): Double? {
@@ -185,7 +186,7 @@ class ServerSettingsView private constructor(
 
     companion object {
         fun of(frame: ServerMessage.ServerSettings): ServerSettingsView =
-            ServerSettingsView(frame.settings, frame.envForced.filterValues { it }.keys, frame.restartRequired, frame.detected)
+            ServerSettingsView(frame.settings, frame.envForced.filterValues { it }.keys, frame.restartRequired, frame.detected, frame.secretsSet)
 
         /** settings-dialog.tsx:47: `String(raw ?? "").split(",").map(trim).filter(Boolean)`. */
         fun headlessModesList(raw: String): List<String> = raw.split(',').map(::jsTrim).filter { it.isNotEmpty() }
@@ -207,8 +208,22 @@ class ServerSettingsView private constructor(
 object ServerSettingsPatch {
     private fun patch(setting: ServerSetting, value: JsonElement) = JsonObject(mapOf(setting.key to value))
 
-    /** The builders of the ServerXRow helpers never take an engine card's value ([SettingKind.Runs]: its own blur rule, [engineValue]). */
-    private fun plain(setting: ServerSetting) = setting.kind != SettingKind.Runs
+    /**
+     * The builders of the ServerXRow helpers never take an engine card's value ([SettingKind.Runs]: its own blur rule,
+     * [engineValue]), and since v144 never a [SettingKind.Secret]: a console credential is written only by [secret]
+     * (with the current password and a requestId), the one path the server accepts.
+     */
+    private fun plain(setting: ServerSetting) = setting.kind != SettingKind.Runs && setting.kind != SettingKind.Secret
+
+    /**
+     * v144: the ONE `settings` patch a credential write carries (`{password: next}` or `{proxyToken: next}`; a proxy
+     * token cleared is `{proxyToken: ""}`, server-secret-row.tsx:105). Null for a key that is not a secret, or one
+     * the environment forces (the server would refuse it).
+     */
+    fun secret(view: ServerSettingsView, setting: ServerSetting, value: String): JsonObject? {
+        if (setting.kind != SettingKind.Secret || view.forced(setting)) return null
+        return patch(setting, JsonPrimitive(value))
+    }
 
     /**
      * ServerTextRow's commit (:129-132): `{ [field]: current || null }` when the field differs from

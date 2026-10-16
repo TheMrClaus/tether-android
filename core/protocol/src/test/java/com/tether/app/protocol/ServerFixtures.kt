@@ -8,7 +8,7 @@ package com.tether.app.protocol
  *    server.mjs at 7d65611 (approvals arrive as `event` frames);
  *  - `acp-agents`: retired server-side (the request is answered with `error`);
  *  - `overview-snapshot` / `overview-delta` (v131/v132): sent only to a subscribed socket;
- *  - `archive-preview` / `archive-stale-result` (v143 / v141): added after the 887c222 capture.
+ *  - `archive-preview` / `archive-stale-result` / `server-settings-result` (v143 / v141 / v144): added after the 887c222 capture.
  */
 object ServerFixtures {
     const val APPROVAL = """
@@ -94,7 +94,14 @@ object ServerFixtures {
          "retention":{"cap":500,"retiredNow":0,"willBePruned":3}}
     """
 
+    /** v144 (protocol.ts:891-902) `server-settings-result`: the answer to a credential write. */
+    const val SERVER_SETTINGS_RESULT = """
+        {"type":"server-settings-result","requestId":"r1","ok":false,"reason":"bad_current_password",
+         "message":"That isn't the current password. Nothing was changed."}
+    """
+
     val HAND_AUTHORED: Map<String, String> = mapOf(
+        "server-settings-result" to SERVER_SETTINGS_RESULT,
         "archive-preview" to ARCHIVE_PREVIEW,
         "archive-stale-result" to ARCHIVE_STALE_RESULT,
         "approval" to APPROVAL,

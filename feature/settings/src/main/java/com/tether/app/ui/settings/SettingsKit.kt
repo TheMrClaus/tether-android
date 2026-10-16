@@ -40,7 +40,9 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.text
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
@@ -143,12 +145,14 @@ internal fun SettingsRowText(
     tip: String? = null,
     titleColor: Color = LocalTetherTokens.current.ink,
     locked: Boolean = false,
+    /** v144: a status pill after the tip (`.passkey-tag`); with one the title line wraps, the pill dropping under at large font. */
+    tag: String? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     var tipOpen by remember { mutableStateOf(false) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        val titleLine: @Composable () -> Unit = {
             Text(title, color = titleColor, style = settingsText(type.ui, 14f, 650, lineHeight = 1.5f))
             if (locked) {
                 Icon(
@@ -159,6 +163,13 @@ internal fun SettingsRowText(
                 )
             }
             if (tip != null) SettingsTip(tip, open = tipOpen, onToggle = { tipOpen = !tipOpen })
+            if (tag != null) SettingsStatusTag(tag)
+        }
+        if (tag != null) {
+            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+            androidx.compose.foundation.layout.FlowRow(verticalArrangement = Arrangement.Center, itemVerticalAlignment = Alignment.CenterVertically) { titleLine() }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) { titleLine() }
         }
         if (caption != null) {
             Text(caption, color = t.muted, style = settingsText(type.ui, 12f, 400, lineHeight = 1.6f))
@@ -178,6 +189,28 @@ internal fun SettingsRowText(
             )
         }
     }
+}
+
+/**
+ * `.passkey-tag` as Studio draws it (globals.css:8938, studio.css:638): a fully rounded `mineral` pill, no border, `faint`
+ * ink, 11sp / 620, tracking 0.04em, UPPERCASE drawn, 4 x 8dp, 8dp after what precedes it. Its accessible text is the
+ * original case, as a key legend's is.
+ */
+@Composable
+internal fun SettingsStatusTag(text: String, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Text(
+        text.uppercase(),
+        color = t.faint,
+        style = settingsText(type.ui, 11f, 620, lineHeight = 1.4f, trackingEm = 0.04f),
+        modifier = modifier
+            .testTag(SettingsTags.StatusTag)
+            .padding(start = 8.dp)
+            .cssSurface(CircleShape, t.mineral, null, emptyList())
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clearAndSetSemantics { this.text = AnnotatedString(text) },
+    )
 }
 
 /**
