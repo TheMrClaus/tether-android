@@ -163,7 +163,8 @@ object SidebarViewModel {
                     rows,
                     state.now,
                     SidebarWorkspaces.SIDEBAR_RECENT_MS,
-                    { row -> ((row["lastMessageAt"] as? JsNum) ?: (row["updatedAt"] as? JsNum))?.value },
+                    // SB-2 (D-L34-26): a multi-unit name group ages by its freshest member; any other row by its own stamp.
+                    { row -> SidebarOrder.bandRecencyOf(row, grouping.multiUnitHeadKeys, grouping.olderByHeadKey) },
                 ) { row ->
                     val e = entry(row)
                     e.live?.pinned == true || Web.hasWorkInProgress(row) || Web.hasUnseenWork(row) || isActiveEntry(state, e) ||

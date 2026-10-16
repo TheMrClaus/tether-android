@@ -114,7 +114,7 @@ class SidebarOlderBandRulesTest {
     }
 
     @Test fun theBandRowWaitsForShowMoreToFinish() {
-        val many = (1..12).map { F.live("r$it", "Recent $it", ago = it.toLong()) } + F.live("old", "Old", ago = 20 * DAY_MIN)
+        val many = (1..12).map { F.live("r$it", "Recent ${'a' + it - 1}", ago = it.toLong()) } + F.live("old", "Old", ago = 20 * DAY_MIN)
         val first = SidebarViewModel.view(F.state(many))
         assertEquals(10, block(first).rows.size)
         assertEquals(2, block(first).remaining)

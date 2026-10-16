@@ -42,16 +42,31 @@ class SidebarChainsModelTest {
 
     @Test fun chainKeysComeFromTheVisibleRowsOfTheBlock() {
         val view = SidebarViewModel.view(F.state(chain(3), current = F.APP))
-        assertEquals(listOf(SidebarOrder.HandoverChainKeys("live:m2", listOf("live:m1", "live:m0"))), view.chainKeysByWorkspace.getValue(F.APP))
+        assertEquals(listOf(SidebarOrder.HandoverChainKeys("live:m2", listOf("live:m1", "live:m0"), "live:m0")), view.chainKeysByWorkspace.getValue(F.APP))
     }
 
     @Test fun anArchivedMiddleSplitsTheChainAndALoneSideKeepsAPlainRow() {
-        val sessions = chain(4).map { if (it.id == "m1") F.live("m1", "Member m1", ago = 12, archived = true, handedOffFrom = "m0") else it }
+        // SB-2: the lone side is named "Origin" so it does not share a name base with "Member m3" (see the regroup test below).
+        val sessions = chain(4).map {
+            when (it.id) {
+                "m1" -> F.live("m1", "Member m1", ago = 12, archived = true, handedOffFrom = "m0")
+                "m0" -> F.live("m0", "Origin", ago = 15)
+                else -> it
+            }
+        }
         val view = SidebarViewModel.view(F.state(sessions, current = F.APP))
         val block = view.blocks.single()
         assertEquals(setOf("live:m3", "live:m0"), keys(block.rows).toSet())
         assertEquals(listOf("live:m2"), keys(block.olderByHeadKey.getValue("live:m3")))
         assertEquals(listOf("live:m1"), keys(view.archived))
+    }
+
+    @Test fun anArchivedMiddleWhoseLoneSideSharesTheNameBaseRegroupsByName() {
+        val sessions = chain(4).map { if (it.id == "m1") F.live("m1", "Member m1", ago = 12, archived = true, handedOffFrom = "m0") else it }
+        val block = SidebarViewModel.view(F.state(sessions, current = F.APP)).blocks.single()
+        // "Member m3" (head of m3<-m2) and "Member m0" are one name group (web SB-2): one row, m0 folded under it, anchored at m0.
+        assertEquals(setOf("live:m3"), keys(block.rows).toSet())
+        assertEquals(listOf("live:m2", "live:m0"), keys(block.olderByHeadKey.getValue("live:m3")))
     }
 
     @Test fun theOlderBandKeepsAGroupWhoseOlderMemberIsPinnedAndFoldsAnIdleOne() {
@@ -76,7 +91,7 @@ class SidebarChainsModelTest {
     }
 
     @Test fun aSelectedOlderMemberHoldsTheGroupOnTheFirstPage() {
-        val solos = (1..12).map { F.live("s$it", "Solo $it", ago = it.toLong()) }
+        val solos = (1..12).map { F.live("s$it", "Solo ${'a' + it - 1}", ago = it.toLong()) }
         val tail = chain(2, ago = 100)
         val without = SidebarViewModel.view(F.state(solos + tail, current = F.APP)).blocks.single()
         assertEquals(10, without.rows.size)

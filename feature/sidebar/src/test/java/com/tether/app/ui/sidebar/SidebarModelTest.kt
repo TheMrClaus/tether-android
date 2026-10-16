@@ -173,7 +173,7 @@ class SidebarModelTest {
     }
 
     @Test fun blocksPageTenRowsAndNeverHideTheSelectedOne() {
-        val many = (1..14).map { F.live("p$it", "row $it", ago = it.toLong()) }
+        val many = (1..14).map { F.live("p$it", "row ${'a' + it - 1}", ago = it.toLong()) }
         val state = F.state(many, activeId = "p13")
         val block = SidebarViewModel.view(state).blocks.single()
         assertEquals(11, block.rows.size)
