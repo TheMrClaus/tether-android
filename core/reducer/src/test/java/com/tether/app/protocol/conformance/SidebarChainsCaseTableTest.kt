@@ -22,15 +22,16 @@ import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
 /**
- * W35 (ta-b6m9): the 25 `handoverFoldCases` of tether 7cc0f38c (lib/sidebar-order.ts), kept OUT of parity-corpus/ (whose
- * pins stay at 887c222 / v137) in src/test/resources/helpers/sidebar-chains-7cc0f38c.json, run through their OWN adapter
+ * W35 (ta-b6m9) + W39 (ta-ftl7): cases[10..90] of tether ac67c5e4's sidebar-order table (lib/sidebar-order.ts) = the 25
+ * `handoverFoldCases` of 7cc0f38c (byte-identical) + the 56 SB-2 `sequenceGroupCases`, kept OUT of parity-corpus/ (whose
+ * pins stay at 887c222 / v137) in src/test/resources/helpers/sidebar-chains-ac67c5e4.json, run through their OWN adapter
  * table so HelperAdapters' exercised-set check is unchanged. The Map result (`$map`) is encoded as the typed layer does.
  */
 @RunWith(Parameterized::class)
 class SidebarChainsCaseTableTest(private val index: Int, private val fn: String) {
 
     companion object {
-        private const val RESOURCE = "/helpers/sidebar-chains-7cc0f38c.json"
+        private const val RESOURCE = "/helpers/sidebar-chains-ac67c5e4.json"
         val table: JsObj by lazy { CanonicalJson.parse(SidebarChainsCaseTableTest::class.java.getResource(RESOURCE)!!.readText()) as JsObj }
         private val cases get() = (table["cases"] as JsArr).map { it as JsObj }
 
@@ -61,6 +62,10 @@ class SidebarChainsCaseTableTest(private val index: Int, private val fn: String)
             "handoverChains" to { a ->
                 SidebarOrder.handoverChains((a[0] as JsArr).toList()).map { TaggedObject(mapOf("head" to it.head, "older" to JsArr.of(it.older))) }
             },
+            "parseSequenceName" to { _ -> TODO("SB-2 parseSequenceName") },
+            "sidebarGroups" to { _ -> TODO("SB-2 sidebarGroups") },
+            "placeGroupMembers" to { _ -> TODO("SB-2 placeGroupMembers") },
+            "groupBandRecency" to { _ -> TODO("SB-2 groupBandRecency") },
             "foldHandoverChains" to { a ->
                 val r = SidebarOrder.foldHandoverChains((a[0] as JsArr).toList())
                 TaggedObject(mapOf("rows" to JsArr.of(r.rows), "olderByHeadKey" to r.olderByHeadKey.mapValues { JsArr.of(it.value) }))
@@ -92,13 +97,13 @@ class SidebarChainsCaseTableTest(private val index: Int, private val fn: String)
         )
     }
 
-    /** The file is the recorded 25 cases of 7cc0f38c, every fn has an adapter here, and none is orphaned. */
+    /** The file is the recorded 81 cases of ac67c5e4, every fn has an adapter here, and none is orphaned. */
     @Test
     fun theCaseFileIsScopedAndPinned() {
-        assertEquals("7cc0f38ce237d446843f6f9cabaa83ab89f67532", table["tetherSha"].str)
+        assertEquals("ac67c5e4ffdb1fcfa3b4176929cdecb407b7b19c", table["tetherSha"].str)
         assertTrue((table["recipe"].str ?: "").isNotEmpty())
         assertEquals(64, (table["sourceSha256"].str ?: "").length)
-        assertEquals(25, cases.size)
+        assertEquals(81, cases.size)
         assertEquals(adapters.keys, cases.map { it["fn"].str!! }.toSet())
     }
 }
