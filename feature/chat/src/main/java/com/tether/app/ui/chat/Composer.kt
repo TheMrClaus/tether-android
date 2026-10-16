@@ -297,6 +297,8 @@ fun Composer(
     var menuDismissed by rememberSaveable(session?.id) { mutableStateOf(false) }
     var notice by remember(session?.id) { mutableStateOf<String?>(null) }
     var noticeSeq by remember(session?.id) { mutableStateOf(0) }
+    // The web flash(msg, icon) (chat-view.tsx:2803-2805): the icon rides the call site, default Terminal.
+    var noticeIcon by remember(session?.id) { mutableStateOf(TetherIcons.Terminal) }
 
     // The web flash(): 6 s auto-dismiss; every flash re-times itself, even an
     // identical message (the counter makes it a fresh effect key).
@@ -306,8 +308,9 @@ fun Composer(
             notice = null
         }
     }
-    fun flash(message: String) {
+    fun flash(message: String, icon: androidx.compose.ui.graphics.vector.ImageVector = TetherIcons.Terminal) {
         noticeSeq += 1
+        noticeIcon = icon
         notice = message
     }
 
@@ -351,7 +354,7 @@ fun Composer(
     fun dispatchCommand(background: Boolean) {
         if (session == null) return
         if (handoverHolding) {
-            flash(com.tether.app.client.Handover.underwayCopy("command"))
+            flash(com.tether.app.client.Handover.underwayCopy("command"), TetherIcons.ArrowRightLeft)
             return
         }
         if (picked.isNotEmpty()) {
@@ -742,7 +745,7 @@ fun Composer(
         // reference content for THIS prompt, not a standing instruction).
         if (hasPicks && browserPicks != null) {
             if (handoverHolding) {
-                flash(com.tether.app.client.Handover.underwayCopy("attachments"))
+                flash(com.tether.app.client.Handover.underwayCopy("attachments"), TetherIcons.ArrowRightLeft)
                 return
             }
             if (busy) {
@@ -775,7 +778,7 @@ fun Composer(
                 return
             }
             if (handoverHolding) {
-                flash(com.tether.app.client.Handover.underwayCopy("delegate"))
+                flash(com.tether.app.client.Handover.underwayCopy("delegate"), TetherIcons.ArrowRightLeft)
                 return
             }
             if (busy) {
@@ -802,7 +805,7 @@ fun Composer(
             return
         }
         if (handoverHolding && hasAttachments) {
-            flash(com.tether.app.client.Handover.underwayCopy("attachments"))
+            flash(com.tether.app.client.Handover.underwayCopy("attachments"), TetherIcons.ArrowRightLeft)
             return
         }
         if (busy && hasAttachments) {
@@ -1003,7 +1006,7 @@ fun Composer(
                     ReadOnlyRow()
                 }
                 notice?.let {
-                    ComposerNotice(it, if (com.tether.app.client.Handover.isUnderwayRefusal(it)) TetherIcons.ArrowRightLeft else TetherIcons.Terminal)
+                    ComposerNotice(it, noticeIcon)
                 }
                 // T6.4 (chat-view.tsx:3780-3830): the todo bar, then the RUNNING background commands.
                 val progress = remember(tree) { selectProgress(tree) }

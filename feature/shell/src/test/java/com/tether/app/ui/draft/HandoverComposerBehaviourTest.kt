@@ -138,8 +138,16 @@ class HandoverComposerBehaviourTest {
         val config = rule.onNodeWithTag(DraftComposerTags.NameField).fetchSemanticsNode().config
         assertEquals(null, config.getOrNull(SemanticsProperties.ContentDescription))
         assertEquals("Parser rewrite 2", config.getOrNull(SemanticsProperties.EditableText)?.text)
-        // The label is its own readable node, ahead of the field.
-        rule.onNodeWithText(Handover.NAME_FIELD_LABEL).assertExists()
+        // The label merges into the field's node: it is the field's accessible name, the typed value still read.
+        val texts = config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
+        assertTrue(texts.toString(), texts.contains(Handover.NAME_FIELD_LABEL))
+    }
+
+    @Test
+    fun theHelperTextIsTheNameFieldsDescription() {
+        show(HandoverComposerShot.NameCleared, DraftSheetActions())
+        val description = rule.onNodeWithTag(DraftComposerTags.NameField).fetchSemanticsNode().config.getOrNull(SemanticsProperties.StateDescription)
+        assertTrue(description.toString(), description != null && description.startsWith("Automatic name"))
     }
 
     @Test

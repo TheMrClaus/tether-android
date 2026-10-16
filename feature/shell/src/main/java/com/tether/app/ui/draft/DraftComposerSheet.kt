@@ -73,6 +73,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag as testTagProperty
 import androidx.compose.ui.text.TextRange
@@ -743,9 +744,9 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
     }
     // draft-composer.tsx: the hook's error, else the attachment flash.
     // W34 (dc:584-592): the source changed while choosing (polite), then the refusal (ASSERTIVE in this mode).
-    handover?.blockedLine?.let { StatusLine(TetherIcons.ArrowRightLeft, it, DraftComposerTags.Blocked, topAligned = true) }
+    handover?.blockedLine?.let { StatusLine(TetherIcons.TriangleAlert, it, DraftComposerTags.Blocked, topAligned = true) }
     if (draft.error.isNotEmpty()) {
-        StatusLine(if (handover != null) TetherIcons.ArrowRightLeft else TetherIcons.TriangleAlert, draft.error, DraftComposerTags.Error, assertive = handover != null, topAligned = inputs.v151 || handover != null)
+        StatusLine(TetherIcons.TriangleAlert, draft.error, DraftComposerTags.Error, assertive = handover != null, topAligned = inputs.v151 || handover != null)
     } else if (inputs.notice != null) {
         StatusLine(TetherIcons.Paperclip, inputs.notice, DraftComposerTags.Notice)
     }
@@ -1107,8 +1108,8 @@ private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover:
             style = cssText(type.ui, 0.75f, 650),
             modifier = m
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { runCatching { focus.requestFocus() } }
-                // The label is read as its own node ahead of the field; the field keeps its typed value for TalkBack.
-                .clearAndSetSemantics { text = androidx.compose.ui.text.AnnotatedString(com.tether.app.client.Handover.NAME_FIELD_LABEL) },
+                // Visual only: the FIELD carries the name, so the label is not a second a11y node.
+                .clearAndSetSemantics { },
         )
     }
     val input: @Composable (Modifier) -> Unit = { m ->
@@ -1127,6 +1128,12 @@ private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover:
                 .tetherWell(t, RoundedCornerShape(t.radiusSm), focused)
                 .alpha(if (pending) 0.6f else 1f)
                 .focusRequester(focus)
+                // The field's own name is the label (the web's label htmlFor) in its Text; the typed value stays its
+                // EditableText (no contentDescription to mask it). The helper is its description (aria-describedby).
+                .semantics {
+                    text = androidx.compose.ui.text.AnnotatedString(com.tether.app.client.Handover.NAME_FIELD_LABEL)
+                    if (hint != null) stateDescription = hint
+                }
                 .testTag(DraftComposerTags.NameField),
             textStyle = style,
             cursorBrush = SolidColor(t.violet),

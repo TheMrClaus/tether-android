@@ -84,6 +84,7 @@ private fun AndroidComposeTestRule<*, *>.snapV151(shot: HandoverV151Shot, skin: 
                 liveness = ComposerLiveness.Live,
                 handoverUnderWay = true,
                 handoverStage = stage.view,
+                handoverV151 = true,
                 attachments = attachments,
                 initialDraft = draft,
             )
