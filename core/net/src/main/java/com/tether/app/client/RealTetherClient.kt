@@ -3567,6 +3567,8 @@ class RealTetherClient(
             }
             // ta-q6p: v74 `acp-agents` is retired server-side (887c222 never sends it): decoded, routed nowhere.
             is ServerMessage.AcpAgents -> Unit
+            // v144: the answer to a credential write (matched by requestId; never a toast, the dialog shows it).
+            is ServerMessage.ServerSettingsResult -> onServerSettingsResult(webSocket, message)
             // T8.2 (use-tether.ts 90fbb9f :905-917): a reply naming a superseded browse is dropped; an
             // uncorrelated one (create-folder, the intent's plain browse, the ready's) still lands.
             is ServerMessage.Directories -> ifCurrent(webSocket) {
@@ -5784,6 +5786,69 @@ class RealTetherClient(
     // ta-coik.5: any key the web's tabs write, the engine cards' included (no confirmation, as on the web).
     override fun setServerSettings(patch: JsonObject, origin: String): Boolean =
         patch.isNotEmpty() && sendFrameFor(origin, ClientMessage.SetServerSettings(patch))
+
+    /**
+     * v144 (use-tether.ts:1940-1963): one credential write. The waiter is registered and the frame enqueued under
+     * [lock] on the socket opened for [origin]; none open settles at once as NoReply. Only a `server-settings-result`
+     * with the same requestId settles it (a foreign or absent id is ignored); otherwise the web's 20 s no-reply
+     * window ends it. A socket closing mid-flight does NOT settle early (the web waits the window out). The waiter
+     * is removed on every exit, including the caller's cancellation. The frame (and its secrets) is not referenced
+     * after the send.
+     */
+    override suspend fun changeServerSecret(patch: JsonObject, currentPassword: String, origin: String): ServerSecretOutcome {
+        val requestId = secretRequestIds()
+        val waiter = CompletableDeferred<ServerSecretOutcome>()
+        val text = ClientMessage.SetServerSettings(patch, currentPassword, requestId).encode()
+        val sent = synchronized(lock) {
+            val ws = (if (socketOpen && handshakeDone && socketOrigin == origin) socket else null)
+            if (ws == null) {
+                null
+            } else {
+                secretRequests[requestId] = waiter
+                ws.send(text)
+            }
+        }
+        if (sent != true) {
+            synchronized(lock) { secretRequests.remove(requestId) }
+            return ServerSecretOutcome.NoReply
+        }
+        val timeout = scheduler.schedule(secretRequestTimeoutMs) { waiter.complete(ServerSecretOutcome.NoReply) }
+        try {
+            return withContext(Dispatchers.Default) { waiter.await() }
+        } finally {
+            timeout.cancel()
+            synchronized(lock) { secretRequests.remove(requestId) }
+        }
+    }
+
+    /** v144: the credential writes waiting for their `server-settings-result`, by requestId (guarded by [lock]). */
+    private val secretRequests = HashMap<String, CompletableDeferred<ServerSecretOutcome>>()
+
+    /** Test seam: credential writes still waiting (must return to 0: nothing leaks). */
+    internal fun pendingSecretRequestCount(): Int = synchronized(lock) { secretRequests.size }
+
+    /** Test seam: each credential write's requestId (production: a fresh random UUID, 36 chars; the server's cap is 64). */
+    @Volatile
+    internal var secretRequestIds: () -> String = { UUID.randomUUID().toString() }
+
+    /** Test seam: the no-reply window (production: the web's 20 s). */
+    @Volatile
+    internal var secretRequestTimeoutMs: Long = ServerSecretOutcome.NO_REPLY_TIMEOUT_MS
+
+    private fun onServerSettingsResult(webSocket: WebSocket, message: ServerMessage.ServerSettingsResult) {
+        val requestId = message.requestId ?: return
+        val waiter = synchronized(lock) { if (socket !== webSocket) null else secretRequests.remove(requestId) } ?: return
+        waiter.complete(
+            if (message.ok) {
+                ServerSecretOutcome.Saved
+            } else {
+                ServerSecretOutcome.Refused(
+                    message.reason ?: ServerSecretOutcome.REFUSED_FALLBACK_REASON,
+                    message.message ?: ServerSecretOutcome.REFUSED_FALLBACK_MESSAGE,
+                )
+            },
+        )
+    }
 
     override fun setAdvancedSettings(message: ClientMessage.SetAdvancedSettings, origin: String): Boolean = sendFrameFor(origin, message)
 

@@ -73,8 +73,26 @@ class SettingsFramesTest {
             assertFalse(text, text.contains(tokenSentinel))
             assertTrue(text, text.contains("password"))
         }
-        assertEquals("SetServerSettings(settings=[host, password, proxyToken])", outbound.toString())
+        assertEquals("SetServerSettings(settings=[host, password, proxyToken], currentPassword=none, requestId=null)", outbound.toString())
         // The wire form still carries the value: only what is printed is redacted.
         assertTrue(outbound.encode().contains(sentinel))
+    }
+
+    @Test fun aCredentialWriteCarriesTheCurrentPasswordAndRequestIdAndPrintsNeither() {
+        val patch = buildJsonObject { put("password", sentinel) }
+        val frame = ClientMessage.SetServerSettings(patch, "SENTINEL-current-aa", "11111111-2222-3333-4444-555555555555")
+        assertEquals(
+            """{"type":"set-server-settings","settings":{"password":"$sentinel"},"currentPassword":"SENTINEL-current-aa","requestId":"11111111-2222-3333-4444-555555555555"}""",
+            frame.encode(),
+        )
+        for (text in listOf(frame.toString())) {
+            assertFalse(text, text.contains(sentinel) || text.contains("SENTINEL-current-aa"))
+        }
+        assertEquals("SetServerSettings(settings=[password], currentPassword=***, requestId=11111111-2222-3333-4444-555555555555)", frame.toString())
+        // Without them the frame is the plain v50 one.
+        assertEquals("""{"type":"set-server-settings","settings":{"password":"$sentinel"}}""", ClientMessage.SetServerSettings(patch).encode())
+        // The decoder keeps them (the conformance round trip).
+        val back = ClientMessage.decode(frame.toJsonObject()).getOrThrow() as ClientMessage.SetServerSettings
+        assertEquals(frame, back)
     }
 }

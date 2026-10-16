@@ -97,6 +97,8 @@ fun TetherKey(
     contentPadding: Dp? = null,
     /** Content after the legend, e.g. New session's `<kbd>N</kbd>` cap (`margin-left: auto`). */
     trailing: (@Composable RowScope.() -> Unit)? = null,
+    /** Content before the legend in place of [icon] (the credential dialog's Saving… spinner, which rotates). */
+    leading: (@Composable RowScope.() -> Unit)? = null,
     /** The legend's line limit: 1 (a key's legend never wraps) unless a caller must show a long legend whole. */
     maxLines: Int = 1,
     /** False: focus is held but its ring stays unpainted (`:focus-visible`: a touch user's programmatic focus shows none). */
@@ -168,6 +170,7 @@ fun TetherKey(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = contentArrangement ?: Arrangement.spacedBy(t.css.spaceSm, Alignment.CenterHorizontally),
     ) {
+        leading?.invoke(this)
         if (icon != null) {
             Icon(icon, contentDescription = null, tint = look.ink, modifier = Modifier.size(iconSize))
         }

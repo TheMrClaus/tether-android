@@ -93,7 +93,6 @@ import com.tether.app.ui.state.rememberFormState
 object ServerSettingsTags {
     fun row(s: ServerSetting) = "server-setting:${s.key}"
     fun input(s: ServerSetting) = "server-setting-input:${s.key}"
-    fun reveal(s: ServerSetting) = "server-setting-reveal:${s.key}"
     fun add(s: ServerSetting) = "server-setting-add:${s.key}"
     fun entry(s: ServerSetting, path: String) = "server-setting-entry:${s.key}:$path"
     fun remove(s: ServerSetting, path: String) = "server-setting-remove:${s.key}:$path"
@@ -508,63 +507,6 @@ internal fun ServerTextRow(row: ServerRow, view: ServerSettingsView, binding: Se
                 onCommit = { serverCommit(ServerSettingsPatch.text(view, s, it, shown), binding::send) },
                 modifier = m.serverInputWidth(narrow),
             )
-        },
-    )
-}
-
-/**
- * ServerTextRow with `password` (settings-dialog.tsx 90fbb9f :114-160) for `password` /
- * `proxyToken`, which the server sends in plaintext. ta-coik.5, the web's behaviour:
- * - masked by default (`type="password"`): each character a dot, typed into directly; as in the
- *   browser, a masked field offers no copy or cut;
- * - Reveal (the web's eye, `aria-label` "Reveal" / "Hide") shows it as plain text; copy and cut
- *   work then, and a copy is marked sensitive ([SensitiveClipScope]);
- * - committed as the web's text row does: Done, a focus loss, or leaving with an edit in it (never
- *   on a configuration change);
- * - forced by env: the field is disabled and masked, with no Reveal (the web hides its eye then).
- * The reveal flag is plain `remember` (a rotation masks it again, ta-coik.20; the panel is keyed on the server: another server starts
- * masked); the window is not secure, as the web's page is not (ta-coik.65).
- */
-@Composable
-internal fun ServerSecretRow(row: ServerRow, view: ServerSettingsView, binding: ServerSettingsBinding, narrow: Boolean) {
-    val s = row.setting
-    val forced = view.forced(s)
-    val secret = view.secret(s)
-    var revealed by remember { mutableStateOf(false) }
-    val open = revealed && !forced
-    SettingsRow(
-        kind = RowKind.Server,
-        narrow = narrow,
-        modifier = Modifier.testTag(ServerSettingsTags.row(s)),
-        text = { m -> SettingsRowText(row.label, caption(forced, row.description), m, tip = row.tip, locked = forced) },
-        control = { m ->
-            Row(m.serverInputWidth(narrow), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // The field is filled with the server's value as it is (the web's `defaultValue`).
-                val shown = secret.reveal()
-                CommitField(
-                    shown = shown,
-                    label = row.label,
-                    tag = ServerSettingsTags.input(s),
-                    enabled = !forced,
-                    narrow = narrow,
-                    placeholder = row.placeholder,
-                    keyboardType = KeyboardType.Password,
-                    masked = !open,
-                    sensitive = true,
-                    onCommit = { serverCommit(ServerSettingsPatch.text(view, s, it, shown), binding::send) },
-                    modifier = Modifier.weight(1f),
-                )
-                if (!forced) {
-                    TetherKey(
-                        onClick = { revealed = !revealed },
-                        classes = KeyClasses.IconButton,
-                        icon = if (open) TetherIcons.EyeOff else TetherIcons.Eye,
-                        iconSize = 14.dp,
-                        contentDescription = if (open) ServerRowCopy.hide(row.label) else ServerRowCopy.reveal(row.label),
-                        modifier = Modifier.testTag(ServerSettingsTags.reveal(s)),
-                    )
-                }
-            }
         },
     )
 }
