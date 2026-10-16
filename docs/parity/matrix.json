@@ -1145,6 +1145,13 @@
   },
   {
    "kind": "client-msg",
+   "artifact": "handover-cancel",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
+   "android": "PARTIAL",
+   "task": "ta-9wdf"
+  },
+  {
+   "kind": "client-msg",
    "artifact": "queue-remove",
    "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
    "android": "PARTIAL",

@@ -930,6 +930,30 @@ interface TetherClient {
     /** v150: ticks once per refused `handover-request` (use-tether.ts handoverRefusalSeq), so a device can drop its local flag. */
     val handoverRefusals: SharedFlow<Unit> get() = NO_HANDOVER_REFUSALS
 
+    /**
+     * v151 (use-tether.ts requestHandover withSettings): "Hand over with different settings": `handover-request` with a
+     * create-shaped [successor] and a correlation [requestId]. Its refusal is the composer's, INLINE (no global toast)
+     * while the composer is open, and a "Couldn't hand over: ..." toast once [abandonHandoverRequest] says it closed.
+     * True when the frame went out; a failed send emits NO toast (the composer says so itself).
+     */
+    fun handoverRequestWithSettings(sessionId: String, requestId: String, successor: JsonObject): Boolean = false
+
+    /** v151: the composer that sent [requestId] was closed while it was pending: its later refusal now rides the toast. */
+    fun abandonHandoverRequest(requestId: String) {}
+
+    /**
+     * v151 (use-tether.ts cancelHandover): the operator's explicit "Stop handover" press, `handover-cancel` with
+     * [requestId]. Its refusal reads the STOP copy ([Handover.stopRefusalCopy]) in the toast, signals
+     * [handoverStopRefusals], and never [handoverRefusals]. True when the frame went out.
+     */
+    fun handoverCancel(sessionId: String, requestId: String): Boolean = false
+
+    /** v151: the source session id of each refused `handover-cancel` (use-tether.ts handoverStopRefusal). */
+    val handoverStopRefusals: SharedFlow<String> get() = NO_STOP_REFUSALS
+
+    /** v151: moves (never back) on every `ready` snapshot, one per connect (use-tether.ts snapshotSeq). */
+    val snapshotSeq: StateFlow<Long> get() = NO_LINK_EPOCH
+
     /** T8.5 (use-tether.ts:1906-1913): drop [sourceId]'s brief from [handoffBriefs]; client-side only. */
     fun clearHandoffBrief(sourceId: String) {}
 
@@ -1281,6 +1305,7 @@ data class WorkspaceSelectStatus(val cwd: String, val requestId: String, val pha
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
 private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)
 private val NO_HANDOVER_REFUSALS: SharedFlow<Unit> = MutableSharedFlow()
+private val NO_STOP_REFUSALS: SharedFlow<String> = MutableSharedFlow()
 private val NO_SERVER_PROTOCOL: StateFlow<Int?> = MutableStateFlow(null)
 private val NO_GIT_FILE_DIFFS: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = MutableStateFlow(emptyMap())
 private val NO_WORKTREE_DIFFS: StateFlow<Map<String, kotlinx.serialization.json.JsonObject?>> = MutableStateFlow(emptyMap())

@@ -66,6 +66,11 @@ data class AgentSession(
     /** v74 (T9.1, lib/protocol.ts AgentSession): the generic `acp` engine's agent id; absent for other providers. */
     val acpAgentId: String? = null,
     /**
+     * v84: the custom-providers registry id this session runs on (absent / null = the implicit default profile; `provider`
+     * stays the profile's `extends` value). The handover composer seeds its provider row from it (entryForSource).
+     */
+    val profileId: String? = null,
+    /**
      * v135 (issue #227 part 2): how this session came to exist — "console" | "api-requested" |
      * "api-agent" | "delegate" | "handoff" | "adopted", null on a manifest predating the field.
      * DISPLAY METADATA ONLY: nothing may branch an approval, consent, scope or lease on it. Raw so
@@ -81,7 +86,40 @@ data class AgentSession(
      * drops the session row; read it with [handoverBlockedCode].
      */
     val handoverBlockedReason: JsonElement? = null,
+    /**
+     * v151 (tether #273 part 2): where an underway handover is: "requested" | "scheduled" | "waiting_background";
+     * absent when nothing is underway. Raw so a malformed value never drops the session row; read it with
+     * [handoverStageCode].
+     */
+    val handoverStage: JsonElement? = null,
+    /**
+     * v100: Codex's reviewer, `"auto_review"` or null/absent (the third key of its sandbox / approvals / reviewer triple;
+     * the handover composer seeds from it). Raw so a malformed value never drops the session row; read it with
+     * [approvalsReviewerCode].
+     */
+    val approvalsReviewer: JsonElement? = null,
+    /** v151: the background tasks a "waiting_background" handover waits for (present only then). Read with [handoverBackgroundTaskCount]. */
+    val handoverBackgroundTasks: JsonElement? = null,
+    /** v151: the server's display hint for the successor's name (present only while eligible). Read with [handoverSuccessorHint]. */
+    val handoverSuccessorName: JsonElement? = null,
 ) {
+    /** [handoverStage] when it is a JSON string (the web's `typeof session.handoverStage === "string"`), else null. */
+    val handoverStageCode: String?
+        get() = (handoverStage as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+    /** [approvalsReviewer] when it is a JSON string, else null. */
+    val approvalsReviewerCode: String?
+        get() = (approvalsReviewer as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+    /** [handoverBackgroundTasks] when it is a finite JSON number (the web's Number.isFinite), truncated; else null. */
+    val handoverBackgroundTaskCount: Int?
+        get() = (handoverBackgroundTasks as? JsonPrimitive)?.takeIf { !it.isString }?.content?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() }?.toInt()
+
+    /** [handoverSuccessorName] when it is a JSON string (trim is the caller's), else null. */
+    val handoverSuccessorHint: String?
+        get() = (handoverSuccessorName as? JsonPrimitive)?.takeIf { it.isString }?.content
+
     /** [handoverBlockedReason] when it is a non-empty JSON string (an unknown future code is kept), else null. */
     val handoverBlockedCode: String?
         get() = (handoverBlockedReason as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }

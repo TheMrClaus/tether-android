@@ -1,6 +1,7 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.Attachment
+import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.WorktreeCreateRequest
 import com.tether.app.protocol.helpers.DraftForm
 import com.tether.app.protocol.tree.JsArr
@@ -70,6 +71,18 @@ data class DraftComposerState(
      * the operator's approval (the create is sent only on [DraftComposerModel.confirmSetup]).
      */
     val setupConfirmation: DraftSetupConfirmation? = null,
+    /**
+     * tth-wtl.3 (v151, use-draft-composer.ts `name`): the Session name field, in both modes. Lives with the draft: it
+     * survives closing and reopening the sheet, clears after a successful create, and is never saved to preferences.
+     * At most [Handover.NAME_MAX_LENGTH] characters ([DraftComposerModel.setName]).
+     */
+    val name: String = "",
+    /** The operator typed in [name] (an unedited handover name is the server's hint and is not sent). */
+    val nameEdited: Boolean = false,
+    /** The handover composer's state while it is open ([DraftComposerModel.openHandover]), else null. */
+    val handover: HandoverDraftState? = null,
+    /** Moves (never back) each time a handover request succeeded and closed the composer: the UI returns focus then. */
+    val handoverSucceeded: Long = 0,
 ) {
     /** The wire attachments of [staged], in order. */
     val attachments: List<Attachment> get() = staged.map { it.attachment }
@@ -82,6 +95,32 @@ data class DraftComposerState(
         "DraftComposerState(text=${text.length} chars, attachments=${staged.size}, creating=$creating, " +
             "error=${if (error.isEmpty()) "none" else "set"}, completed=$completed, entries=${entries.size})"
 }
+
+/**
+ * tth-wtl.3 (use-draft-composer.ts `handover`): the composer in handover mode for [sourceId]. [error] lives in
+ * [DraftComposerState.error] (the inline refusal line, assertive); [blockedLine] is the polite "changed while you were
+ * choosing" line, with the CTA disabled; [pending] is a request that has not been answered (the CTA reads "Handing over...").
+ */
+data class HandoverDraftState(
+    val sourceId: String,
+    val sourceName: String,
+    /** The server's `handoverSuccessorName` at open: the name field's seed and the helper line's text. */
+    val hint: String,
+    val pendingRequestId: String? = null,
+    /** The Codex "Current (custom)" Mode's raw triple, held beside the form; null when the provider has none. */
+    val codexCurrent: HandoverDraftForm.CodexCurrent? = null,
+    val blockedLine: String? = null,
+) {
+    val pending: Boolean get() = pendingRequestId != null
+
+    /** The "Current (custom)" row for the Codex Mode list (first and selectable), else null. */
+    val codexCurrentOption: HandoverDraftForm.CodexCurrentOption? get() = codexCurrent?.let(HandoverDraftForm::codexCurrentOption)
+
+    override fun toString(): String = "HandoverDraftState(pending=$pending, blocked=${blockedLine != null})"
+}
+
+/** What a handover submit became. */
+enum class HandoverSubmitResult { Sent, Blocked, Busy, NotReady, NotConnected, NotSupported, NotOpen }
 
 /** What the setup confirmation shows (use-draft-composer.ts DraftSetupConfirmation): the hooks, and the create they belong to. */
 data class DraftSetupConfirmation(
@@ -191,6 +230,10 @@ class DraftComposerModel(
      * selects it, only while [origin] is still the configured server (ta-2ew).
      */
     private val onSessionCreated: (sessionId: String, origin: String) -> Unit = { _, _ -> },
+    /** v151: a handover request went out from the composer: this device now holds a claim on [sourceId]. */
+    private val onHandoverRequested: (sourceId: String) -> Unit = {},
+    /** v151: the source took the request (its row shows a stage or `handoverPending`): the composer closed. */
+    private val onHandoverSucceeded: (sourceId: String) -> Unit = {},
 ) {
     private val _state = MutableStateFlow(DraftComposerState())
     val state: StateFlow<DraftComposerState> = _state.asStateFlow()
@@ -282,10 +325,17 @@ class DraftComposerModel(
         submitting = false
         inspect = null
         sourceFor = null
-        _state.update { s -> dropAttachments(s).let { DraftComposerState(completed = it.completed) } }
+        stash = null
+        handoverModels = emptyMap()
+        handoverSeed = null
+        handoverDropped = false
+        _state.update { s -> dropAttachments(s).let { DraftComposerState(completed = it.completed, handoverSucceeded = it.handoverSucceeded) } }
     }
 
     private fun persist(pick: (JsObj) -> JsObj) {
+        // B1 (use-draft-composer.ts persistPreferences): handover mode NEVER writes saved preferences; the source's
+        // settings must not become New Session's last-used.
+        if (_state.value.handover != null) return
         preferences = pick(preferences)
         prefsPending?.add(pick)
         val origin = prefsOrigin ?: return
@@ -309,7 +359,18 @@ class DraftComposerModel(
     }
 
     private fun entriesJs(): JsArr =
-        DraftForm.mergeCustomModelsIntoEntries(JsArr.of(entries.map { it.toDraftEntry() }), preferences["customModels"])
+        DraftForm.mergeCustomModelsIntoEntries(JsArr.of(entries.map { it.toDraftEntry() }), customModelsJs())
+
+    /** The saved custom model ids plus the handover composer's own (a source model the catalog lacks: listed, never saved). */
+    private fun customModelsJs(): JsValue? {
+        if (handoverModels.isEmpty()) return preferences["customModels"]
+        var merged = (preferences["customModels"] as? JsObj) ?: JsObj.EMPTY
+        for ((key, ids) in handoverModels) {
+            val have = ((merged[key] as? JsArr)?.toList() ?: emptyList()).filterIsInstance<JsStr>().map { it.value }
+            merged = merged.put(key, JsArr.of((have + ids.filter { it !in have }).map(::JsStr)))
+        }
+        return merged
+    }
 
     private fun entryJs(key: String): JsValue? = entriesJs().firstOrNull { (it as? JsObj)?.get("key") == JsStr(key) }
 
@@ -323,7 +384,7 @@ class DraftComposerModel(
     fun refresh() {
         val live = if (client.providerCatalogLive.value) client.providerCatalog.value else null
         entries = NewSessionGuard.draftEntries(live, client.providers.value)
-        val custom = CustomModelId.asMap(preferences["customModels"])
+        val custom = CustomModelId.asMap(customModelsJs())
         _state.update { it.copy(entries = mergeCustomModels(entries, custom), customModels = custom) }
         dispatch(
             JsObj.of(
@@ -419,7 +480,14 @@ class DraftComposerModel(
         val entry = entryJs(key) ?: return false
         if ((entry as? JsObj)?.get("status") == JsStr("unavailable")) return false
         dispatch(JsObj.of("type" to JsStr("SET_PROVIDER_FROM_USER"), "entry" to entry, "preferences" to preferences))
+        dropCodexCurrentOnKeyChange(key)
         return true
+    }
+
+    /** df:1019: a provider change drops the Codex "current" triple (it is the SOURCE row's); a pick of the same row keeps it. */
+    private fun dropCodexCurrentOnKeyChange(newKey: String) {
+        val handover = _state.value.handover ?: return
+        if (handover.codexCurrent != null && handoverSeed?.key != newKey) _state.update { it.copy(handover = handover.copy(codexCurrent = null)) }
     }
 
     /** use-draft-composer.ts selectModel. */
@@ -435,6 +503,7 @@ class DraftComposerModel(
         val entry = entryJs(key) ?: return
         if ((entry as? JsObj)?.get("status") == JsStr("unavailable")) return
         dispatch(JsObj.of("type" to JsStr("SET_PROVIDER_AND_MODEL_FROM_USER"), "entry" to entry, "modelId" to JsStr(modelId), "preferences" to preferences))
+        dropCodexCurrentOnKeyChange(key)
         persist { DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("model" to JsStr(modelId))) }
     }
 
@@ -586,13 +655,22 @@ class DraftComposerModel(
         val id = CustomModelId.normalize(modelId)
         val entry = _state.value.entries.firstOrNull { it.key == entryKey } ?: return false
         if (entry.models.any { it.value == id }) return false
-        persist { DraftForm.addCustomModelPref(it, JsStr(entryKey), JsStr(id)) as JsObj }
+        if (_state.value.handover != null) {
+            // Handover mode: a hand-added model lives only in this composer (use-draft-composer.ts handoverModels).
+            handoverModels = handoverModels + (entryKey to (handoverModels[entryKey].orEmpty() + id).distinct())
+        } else {
+            persist { DraftForm.addCustomModelPref(it, JsStr(entryKey), JsStr(id)) as JsObj }
+        }
         refresh()
         return true
     }
 
     fun removeCustomModel(entryKey: String, modelId: String) {
-        persist { DraftForm.removeCustomModelPref(it, JsStr(entryKey), JsStr(modelId)) as JsObj }
+        if (_state.value.handover != null) {
+            handoverModels = handoverModels.mapValues { (k, ids) -> if (k == entryKey) ids - modelId else ids }.filterValues { it.isNotEmpty() }
+        } else {
+            persist { DraftForm.removeCustomModelPref(it, JsStr(entryKey), JsStr(modelId)) as JsObj }
+        }
         refresh()
     }
 
@@ -602,6 +680,195 @@ class DraftComposerModel(
     private fun formKey(): String = (_state.value.form["key"] as? JsStr)?.value ?: ""
 
     private fun formStr(key: String): String = (_state.value.form[key] as? JsStr)?.value ?: ""
+
+    // ---------------------------------------------------------------------------------------------
+    // The Session name (tth-wtl.3) and handover mode (use-draft-composer.ts:171-186, 391-508)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * The Session name field (both modes): at most [Handover.NAME_MAX_LENGTH] characters (the web's maxLength, a pair is
+     * never split), marks the field edited. Ignored while a handover request is pending (the field is disabled then).
+     * Enter and the IME action never submit: this is the model's only entry point for the field.
+     */
+    fun setName(value: String) {
+        if (_state.value.handover?.pending == true) return
+        var v = value.take(Handover.NAME_MAX_LENGTH)
+        if (v.isNotEmpty() && v.length == Handover.NAME_MAX_LENGTH && Character.isHighSurrogate(v.last()) && value.length > v.length) v = v.dropLast(1)
+        _state.update { it.copy(name = v, nameEdited = true) }
+    }
+
+    /** What closing handover mode puts back (use-draft-composer.ts stashRef): the operator's normal draft, untouched. */
+    private class Stash(
+        val form: JsObj,
+        val modified: JsObj,
+        val text: String,
+        val name: String,
+        val nameEdited: Boolean,
+        val staged: List<StagedAttachment>,
+        val error: String,
+    )
+
+    private var stash: Stash? = null
+
+    /** A source model the catalog lacks, listed while the composer is open and never saved (use-draft-composer.ts handoverModels). */
+    private var handoverModels: Map<String, List<String>> = emptyMap()
+    private var handoverSeed: HandoverDraftForm.Seed? = null
+    private var handoverDropped = false
+    private var handoverDroppedAtSnapshot = 0L
+    private var handoverErrorSeq = 0L
+
+    /**
+     * use-draft-composer.ts openHandover: open the composer for a handover of [source]: stash the normal draft, seed
+     * EVERYTHING from the source (provider and profile, model, effort, Mode, folder; isolation off), and pre-fill the
+     * Session name with the server's hint. Nothing is sent, nothing is saved. False when the source's engine is not
+     * in the catalog (nothing to seed from: the dialog says so). Reopening while open re-seeds, keeping the first stash.
+     */
+    fun openHandover(source: AgentSession): Boolean {
+        val entry = Handover.entryForSource(_state.value.entries, source) ?: return false
+        val current = _state.value
+        if (current.handover == null) {
+            stash = Stash(current.form, current.modified, current.text, current.name, current.nameEdited, current.staged, current.error)
+        }
+        val seed = HandoverDraftForm.seedFromSource(entry, source)
+        handoverSeed = seed
+        handoverModels = seed.extraModel?.let { mapOf(seed.key to listOf(it)) } ?: emptyMap()
+        handoverDropped = false
+        handoverErrorSeq = 0L
+        val hint = source.handoverSuccessorHint.orEmpty()
+        // df:1095 SEED_FROM_SOURCE: every seeded field AND its userModified flag, so a later RESOLVE cannot overwrite any.
+        val form = DraftForm.INITIAL_DRAFT_FORM
+            .put("key", JsStr(seed.key)).put("model", JsStr(seed.model)).put("reasoningEffort", JsStr(seed.reasoningEffort))
+            .put("mode", JsStr(seed.mode)).put("autoMode", JsBool.FALSE).put("cwd", JsStr(seed.cwd)).put("useWorktree", JsBool.FALSE)
+        val modified = DraftForm.INITIAL_USER_MODIFIED
+            .with(
+                "key" to JsBool.TRUE, "model" to JsBool.TRUE, "reasoningEffort" to JsBool.TRUE, "mode" to JsBool.TRUE,
+                "autoMode" to JsBool.TRUE, "cwd" to JsBool.TRUE, "useWorktree" to JsBool.TRUE,
+            )
+        val opened = HandoverDraftState(source.id, source.name, hint, codexCurrent = seed.codexCurrent)
+        val blocked = blockedLineFor(opened, client.sessions.value.ifEmpty { listOf(source) })
+        _state.update { s ->
+            dropAttachments(s).copy(
+                form = form, modified = modified, text = "", name = hint, nameEdited = false, error = "",
+                handover = opened.copy(blockedLine = blocked),
+            )
+        }
+        refresh()
+        reconcileWorktree()
+        reconcileSetupCheck()
+        return true
+    }
+
+    /**
+     * use-draft-composer.ts closeHandover: leave handover mode, nothing sent (or the request already settled), the
+     * normal draft back. Closing while a request is pending leaves it OUTSTANDING: its later refusal is a toast
+     * ([TetherClient.abandonHandoverRequest]). A no-op outside handover mode.
+     */
+    fun closeHandover() {
+        val h = _state.value.handover ?: return
+        h.pendingRequestId?.let(client::abandonHandoverRequest)
+        val back = stash
+        stash = null
+        handoverModels = emptyMap()
+        handoverSeed = null
+        handoverDropped = false
+        _state.update { s ->
+            val base = dropAttachments(s).copy(handover = null)
+            if (back == null) base
+            else base.copy(form = back.form, modified = back.modified, text = back.text, name = back.name, nameEdited = back.nameEdited, staged = back.staged, error = back.error)
+        }
+        refresh()
+        reconcileWorktree()
+        reconcileSetupCheck()
+    }
+
+    /** The source row's blocking code while the composer is open (hu:240, D11): disable with a reason, never auto-close. */
+    private fun blockedLineFor(h: HandoverDraftState, sessions: List<AgentSession>): String? {
+        val source = sessions.firstOrNull { it.id == h.sourceId } ?: return Handover.blockedCopy(h.sourceName, "unknown_session")
+        if (h.pending && source.handoverPending) return null
+        val code = Handover.rowCode(source) ?: return null
+        val successor = if (code == "already_handed_off") sessions.firstOrNull { it.id == source.handedOffTo }?.name?.let(LabelText::label) else null
+        return Handover.blockedCopy(h.sourceName, code, successor)
+    }
+
+    /**
+     * The session list changed (or a snapshot landed): in handover mode, (1) a pending request whose source row now
+     * shows `handoverPending` or a `handoverStage` SUCCEEDED: the composer closes and [onHandoverSucceeded] fires;
+     * (2) a reconnect while pending reconciles only from a snapshot NEWER than the drop: the source underway = success
+     * (1), otherwise the composer is editable again with no error; (3) the blocked line follows the source's eligibility.
+     */
+    fun onSessions(sessions: List<AgentSession>) {
+        val h = _state.value.handover ?: return
+        val source = sessions.firstOrNull { it.id == h.sourceId }
+        if (h.pending && source != null && Handover.underway(source)) {
+            val id = h.sourceId
+            _state.update { it.copy(handover = h.copy(pendingRequestId = null), handoverSucceeded = it.handoverSucceeded + 1) }
+            closeHandover()
+            onHandoverSucceeded(id)
+            return
+        }
+        var next = h
+        if (h.pending && handoverDropped && client.snapshotSeq.value > handoverDroppedAtSnapshot) {
+            handoverDropped = false
+            next = next.copy(pendingRequestId = null)
+        }
+        next = next.copy(blockedLine = blockedLineFor(next, sessions))
+        if (next != h) _state.update { it.copy(handover = next) }
+    }
+
+    /**
+     * use-draft-composer.ts submitHandover: ask the server to hand [HandoverDraftState.sourceId] over with the form's
+     * settings (`handover-request` + `successor` + a fresh requestId; the current lead writes the first message, there
+     * is no prompt). Success is the source row changing ([onSessions]); a refusal echoing our requestId is inline
+     * ([onHandoverError]), the composer staying open with every value kept.
+     */
+    fun submitHandover(): HandoverSubmitResult {
+        val h = _state.value.handover ?: return HandoverSubmitResult.NotOpen
+        if (h.pending) return HandoverSubmitResult.Busy
+        if (h.blockedLine != null) return HandoverSubmitResult.Blocked
+        // A v150 server silently drops `successor` and would hand over "as is" with the wrong settings.
+        if (!Handover.v151(client.serverProtocolVersion.value)) {
+            _state.update { it.copy(error = Handover.GENERIC_REASON) }
+            return HandoverSubmitResult.NotSupported
+        }
+        val entry = entryForKey(formKey())
+        if (entry == null || entry.status == "unavailable") {
+            _state.update { it.copy(error = Handover.SUBMIT_NEED_PROVIDER) }
+            return HandoverSubmitResult.NotReady
+        }
+        if (formStr("cwd").isBlank()) {
+            _state.update { it.copy(error = Handover.SUBMIT_NEED_CWD) }
+            return HandoverSubmitResult.NotReady
+        }
+        val seed = handoverSeed
+        val s = _state.value
+        val requestId = newRequestId()
+        val successor = HandoverDraftForm.buildSuccessor(
+            s.form, entry, seed?.model.orEmpty(), seed?.reasoningEffort.orEmpty(), h.codexCurrent, s.name, s.nameEdited,
+        )
+        val errorSeq = client.createErrors.value?.seq ?: 0L
+        if (!client.handoverRequestWithSettings(h.sourceId, requestId, successor)) {
+            _state.update { it.copy(error = Handover.SUBMIT_RECONNECTING) }
+            return HandoverSubmitResult.NotConnected
+        }
+        handoverErrorSeq = errorSeq
+        handoverDropped = false
+        _state.update { it.copy(error = "", handover = h.copy(pendingRequestId = requestId)) }
+        onHandoverRequested(h.sourceId)
+        return HandoverSubmitResult.Sent
+    }
+
+    /**
+     * An `error` frame that echoes OUR pending requestId (use-draft-composer.ts:447-456): the composer STAYS open with
+     * every value kept, the CTA live again, and the reason inline (never a toast; the client routed it that way).
+     */
+    private fun onHandoverError(reply: CreateErrorReply): Boolean {
+        val h = _state.value.handover ?: return false
+        val pendingId = h.pendingRequestId ?: return false
+        if (reply.requestId != pendingId || reply.seq <= handoverErrorSeq || reply.message.isEmpty()) return false
+        val copy = Handover.refusalCopy(Handover.parseRefusal(reply.message)?.code)
+        _state.update { it.copy(error = copy, handover = h.copy(pendingRequestId = null)) }
+        return true
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Readiness and submit (use-draft-composer.ts:266-368)
@@ -629,7 +896,8 @@ class DraftComposerModel(
      * for; null: drawn with no server recorded, ta-coik.69: it goes to the live socket's server). One attempt, one fresh requestId; never retried.
      */
     fun submit(expectedOrigin: String?, requirePrompt: Boolean = true): DraftSubmitResult {
-        if (_state.value.creating || submitting || setupCheck != null) return DraftSubmitResult.Busy
+        // Handover mode never creates: its one submit is [submitHandover].
+        if (_state.value.creating || submitting || setupCheck != null || _state.value.handover != null) return DraftSubmitResult.Busy
         val reason = readiness(requirePrompt)
         if (reason.isNotEmpty()) {
             _state.update { it.copy(error = reason) }
@@ -670,7 +938,9 @@ class DraftComposerModel(
         submitting = true
         pending = created
         _state.update { it.copy(creating = true, error = "") }
-        val request = NewSessionRequest(NewSessionChoice(entry.key, entry.provider, entry.profileId), s.form, s.modified, requestId, epoch, setupConsent)
+        // v151 (use-draft-composer.ts:628): the Session name rides only on a server that names the session from it.
+        val name = s.name.takeIf { Handover.v151(client.serverProtocolVersion.value) }
+        val request = NewSessionRequest(NewSessionChoice(entry.key, entry.provider, entry.profileId), s.form, s.modified, requestId, epoch, setupConsent, name)
         val result = try {
             client.createNewSession(request, expectedOrigin)
         } finally {
@@ -902,6 +1172,8 @@ class DraftComposerModel(
 
     private fun complete(p: PendingCreate, reply: CreatedReply): String {
         settle(p)
+        // use-draft-composer.ts:779-830: the name clears after a create, whichever way its first message went.
+        _state.update { it.copy(name = "", nameEdited = false) }
         val sessionId = reply.session.id
         when {
             p.prompt.isEmpty() && p.attachments.isEmpty() ->
@@ -975,6 +1247,7 @@ class DraftComposerModel(
      * in-flight create ([answers]); true when it did.
      */
     fun onCreateError(reply: CreateErrorReply): Boolean {
+        if (onHandoverError(reply)) return true
         // ta-m7ef (use-draft-composer.ts setupCheckErrorApplies): a refusal of the setup check itself ends it.
         setupCheck?.let { check ->
             if (SetupConsentSteps.errorEndsCheck(check.phase == SetupPhase.Checking, check.inspectRequestId, check.errorSeq, reply)) {
@@ -1023,6 +1296,13 @@ class DraftComposerModel(
      * session is never reported as not created; its first message is then the new session's draft).
      */
     fun onLink(connection: ConnectionState, linkEpoch: Long) {
+        // Reconnect while a handover request is pending (use-draft-composer.ts:458-472): reconcile from the next snapshot.
+        _state.value.handover?.let { h ->
+            if (h.pending && connection != ConnectionState.Connected && !handoverDropped) {
+                handoverDropped = true
+                handoverDroppedAtSnapshot = client.snapshotSeq.value
+            }
+        }
         // ta-23f: a question or answer from another socket no longer stands.
         inspect?.let { if (it.epoch != linkEpoch) inspect = null }
         sourceFor?.let { if (it.epoch != linkEpoch) dropSource() }

@@ -719,6 +719,8 @@ class RealTetherClient(
     override val eventLog: StateFlow<EventLog> = eventLogState
     override val nodeResult: StateFlow<NodeActionResult?> = nodeResultState
     // T10.3: the console's own protocol version (its `ready`), for the Nodes panel's skew warning.
+    private val snapshotSeqState = MutableStateFlow(0L)
+    override val snapshotSeq: StateFlow<Long> = snapshotSeqState
     private val serverProtocolVersionState = MutableStateFlow<Int?>(null)
     override val serverProtocolVersion: StateFlow<Int?> = serverProtocolVersionState
     override val signedOutReason: StateFlow<SignedOutReason?> = signedOutReasonState
@@ -3589,8 +3591,27 @@ class RealTetherClient(
                 // requestId also ends that request.
                 // v150 (#273, use-tether.ts:1241-1250): a handover refusal reads as its operator sentence, and
                 // signals the device to drop its requested flag; every other error stays verbatim.
-                val reading = Handover.readError(message.message, handoverRequestedAt, clock())
-                if (emitServerErrorIfCurrent(webSocket, reading.text) && reading.refusal) handoverRefusalsFlow.tryEmit(Unit)
+                // v151 (use-tether.ts:1247-1265, wave-check W34 #2): a requestId this client sent routes FIRST:
+                // (i) a Stop's refusal reads the stop copy and keeps the claims; (ii) an abandoned composer's reads
+                // "Couldn't hand over: ..." and drops the claim; (iii) a live composer's is inline only (no toast) and
+                // drops the claim; (iv) anything else is the v150 reading.
+                val route = message.requestId?.let(::takeHandoverRoute)
+                val refusalCode = Handover.parseRefusal(message.message)?.code
+                when (route) {
+                    is HandoverRoute.Stop -> {
+                        emitServerErrorIfCurrent(webSocket, Handover.stopRefusalCopy(refusalCode))
+                        handoverStopRefusalsFlow.tryEmit(route.sessionId)
+                    }
+                    HandoverRoute.Abandoned -> {
+                        emitServerErrorIfCurrent(webSocket, Handover.refusalCopy(refusalCode))
+                        handoverRefusalsFlow.tryEmit(Unit)
+                    }
+                    HandoverRoute.Composer -> handoverRefusalsFlow.tryEmit(Unit)
+                    null -> {
+                        val reading = Handover.readError(message.message, handoverRequestedAt, clock(), Handover.v151(serverProtocolVersionState.value))
+                        if (emitServerErrorIfCurrent(webSocket, reading.text) && reading.refusal) handoverRefusalsFlow.tryEmit(Unit)
+                    }
+                }
                 // ta-8cv: use-tether.ts:1201 setCreateError — every error, with its echo; the draft
                 // composer acts only on the one that names its in-flight create.
                 var errorReply: CreateErrorReply? = null
@@ -3741,6 +3762,8 @@ class RealTetherClient(
             if (socket !== webSocket) return
             // Published under the same check: a late ready of a socket let go
             // (another server's) can never show its sessions.
+            // Moved BEFORE the list so a collector that sees the new list always reads the new count.
+            snapshotSeqState.value += 1
             sessionsState.value = message.sessions.sortedByDescending { it.updatedAt }
             listedSessionIds.clear()
             message.sessions.mapTo(listedSessionIds) { it.id }
@@ -5583,6 +5606,62 @@ class RealTetherClient(
         return sent
     }
 
+    /** What a refusal's echoed requestId was sent for (use-tether.ts handoverComposerRequestIdsRef and its two siblings). */
+    private sealed interface HandoverRoute {
+        data class Stop(val sessionId: String) : HandoverRoute
+        data object Abandoned : HandoverRoute
+        data object Composer : HandoverRoute
+    }
+
+    private val handoverComposerIds = LinkedHashSet<String>()
+    private val handoverAbandonedIds = LinkedHashSet<String>()
+    private val handoverStopIds = LinkedHashMap<String, String>()
+    private val handoverStopRefusalsFlow = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    override val handoverStopRefusals: SharedFlow<String> = handoverStopRefusalsFlow
+
+    /** Bounded: a successful request's id is never echoed, so the sets would otherwise only grow. */
+    private fun <T> MutableCollection<T>.boundedAdd(value: T) {
+        add(value)
+        while (size > HANDOVER_ID_CAP) remove(first())
+    }
+
+    /** use-tether.ts:1264-1266 in the web's order: the composer id is consumed first, then the stop map, then the abandoned set. */
+    private fun takeHandoverRoute(requestId: String): HandoverRoute? = synchronized(handoverIdLock) {
+        val composer = handoverComposerIds.remove(requestId)
+        val stop = handoverStopIds.remove(requestId)
+        val abandoned = handoverAbandonedIds.remove(requestId)
+        when {
+            stop != null -> HandoverRoute.Stop(stop)
+            abandoned -> HandoverRoute.Abandoned
+            composer -> HandoverRoute.Composer
+            else -> null
+        }
+    }
+
+    private val handoverIdLock = Any()
+
+    override fun handoverRequestWithSettings(sessionId: String, requestId: String, successor: JsonObject): Boolean {
+        val sent = sendFrame(ClientMessage.HandoverRequest(sessionId, successor, requestId))
+        if (sent) {
+            handoverRequestedAt = clock()
+            synchronized(handoverIdLock) { handoverComposerIds.boundedAdd(requestId) }
+        }
+        return sent
+    }
+
+    override fun abandonHandoverRequest(requestId: String) {
+        synchronized(handoverIdLock) { if (handoverComposerIds.remove(requestId)) handoverAbandonedIds.boundedAdd(requestId) }
+    }
+
+    override fun handoverCancel(sessionId: String, requestId: String): Boolean {
+        val sent = sendFrame(ClientMessage.HandoverCancel(sessionId, requestId))
+        if (sent) synchronized(handoverIdLock) {
+            handoverStopIds[requestId] = sessionId
+            while (handoverStopIds.size > HANDOVER_ID_CAP) handoverStopIds.remove(handoverStopIds.keys.first())
+        } else emitError(LINK_RECONNECTING)
+        return sent
+    }
+
     override fun handoff(sourceId: String, targetId: String, engineText: String): Boolean =
         sendFrame(ClientMessage.Handoff(sourceId, targetId, engineText)).also { sent -> if (!sent) emitError(LINK_RECONNECTING) }
 
@@ -6192,3 +6271,6 @@ class RealTetherClient(
     private fun parseJsonField(response: Response, field: String): String? =
         parseJsonObject(response)?.get(field)?.jsonPrimitive?.content
 }
+
+/** v151: how many handover requestIds the client remembers for refusal routing (a successful request is never echoed). */
+private const val HANDOVER_ID_CAP = 64

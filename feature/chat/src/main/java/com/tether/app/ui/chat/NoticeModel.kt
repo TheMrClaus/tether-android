@@ -80,6 +80,16 @@ private val HANDOVER_NOTICE_WORDS = mapOf(
 internal const val HANDOVER_NOTICE_GENERIC = "The handover did not complete as planned."
 
 /**
+ * v151 (hu:292-309, ta-9wdf §4.4): the words that CHANGE on a server at protocol >= 151 ([com.tether.app.client.Handover.v151]).
+ * An operator's Stop is its own notice code, and a held row now flushes on the source after any end, so "nothing more will be
+ * sent" would be false. Keyed on the code alone, never the level. Below 151 the W33 words above stay byte for byte.
+ */
+private val HANDOVER_NOTICE_WORDS_V151 = mapOf(
+    "handover_cancelled" to "The handover could not continue and has ended. Nothing was sent to a new session; waiting messages run here.",
+    "handover_operator_stopped" to "You stopped the handover. Nothing was sent.",
+)
+
+/**
  * lib/handover-ui.mjs handoverNoticeView: null for a notice that is not a handover one (render as usual); the quiet
  * success codes are hidden (the banners carry that state); any other `handover_*` code reads as ONE plain line.
  */
@@ -88,20 +98,21 @@ internal sealed interface HandoverNoticeView {
     data class Words(val text: String) : HandoverNoticeView
 }
 
-internal fun handoverNoticeView(code: String?): HandoverNoticeView? {
+internal fun handoverNoticeView(code: String?, v151: Boolean = false): HandoverNoticeView? {
     if (code == null || !code.startsWith("handover_")) return null
     if (code in HANDOVER_NOTICE_QUIET) return HandoverNoticeView.Hide
-    return HandoverNoticeView.Words(HANDOVER_NOTICE_WORDS[code] ?: HANDOVER_NOTICE_GENERIC)
+    val words = (if (v151) HANDOVER_NOTICE_WORDS_V151[code] else null) ?: HANDOVER_NOTICE_WORDS[code]
+    return HandoverNoticeView.Words(words ?: HANDOVER_NOTICE_GENERIC)
 }
 
 /** A `providerNotices` list (session- or turn-scoped), in order; rows without an id or message are skipped. */
-fun providerNotices(list: JsValue?, providerLabel: String): List<ProviderNoticeView> =
+fun providerNotices(list: JsValue?, providerLabel: String, v151: Boolean = false): List<ProviderNoticeView> =
     (list as? JsArr)?.mapNotNull { item ->
         val o = item as? JsObj ?: return@mapNotNull null
         val id = o["noticeId"].str()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
         val message = LabelText.clean(o["message"].str(), NOTICE_BODY_MAX)
         val level = o["level"].str().takeIf { it == "info" || it == "error" } ?: "warning"
-        when (val handover = handoverNoticeView(o["code"].str())) {
+        when (val handover = handoverNoticeView(o["code"].str(), v151)) {
             HandoverNoticeView.Hide -> return@mapNotNull null
             is HandoverNoticeView.Words ->
                 return@mapNotNull ProviderNoticeView(id, level, HANDOVER_NOTICE_HEADING, handover.text, dismissKeyOf(o["dismissKey"]))

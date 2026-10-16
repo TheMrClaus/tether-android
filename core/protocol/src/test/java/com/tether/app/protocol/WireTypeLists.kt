@@ -31,7 +31,7 @@ object WireTypeLists {
         "acp-agents", "advanced-settings", "approval", "archive", "archive-inspect", "archive-stale", "attach", "background-command",
         "browse", "change-request", "codex-control-action", "codex-controls", "create",
         "create-folder", "detect-engines", "discover", "dismiss-notice", "fetch-turns",
-        "git-diff-file", "global-search", "handoff", "handoff-brief", "handover-request", "hello", "interrupt", "kill",
+        "git-diff-file", "global-search", "handoff", "handoff-brief", "handover-cancel", "handover-request", "hello", "interrupt", "kill",
         "mark-seen", "metadata-draft-request", "node-add", "node-probe", "node-remove",
         "opencode-control-action", "opencode-controls", "pin", "ping", "providers",
         "providers-snapshot", "question", "queue-add", "queue-edit", "queue-remove",
@@ -47,5 +47,5 @@ object WireTypeLists {
 
     /** Types added after PARITY_BASE (887c222): not in matrix.json until the matrix is rebuilt at a newer base. */
     val SINCE_PARITY_BASE_SERVER: Set<String> = setOf("archive-preview", "archive-stale-result")
-    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("archive-inspect", "archive-stale", "handover-request")
+    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("archive-inspect", "archive-stale", "handover-request", "handover-cancel")
 }

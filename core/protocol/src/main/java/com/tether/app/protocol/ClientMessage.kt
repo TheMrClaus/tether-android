@@ -747,11 +747,39 @@ sealed interface ClientMessage {
     }
 
     /**
-     * v150 (tether #273): the operator's "Hand over to a new lead". `{ type, sessionId }` ONLY: the server owns the
-     * instruction text and strips extra keys. Owner-grade principals only; a refusal is an `error` frame "<code>: detail".
+     * v150 (tether #273): the operator's "Hand over to a new lead". As it is: `{ type, sessionId }` ONLY, byte for byte
+     * (the server owns the instruction text and strips extra keys). v151 (#273 part 2, "different settings"): the same
+     * frame with a create-shaped [successor] (a JSON object, built key for key by the web's buildHandoverSuccessor: an
+     * ABSENT key inherits the source's value, an explicit null is a choice) and a [requestId] the refusal echoes.
+     * Owner-grade principals only; a refusal is an `error` frame "<code>: detail". A v150 server silently drops
+     * `successor`, so the client sends it only to a server at protocol >= 151.
      */
-    data class HandoverRequest(val sessionId: String) : ClientMessage {
-        override fun toJsonObject() = frame("handover-request") { put("sessionId", sessionId) }
+    data class HandoverRequest(
+        val sessionId: String,
+        val successor: kotlinx.serialization.json.JsonObject? = null,
+        val requestId: String? = null,
+    ) : ClientMessage {
+        override fun toJsonObject() = frame("handover-request") {
+            put("sessionId", sessionId)
+            opt("requestId", requestId)
+            if (successor != null) put("successor", successor)
+        }
+
+        /** The successor carries the folder, profile and name: redacted like [Create]. */
+        override fun toString(): String =
+            "HandoverRequest(sessionId=$sessionId, successor=${if (successor == null) "none" else "***"}, requestId=$requestId)"
+    }
+
+    /**
+     * v151 (tether #273 part 2): the operator's explicit "Stop handover" press, the ONLY sender of this frame.
+     * `{ type, sessionId, requestId? }`; success has no reply (the session row loses its handover stage), a refusal is
+     * an `error` frame "<code>: detail" echoing [requestId]. Owner-grade only. Unknown to a v150 server.
+     */
+    data class HandoverCancel(val sessionId: String, val requestId: String? = null) : ClientMessage {
+        override fun toJsonObject() = frame("handover-cancel") {
+            put("sessionId", sessionId)
+            opt("requestId", requestId)
+        }
     }
 
     companion object {
@@ -1110,7 +1138,10 @@ private object ClientDecoders {
         "stop-command" to { r -> ClientMessage.StopCommand(r.str("sessionId"), r.str("commandId")) },
         "queue-add" to { r -> ClientMessage.QueueAdd(r.str("sessionId"), r.str("queueId"), r.str("text")) },
         "queue-edit" to { r -> ClientMessage.QueueEdit(r.str("sessionId"), r.str("queueId"), r.str("text")) },
-        "handover-request" to { r -> ClientMessage.HandoverRequest(r.str("sessionId")) },
+        "handover-request" to { r ->
+            ClientMessage.HandoverRequest(r.str("sessionId"), r.o.obj("successor"), r.o.str("requestId"))
+        },
+        "handover-cancel" to { r -> ClientMessage.HandoverCancel(r.str("sessionId"), r.o.str("requestId")) },
         "queue-remove" to { r -> ClientMessage.QueueRemove(r.str("sessionId"), r.str("queueId")) },
         "interrupt" to { r -> ClientMessage.Interrupt(r.str("sessionId")) },
         "dismiss-notice" to { r -> ClientMessage.DismissNotice(r.str("sessionId"), r.str("dismissKey")) },

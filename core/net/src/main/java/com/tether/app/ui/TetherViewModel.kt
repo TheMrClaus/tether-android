@@ -20,6 +20,7 @@ import com.tether.app.client.isWarning
 import com.tether.app.client.serverOrigin
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.model.AgentSession
+import java.util.UUID
 import com.tether.app.protocol.model.HistorySession
 import com.tether.app.ui.prefs.DraftStore
 import com.tether.app.ui.prefs.InMemoryDraftStore
@@ -150,6 +151,8 @@ class TetherViewModel(
         currentWorkspace = { _currentWorkspace.value },
         saveSessionDraft = { origin, sessionId, text -> saveSessionDraft(origin, sessionId, text) },
         onSessionCreated = { sessionId, origin -> onOwnCreate(sessionId, origin) },
+        onHandoverRequested = { sourceId -> handoverClaims.add(sourceId) },
+        onHandoverSucceeded = { hideDraft() },
     )
 
     /**
@@ -188,8 +191,26 @@ class TetherViewModel(
         _draftOpen.value = true
     }
 
+    /**
+     * v151 (dashboard.tsx:1321-1338): "Change settings..." of the Hand over dialog: raise the New Session sheet in
+     * handover mode for [sourceId]. False (nothing opened) when the source is not listed, the server is below
+     * protocol 151 (it would silently drop `successor`), or the source's engine is not in the catalog
+     * ([Handover.canChangeSettings]: the dialog then says so and stays open).
+     */
+    fun openHandoverDraft(sourceId: String): Boolean {
+        if (!Handover.v151(client.serverProtocolVersion.value)) return false
+        val source = client.sessions.value.firstOrNull { it.id == sourceId } ?: return false
+        draftComposer.setTakeover(null)
+        if (!draftComposer.openHandover(source)) return false
+        _draftOpen.value = true
+        return true
+    }
+
     /** Every way the sheet goes (close, a selection, a resume, a `created`, another server, sign-out). */
     private fun hideDraft() {
+        // v151: however the sheet goes, handover mode ends with it (the normal draft is put back; a pending request
+        // stays outstanding and a later refusal rides the toast).
+        draftComposer.closeHandover()
         // ta-m7ef (dashboard.tsx 1bf4a465 :334-340): however the sheet goes away, a pending setup check or
         // confirmation goes with it: reopening must never show an approval the operator walked away from.
         draftComposer.cancelSetup()
@@ -442,10 +463,79 @@ class TetherViewModel(
         return true
     }
 
+    /** v151: the source ids whose `handover-cancel` this device sent and the server has not echoed ("Stopping handover..."). */
+    private val _handoverStopping = MutableStateFlow<Set<String>>(emptySet())
+    val handoverStopping: StateFlow<Set<String>> = _handoverStopping.asStateFlow()
+
+    /** The stopping ids whose stage the server has shown since the press (handoverStoppingSeenRef). */
+    private val stoppingSeen = mutableSetOf<String>()
+
+    /**
+     * v151 (dashboard.tsx:1301-1306): the operator's explicit "Stop handover" press, the ONLY sender of `handover-cancel`.
+     * No confirm. The row and strip read "Stopping..." until the server echoes. False (nothing sent) below protocol 151
+     * or when the link cannot take it (a failed send sets no flag).
+     */
+    fun stopHandover(sessionId: String): Boolean {
+        if (!Handover.v151(client.serverProtocolVersion.value)) return false
+        if (!client.handoverCancel(sessionId, UUID.randomUUID().toString())) return false
+        _handoverStopping.value = _handoverStopping.value + sessionId
+        return true
+    }
+
+    /**
+     * dashboard.tsx:1350-1382: the stopping flag clears (a) once the stage has appeared and then gone, or the session
+     * is gone; (b) on a refusal of that stop; (c) on every snapshot (SF-1: a stop can be lost to a socket drop, and a
+     * stage that is still present reads as a live "Stop handover" again).
+     */
+    private fun onStoppingSessions(sessions: List<AgentSession>) {
+        val stopping = _handoverStopping.value
+        if (stopping.isEmpty()) return
+        val done = mutableSetOf<String>()
+        for (id in stopping) {
+            val row = sessions.firstOrNull { it.id == id }
+            if (row == null) { done += id; continue }
+            if (Handover.underway(row)) stoppingSeen += id else if (id in stoppingSeen) done += id
+        }
+        if (done.isNotEmpty()) {
+            stoppingSeen -= done
+            _handoverStopping.value = stopping - done
+        }
+    }
+
+    private fun clearStopping(ids: Collection<String>?) {
+        if (ids == null) { stoppingSeen.clear(); _handoverStopping.value = emptySet(); return }
+        stoppingSeen -= ids.toSet()
+        _handoverStopping.value = _handoverStopping.value - ids.toSet()
+    }
+
     /** The session menu's Hand over row for [sessionId] (null while it is not listed), live. */
     fun handoverMenuState(sessionId: String): kotlinx.coroutines.flow.Flow<Handover.MenuState?> =
-        combine(client.sessions, handoverClaims.requested, client.serverProtocolVersion) { sessions, requested, protocol ->
-            sessions.firstOrNull { it.id == sessionId }?.let { Handover.menuState(it, sessionId in requested, sessions, protocol) }
+        combine(client.sessions, handoverClaims.requested, client.serverProtocolVersion, _handoverStopping, client.projections) { sessions, requested, protocol, stopping, projections ->
+            val projection = projections[sessionId]
+            sessions.firstOrNull { it.id == sessionId }?.let {
+                Handover.menuState(
+                    it, sessionId in requested, sessions, protocol,
+                    stopping = sessionId in stopping,
+                    hasInstructionRow = projection?.queuedMessages?.any { m -> m.isHandoverRequest } == true,
+                    turnRunning = projection?.activeTurnId != null,
+                )
+            }
+        }.distinctUntilChanged()
+
+    /**
+     * What the strip above the composer says for [sessionId] (null = nothing underway): the v151 stage line
+     * ([Handover.handoverStageView]) on a server at protocol >= 151, else the W33 pending notice exactly as shipped.
+     * Replaces [handoverUnderWay] (B2 wires it).
+     */
+    fun handoverStrip(sessionId: String): kotlinx.coroutines.flow.Flow<Handover.Strip?> =
+        combine(client.sessions, handoverClaims.requested, client.serverProtocolVersion, _handoverStopping, client.projections) { sessions, requested, protocol, stopping, projections ->
+            val projection = projections[sessionId]
+            Handover.strip(
+                sessions.firstOrNull { it.id == sessionId }, sessionId in requested, protocol,
+                stopping = sessionId in stopping,
+                hasInstructionRow = projection?.queuedMessages?.any { m -> m.isHandoverRequest } == true,
+                turnRunning = projection?.activeTurnId != null,
+            )
         }.distinctUntilChanged()
 
     /** The "Handover under way" banner: asked here (not yet settled) or the server's own `handoverPending`, and not yet handed off. */
@@ -476,6 +566,23 @@ class TetherViewModel(
         }
         viewModelScope.launch {
             client.handoverRefusals.collect { handoverClaims.onRefusal(client.sessions.value) }
+        }
+        viewModelScope.launch {
+            client.handoverStopRefusals.collect { id -> clearStopping(listOf(id)) }
+        }
+        viewModelScope.launch {
+            client.sessions.collect { sessions ->
+                onStoppingSessions(sessions)
+                draftComposer.onSessions(sessions)
+            }
+        }
+        viewModelScope.launch {
+            // Every snapshot (one per connect) is authoritative: the local stopping flag goes, and a handover composer
+            // reconciles a request that was pending across the drop.
+            client.snapshotSeq.collect {
+                clearStopping(null)
+                draftComposer.onSessions(client.sessions.value)
+            }
         }
         viewModelScope.launch {
             client.configured.collect { configured -> if (!configured) handoverClaims.clear() }

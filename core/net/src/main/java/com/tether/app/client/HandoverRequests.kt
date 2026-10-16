@@ -45,7 +45,9 @@ class HandoverRequests {
         for (id in _requested.value) {
             val row = sessions.firstOrNull { it.id == id }
             if (row == null) { settled += id; continue }
-            if (row.handoverPending) seenPending += id
+            // v151: a server stage counts like handoverPending (a "requested" handover has a stage, no pending yet), so a
+            // Stop from that stage settles the claim instead of leaving the local "requested" flag stuck.
+            if (row.handoverPending || row.handoverStageCode != null) seenPending += id
             else if (id in seenPending && row.handedOffTo == null) { seenPending -= id; settled += id }
         }
         drop(settled)
@@ -53,7 +55,7 @@ class HandoverRequests {
 
     /** A refusal: drop every claim the server never echoed (its `handoverPending` is not set). */
     fun onRefusal(sessions: List<AgentSession>) {
-        drop(_requested.value.filter { id -> sessions.firstOrNull { it.id == id }?.handoverPending != true })
+        drop(_requested.value.filter { id -> sessions.firstOrNull { it.id == id }?.let { it.handoverPending || it.handoverStageCode != null } != true })
     }
 
     /**

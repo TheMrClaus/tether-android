@@ -32,6 +32,7 @@ import com.tether.app.protocol.tree.JsStr
  *   ([WorktreeDraft.request]: the web's builder as it is; [NewSessionGuard.resolve] then refuses an
  *   isolated create with no block at all, which the server would take for a default new branch).
  * - `profileId` only for a profile row.
+ * - `name` (v151) only when non-empty after trim.
  * - `model` / `reasoningEffort` only when the operator picked them in THIS draft (userModified) and
  *   they are non-empty: a display pre-selection is never pinned.
  *
@@ -47,7 +48,7 @@ object CreateFrame {
     /** use-draft-composer.ts: the cold-start / non-mode providers' permissionMode. */
     const val DEFAULT_PERMISSION_MODE = DraftForm.CLAUDE_DEFAULT_PERMISSION_MODE
 
-    fun build(form: JsObj, entry: ProviderCatalogEntry, modified: JsObj, requestId: String): ClientMessage.Create {
+    fun build(form: JsObj, entry: ProviderCatalogEntry, modified: JsObj, requestId: String, name: String? = null): ClientMessage.Create {
         val provider = entry.provider
         val isClaude = provider == "claude"
         val isCodex = provider == "codex"
@@ -78,6 +79,9 @@ object CreateFrame {
             useWorktree = form["useWorktree"] == JsBool.TRUE,
             worktree = worktree,
             profileId = entry.profileId?.takeIf { it.isNotEmpty() },
+            // tth-wtl.3 (D8, use-draft-composer.ts:628): the Session name, only when non-empty after trim; empty is
+            // auto-named exactly as today. The caller passes it only on a v151 server (Handover.v151).
+            name = name?.trim()?.takeIf { it.isNotEmpty() },
             model = model.takeIf { modified.flag("model") && it.isNotEmpty() },
             reasoningEffort = effort.takeIf { modified.flag("reasoningEffort") && it.isNotEmpty() },
         )

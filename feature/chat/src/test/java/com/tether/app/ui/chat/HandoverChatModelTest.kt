@@ -75,6 +75,29 @@ class HandoverChatModelTest {
         assertTrue("no raw code or id in the line", out.none { "handover_" in it.message || "raw" in it.message })
     }
 
+    private fun noticesV151(vararg codes: String?) = providerNotices(
+        JsArr.of(codes.mapIndexed { i, c -> JsObj.of("noticeId" to s("n$i"), "level" to s("info"), "message" to s("raw $i"), "code" to c?.let(::s)) }),
+        "Claude",
+        v151 = true,
+    )
+
+    @Test fun at151TheStoppedAndCancelledNoticesTakeTheWebsWordsKeyedOnTheCodeAlone() {
+        val out = noticesV151("handover_operator_stopped", "handover_cancelled", "handover_not_delivered", "handover_scheduled")
+        assertEquals(
+            listOf(
+                "You stopped the handover. Nothing was sent.",
+                "The handover could not continue and has ended. Nothing was sent to a new session; waiting messages run here.",
+                "The handover prompt was not delivered to the new lead.",
+            ),
+            out.map { it.message },
+        )
+        // below 151 the same codes read W33's words, byte for byte (an unknown-to-W33 code is the generic line)
+        assertEquals(
+            listOf("The handover did not complete as planned.", "The handover did not complete. Nothing more will be sent automatically."),
+            notices("handover_operator_stopped", "handover_cancelled").map { it.message },
+        )
+    }
+
     @Test fun otherNoticesAreUntouched() {
         val out = notices("model_fallback", null)
         assertEquals(listOf(providerNoticeHeading("Claude", "model_fallback"), "Claude"), out.map { it.heading })
