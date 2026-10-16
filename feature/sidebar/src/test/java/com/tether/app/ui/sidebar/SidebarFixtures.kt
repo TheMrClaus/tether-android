@@ -91,6 +91,14 @@ object SidebarFixtures {
         )
     }
 
+    /**
+     * The archived-middle chain (x0 lone, x1 archived, x2 -> x3 live). S4's name groups would merge x0 and x3 on the shared numbered base "chain x",
+     * so the lone side's name carries a trailing zero-width space: it parses to no sequence key (the digits no longer end the name), draws
+     * the same pixels, and the split stays a split (S3a commit 1, lead ruling S4-1).
+     */
+    fun archivedMiddleChain(): List<AgentSession> =
+        chain(4, "x", ago = 5, names = listOf("Chain x0\u200B", "Chain x1", "Chain x2", "Chain x3"), archivedAt = setOf(1))
+
     /** The chain goldens' base: a four-member chain (head `c3`), a two-member chain (head `p1`) and a solo row. */
     val chainSessions: List<AgentSession> =
         chain(4, "c", ago = 5, names = listOf("Probe the parser", "Plan the importer", "Build the importer", "Ship the importer")) +

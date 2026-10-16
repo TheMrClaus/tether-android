@@ -168,7 +168,7 @@ class SidebarChainsBehaviourTest {
     }
 
     @Test fun anArchivedMiddleSplitsTheChain() {
-        val sessions = F.chain(4, "x", ago = 5, archivedAt = setOf(1))
+        val sessions = F.archivedMiddleChain()
         show(F.state(sessions, current = F.APP))
         assertEquals("1 earlier session of Chain x3", description(SidebarTags.chainToggle("live:x3")))
         assertTrue(rowShown("live:x0") && rule.onAllNodesWithTag(SidebarTags.chainToggle("live:x0"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())

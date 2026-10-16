@@ -100,7 +100,7 @@ fun sidebarState(shot: SidebarShot): SidebarState = when (shot) {
     SidebarShot.ChainOpen -> F.state(F.chainSessions + F.live("cd", "Index the fixtures", ago = 7, parent = "c2"), current = F.APP, activeId = "c3")
     SidebarShot.ChainAuto -> F.state(F.chain(3, "a", ago = 5) + F.live("solo", "Scratch notes", ago = 40), current = F.APP, activeId = "a1")
     SidebarShot.ChainSuffix -> F.state(chainSuffixSessions(), histories = chainSuffixHistories(), current = F.APP)
-    SidebarShot.ChainArchived -> F.state(F.chain(4, "x", ago = 5, archivedAt = setOf(1)) + F.live("solo", "Scratch notes", ago = 40), current = F.APP, activeId = "x3")
+    SidebarShot.ChainArchived -> F.state(F.archivedMiddleChain() + F.live("solo", "Scratch notes", ago = 40), current = F.APP, activeId = "x3")
     SidebarShot.ChainFilter -> F.state(F.chainSessions, current = F.APP, activeId = "c3", query = "importer")
     SidebarShot.ChainDrag -> F.state(F.chainSessions, current = F.APP, activeId = "c3")
 }
