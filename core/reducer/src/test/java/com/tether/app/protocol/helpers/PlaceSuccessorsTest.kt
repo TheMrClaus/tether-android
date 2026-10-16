@@ -40,11 +40,15 @@ class PlaceSuccessorsTest {
         assertSame(plain, SidebarOrder.placeSuccessors(plain))
     }
 
-    @Test fun theBrowsingViewPlacesThemAndAFilterLensStaysFlat() {
+    // W35 (tth-0bs): the browsing view now folds the placed chain into its head (older members behind it); a lens stays flat.
+    @Test fun theBrowsingViewFoldsThePlacedChainAndAFilterLensStaysFlat() {
         val rows = listOf(row("A", "a"), row("B", "b", from = "a"))
         val byWorkspace = mapOf("/w" to rows)
-        assertEquals(listOf("B", "A"), keys(SessionSidebar.groupedByWorkspace(byWorkspace, filtering = false).getValue("/w").rows))
+        val browsing = SessionSidebar.groupedByWorkspace(byWorkspace, filtering = false).getValue("/w")
+        assertEquals(listOf("B"), keys(browsing.rows))
+        assertEquals(listOf("A"), keys(browsing.olderByHeadKey.getValue("B")))
         assertEquals(listOf("A", "B"), keys(SessionSidebar.groupedByWorkspace(byWorkspace, filtering = true).getValue("/w").rows))
-        assertEquals(listOf("B", "A"), keys(SessionSidebar.groupedByWorkspace(byWorkspace, false, mapOf("/w" to listOf("B"))).getValue("/w").rows).reversed())
+        // a saved manual order never prevents the fold
+        assertEquals(listOf("B"), keys(SessionSidebar.groupedByWorkspace(byWorkspace, false, mapOf("/w" to listOf("B"))).getValue("/w").rows))
     }
 }

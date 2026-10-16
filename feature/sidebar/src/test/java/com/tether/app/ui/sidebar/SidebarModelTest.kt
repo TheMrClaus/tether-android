@@ -50,14 +50,17 @@ class SidebarModelTest {
     }
 
     @Test fun theSuccessorRowIsPlacedDirectlyAboveItsSourceInTheBrowsingView() {
-        // Recency would list x, the source a, then the successor b (oldest); placeSuccessors lifts b above a.
+        // Recency would list x, the source a, then the successor b (oldest); placeSuccessors lifts b above a, then the
+        // chain {b, a} folds into its head b (W35) at that slot, with a behind it.
         val x = F.live("x", "X", ago = 1)
         val a = F.live("a", "A", ago = 2, handedOffTo = "b")
         val b = F.live("b", "B", ago = 3).copy(handedOffFrom = "a")
         val sorted = rows(listOf(x, a, b))
         val byWs = com.tether.app.protocol.helpers.SessionSidebar.rowsByWorkspace(sorted.map { it.js })
-        val placed = com.tether.app.protocol.helpers.SessionSidebar.groupedByWorkspace(byWs, filtering = false).values.single().rows
-        assertEquals(listOf("live:x", "live:b", "live:a"), placed.map { ((it as com.tether.app.protocol.tree.JsObj)["key"] as com.tether.app.protocol.tree.JsStr).value })
+        val grouped = com.tether.app.protocol.helpers.SessionSidebar.groupedByWorkspace(byWs, filtering = false).values.single()
+        assertEquals(listOf("a"), grouped.olderByHeadKey.getValue("live:b").map { ((it as com.tether.app.protocol.tree.JsObj)["key"] as com.tether.app.protocol.tree.JsStr).value.removePrefix("live:") })
+        val placed = grouped.rows
+        assertEquals(listOf("live:x", "live:b"), placed.map { ((it as com.tether.app.protocol.tree.JsObj)["key"] as com.tether.app.protocol.tree.JsStr).value })
     }
 
     @Test fun lastActiveSortKeysOnLastMessageAt() {

@@ -50,6 +50,8 @@ object SidebarFixtures {
         parent: String? = null,
         archived: Boolean = false,
         handedOffTo: String? = null,
+        handedOffFrom: String? = null,
+        pinned: Boolean = false,
     ) = AgentSession(
         id = id,
         provider = provider,
@@ -62,6 +64,8 @@ object SidebarFixtures {
         runtimeArchived = archived,
         parentSessionId = parent,
         handedOffTo = handedOffTo,
+        handedOffFrom = handedOffFrom,
+        pinned = pinned,
     )
 
     fun history(

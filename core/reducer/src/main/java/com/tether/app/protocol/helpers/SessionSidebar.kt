@@ -90,7 +90,12 @@ object SessionSidebar {
     fun hasUnseenWork(entry: JsValue?): Boolean = truthy(entry["unread"]) || truthy(entry["digest"])
 
     /** components/session-sidebar.tsx:447 — top-level rows, and delegate children keyed by their parent's row key. */
-    data class GroupedRows(val rows: List<JsValue>, val childrenByKey: Map<String, List<JsValue>>)
+    data class GroupedRows(
+        val rows: List<JsValue>,
+        val childrenByKey: Map<String, List<JsValue>>,
+        /** HG (tth-0bs): each handover chain's older members (newest first), keyed by the chain's HEAD row key. Empty while filtering. */
+        val olderByHeadKey: Map<String, List<JsValue>> = emptyMap(),
+    )
 
     // components/session-sidebar.tsx:454 — a row is a child only when its parent is ALSO listed.
     fun groupDelegateChildren(entries: List<JsValue>): GroupedRows {
@@ -174,7 +179,36 @@ object SessionSidebar {
     ): Map<String, GroupedRows> =
         rowsByWorkspace.mapValues { (workspace, entries) ->
             if (filtering) GroupedRows(entries, emptyMap())
-            else groupDelegateChildren(SidebarOrder.placeSuccessors(entries, sessionOrders[workspace].orEmpty().toSet()))
+            else withHandoverFold(groupDelegateChildren(SidebarOrder.placeSuccessors(entries, sessionOrders[workspace].orEmpty().toSet())))
+        }
+
+    // components/session-sidebar.tsx:484 withHandoverFold (tth-0bs) — delegate children are already extracted, so a chain
+    // member's own delegates stay in childrenByKey under that member.
+    fun withHandoverFold(grouped: GroupedRows): GroupedRows {
+        val folded = SidebarOrder.foldHandoverChains(grouped.rows)
+        return GroupedRows(folded.rows, grouped.childrenByKey, folded.olderByHeadKey)
+    }
+
+    // components/session-sidebar.tsx:642-655 chainKeysByWorkspace — chains over the PLAIN browsing rows per block
+    // (delegate children excluded); order-independent, so drag order, preview and commit agree. Empty while filtering.
+    fun chainKeysByWorkspace(
+        visibleRows: List<JsValue>,
+        delegateChildKeys: Set<String>,
+        filtering: Boolean,
+    ): Map<String, List<SidebarOrder.HandoverChainKeys>> {
+        if (filtering) return emptyMap()
+        val out = LinkedHashMap<String, List<SidebarOrder.HandoverChainKeys>>()
+        for ((workspace, rows) in rowsByWorkspace(visibleRows.filter { (it["key"] as? JsStr)?.value !in delegateChildKeys })) {
+            val chains = SidebarOrder.chainKeys(SidebarOrder.handoverChains(rows))
+            if (chains.isNotEmpty()) out[workspace] = chains
+        }
+        return out
+    }
+
+    // components/session-sidebar.tsx:945-952 chainFamily — every older member of [head] plus their delegates.
+    fun chainFamily(headKey: String, grouping: GroupedRows): List<JsValue> =
+        grouping.olderByHeadKey[headKey].orEmpty().flatMap { member ->
+            listOf(member) + grouping.childrenByKey[(member["key"] as JsStr).value].orEmpty()
         }
 
     // components/session-sidebar.tsx:641 — child rows whose parent is also listed never join a drag order.

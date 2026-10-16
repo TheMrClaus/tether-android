@@ -116,9 +116,15 @@ class DragController internal constructor(
 ) {
     internal var listBounds: Rect = Rect.Zero
 
+    private fun chainsOf(workspace: String) = viewOf().chainKeysByWorkspace[workspace].orEmpty()
+
+    /** HG: the block's full row order with one key per handover chain (its head). */
+    private fun collapsedBase(workspace: String): List<String> =
+        SidebarViewModel.collapsedDragOrder(SidebarViewModel.dragBaseOrder(stateOf(), workspace, viewOf().delegateChildKeys), chainsOf(workspace))
+
     fun begin(entry: SidebarEntry) {
         val workspace = entry.workspace ?: return
-        val order = SidebarViewModel.dragBaseOrder(stateOf(), workspace, viewOf().delegateChildKeys)
+        val order = collapsedBase(workspace)
         setDrag(DragSession(entry.key, workspace, order, order))
     }
 
@@ -152,20 +158,20 @@ class DragController internal constructor(
     /** session-sidebar.tsx:684-696. */
     fun finish() {
         val drag = getDrag() ?: return
-        if (drag.engaged && drag.order != drag.initialOrder) onCommit()(drag.workspace, drag.order)
+        if (drag.engaged && drag.order != drag.initialOrder) onCommit()(drag.workspace, SidebarViewModel.committedOrder(drag.order, chainsOf(drag.workspace)))
         setDrag(null)
     }
 
     /** TalkBack's "Move up" / "Move down" on the handle: the same full-order commit, one step. */
     fun moveByOne(entry: SidebarEntry, delta: Int): Boolean {
         val workspace = entry.workspace ?: return false
-        val order = SidebarViewModel.dragBaseOrder(stateOf(), workspace, viewOf().delegateChildKeys)
+        val order = collapsedBase(workspace)
         val from = order.indexOf(entry.key)
         val to = from + delta
         if (from < 0 || to !in order.indices) return false
         val next = SidebarViewModel.move(order, entry.key, order[to])
         if (next == order) return false
-        onCommit()(workspace, next)
+        onCommit()(workspace, SidebarViewModel.committedOrder(next, chainsOf(workspace)))
         return true
     }
 }
