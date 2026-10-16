@@ -4,6 +4,8 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performSemanticsAction
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import com.tether.app.ui.theme.LocalReducedMotion
@@ -33,6 +35,14 @@ enum class SecretShot(val id: String, val mode: SecretMode) {
     TokenClear("settings-secret-token-clear", SecretMode.TokenClear),
     NoReply("settings-secret-no-reply", SecretMode.TokenSet),
     ;
+
+    /** The field the web focuses in this state (spec 4.3); null = none (the shot is not about focus). */
+    val focused: SecretField? get() = when (this) {
+        Password -> SecretField.Current
+        PasswordWeak -> SecretField.New
+        TokenBadCurrent -> SecretField.Current
+        else -> null
+    }
 
     fun seed(): ServerSecretsState {
         val s = ServerSecretsState()
@@ -73,6 +83,13 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.snapSecret(shot: Secret
     }
     mainClock.advanceTimeBy(700)
     waitForIdle()
+    // Robolectric has no IME and the dialog's own focus request races the first frame: put the ring where the web does.
+    fontScaled.focused?.let { f ->
+        onNodeWithTag(ServerSecretTags.field(f), useUnmergedTree = true)
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus)
+        mainClock.advanceTimeBy(700)
+        waitForIdle()
+    }
     captureScreenRoboImage(
         "src/test/screenshots/$name/${skin.id}-$size.png",
         roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),
@@ -142,7 +159,11 @@ class ServerSecretFont2ScreenshotTest(private val skin: TetherSkin) {
 
 /** The Authentication rows at 1.3x (both skins) and 2.0x (Studio light only): the tag wraps, phone keys go one per line. */
 abstract class AuthFontShotBase(private val skin: TetherSkin, private val label: String) : SettingsShotBase() {
-    @Test fun settings() = rule.snapSettings(store, SettingsShot.AdvancedAuth, skin, "phone", name = "settings-advanced-auth-font-$label")
+    // The token keys (the Clear key is the lowest) are scrolled fully into frame: at 2.0x they stack one per line below the fold.
+    @Test fun settings() = rule.snapSettings(
+        store, SettingsShot.AdvancedAuth, skin, "phone", name = "settings-advanced-auth-font-$label",
+        ensureVisible = ServerSecretTags.clear(com.tether.app.client.ServerSetting.ProxyToken),
+    )
 }
 
 @RunWith(ParameterizedRobolectricTestRunner::class)

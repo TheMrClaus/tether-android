@@ -26,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -155,29 +157,55 @@ private fun SecretKeys(
     modifier: Modifier,
 ) {
     val stack = LocalSettingsRowsStack.current
-    FlowRow(
-        modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        itemVerticalAlignment = Alignment.CenterVertically,
-    ) {
-        val share = if (stack) Modifier.weight(1f) else Modifier
+    val gap = 8.dp
+    val keys: @Composable () -> Unit = {
         TetherKey(
             onClick = { secrets.open(mode) },
             classes = KeyClasses.ButtonSecondary,
             label = if (s == ServerSetting.Password) ServerSecretCopy.OPEN_PASSWORD else ServerSecretCopy.OPEN_TOKEN,
             icon = TetherIcons.KeyRound,
             iconSize = 14.dp,
-            modifier = share.focusRequester(opener).testTag(ServerSecretTags.opener(s)),
+            modifier = Modifier.focusRequester(opener).testTag(ServerSecretTags.opener(s)),
         )
         if (configuredToken) {
             TetherKey(
                 onClick = { secrets.open(SecretMode.TokenClear) },
                 classes = KeyClasses.ButtonSecondary,
                 label = ServerSecretCopy.CLEAR,
-                modifier = share.testTag(ServerSecretTags.clear(s)),
+                modifier = Modifier.testTag(ServerSecretTags.clear(s)),
             )
         }
+    }
+    if (stack) {
+        // Keys share the row equally; when a legend does not fit its share each key takes its own full-width line
+        // (the web's flex-wrap with basis 0) -- measured, never clipped.
+        Layout(keys, modifier) { measurables, constraints ->
+            val g = gap.roundToPx()
+            val w = constraints.maxWidth
+            val n = measurables.size
+            val half = (w - g * (n - 1)) / n
+            val fits = measurables.all { it.maxIntrinsicWidth(Constraints.Infinity) <= half }
+            val placeables = if (fits) {
+                measurables.map { it.measure(Constraints.fixedWidth(half).copy(minHeight = 0)) }
+            } else {
+                measurables.map { it.measure(Constraints.fixedWidth(w)) }
+            }
+            if (fits) {
+                val h = placeables.maxOf { it.height }
+                layout(w, h) {
+                    var x = 0
+                    placeables.forEach { it.placeRelative(x, (h - it.height) / 2); x += half + g }
+                }
+            } else {
+                val h = placeables.sumOf { it.height } + g * (n - 1)
+                layout(w, h) {
+                    var y = 0
+                    placeables.forEach { it.placeRelative(0, y); y += it.height + g }
+                }
+            }
+        }
+    } else {
+        FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(gap), verticalArrangement = Arrangement.spacedBy(gap), itemVerticalAlignment = Alignment.CenterVertically) { keys() }
     }
 }
 
