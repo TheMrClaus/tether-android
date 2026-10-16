@@ -46,6 +46,18 @@ object NoticeFixtures {
         )
     }
 
+    /** A Reasonix turn: a mapped-title notice and an unmapped-code notice (provider stamped as the session's). */
+    val reasonixNotices: ChatFixtures.Folded by lazy {
+        val f = ChatFixtures.fold(
+            *open("t1", "Switch the approvals on.").toTypedArray(),
+            ev("provider_notice", "t1", ts = TS) { put("noticeId", "rx-map"); put("level", "warning"); put("code", "reasonix_approval_mismatch"); put("message", "Reasonix reported different approvals than the ones requested.") },
+            ev("provider_notice", "t1", ts = TS) { put("noticeId", "rx-raw"); put("level", "info"); put("code", "reasonix_something_new"); put("message", "An unmapped Reasonix notice keeps its code.") },
+            *reply("t1", "Done.").toTypedArray(),
+            end("t1"),
+        )
+        f.copy(projection = f.projection.copy(provider = "reasonix"))
+    }
+
     /** A rich Codex turn: a compaction, an info notice and an error notice. */
     val codexNotices: ChatFixtures.Folded by lazy {
         ChatFixtures.fold(

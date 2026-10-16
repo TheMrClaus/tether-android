@@ -1,7 +1,9 @@
 package com.tether.app.ui.chat
 
 import com.tether.app.protocol.tree.JsCodec
+import com.tether.app.protocol.reduce.evNullTurn
 import com.tether.app.protocol.tree.JsObj
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -48,15 +50,66 @@ class NoticeModelTest {
     }
 
     @Test
+    fun turnTailAddsOpencodeAndSessionTailDoesNot() {
+        assertEquals("Pi", noticeProviderLabel("pi", richCodex = false))
+        assertEquals("Reasonix", noticeProviderLabel("reasonix", richCodex = false))
+        assertNull(noticeProviderLabel("opencode", richCodex = false))
+        assertEquals("opencode", turnNoticeProviderLabel("opencode", richCodex = false))
+        assertEquals("Pi", turnNoticeProviderLabel("pi", richCodex = false))
+        assertEquals("Reasonix", turnNoticeProviderLabel("reasonix", richCodex = false))
+        assertEquals("Codex", turnNoticeProviderLabel("codex", richCodex = true))
+        assertNull(turnNoticeProviderLabel("codex", richCodex = false))
+        assertNull(turnNoticeProviderLabel(null, richCodex = false))
+    }
+
+    @Test
+    fun turnNoticesShowForPiOpencodeAndReasonix() {
+        for ((provider, label) in listOf("pi" to "Pi", "opencode" to "opencode", "reasonix" to "Reasonix")) {
+            val f = NoticeFixtures.codexNotices
+            val rows = items(f.copy(projection = f.projection.copy(provider = provider))).filterIsInstance<ChatItem.ProviderNotice>()
+            assertEquals(provider, listOf("n-info", "n-err"), rows.map { it.notice.noticeId })
+            assertEquals(provider, "$label · config", rows[0].notice.heading)
+            assertEquals(provider, label, rows[1].notice.heading)
+        }
+    }
+
+    @Test
+    fun reasonixHeadingsUseTheTitleMapAndUnmappedKeepTheCode() {
+        val rows = items(NoticeFixtures.reasonixNotices).filterIsInstance<ChatItem.ProviderNotice>()
+        assertEquals("Reasonix · Approvals differ", rows[0].notice.heading)
+        assertEquals("Reasonix · reasonix_something_new", rows[1].notice.heading)
+        assertEquals("Setting not applied", reasonixNoticeTitle("reasonix_model_not_applied"))
+        assertNull(reasonixNoticeTitle("reasonix__not_applied"))
+        assertEquals("Mode changed", reasonixNoticeTitle("reasonix_mode_changed"))
+        // Other engines keep the raw code.
+        assertEquals("Pi · reasonix_mode_changed", providerNoticeHeading("Pi", "reasonix_mode_changed"))
+    }
+
+    @Test
+    fun sessionTailNoticesShowForPiAndReasonixNotOpencode() {
+        fun tail(provider: String): List<ChatItem.ProviderNotice> {
+            val f = ChatFixtures.fold(
+                *ChatFixtures.turn("t1", "hi", "hello", ChatFixtures.T_IDLE),
+                evNullTurn("provider_notice", seq = 10, ts = ChatFixtures.T_IDLE) { put("noticeId", "s-1"); put("level", "info"); put("code", "reasonix_mode_changed"); put("message", "Mode moved.") },
+            )
+            return items(f.copy(projection = f.projection.copy(provider = provider))).filterIsInstance<ChatItem.ProviderNotice>()
+        }
+        assertEquals("Reasonix · Mode changed", tail("reasonix").single().notice.heading)
+        assertEquals("Pi · reasonix_mode_changed", tail("pi").single().notice.heading)
+        assertTrue(tail("opencode").isEmpty())
+    }
+
+    @Test
     fun providerNoticesShowOnlyForRichCodexAndClaude() {
         assertEquals("Codex", noticeProviderLabel("codex", richCodex = true))
         assertEquals("Claude", noticeProviderLabel("claude", richCodex = false))
         assertNull(noticeProviderLabel("codex", richCodex = false))
         assertNull(noticeProviderLabel("opencode", richCodex = false))
-        // A non-rich session of another provider shows none (the fixture tree is folded as claude).
+        // A non-rich opencode session shows no compactions (Codex-only) and no session-tail notices;
+        // its TURN notices do show (chat-view.tsx:3751-3768; see turnNoticesShowForPiOpencodeAndReasonix).
         val f = NoticeFixtures.codexNotices
         val asOpencode = f.copy(projection = f.projection.copy(provider = "opencode"))
-        assertTrue(items(asOpencode).none { it is ChatItem.ProviderNotice || it is ChatItem.Compaction })
+        assertTrue(items(asOpencode).none { it is ChatItem.Compaction || (it is ChatItem.ProviderNotice && it.turnId == null) })
     }
 
     @Test
