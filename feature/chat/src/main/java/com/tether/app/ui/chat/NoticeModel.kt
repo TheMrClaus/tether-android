@@ -64,7 +64,25 @@ private fun dismissKeyOf(value: JsValue?): String? = value.str()?.takeIf { it.is
 /** codex-rich-renderers.tsx:402-404 — `<provider> · <code>` when the notice has a code. */
 internal fun providerNoticeHeading(providerLabel: String, code: String?): String {
     val shown = LabelText.label(code)
-    return if (shown.isEmpty()) providerLabel else "$providerLabel · $shown"
+    if (shown.isEmpty()) return providerLabel
+    val title = if (providerLabel == "Reasonix") reasonixNoticeTitle(shown) else null
+    return "$providerLabel · ${title ?: shown}"
+}
+
+private val REASONIX_NOTICE_TITLES = mapOf(
+    "reasonix_approval_reported" to "Approvals not reported",
+    "reasonix_approval_mismatch" to "Approvals differ",
+    "reasonix_approval_changed" to "Approvals changed",
+    "reasonix_mode_changed" to "Mode changed",
+)
+private val REASONIX_NOT_APPLIED = Regex("^reasonix_.+_not_applied$")
+
+/** lib/reasonix-notice-titles.ts, verbatim: human titles for Reasonix notice codes; unmapped codes are null. */
+internal fun reasonixNoticeTitle(code: String?): String? {
+    if (code.isNullOrEmpty()) return null
+    REASONIX_NOTICE_TITLES[code]?.let { return it }
+    if (REASONIX_NOT_APPLIED.matches(code)) return "Setting not applied"
+    return null
 }
 
 /** The heading of a handover notice (#273): one plain "Tether" line, never the raw code. */
@@ -137,8 +155,17 @@ internal fun compactions(turn: JsObj?): List<CompactionView> =
 internal fun noticeProviderLabel(provider: String?, richCodex: Boolean): String? = when {
     richCodex -> "Codex"
     provider == "claude" -> "Claude"
+    provider == "pi" -> "Pi"
+    provider == "reasonix" -> "Reasonix"
     else -> null
 }
+
+/**
+ * The TURN tail's label (chat-view.tsx:3751-3768): the session list plus opencode, which the web
+ * shows on turn tails only (the session tail, :3894-3898, has no opencode).
+ */
+internal fun turnNoticeProviderLabel(provider: String?, richCodex: Boolean): String? =
+    noticeProviderLabel(provider, richCodex) ?: if (provider == "opencode") "opencode" else null
 
 /**
  * chat-view.tsx:3555-3604: the session notices at the transcript foot, in their order. A

@@ -25,6 +25,7 @@ import org.robolectric.annotation.Config
 enum class NoticeShot(val id: String, val composer: Boolean = false) {
     Fallback("fallback"),
     Codex("codex"),
+    Reasonix("reasonix"),
     Session("session"),
     Interrupted("interrupted"),
     Limit("limit"),
@@ -40,6 +41,7 @@ private const val CaptureAtMs = 700L
 private fun fixtureFor(shot: NoticeShot): ChatFixtures.Folded = when (shot) {
     NoticeShot.Fallback -> NoticeFixtures.claudeFallback
     NoticeShot.Codex -> NoticeFixtures.codexNotices
+    NoticeShot.Reasonix -> NoticeFixtures.reasonixNotices
     NoticeShot.Session -> NoticeFixtures.sessionNotices
     NoticeShot.Interrupted -> NoticeFixtures.interrupted
     NoticeShot.Limit -> NoticeFixtures.limit

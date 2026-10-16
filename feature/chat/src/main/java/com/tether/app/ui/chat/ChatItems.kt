@@ -286,6 +286,7 @@ internal fun buildChatItems(
     // T6.6: whose provider notices show (a rich Codex session's, a Claude session's), and the
     // turn_interrupted accounts by turn.
     val noticeLabel = noticeProviderLabel(projection.provider, richCodex)
+    val turnNoticeLabel = turnNoticeProviderLabel(projection.provider, richCodex)
     val interrupts = interruptNoticesByTurn(state)
     val finishedBg = finishedBackgroundCommands(state)
     var bgIndex = 0
@@ -384,10 +385,10 @@ internal fun buildChatItems(
             // T6.6: `CodexNotices` (compactions first, then the turn's provider notices), same stack.
             compactions(turnObj).forEach { items.add(ChatItem.Compaction(scope, turnId, it, opens(), tight())) }
             providerNotices(turnObj["providerNotices"], "Codex", handoverV151).forEach { items.add(ChatItem.ProviderNotice(scope, turnId, it, opens(), tight())) }
-        } else if (noticeLabel == "Claude" && turnObj != null) {
-            // issue #179 (chat-view.tsx:3438): a Claude CLI model fallback, one `.notices` stack.
+        } else if (turnNoticeLabel != null && turnObj != null) {
+            // issue #179 (chat-view.tsx:3438, 3751-3768): Claude / opencode / Pi / Reasonix turn notices, one `.notices` stack.
             var inStack = false
-            providerNotices(turnObj["providerNotices"], "Claude", handoverV151).forEach {
+            providerNotices(turnObj["providerNotices"], turnNoticeLabel, handoverV151).forEach {
                 items.add(ChatItem.ProviderNotice(scope, turnId, it, opens(), inStack))
                 inStack = true
             }
