@@ -170,6 +170,33 @@ class SidebarChainsBehaviourTest {
         assertTrue(rule.onNodeWithTag(head).fetchSemanticsNode().boundsInRoot.top > tops[1])
     }
 
+    @Test fun releasingADraggedChainHeadCommitsTheChainContiguous() {
+        val st = state()
+        val view = SidebarViewModel.view(st)
+        val head = st.sidebarSessions.first { it.key == "live:c3" }
+        val solo = st.sidebarSessions.first { it.key == "live:solo" }
+        var drag: DragSession? = null
+        var committed: Pair<String, List<String>>? = null
+        val rows = linkedMapOf<String, androidx.compose.ui.geometry.Rect>()
+        val ctl = DragController(
+            stateOf = { st }, viewOf = { view }, getDrag = { drag }, setDrag = { drag = it },
+            rowBounds = rows, onCommit = { { w, o -> committed = w to o } },
+        )
+        ctl.begin(head)
+        drag!!.initialOrder.forEachIndexed { i, k -> rows[k] = androidx.compose.ui.geometry.Rect(0f, i * 10f, 10f, i * 10f + 10f) }
+        assertEquals(listOf("live:c3", "live:p1", "live:solo"), drag!!.order)
+        ctl.engage()
+        ctl.move(androidx.compose.ui.geometry.Offset(5f, rows.getValue(solo.key).top + 1f), 0f)
+        ctl.finish()
+        val order = committed!!.second
+        assertEquals(null, drag)
+        val chain = listOf("live:c3", "live:c2", "live:c1", "live:c0")
+        val at = order.indexOf("live:c3")
+        assertEquals("the chain stays contiguous, head first", chain, order.subList(at, at + 4))
+        assertTrue("the head moved below the solo row", order.indexOf("live:solo") < at)
+        assertEquals(order.toSet().size, order.size)
+    }
+
     @Test fun theToggleIsAtLeast44dpInTheRailAnd48dpOnThePhone() {
         show(state())
         val phone = rule.onNodeWithTag(head).fetchSemanticsNode().size.height

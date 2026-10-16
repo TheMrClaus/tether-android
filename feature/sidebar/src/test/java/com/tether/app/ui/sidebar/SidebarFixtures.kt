@@ -87,6 +87,7 @@ object SidebarFixtures {
             status = status(i),
             archived = i in archivedAt,
             handedOffFrom = if (i > 0) "$prefix${i - 1}" else null,
+            handedOffTo = if (i < n - 1) "$prefix${i + 1}" else null,
         )
     }
 

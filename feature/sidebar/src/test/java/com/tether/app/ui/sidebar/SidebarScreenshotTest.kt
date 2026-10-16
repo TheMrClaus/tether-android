@@ -107,7 +107,7 @@ fun sidebarState(shot: SidebarShot): SidebarState = when (shot) {
 
 /** Three closed chains: (a) a waiting and an active member, (b) an active member, (c) unread work only. */
 private fun chainSuffixSessions() =
-    F.chain(3, "w", ago = 5, status = { if (it == 0) "waiting" else if (it == 1) "active" else "ready" }) +
+    F.chain(112, "w", ago = 5, status = { if (it == 0) "waiting" else if (it == 1) "active" else "ready" }) +
         F.chain(3, "v", ago = 15, status = { if (it == 1) "active" else "ready" }) +
         F.chain(3, "u", ago = 25).map { if (it.id == "u0") it.copy(historyId = "h-u0") else it }
 
@@ -127,6 +127,7 @@ fun sidebarSeed(shot: SidebarShot): SidebarUiSeed = when (shot) {
     )
     SidebarShot.ChainDrag -> SidebarUiSeed(drag = DragPreview("live:c3", listOf("live:solo", "live:c3", "live:p1")))
     SidebarShot.ChainFocus -> SidebarUiSeed(focusChain = "live:c0")
+    SidebarShot.ChainArchived -> SidebarUiSeed(openChains = setOf("live:x3"))
     SidebarShot.Archived -> SidebarUiSeed(archivedOpen = true)
     SidebarShot.OlderOpen -> SidebarUiSeed(olderOpen = setOf(F.ROOT))
     SidebarShot.ArchiveStale -> SidebarUiSeed(archiveStale = ArchiveStaleState())
@@ -213,6 +214,9 @@ class SidebarFontScale2PhoneScreenshotTest(private val skin: TetherSkin) {
     @get:Rule val rule = createComposeRule()
 
     @Test fun sidebar() = rule.snapSidebar(SidebarShot.Status, skin, "sidebar-status-font-2.0x", "phone", TetherLayoutClass.Phone)
+
+    /** W35: the chain toggle's label and suffix at twice the text, where they wrap onto a second line. */
+    @Test fun chainSuffix() = rule.snapSidebar(SidebarShot.ChainSuffix, skin, "sidebar-chain-suffix-font-2.0x", "phone", TetherLayoutClass.Phone)
 
     companion object {
         @JvmStatic
