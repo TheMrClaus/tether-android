@@ -799,7 +799,7 @@ class DraftComposerModel(
     fun onSessions(sessions: List<AgentSession>) {
         val h = _state.value.handover ?: return
         val source = sessions.firstOrNull { it.id == h.sourceId }
-        if (h.pending && source != null && Handover.underway(source)) {
+        if (h.pending && source != null && source.handoverPending) { // use-draft-composer.ts:441; a stage implies pending (session-manager.mjs:1417-1420,1549)
             val id = h.sourceId
             _state.update { it.copy(handover = h.copy(pendingRequestId = null), handoverSucceeded = it.handoverSucceeded + 1) }
             closeHandover()

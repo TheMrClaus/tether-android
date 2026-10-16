@@ -277,7 +277,7 @@ class DraftComposerHandoverTest {
 
     // ---- the lifecycle: success, refusal, abandon, reconnect, blocked ----
     @Test fun successIsTheSourceRowShowingPendingOrAStageAndTheComposerCloses() = runTest {
-        for (row in listOf<(AgentSession) -> AgentSession>({ it.copy(handoverPending = true) }, { it.copy(handoverStage = JsonPrimitive("requested")) })) {
+        for (row in listOf<(AgentSession) -> AgentSession>({ it.copy(handoverPending = true) }, { it.copy(handoverPending = true, handoverStage = JsonPrimitive("requested")) })) {
             val h = harness(); h.live(); h.open()
             h.model.submitHandover()
             h.model.onSessions(listOf(source()))
@@ -288,6 +288,14 @@ class DraftComposerHandoverTest {
             assertEquals(1L, h.model.state.value.handoverSucceeded)
             assertTrue("a success is no abandon", h.client.abandoned.isEmpty())
         }
+    }
+
+    @Test fun aStageWithoutPendingDoesNotCloseTheComposerTheWebClosesOnPendingOnly() = runTest {
+        val h = harness(); h.live(); h.open()
+        h.model.submitHandover()
+        h.model.onSessions(listOf(source { it.copy(handoverStage = JsonPrimitive("requested")) }))
+        assertTrue(h.model.state.value.handover!!.pending)
+        assertTrue(h.succeeded.isEmpty())
     }
 
     @Test fun anInlineRefusalKeepsEveryValueAndReadsCouldntHandOver() = runTest {
@@ -348,7 +356,7 @@ class DraftComposerHandoverTest {
         h.model.submitHandover()
         h.model.onLink(ConnectionState.Disconnected, 1)
         h.client.snapshotSeq.value = 2
-        h.model.onSessions(listOf(source { it.copy(handoverStage = JsonPrimitive("scheduled")) }))
+        h.model.onSessions(listOf(source { it.copy(handoverPending = true, handoverStage = JsonPrimitive("scheduled")) }))
         assertNull(h.model.state.value.handover)
         assertEquals(listOf("src"), h.succeeded)
     }

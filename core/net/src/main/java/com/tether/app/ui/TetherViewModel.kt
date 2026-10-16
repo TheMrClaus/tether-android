@@ -479,6 +479,7 @@ class TetherViewModel(
         if (!Handover.v151(client.serverProtocolVersion.value)) return false
         if (!client.handoverCancel(sessionId, UUID.randomUUID().toString())) return false
         _handoverStopping.value = _handoverStopping.value + sessionId
+        onStoppingSessions(client.sessions.value) // the web effect re-runs at the press: a stage already shown counts as seen
         return true
     }
 

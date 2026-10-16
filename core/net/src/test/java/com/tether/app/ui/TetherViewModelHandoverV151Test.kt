@@ -105,6 +105,15 @@ class TetherViewModelHandoverV151Test {
         assertTrue(vm.handoverStopping.value.isEmpty())
     }
 
+    @Test fun stoppingClearsOnTheOrdinaryEchoWithNoIntermediateUnderwayList() = runTest(dispatcher) {
+        val client = Client()
+        val vm = vm(client)
+        client.sessions.value = listOf(staged("scheduled")); runCurrent()
+        vm.stopHandover("a")
+        client.sessions.value = listOf(s("a")); runCurrent()
+        assertTrue(vm.handoverStopping.value.isEmpty())
+    }
+
     @Test fun stoppingClearsWhenTheSessionIsGone() = runTest(dispatcher) {
         val client = Client()
         val vm = vm(client)
@@ -203,7 +212,7 @@ class TetherViewModelHandoverV151Test {
         assertTrue(vm.openHandoverDraft("a"))
         vm.draftComposer.submitHandover()
         assertEquals(setOf("a"), vm.handoverRequested.value)
-        client.sessions.value = listOf(s("a") { it.copy(handoverStage = JsonPrimitive("requested")) }); runCurrent()
+        client.sessions.value = listOf(s("a") { it.copy(handoverPending = true, handoverStage = JsonPrimitive("requested")) }); runCurrent()
         assertNull(vm.draftComposer.state.value.handover)
         assertFalse("success closes the sheet", vm.draftOpen.value)
         assertEquals(setOf("a"), vm.handoverRequested.value)

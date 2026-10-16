@@ -3517,7 +3517,11 @@ class RealTetherClient(
                 val reply = CreatedReply(message.session, createdSeq, message.requestId, epoch, socketOrigin)
                 createdState.value = reply
                 createdRepliesFlow.tryEmit(reply)
-                message.requestId?.let { recordCreateReplyLocked(it, CreateReplyRecord.Created(reply)) }
+                message.requestId?.let {
+                    recordCreateReplyLocked(it, CreateReplyRecord.Created(reply))
+                    // use-tether.ts:871-872: a succeeded handover request can no longer be refused; forget its ids.
+                    synchronized(handoverIdLock) { handoverComposerIds.remove(it); handoverAbandonedIds.remove(it) }
+                }
             }
             is ServerMessage.SessionUpdate -> {
                 if (message.session.runtimeArchived) {

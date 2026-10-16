@@ -133,7 +133,7 @@ object Handover {
             handoverStageView(session, hasInstructionRow, turnRunning, localRequested, stopping)?.let {
                 return if (it.key == StageKey.Stopping) MenuState.Stopping else MenuState.Stop(it.line)
             }
-            val code = rowCode(session, requested = false) ?: return MenuState.Enabled
+            val code = rowCode(session, requested = localRequested) ?: return MenuState.Enabled
             val successor = if (code == "already_handed_off") sessions.firstOrNull { it.id == session.handedOffTo }?.name?.let(LabelText::label) else null
             return MenuState.Blocked(reasonCopy(code, successor))
         }

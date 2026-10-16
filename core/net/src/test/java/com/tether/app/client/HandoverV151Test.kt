@@ -59,6 +59,9 @@ class HandoverV151Test {
         val a = s("a") { it.copy(handedOffTo = "b", handoverPending = true, handoverStage = JsonPrimitive("scheduled")) }
         // web order (hu:131-135): pending / a stage is checked BEFORE handedOffTo, so it reads "Handover under way." (never Stop)
         assertEquals(MenuState.Blocked(Handover.UNDER_WAY), Handover.menuState(a, false, listOf(a, b), 151))
+        // the request is still un-echoed on this device (hu:198-210 passes `requested`): the row code is handover_pending
+        val handed = a.copy(handoverPending = false, handoverStage = null)
+        assertEquals(MenuState.Blocked(Handover.UNDER_WAY), Handover.menuState(handed, true, listOf(handed, b), 151))
         val done = a.copy(handoverPending = false, handoverStage = null)
         assertEquals(MenuState.Blocked("Already handed off to Successor."), Handover.menuState(done, false, listOf(done, b), 151))
         assertEquals(MenuState.Blocked("Read-only — Tether isn't driving this session."), menu(s { it.copy(readOnly = true) }, 151))

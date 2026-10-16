@@ -166,6 +166,26 @@ class HandoverV151TransmissionTest {
         assertEquals(Handover.GENERIC_REFUSAL, next("generic"))
     }
 
+    // use-tether.ts:871-872: a `created` frame carrying the requestId forgets the composer and abandoned ids
+    @Test
+    fun aCreatedFrameForTheRequestIdForgetsItSoALaterRefusalFallsThrough() {
+        val (client, ws) = connected()
+        client.handoverRequestWithSettings("s1", "r1", successor); h.expectFrame("handover-request")
+        client.handoverRequestWithSettings("s1", "r2", successor); h.expectFrame("handover-request")
+        client.abandonHandoverRequest("r2")
+        for (id in listOf("r1", "r2")) {
+            ws.send("""{"type":"created","requestId":"$id","session":{"id":"c$id","provider":"claude","name":"n","cwd":"/w","status":"active","startedAt":1,"updatedAt":1,"endedAt":null,"exitCode":null,"pinned":false,"runtimeArchived":false,"mode":"headless"}}""")
+        }
+        val until = System.currentTimeMillis() + 20_000
+        while (client.sessions.value.size < 3 && System.currentTimeMillis() < until) Thread.sleep(10)
+        assertEquals(3, client.sessions.value.size)
+        refuse(ws, "r1", "plan_mode: x")
+        assertEquals("Plan mode can't hand over \u2014 leave plan mode first.", next("readError, not the composer route"))
+        assertNotNull(refusals.poll(20, TimeUnit.SECONDS))
+        refuse(ws, "r2", "plan_mode: x")
+        assertEquals("Plan mode can't hand over \u2014 leave plan mode first.", next("readError, not the abandoned toast"))
+    }
+
     // ---- routing (iv): anything else is today's reading ----
     @Test
     fun anUnknownRequestIdFallsThroughToTheV150Reading() {
