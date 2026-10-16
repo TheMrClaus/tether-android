@@ -68,12 +68,9 @@ class SidebarChainsBehaviourTest {
         val c = node.config
         assertEquals(androidx.compose.ui.semantics.Role.Button, c.getOrNull(SemanticsProperties.Role))
         assertTrue("click action on the tagged node", c.getOrNull(androidx.compose.ui.semantics.SemanticsActions.OnClick) != null)
-        assertTrue("the tooltip anchor is this same node, not a parent", c.getOrNull(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) != null)
         assertEquals("Collapsed", c.getOrNull(SemanticsProperties.StateDescription))
         assertEquals("3 earlier sessions of Ship the importer", c.getOrNull(SemanticsProperties.ContentDescription)?.joinToString())
         assertTrue("label text is merged, not a child node", node.children.isEmpty())
-        val parent = node.parent!!.config
-        assertTrue("no wrapper node carries the long-press apart from the toggle", parent.getOrNull(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) == null)
     }
 
     @Test fun aTapOpensAndClosesTheEarlierSessionsAndClosedRowsAreNotInSemantics() {

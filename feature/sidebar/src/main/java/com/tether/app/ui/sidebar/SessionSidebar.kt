@@ -77,6 +77,8 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
@@ -1254,14 +1256,18 @@ private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone
             .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
             .focusRing(focused && keyboardMode, shape, t.violet, offset = (-2).dp)
             .clip(shape)
-            .semantics(mergeDescendants = true) {
-                contentDescription = name
-                stateDescription = if (open) "Expanded" else "Collapsed"
-            }
             .focusRequester(focusRequester)
             .clickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Button, onClick = onToggle)
             .padding(start = t.css.spaceMd, end = t.css.spaceMd, top = t.css.spaceXs)
-            .testTag(tag),
+            // Compose only gives a node its Button class/clickable on device when it has no exposed children; the label
+            // Text kept showing up as a child of a merged node, so the node states its own semantics and clears the rest.
+            .clearAndSetSemantics {
+                testTag = tag
+                contentDescription = name
+                stateDescription = if (open) "Expanded" else "Collapsed"
+                role = Role.Button
+                onClick { onToggle(); true }
+            },
     ) {
         FlowRow(
             Modifier.fillMaxWidth(),
