@@ -912,20 +912,15 @@ internal object PreviewCopy {
     }
 
     /** [delegate] (the safe copy) fed the [decode]d text. */
-    class Clipboard(private val delegate: androidx.compose.ui.platform.Clipboard) : androidx.compose.ui.platform.Clipboard {
-        override suspend fun getClipEntry(): androidx.compose.ui.platform.ClipEntry? = delegate.getClipEntry()
-
-        override suspend fun setClipEntry(clipEntry: androidx.compose.ui.platform.ClipEntry?) {
+    fun Clipboard(delegate: androidx.compose.ui.platform.Clipboard): androidx.compose.ui.platform.Clipboard =
+        com.tether.app.ui.text.writeThroughClipboard(delegate) { clipEntry ->
             val data = clipEntry?.clipData
             val text = if (data != null && data.itemCount > 0) data.getItemAt(0).text else null
-            if (text == null) return delegate.setClipEntry(clipEntry)
+            if (text == null) return@writeThroughClipboard delegate.setClipEntry(clipEntry)
             val decoded = decode(text)
-            if (decoded == text.toString()) return delegate.setClipEntry(clipEntry)
+            if (decoded == text.toString()) return@writeThroughClipboard delegate.setClipEntry(clipEntry)
             delegate.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText(data!!.description?.label ?: "text", decoded)))
         }
-
-        override val nativeClipboard get() = delegate.nativeClipboard
-    }
 }
 
 private const val LINE_PIECE = 4_000

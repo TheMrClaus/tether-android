@@ -1,5 +1,6 @@
 package com.tether.app.ui.text
 
+import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -19,6 +20,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.AndroidClipboard
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -211,27 +213,44 @@ fun copyExact(context: Context, display: String, notices: CopyNotices?, raw: Str
  * the page's own text, and, when the text carries hidden controls, tells [notices] (information
  * only). A copy with nothing drawn in it passes through untouched, rich text and all.
  */
-class SafeCopyClipboard(private val delegate: Clipboard, private val notices: CopyNotices?) : Clipboard {
-    override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
-
-    override suspend fun setClipEntry(clipEntry: ClipEntry?) {
+fun SafeCopyClipboard(delegate: Clipboard, notices: CopyNotices?): Clipboard =
+    writeThroughClipboard(delegate) { entry ->
         notices?.clear() // never leave an earlier copy's notice behind
-        if (clipEntry == null) return delegate.setClipEntry(null)
-        val data = clipEntry.clipData
+        if (entry == null) return@writeThroughClipboard delegate.setClipEntry(null)
+        val data = entry.clipData
         val text = if (data.itemCount > 0) data.getItemAt(0).text else null
-        if (text == null) return delegate.setClipEntry(clipEntry)
+        if (text == null) return@writeThroughClipboard delegate.setClipEntry(entry)
         val hidden = SafeText.forCopy(text).hidden
         val exact = SafeText.original(text)
         if (exact == text.toString() && text.indexOf(SafeText.MARK) < 0) {
-            delegate.setClipEntry(clipEntry)
+            delegate.setClipEntry(entry)
         } else {
             delegate.setClipEntry(ClipEntry(ClipData.newPlainText(data.description?.label ?: "text", exact)))
         }
         if (hidden > 0) notices?.show(hidden)
     }
 
-    override val nativeClipboard get() = delegate.nativeClipboard
-}
+/**
+ * A [Clipboard] over [delegate] whose writes go through [write]. ta-esj0: Compose's text field
+ * (paste check, selection toolbar) takes the platform manager from the clipboard it is given and
+ * throws unless that clipboard IS an AndroidClipboard, so a wrapper of the platform clipboard stays
+ * one (reads and the manager pass through); any other clipboard is wrapped plainly.
+ */
+@SuppressLint("VisibleForTests")
+fun writeThroughClipboard(delegate: Clipboard, write: suspend (ClipEntry?) -> Unit): Clipboard =
+    if (delegate is AndroidClipboard) {
+        object : AndroidClipboard {
+            override val clipboardManager: android.content.ClipboardManager get() = delegate.clipboardManager
+            override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
+            override suspend fun setClipEntry(clipEntry: ClipEntry?) = write(clipEntry)
+        }
+    } else {
+        object : Clipboard {
+            override val nativeClipboard get() = delegate.nativeClipboard
+            override suspend fun getClipEntry(): ClipEntry? = delegate.getClipEntry()
+            override suspend fun setClipEntry(clipEntry: ClipEntry?) = write(clipEntry)
+        }
+    }
 
 private fun CharSequence.indexOf(c: Char): Int {
     for (i in indices) if (this[i] == c) return i
