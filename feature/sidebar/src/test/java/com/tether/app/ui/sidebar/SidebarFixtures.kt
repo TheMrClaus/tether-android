@@ -68,6 +68,34 @@ object SidebarFixtures {
         pinned = pinned,
     )
 
+    /**
+     * W35 (ta-b6m9): a handover chain of [n] sessions, `prefix0` the oldest and `prefix(n-1)` the head, each handed off
+     * from the previous one. [ago] is the head's age; [names] (oldest first) overrides the default "Chain <prefix><i>".
+     */
+    fun chain(
+        n: Int,
+        prefix: String,
+        ago: Long,
+        names: List<String>? = null,
+        status: (Int) -> String = { "ready" },
+        archivedAt: Set<Int> = emptySet(),
+    ): List<AgentSession> = (0 until n).map { i ->
+        live(
+            "$prefix$i",
+            names?.get(i) ?: "Chain $prefix$i",
+            ago = ago + (n - 1 - i),
+            status = status(i),
+            archived = i in archivedAt,
+            handedOffFrom = if (i > 0) "$prefix${i - 1}" else null,
+        )
+    }
+
+    /** The chain goldens' base: a four-member chain (head `c3`), a two-member chain (head `p1`) and a solo row. */
+    val chainSessions: List<AgentSession> =
+        chain(4, "c", ago = 5, names = listOf("Probe the parser", "Plan the importer", "Build the importer", "Ship the importer")) +
+            chain(2, "p", ago = 20, names = listOf("Draft the guide", "Polish the guide")) +
+            live("solo", "Scratch notes", ago = 40)
+
     fun history(
         id: String,
         name: String,

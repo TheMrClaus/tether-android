@@ -1,6 +1,23 @@
 package com.tether.app.ui.sidebar
 
 import com.tether.app.ui.util.RecompositionProbe
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
+import com.tether.app.client.LabelText
+import com.tether.app.protocol.helpers.SidebarOrder
+import com.tether.app.ui.components.focusRing
+import com.tether.app.ui.theme.LocalReducedMotion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -139,6 +156,12 @@ data class SidebarUiSeed(
     val openChildren: Set<String> = emptySet(),
     /** Blocks whose "Older" band starts expanded (the web's `olderOpen` state). */
     val olderOpen: Set<String> = emptySet(),
+    /** HG (tth-0bs): handover chains (by ROOT key) whose earlier sessions start open. */
+    val openChains: Set<String> = emptySet(),
+    /** Chains (by ROOT key) that have already shown these reasons: a preloaded `seen`, so nothing rises on mount. */
+    val seenChains: Map<String, List<String>> = emptyMap(),
+    /** Keyboard mode with focus on this chain's toggle (ROOT key), for the focus golden. */
+    val focusChain: String? = null,
     /** The "Archive idle sessions" dialog starts open, in this state (a golden's starting point). */
     val archiveStale: ArchiveStaleState? = null,
 )
@@ -158,6 +181,8 @@ object SidebarTags {
     fun archive(key: String) = "sidebar-archive:$key"
     fun block(workspace: String) = "sidebar-block:$workspace"
     fun older(workspace: String) = "sidebar-older:$workspace"
+    /** The chain toggle under the head row [headKey]. */
+    fun chainToggle(headKey: String) = "sidebar-chain-toggle:$headKey"
 }
 
 /** How long an armed end control stays armed (session-sidebar.tsx:40). */
@@ -246,6 +271,9 @@ private fun SidebarContent(
     var sortOpen by remember { mutableStateOf(seed.sortMenuOpen) }
     var archivedOpen by remember { mutableStateOf(seed.archivedOpen) }
     val openChildren = remember { mutableStateMapOf<String, Boolean>().apply { seed.openChildren.forEach { put(it, true) } } }
+    // HG (tth-0bs) session-sidebar.tsx:925-943 — open/closed and the last reason set, per chain ROOT key.
+    val chainOpen = remember { mutableStateMapOf<String, Boolean>().apply { seed.openChains.forEach { put(it, true) } } }
+    val chainSeen = remember { mutableStateMapOf<String, List<String>>().apply { putAll(seed.seenChains) } }
     val rowBounds = remember { HashMap<String, Rect>() }
     val endBounds = remember { HashMap<String, Rect>() }
     var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -262,6 +290,16 @@ private fun SidebarContent(
 
     val dragPreview = drag?.takeIf { it.engaged }?.let { DragPreview(it.key, it.order) }
     val view = SidebarViewModel.view(state, visibleCounts, dragPreview, olderOpen)
+
+    // A RISING edge (a reason key not yet seen) opens the chain, on mount too; a falling edge does nothing.
+    view.blocks.forEach { block ->
+        block.chainSummaries.values.forEach { chain ->
+            val before = chainSeen[chain.rootKey].orEmpty()
+            val rising = chain.reasonKeys.any { it !in before }
+            if (rising && chainOpen[chain.rootKey] != true) chainOpen[chain.rootKey] = true
+            if (rising || before.size != chain.reasonKeys.size) chainSeen[chain.rootKey] = chain.reasonKeys
+        }
+    }
 
     val latestState by rememberUpdatedState(state)
     val latestView by rememberUpdatedState(view)
@@ -375,6 +413,8 @@ private fun SidebarContent(
                         dragController = dragController,
                         draggingKey = drag?.takeIf { it.engaged }?.key,
                         openChildren = openChildren,
+                        chainOpen = chainOpen,
+                        focusChain = seed.focusChain,
                         rowBounds = rowBounds,
                         endBounds = endBounds,
                         onShowMore = { ws -> visibleCounts = visibleCounts + (ws to ((visibleCounts[ws] ?: Web.WORKSPACE_PAGE_SIZE) + Web.WORKSPACE_PAGE_SIZE)) },
@@ -888,6 +928,8 @@ private fun WorkspaceBlock(
     dragController: DragController,
     draggingKey: String?,
     openChildren: MutableMap<String, Boolean>,
+    chainOpen: MutableMap<String, Boolean>,
+    focusChain: String?,
     rowBounds: MutableMap<String, Rect>,
     endBounds: MutableMap<String, Rect>,
     onShowMore: (String) -> Unit,
@@ -948,6 +990,45 @@ private fun WorkspaceBlock(
                                     .drawBehind { drawRect(t.line, Offset.Zero, androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height)) }
                                     .padding(start = 1.dp + 0.2f.rem),
                             ) { children.forEach { child -> row(child, false) } }
+                        }
+                    }
+                    // HG (tth-0bs) session-sidebar.tsx:985-1030 — the chain's earlier sessions, behind one toggle.
+                    val chain = block.chainSummaries[entry.key]
+                    if (chain != null) {
+                        val open = chainOpen[chain.rootKey] == true
+                        ChainToggle(
+                            chain = chain,
+                            headName = SafeText.line(LabelText.title(Web.sidebarSessionName(entry.js))),
+                            open = open,
+                            phone = phone,
+                            focusSeed = focusChain == chain.rootKey,
+                            tag = SidebarTags.chainToggle(entry.key),
+                        ) { chainOpen[chain.rootKey] = !open }
+                        // Closed rows are not composed: not visible, not focusable, not in semantics (`hidden`).
+                        if (open) {
+                            Column(
+                                Modifier
+                                    .padding(start = 1.1f.rem)
+                                    .drawBehind { drawRect(t.line, Offset.Zero, androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height)) }
+                                    .padding(start = 1.dp + 0.2f.rem),
+                            ) {
+                                chain.older.forEach { member ->
+                                    row(member, false)
+                                    val kids = block.childrenByKey[member.key].orEmpty()
+                                    if (kids.isNotEmpty()) {
+                                        val kidOpen = kids.any { SidebarViewModel.isActiveEntry(state, it) } || openChildren[member.key] == true
+                                        DelegateToggle(kids.size, kidOpen, phone) { openChildren[member.key] = !kidOpen }
+                                        if (kidOpen) {
+                                            Column(
+                                                Modifier
+                                                    .padding(start = 1.1f.rem)
+                                                    .drawBehind { drawRect(t.line, Offset.Zero, androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height)) }
+                                                    .padding(start = 1.dp + 0.2f.rem),
+                                            ) { kids.forEach { kid -> row(kid, false) } }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1120,6 +1201,74 @@ private fun HeaderAction(
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { SmallIcon(icon, tint, size) }
+}
+
+/**
+ * `.session-chain-toggle` (globals.css 2606-2640; session-sidebar.tsx:992-1009): "N earlier sessions" under a handover
+ * chain's head, a top-aligned slim row (chevron, label, "· 2 needs you" suffix while closed). The title is a long-press
+ * tooltip. A tap, Enter or Space flips [open]; nothing moves focus. The ring is inset and shows in keyboard mode only.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone: Boolean, focusSeed: Boolean, tag: String, onToggle: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val reduced = LocalReducedMotion.current
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val input = androidx.compose.ui.platform.LocalInputModeManager.current
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    if (focusSeed) {
+        LaunchedEffect(Unit) {
+            androidx.compose.runtime.withFrameNanos { }
+            input.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard)
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+    val keyboardMode = input.inputMode == androidx.compose.ui.input.InputMode.Keyboard
+    val ink = if (hovered || focused) t.muted else t.faint
+    val shape = RoundedCornerShape(t.radiusSm)
+    val rotation by animateFloatAsState(
+        if (open) 180f else 0f,
+        if (reduced) snap() else tween(t.css.durationFast, easing = t.css.easeOut.toEasing()),
+        label = "chainChevron",
+    )
+    val showSuffix = !open && chain.suffix != null
+    val suffixInk = when (chain.suffix?.kind) {
+        SidebarOrder.ChainSuffixKind.Waiting -> t.violet
+        SidebarOrder.ChainSuffixKind.Active -> t.running
+        else -> ink
+    }
+    val name = "${chain.label} of $headName" + if (showSuffix) ", ${chain.suffixText}" else ""
+    val style = css(type.ui, 0.72f, 400, lineHeight = 1.3889f).ltrWords()
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text("Earlier sessions in this handover chain, newest first") } },
+        state = rememberTooltipState(),
+        modifier = Modifier.padding(start = 0.9f.rem).fillMaxWidth(),
+    ) {
+        FlowRow(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
+                .focusRing(focused && keyboardMode, shape, t.violet, offset = (-2).dp)
+                .clip(shape)
+                .semantics(mergeDescendants = true) {
+                    contentDescription = name
+                    stateDescription = if (open) "Expanded" else "Collapsed"
+                }
+                .focusRequester(focusRequester)
+                .clickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Button, onClick = onToggle)
+                .padding(start = t.css.spaceMd, end = t.css.spaceMd, top = t.css.spaceXs)
+                .testTag(tag),
+            horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+        ) {
+            SmallIcon(TetherIcons.ChevronDown, ink, 12.dp, Modifier.padding(top = 0.125f.rem).rotate(rotation))
+            Text(chain.label, style = style, color = ink, maxLines = 1)
+            if (showSuffix) Text("· ${chain.suffixText}", style = style, color = suffixInk)
+        }
+    }
 }
 
 /** `.session-children-toggle` (globals.css 3185-3217): "N delegate(s)", collapsed by default. */

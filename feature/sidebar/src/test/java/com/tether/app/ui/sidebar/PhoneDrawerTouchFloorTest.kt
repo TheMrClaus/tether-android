@@ -27,18 +27,18 @@ class PhoneDrawerTouchFloorTest {
     @get:Rule val rule = createComposeRule()
     private val F = SidebarFixtures
 
-    private fun show(state: SidebarState) {
+    private fun show(state: SidebarState, seed: SidebarUiSeed = SidebarUiSeed()) {
         // Unspecified turns Material's 48 dp inflation off, so a control reaches the floor only by its own size.
         rule.setContent {
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                SidebarUnderTest(TetherSkin.StudioDark, state)
+                SidebarUnderTest(TetherSkin.StudioDark, state, seed = seed)
             }
         }
         rule.waitForIdle()
     }
 
-    private fun assertEveryControlIs48(state: SidebarState) {
-        show(state)
+    private fun assertEveryControlIs48(state: SidebarState, seed: SidebarUiSeed = SidebarUiSeed()) {
+        show(state, seed)
         val floor = with(rule.density) { 48.dp.toPx() } // the owner-directed 48 dp literal, not the constant under test
         val nodes = rule.onAllNodes(hasClickAction(), useUnmergedTree = true).fetchSemanticsNodes()
         assertTrue("the drawer has controls", nodes.size > 20)
@@ -56,6 +56,12 @@ class PhoneDrawerTouchFloorTest {
 
     @Test fun everyControlOfSeveralBlocksIs48dp() =
         assertEveryControlIs48(F.state(F.groupSessions, pinned = listOf(F.DOCS, F.APP), current = F.APP, activeId = "g3", collapsed = listOf(F.DOCS)))
+
+    // W35 (ta-b6m9): the handover chain's toggle is a control too, closed and open (and its older rows).
+    @Test fun theChainToggleAndItsOlderRowsAre48dp() =
+        assertEveryControlIs48(F.state(F.chainSessions, current = F.APP, activeId = "c3"), SidebarUiSeed(openChains = setOf("live:c0")))
+
+    @Test fun theClosedChainToggleIs48dp() = assertEveryControlIs48(F.state(F.chainSessions, current = F.APP, activeId = "c3"))
 
     @Test fun consecutiveRowsAreAtLeast48dpApart() {
         show(F.state(F.drawerSessions))

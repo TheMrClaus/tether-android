@@ -35,6 +35,21 @@ enum class SidebarShot(val id: String) {
     /** tether #244: the "Archive idle sessions" dialog, its preview and its settled summary. */
     ArchiveStale("archive-stale"),
     ArchiveStaleDone("archive-stale-done"),
+
+    /**
+     * W35 (ta-b6m9, HG tth-0bs): a handover chain's earlier sessions behind one toggle. References (web @7cc0f38c):
+     * Chain r2-main-390/1440-collapsed; ChainOpen r2-main-*-expanded; ChainAuto built-*-autoopen;
+     * ChainArchived r2-archmid-*-expanded; ChainFocus r2-main-*-focus; ChainSuffix, ChainFilter and ChainDrag follow the
+     * A-spec section 7 states (no capture of their own).
+     */
+    Chain("chain"),
+    ChainOpen("chain-open"),
+    ChainAuto("chain-auto"),
+    ChainSuffix("chain-suffix"),
+    ChainArchived("chain-archived"),
+    ChainFilter("chain-filter"),
+    ChainDrag("chain-drag"),
+    ChainFocus("chain-focus"),
 }
 
 private const val DAY_MIN = 24L * 60
@@ -81,7 +96,24 @@ fun sidebarState(shot: SidebarShot): SidebarState = when (shot) {
     SidebarShot.Older, SidebarShot.OlderOpen -> F.state(olderSessions())
     SidebarShot.ArchiveStale -> F.state(F.drawerSessions.take(5), activeId = "s02").copy(archiveStale = archiveStalePreview())
     SidebarShot.ArchiveStaleDone -> F.state(F.drawerSessions.take(5), activeId = "s02")
+    SidebarShot.Chain, SidebarShot.ChainFocus -> F.state(F.chainSessions, current = F.APP, activeId = "c3")
+    SidebarShot.ChainOpen -> F.state(F.chainSessions + F.live("cd", "Index the fixtures", ago = 7, parent = "c2"), current = F.APP, activeId = "c3")
+    SidebarShot.ChainAuto -> F.state(F.chain(3, "a", ago = 5) + F.live("solo", "Scratch notes", ago = 40), current = F.APP, activeId = "a1")
+    SidebarShot.ChainSuffix -> F.state(chainSuffixSessions(), histories = chainSuffixHistories(), current = F.APP)
+    SidebarShot.ChainArchived -> F.state(F.chain(4, "x", ago = 5, archivedAt = setOf(1)) + F.live("solo", "Scratch notes", ago = 40), current = F.APP, activeId = "x3")
+    SidebarShot.ChainFilter -> F.state(F.chainSessions, current = F.APP, activeId = "c3", query = "importer")
+    SidebarShot.ChainDrag -> F.state(F.chainSessions, current = F.APP, activeId = "c3")
 }
+
+/** Three closed chains: (a) a waiting and an active member, (b) an active member, (c) unread work only. */
+private fun chainSuffixSessions() =
+    F.chain(3, "w", ago = 5, status = { if (it == 0) "waiting" else if (it == 1) "active" else "ready" }) +
+        F.chain(3, "v", ago = 15, status = { if (it == 1) "active" else "ready" }) +
+        F.chain(3, "u", ago = 25).map { if (it.id == "u0") it.copy(historyId = "h-u0") else it }
+
+private fun chainSuffixHistories() = mapOf(
+    F.APP to listOf(F.history("h-u0", "Chain u0", cwd = F.APP, ago = 27, seenAgo = 90, digest = null)),
+)
 
 fun sidebarSeed(shot: SidebarShot): SidebarUiSeed = when (shot) {
     SidebarShot.RowActions -> SidebarUiSeed(armedKey = "live:a2", swipedKey = "live:a4")
@@ -89,6 +121,12 @@ fun sidebarSeed(shot: SidebarShot): SidebarUiSeed = when (shot) {
     SidebarShot.HarnessMenu -> SidebarUiSeed(harnessMenuOpen = true)
     SidebarShot.Drag -> SidebarUiSeed(drag = DragPreview("live:s04", listOf("live:s01", "live:s04", "live:s02", "live:s03", "live:s05")))
     SidebarShot.Groups -> SidebarUiSeed(openChildren = setOf("live:g3"))
+    SidebarShot.ChainOpen -> SidebarUiSeed(openChains = setOf("live:c0"))
+    SidebarShot.ChainSuffix -> SidebarUiSeed(
+        seenChains = mapOf("live:w0" to listOf("live:w0", "live:w1"), "live:v0" to listOf("live:v1"), "live:u0" to emptyList()),
+    )
+    SidebarShot.ChainDrag -> SidebarUiSeed(drag = DragPreview("live:c3", listOf("live:solo", "live:c3", "live:p1")))
+    SidebarShot.ChainFocus -> SidebarUiSeed(focusChain = "live:c0")
     SidebarShot.Archived -> SidebarUiSeed(archivedOpen = true)
     SidebarShot.OlderOpen -> SidebarUiSeed(olderOpen = setOf(F.ROOT))
     SidebarShot.ArchiveStale -> SidebarUiSeed(archiveStale = ArchiveStaleState())
@@ -143,7 +181,7 @@ class SidebarTabletScreenshotTest(private val shot: SidebarShot, private val ski
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(SidebarShot.Drawer, SidebarShot.Groups, SidebarShot.Older, SidebarShot.ArchiveStale).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = (listOf(SidebarShot.Drawer, SidebarShot.Groups, SidebarShot.Older, SidebarShot.ArchiveStale) + SidebarShot.entries.filter { it.id.startsWith("chain") }).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -158,7 +196,7 @@ class SidebarFontScaleScreenshotTest(private val shot: SidebarShot, private val 
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(SidebarShot.Drawer, SidebarShot.Status).flatMap { s ->
+        fun params(): List<Array<Any>> = listOf(SidebarShot.Drawer, SidebarShot.Status, SidebarShot.ChainSuffix).flatMap { s ->
             listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }
