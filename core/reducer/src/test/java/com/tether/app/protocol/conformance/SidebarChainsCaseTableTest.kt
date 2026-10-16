@@ -40,7 +40,14 @@ class SidebarChainsCaseTableTest(private val index: Int, private val fn: String)
         fun params(): List<Array<Any>> = cases.mapIndexed { i, c -> arrayOf<Any>(i, c["fn"].str!!) }
 
         private fun chainKeys(v: JsValue?): List<HandoverChainKeys> = (v as JsArr).map { c ->
-            HandoverChainKeys((c["headKey"] as JsStr).value, (c["olderKeys"] as JsArr).map { (it as JsStr).value })
+            HandoverChainKeys((c["headKey"] as JsStr).value, (c["olderKeys"] as JsArr).map { (it as JsStr).value }, (c["anchorKey"] as? JsStr)?.value)
+        }
+
+        private fun chains(v: JsValue?): List<SidebarOrder.HandoverChain> =
+            (v as JsArr).map { SidebarOrder.HandoverChain(it["head"]!!, (it["older"] as JsArr).toList()) }
+
+        private fun groups(v: JsValue?): List<SidebarOrder.SidebarGroup> = (v as JsArr).map {
+            SidebarOrder.SidebarGroup(it["head"]!!, (it["older"] as JsArr).toList(), it["multiUnit"] == JsBool.TRUE, (it["anchorKey"] as JsStr).value)
         }
 
         private fun facts(v: JsValue?): List<ChainMemberFacts> = (v as JsArr).map { m ->
@@ -62,12 +69,19 @@ class SidebarChainsCaseTableTest(private val index: Int, private val fn: String)
             "handoverChains" to { a ->
                 SidebarOrder.handoverChains((a[0] as JsArr).toList()).map { TaggedObject(mapOf("head" to it.head, "older" to JsArr.of(it.older))) }
             },
-            "parseSequenceName" to { _ -> TODO("SB-2 parseSequenceName") },
-            "sidebarGroups" to { _ -> TODO("SB-2 sidebarGroups") },
-            "placeGroupMembers" to { _ -> TODO("SB-2 placeGroupMembers") },
-            "groupBandRecency" to { _ -> TODO("SB-2 groupBandRecency") },
+            "parseSequenceName" to { a ->
+                SidebarOrder.parseSequenceName((a[0] as? JsStr)?.value)?.let { TaggedObject(mapOf("base" to JsStr(it.base), "n" to JsNum(it.n.toDouble()))) }
+            },
+            // the corpus adapter's one-arg sidebarGroups uses the default nameOf (`e.name ?? ""`)
+            "sidebarGroups" to { a ->
+                SidebarOrder.sidebarGroups((a[0] as JsArr).toList()).map {
+                    TaggedObject(mapOf("head" to it.head, "older" to JsArr.of(it.older), "multiUnit" to (if (it.multiUnit) JsBool.TRUE else JsBool.FALSE), "anchorKey" to JsStr(it.anchorKey)))
+                }
+            },
+            "placeGroupMembers" to { a -> JsArr.of(SidebarOrder.placeGroupMembers((a[0] as JsArr).toList(), groups(a[1]))) },
+            "groupBandRecency" to { a -> JsNum(SidebarOrder.groupBandRecency(a[0]!!, (a[1] as JsArr).toList())) },
             "foldHandoverChains" to { a ->
-                val r = SidebarOrder.foldHandoverChains((a[0] as JsArr).toList())
+                val r = SidebarOrder.foldHandoverChains((a[0] as JsArr).toList(), a.getOrNull(1)?.let { chains(it) })
                 TaggedObject(mapOf("rows" to JsArr.of(r.rows), "olderByHeadKey" to r.olderByHeadKey.mapValues { JsArr.of(it.value) }))
             },
             "collapseChainOrder" to { a -> SidebarOrder.collapseChainOrder(strings(a[0]), chainKeys(a[1])).map { JsStr(it) } },

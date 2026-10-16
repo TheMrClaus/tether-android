@@ -3,9 +3,11 @@ package com.tether.app.protocol.helpers
 import com.tether.app.protocol.fold.strictEquals
 import com.tether.app.protocol.fold.truthy
 import com.tether.app.protocol.tree.JsArr
+import com.tether.app.protocol.tree.JsNull
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.protocol.tree.JsValue
+import java.util.Locale
 
 /** T2.2: faithful port of lib/sidebar-order.mjs. */
 object SidebarOrder {
@@ -120,8 +122,11 @@ object SidebarOrder {
     /** [rows] with each chain folded into its head; [olderByHeadKey] is insertion-ordered (the web's Map). */
     data class FoldedChains(val rows: List<JsValue>, val olderByHeadKey: Map<String, List<JsValue>>)
 
-    /** Key-level chain shape used by the drag order (the head stands for its whole group). */
-    data class HandoverChainKeys(val headKey: String, val olderKeys: List<String>)
+    /**
+     * Key-level chain shape used by the drag order (the head stands for its whole group). SB-2 (D-L34-24): [anchorKey] is the member
+     * whose slot the collapsed head takes; null = the chain root (the last older key).
+     */
+    data class HandoverChainKeys(val headKey: String, val olderKeys: List<String>, val anchorKey: String? = null)
 
     data class ChainMemberFacts(val key: String, val selected: Boolean, val waiting: Boolean, val active: Boolean, val unread: Boolean)
 
@@ -168,8 +173,9 @@ object SidebarOrder {
     }
 
     /** foldHandoverChains: each chain becomes its head at the slot of the first member met. keepKeys play no part. */
-    fun foldHandoverChains(entries: List<JsValue>): FoldedChains {
-        val chains = handoverChains(entries)
+    fun foldHandoverChains(entries: List<JsValue>, groups: List<HandoverChain>? = null): FoldedChains {
+        // SB-2: a caller that already derived [sidebarGroups] passes them (as chains); the default stays the handover chains alone.
+        val chains = groups ?: handoverChains(entries)
         if (chains.isEmpty()) return FoldedChains(entries.toList(), emptyMap())
         val olderByHeadKey = LinkedHashMap<String, List<JsValue>>()
         val chainOfKey = HashMap<String, HandoverChain>()
@@ -196,7 +202,7 @@ object SidebarOrder {
         val headByRoot = HashMap<String, String>()
         val chainKeys = HashSet<String>()
         for (chain in chains) {
-            headByRoot[chain.olderKeys.last()] = chain.headKey
+            headByRoot[chain.anchorKey ?: chain.olderKeys.last()] = chain.headKey
             chainKeys += chain.headKey
             chainKeys += chain.olderKeys
         }
@@ -217,6 +223,168 @@ object SidebarOrder {
             olderByHead[key]?.let { out += it }
         }
         return out
+    }
+
+    // ---- SB-2 name-sequence groups: lib/sidebar-order.ts parseSequenceName .. dragChainKeysByWorkspace @ tether ac67c5e4 ----
+
+    /** parseSequenceName's result: the lowercase [base] and the trailing number [n] (1-3 ASCII digits). */
+    data class SequenceName(val base: String, val n: Int)
+
+    // JS `^(.*?)([0-9]+)$`: `.` excludes exactly the four JS line terminators (Java's `.` also drops U+0085); matched with matchEntire
+    // (Java `$` would also accept a final line terminator).
+    private val SEQUENCE_NAME = Regex("([^\\n\\r\\u2028\\u2029]*?)([0-9]+)")
+    private val LETTER = Regex("\\p{L}")
+    private fun isSequenceSpace(c: Char) = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\u000C' || c == '\u000B'
+
+    /** Canonical name parser (D-L34-28): both ports run exactly this. null = the name carries no sequence key (a null name too). */
+    fun parseSequenceName(name: String?): SequenceName? {
+        if (name == null) return null
+        var start = 0
+        var end = name.length
+        while (start < end && isSequenceSpace(name[start])) start++
+        while (end > start && isSequenceSpace(name[end - 1])) end--
+        val s = name.substring(start, end).replace(Regex("[ \\t]+"), " ")
+        val m = SEQUENCE_NAME.matchEntire(s) ?: return null
+        val digits = m.groupValues[2]
+        if (digits.length > 3) return null
+        val base = m.groupValues[1].trimEnd { it == ' ' || it == '-' || it == '_' || it == '#' || it == '.' }.lowercase(Locale.ROOT)
+        if (!LETTER.containsMatchIn(base)) return null
+        return SequenceName(base, digits.toInt())
+    }
+
+    /** A handover chain's shape + whether it merges several units, and the key whose slot the group takes (D-L34-24/26). */
+    data class SidebarGroup(val head: JsValue, val older: List<JsValue>, val multiUnit: Boolean, val anchorKey: String) {
+        fun asChain() = HandoverChain(head, older)
+    }
+
+    /** The corpus adapter's default `nameOf` (`e.name ?? ""`); a non-string name yields null (parses to no key). */
+    fun nameField(entry: JsValue): String? = entry["name"].let { if (it == null || it is JsNull) "" else (it as? JsStr)?.value }
+
+    /** Recency of a unit's head (D-L34-27): `lastMessageAt ?? updatedAt ?? 0`. */
+    private fun headRecency(entry: JsValue): Double {
+        (entry["lastMessageAt"] as? JsNum)?.let { return it.value }
+        val updated = entry["updatedAt"]
+        return if (updated == null || updated is JsNull) 0.0 else jsToNumber(updated)
+    }
+
+    /**
+     * Keys of rows that carry a handover link (same linking rule as handoverChains) yet sit in no chain: caught in a cycle (no head),
+     * so they stay flat (D-L34-38).
+     */
+    private fun handoverCycleKeys(entries: List<JsValue>, chained: Set<String>): Set<String> {
+        val byLiveId = HashMap<String, JsValue>()
+        for (entry in entries) {
+            val id = entry["live"]["id"].nonEmptyStr ?: continue
+            if (!truthy(entry["live"]["runtimeArchived"])) byLiveId[id] = entry
+        }
+        val linked = LinkedHashSet<String>()
+        val hasNext = HashSet<String>()
+        for (entry in entries) {
+            val live = entry["live"]
+            if (!truthy(live) || truthy(live["runtimeArchived"])) continue
+            val source = live["handedOffFrom"].nonEmptyStr?.let { byLiveId[it] } ?: continue
+            val key = rowKey(entry) ?: continue
+            val sourceKey = rowKey(source) ?: continue
+            if (sourceKey == key || sourceKey in hasNext) continue
+            linked += key
+            linked += sourceKey
+            hasNext += sourceKey
+        }
+        return linked.filterTo(HashSet()) { it !in chained }
+    }
+
+    private class GroupUnit(val head: JsValue, val older: List<JsValue>, val anchorKey: String, val parsed: SequenceName?)
+
+    /**
+     * Handover chains UNION name-sequence groups over ONE block's rows. A lone ungrouped row is not a group. Unit order inside a
+     * group: heads with `handedOffTo` set last, then n desc, then head recency desc, then key ascending (UTF-16 code units).
+     */
+    fun sidebarGroups(entries: List<JsValue>, nameOf: (JsValue) -> String? = ::nameField): List<SidebarGroup> {
+        val chains = handoverChains(entries)
+        val chainByHeadKey = HashMap<String, HandoverChain>()
+        val chained = HashSet<String>()
+        for (chain in chains) {
+            chainByHeadKey[rowKey(chain.head)!!] = chain
+            chained += rowKey(chain.head)!!
+            for (member in chain.older) chained += rowKey(member)!!
+        }
+        val cycleKeys = handoverCycleKeys(entries, chained)
+        val units = ArrayList<GroupUnit>()
+        for (entry in entries) {
+            val key = rowKey(entry) ?: continue
+            val chain = chainByHeadKey[key]
+            if (chain == null && key in chained) continue
+            if (chain == null && key in cycleKeys) continue
+            val older = chain?.older ?: emptyList()
+            units += GroupUnit(entry, older, if (older.isNotEmpty()) rowKey(older.last())!! else key, parseSequenceName(nameOf(entry)))
+        }
+        val buckets = LinkedHashMap<String, MutableList<GroupUnit>>()
+        for (unit in units) unit.parsed?.let { buckets.getOrPut(it.base) { ArrayList() } += unit }
+        val out = ArrayList<SidebarGroup>()
+        for (unit in units) {
+            val bucket = unit.parsed?.let { buckets[it.base] }
+            if (bucket == null || bucket.size < 2) {
+                if (unit.older.isNotEmpty()) out += SidebarGroup(unit.head, unit.older, false, unit.anchorKey)
+                continue
+            }
+            if (bucket[0] !== unit) continue // emitted once, at the bucket's first unit in entry order
+            val ordered = bucket.sortedWith { a, b ->
+                val aOut = if (truthy(a.head["live"]["handedOffTo"])) 1.0 else 0.0
+                val bOut = if (truthy(b.head["live"]["handedOffTo"])) 1.0 else 0.0
+                sortSign(
+                    orNumber(aOut - bOut) {
+                        orNumber((b.parsed?.n ?: 0).toDouble() - (a.parsed?.n ?: 0).toDouble()) {
+                            orNumber(headRecency(b.head) - headRecency(a.head)) {
+                                a.head.let { rowKey(it)!! }.compareTo(rowKey(b.head)!!).toDouble()
+                            }
+                        }
+                    },
+                )
+            }
+            val first = ordered.first()
+            out += SidebarGroup(first.head, first.older + ordered.drop(1).flatMap { listOf(it.head) + it.older }, true, first.anchorKey)
+        }
+        return out
+    }
+
+    /**
+     * placeSuccessors' analogue for name groups (D-L34-24): gather every multi-unit group's members into ONE contiguous run at the
+     * anchor member's slot (head first, then older in group order); a group whose anchor is not in [rows] takes its first-met member's slot.
+     */
+    fun placeGroupMembers(rows: List<JsValue>, groups: List<SidebarGroup>): List<JsValue> {
+        val multi = groups.filter { it.multiUnit }
+        if (multi.isEmpty()) return rows.toList()
+        val present = rows.mapNotNullTo(HashSet()) { rowKey(it) }
+        val groupOfKey = HashMap<String, SidebarGroup>()
+        for (group in multi) for (member in listOf(group.head) + group.older) groupOfKey[rowKey(member)!!] = group
+        val placed = HashSet<SidebarGroup>()
+        val out = ArrayList<JsValue>()
+        for (row in rows) {
+            val key = rowKey(row)
+            val group = key?.let { groupOfKey[it] }
+            if (group == null) { out += row; continue }
+            if (group in placed || (group.anchorKey in present && key != group.anchorKey)) continue
+            placed += group
+            for (member in listOf(group.head) + group.older) if (rowKey(member) in present) out += member
+        }
+        return out
+    }
+
+    /** D-L34-26 band recency of a multi-unit group: max `lastMessageAt ?: updatedAt` over head + older (delegates excluded). */
+    fun groupBandRecency(head: JsValue, older: List<JsValue>): Double {
+        var best = headRecency(head)
+        for (member in older) best = Math.max(best, headRecency(member))
+        return best
+    }
+
+    /**
+     * D-L34-26 band recency of one top-level row: a multi-unit group takes the max over head + older; every other row (a lone
+     * handover chain included) keeps the head-only `lastMessageAt ?: updatedAt`.
+     */
+    fun bandRecencyOf(entry: JsValue, multiUnitHeadKeys: Set<String>, olderByHeadKey: Map<String, List<JsValue>>): Double? {
+        val key = rowKey(entry)
+        if (key != null && key in multiUnitHeadKeys) return groupBandRecency(entry, olderByHeadKey[key].orEmpty())
+        return ((entry["lastMessageAt"] as? JsNum) ?: (entry["updatedAt"] as? JsNum))?.value
     }
 
     /** summarizeChainMembers: reasonKeys (selected, waiting or active) open the group; ONE suffix, needs you > active > new. */

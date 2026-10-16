@@ -95,6 +95,8 @@ object SessionSidebar {
         val childrenByKey: Map<String, List<JsValue>>,
         /** HG (tth-0bs): each handover chain's older members (newest first), keyed by the chain's HEAD row key. Empty while filtering. */
         val olderByHeadKey: Map<String, List<JsValue>> = emptyMap(),
+        /** SB-2 (D-L34-26): heads of the groups that merged >= 2 units by name (band recency = max over the group). Empty while filtering. */
+        val multiUnitHeadKeys: Set<String> = emptySet(),
     )
 
     // components/session-sidebar.tsx:454 — a row is a child only when its parent is ALSO listed.
@@ -185,8 +187,12 @@ object SessionSidebar {
     // components/session-sidebar.tsx:484 withHandoverFold (tth-0bs) — delegate children are already extracted, so a chain
     // member's own delegates stay in childrenByKey under that member.
     fun withHandoverFold(grouped: GroupedRows): GroupedRows {
-        val folded = SidebarOrder.foldHandoverChains(grouped.rows)
-        return GroupedRows(folded.rows, grouped.childrenByKey, folded.olderByHeadKey)
+        // SB-2 (D-L34-25): the groups are handover chains UNION name-sequence groups; a multi-unit group's members are gathered into one
+        // run at its anchor first, so the fold's first-met slot and the drag order's anchor coincide.
+        val groups = SidebarOrder.sidebarGroups(grouped.rows, ::sidebarSessionName)
+        val folded = SidebarOrder.foldHandoverChains(SidebarOrder.placeGroupMembers(grouped.rows, groups), groups.map { it.asChain() })
+        val multiUnitHeadKeys = groups.filter { it.multiUnit }.mapTo(LinkedHashSet()) { (it.head["key"] as JsStr).value }
+        return GroupedRows(folded.rows, grouped.childrenByKey, folded.olderByHeadKey, multiUnitHeadKeys)
     }
 
     // components/session-sidebar.tsx:642-655 chainKeysByWorkspace — chains over the PLAIN browsing rows per block
@@ -199,7 +205,10 @@ object SessionSidebar {
         if (filtering) return emptyMap()
         val out = LinkedHashMap<String, List<SidebarOrder.HandoverChainKeys>>()
         for ((workspace, rows) in rowsByWorkspace(visibleRows.filter { (it["key"] as? JsStr)?.value !in delegateChildKeys })) {
-            val chains = SidebarOrder.chainKeys(SidebarOrder.handoverChains(rows))
+            // SB-2: one entry per group (handover chains UNION name groups), the head standing for it, with its anchor.
+            val chains = SidebarOrder.sidebarGroups(rows, ::sidebarSessionName).map { group ->
+                SidebarOrder.HandoverChainKeys((group.head["key"] as JsStr).value, group.older.map { (it["key"] as JsStr).value }, group.anchorKey)
+            }
             if (chains.isNotEmpty()) out[workspace] = chains
         }
         return out
