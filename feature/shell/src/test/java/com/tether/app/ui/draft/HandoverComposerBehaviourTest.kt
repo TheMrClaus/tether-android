@@ -139,8 +139,9 @@ class HandoverComposerBehaviourTest {
         // Editable (the platform maps SetText/EditableText to EditText), value read, name is the label.
         assertTrue(config.contains(androidx.compose.ui.semantics.SemanticsActions.SetText))
         assertEquals("Parser rewrite 2", config.getOrNull(SemanticsProperties.EditableText)?.text)
-        assertEquals(listOf(Handover.NAME_FIELD_LABEL), config.getOrNull(SemanticsProperties.ContentDescription))
-        assertEquals(null, config.getOrNull(SemanticsProperties.Text))
+        // The visible label is merged into the field's own node (the platform maps it to the hint); no contentDescription masks the value.
+        assertTrue(config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == Handover.NAME_FIELD_LABEL })
+        assertEquals(null, config.getOrNull(SemanticsProperties.ContentDescription))
     }
 
     @Test

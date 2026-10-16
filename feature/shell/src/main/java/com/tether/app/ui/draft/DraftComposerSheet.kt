@@ -1101,19 +1101,17 @@ private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover:
     var field by remember { mutableStateOf(TextFieldValue(draft.name, TextRange(draft.name.length))) }
     if (field.text != draft.name) field = TextFieldValue(draft.name, TextRange(draft.name.length))
     val hint = handover?.let { com.tether.app.client.Handover.nameHintView(draft.name, it.hint) }
+    // The visible label is drawn INSIDE the field's decorationBox so it merges into the text field's own node (the web's
+    // label htmlFor): the platform EditText exposes it as its hint while the typed value stays its text.
     val label: @Composable (Modifier) -> Unit = { m ->
         Text(
             com.tether.app.client.Handover.NAME_FIELD_LABEL,
             color = t.muted,
             style = cssText(type.ui, 0.75f, 650),
-            modifier = m
-                // A pointer tap focuses the field (the web's label htmlFor) without a click semantic, so the label is
-                // not an unnamed clickable a11y focus stop; the FIELD carries the name.
-                .pointerInput(Unit) { detectTapGestures { runCatching { focus.requestFocus() } } }
-                .clearAndSetSemantics { },
+            modifier = m,
         )
     }
-    val input: @Composable (Modifier) -> Unit = { m ->
+    val input: @Composable () -> Unit = {
         val style = type.body.copy(fontSize = 16.sp, fontWeight = androidx.compose.ui.text.font.FontWeight(560), color = t.ink)
         BasicTextField(
             value = field,
@@ -1124,17 +1122,11 @@ private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover:
             },
             enabled = !pending,
             singleLine = true,
-            modifier = m
-                .heightIn(min = 44.dp)
-                .tetherWell(t, RoundedCornerShape(t.radiusSm), focused)
-                .alpha(if (pending) 0.6f else 1f)
+            modifier = Modifier
+                .fillMaxWidth()
                 .focusRequester(focus)
-                // The field's own name is the label (the web's label htmlFor) in its Text; the typed value stays its
-                // EditableText (no contentDescription to mask it). The helper is its description (aria-describedby).
-                .semantics {
-                    contentDescription = com.tether.app.client.Handover.NAME_FIELD_LABEL
-                    if (hint != null) stateDescription = hint
-                }
+                // The helper is the field's description (aria-describedby); the name is the merged label (hint).
+                .semantics { if (hint != null) stateDescription = hint }
                 .testTag(DraftComposerTags.NameField),
             textStyle = style,
             cursorBrush = SolidColor(t.violet),
@@ -1150,33 +1142,43 @@ private fun SessionNameRow(draft: DraftComposerState, narrow: Boolean, handover:
             ),
             interactionSource = interaction,
             decorationBox = { inner ->
-                Box(Modifier.padding(horizontal = t.css.spaceMd).heightIn(min = 44.dp), contentAlignment = Alignment.CenterStart) {
-                    if (field.text.isEmpty()) {
-                        Text(
-                            com.tether.app.client.Handover.NAME_PLACEHOLDER,
-                            style = style.copy(fontWeight = androidx.compose.ui.text.font.FontWeight(500)),
-                            color = t.faint,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                val well: @Composable (Modifier) -> Unit = { wm ->
+                    Box(
+                        wm
+                            .heightIn(min = 44.dp)
+                            .tetherWell(t, RoundedCornerShape(t.radiusSm), focused)
+                            .alpha(if (pending) 0.6f else 1f)
+                            .padding(horizontal = t.css.spaceMd),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        if (field.text.isEmpty()) {
+                            Text(
+                                com.tether.app.client.Handover.NAME_PLACEHOLDER,
+                                style = style.copy(fontWeight = androidx.compose.ui.text.font.FontWeight(500)),
+                                color = t.faint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        inner()
                     }
-                    inner()
+                }
+                if (sheet) {
+                    Column(verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
+                        label(Modifier)
+                        well(Modifier.fillMaxWidth())
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd)) {
+                        label(Modifier)
+                        well(Modifier.weight(1f))
+                    }
                 }
             },
         )
     }
     Column(Modifier.fillMaxWidth().testTag(DraftComposerTags.NameRow)) {
-        if (sheet) {
-            Column(verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
-                label(Modifier)
-                input(Modifier.fillMaxWidth())
-            }
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd)) {
-                label(Modifier)
-                input(Modifier.weight(1f))
-            }
-        }
+        input()
         if (hint != null) {
             androidx.compose.foundation.text.selection.SelectionContainer {
                 Text(
