@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.liveRegion
@@ -89,13 +90,15 @@ fun HandOverDialog(
                 runCatching { cancelFocus.requestFocus() }
                 if (prior != androidx.compose.ui.input.InputMode.Keyboard) input.requestInputMode(prior)
             }
-            val keyboardMode = input.inputMode == androidx.compose.ui.input.InputMode.Keyboard
+            // Web (:focus-visible): the ring shows after a key, not after a pointer open. Decided from the mode at open (a
+            // keyboard open) and from a real key event in the dialog, never from the mode after our own forced switch.
+            var keyed by remember { androidx.compose.runtime.mutableStateOf(input.inputMode == androidx.compose.ui.input.InputMode.Keyboard) }
             TetherKey(
                 onClick = onCancel,
                 classes = KeyClasses.ButtonSecondary,
                 label = "Cancel",
-                showFocusRing = keyboardMode,
-                modifier = Modifier.focusRequester(cancelFocus).testTag(HANDOVER_CANCEL_TAG),
+                showFocusRing = keyed,
+                modifier = Modifier.onPreviewKeyEvent { keyed = true; false }.focusRequester(cancelFocus).testTag(HANDOVER_CANCEL_TAG),
             )
             StaleTapGuard(identity) { guard ->
                 TetherKey(
@@ -150,15 +153,18 @@ private fun HandOverDialogV151(
                 runCatching { cancelFocus.requestFocus() }
                 if (prior != androidx.compose.ui.input.InputMode.Keyboard) input.requestInputMode(prior)
             }
-            val keyboardMode = input.inputMode == androidx.compose.ui.input.InputMode.Keyboard
+            // Web (:focus-visible): the ring shows after a key, not after a pointer open. Decided from the mode at open (a
+            // keyboard open) and from a real key event in the dialog, never from the mode after our own forced switch.
+            var keyed by remember { androidx.compose.runtime.mutableStateOf(input.inputMode == androidx.compose.ui.input.InputMode.Keyboard) }
             val fill = if (phone) Modifier.fillMaxWidth() else Modifier
             val cancel: @Composable () -> Unit = {
                 TetherKey(
                     onClick = onCancel,
                     classes = KeyClasses.ButtonSecondary,
                     label = Handover.CANCEL_LABEL,
-                    showFocusRing = keyboardMode,
+                    showFocusRing = keyed,
                     modifier = fill
+                        .onPreviewKeyEvent { keyed = true; false }
                         .focusProperties { next = changeFocus; previous = asIsFocus }
                         .focusRequester(cancelFocus)
                         .testTag(HANDOVER_CANCEL_TAG),
