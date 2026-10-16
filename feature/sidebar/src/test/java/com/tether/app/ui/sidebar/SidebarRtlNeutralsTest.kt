@@ -50,7 +50,7 @@ class SidebarRtlNeutralsTest {
             CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
                 SidebarUnderTest(
                     TetherSkin.StudioDark,
-                    sidebarState(SidebarShot.Drawer),
+                    SidebarFixtures.state(SidebarFixtures.drawerSessions.take(6)), // W39: rows are 56 dp now; the archive row must be in view
                     TetherLayoutClass.Phone,
                     SidebarUiSeed(),
                     SidebarActions(onCollapse = {}),

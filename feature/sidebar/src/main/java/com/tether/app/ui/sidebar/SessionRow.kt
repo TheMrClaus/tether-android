@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -258,7 +259,8 @@ internal fun SessionRow(
         scope.launch { swipeX.animateTo(if (open) -ARCHIVE_WIDTH else 0f, snapSpec) }
     }
 
-    val rowShape = RoundedCornerShape(0.625f.rem)
+    // W39 (ta-v0h8): on the phone the card clips the row, so the row itself is square (the card rounds its ends).
+    val rowShape = if (phone) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(0.625f.rem)
     val rowFace = when {
         active -> Color(0xFF243657)
         else -> Color.Transparent
@@ -284,7 +286,7 @@ internal fun SessionRow(
                     .width(ARCHIVE_WIDTH.dp)
                     .fillMaxHeight()
                     .alpha(if (revealed) 1f else 0f)
-                    .background(t.danger, RoundedCornerShape(t.radiusSm))
+                    .background(t.danger, if (phone) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(t.radiusSm))
                     .semantics {
                         contentDescription = "Archive $name"
                         role = Role.Button
@@ -308,6 +310,14 @@ internal fun SessionRow(
                 .offset { IntOffset((swipeX.value * density.density).roundToInt(), 0) }
                 // `.session-item-swipe { background: inherit }`: the row's own surface travels with it.
                 .then(if (rowFace != Color.Transparent) Modifier.background(rowFace, rowShape) else Modifier)
+                // W39: the selected row's 3 dp `violet` bar at the start edge, full row height (mirrors in RTL).
+                .then(
+                    if (phone && active) Modifier.drawBehind {
+                        val w = PhoneLook.SelectedBar.toPx()
+                        val x = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) size.width - w else 0f
+                        drawRect(t.violet, Offset(x, 0f), androidx.compose.ui.geometry.Size(w, size.height))
+                    } else Modifier,
+                )
                 .then(
                     if (!swipeEnabled) Modifier else Modifier.pointerInput(entry.key, swipeOpen) {
                         val slop = 6.dp.toPx()
@@ -356,7 +366,7 @@ internal fun SessionRow(
             Box(
                 Modifier
                     .width(if (phone) PhoneDrawer.Floor else 2.4f.rem)
-                    .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
+                    .heightIn(min = if (phone) PhoneLook.RowMinHeight else 2.75f.rem)
                     .onGloballyPositioned { handleCoords = it }
                     .testTag(SidebarTags.handle(entry.key))
                     .semantics {
@@ -409,7 +419,14 @@ internal fun SessionRow(
                 contentAlignment = Alignment.Center,
             ) {
                 if (phone) {
-                    ProviderCap(provider, PhoneDrawer.Cap, Modifier.alpha(if (dragEnabled) 1f else 0.72f), selected = active, letterRem = 0.65f)
+                    ProviderCap(
+                        provider,
+                        if (PhoneLook.MonochromeProviderTile) PhoneLook.Tile else PhoneDrawer.Cap,
+                        Modifier.alpha(if (dragEnabled) 1f else 0.72f),
+                        selected = active,
+                        letterRem = 0.65f,
+                        monochrome = PhoneLook.MonochromeProviderTile,
+                    )
                 } else {
                     ProviderCap(provider, 1.75f.rem, Modifier.alpha(if (dragEnabled) 1f else 0.72f), selected = active)
                 }
@@ -418,9 +435,9 @@ internal fun SessionRow(
             Row(
                 Modifier
                     .weight(1f)
-                    .heightIn(min = if (phone) PhoneDrawer.Floor else 3.5f.rem)
+                    .heightIn(min = if (phone) PhoneLook.RowMinHeight else 3.5f.rem)
                     .semantics(mergeDescendants = true) {
-                        contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location, offline, sync)
+                        contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location, offline, sync, phone, provider)
                         if (active) selected = true
                     }
                     .clickable(role = Role.Button) {
@@ -436,12 +453,13 @@ internal fun SessionRow(
                     }
                     // :root .session-item: 0.4rem space-sm, padding-left 0 (Studio 0.75rem 0.25rem, studio.css 325).
                     .then(
-                        if (phone) Modifier.padding(vertical = 0.375f.rem, horizontal = 0.25f.rem)
+                        // The title column starts at 56 dp (the 48 dp handle + 8): the card's one text edge.
+                        if (phone) Modifier.padding(top = PhoneLook.RowVPad, bottom = PhoneLook.RowVPad, start = 8.dp, end = 4.dp)
                         else Modifier.padding(vertical = 0.75f.rem, horizontal = 0.25f.rem),
                     ),
                 verticalAlignment = Alignment.CenterVertically,
                 // The grid gap: space-md on a phone, space-sm from 48rem (globals.css 4052-4058).
-                horizontalArrangement = Arrangement.spacedBy(if (phone) t.css.spaceMd else t.css.spaceSm),
+                horizontalArrangement = Arrangement.spacedBy(if (phone) 0.dp else t.css.spaceSm),
             ) {
                 if (phone) {
                     PhoneRowBody(
@@ -521,13 +539,49 @@ internal fun SessionRow(
 private fun DigestBlock(d: com.tether.app.protocol.model.HistoryDigest, phone: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val rem = if (phone) 0.65f else 0.7f
+    val rem = if (phone) 0.75f else 0.7f
     Column(Modifier.padding(top = 0.1f.rem), verticalArrangement = Arrangement.spacedBy(0.05f.rem)) {
         if (d.newTurns > 0) {
             Text("${d.newTurns} new turn${if (d.newTurns == 1) "" else "s"} since you left", style = css(type.ui, rem, 600), color = t.violet)
         }
         val snippet = LabelText.hint(d.snippet)
         if (snippet.isNotEmpty()) Text(snippet, style = css(type.ui, rem, 400).copy(textDirection = proseDirection), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * W39 (ta-v0h8, director amendment 1): the phone's digest is ONE line: "N new turns" 12/600 `ink` (never
+ * truncated), then " · " and the snippet 12/400 `faint` (ellipsised first). No count: the snippet alone; no
+ * snippet: the count alone. "since you left" and the whole snippet live in the row's description.
+ */
+@Composable
+private fun DigestLine(d: com.tether.app.protocol.model.HistoryDigest) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val snippet = LabelText.hint(d.snippet)
+    val hasCount = d.newTurns > 0
+    if (!hasCount && snippet.isEmpty()) return
+    val lineHeight = 1.3333f
+    Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (hasCount) {
+            Text(
+                "${d.newTurns} new turn${if (d.newTurns == 1) "" else "s"}",
+                style = css(type.ui, 0.75f, 600, lineHeight = lineHeight).ltrWords(),
+                color = t.ink,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+        if (snippet.isNotEmpty()) {
+            Text(
+                (if (hasCount) " · " else "") + snippet,
+                style = css(type.ui, 0.75f, 400, lineHeight = lineHeight).copy(textDirection = proseDirection),
+                color = t.faint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
     }
 }
 
@@ -561,7 +615,7 @@ private fun PhoneRowBody(
             // a one-line name has no line break to put inside a word (ta-z4c1 keeps the rail's two lines).
             WholeWordText(
                 name,
-                style = css(type.ui, 0.75f, 600, lineHeight = 1.4f).copy(textDirection = proseDirection),
+                style = css(type.ui, 0.875f, 600, lineHeight = 1.4286f).copy(textDirection = proseDirection),
                 color = if (active) Color.White else t.ink,
                 maxLines = 1,
                 modifier = Modifier.weight(1f, fill = false),
@@ -571,9 +625,9 @@ private fun PhoneRowBody(
         PhoneMetaLine(
             status = { StatusLine(entry, now, updatedAt, offline, sync, phone = true) },
             // ta-28i: the location is a path: code, LTR.
-            location = location?.let { path -> { Text(codeLabel(path), style = css(type.ui, 0.65f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+            location = location?.let { path -> { Text(codeLabel(path), style = css(type.ui, 0.75f, 400, lineHeight = 1.3333f), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
         )
-        digest?.let { d -> DigestBlock(d, phone = true) }
+        digest?.let { d -> if (PhoneLook.DigestOneLine) DigestLine(d) else DigestBlock(d, phone = true) }
         entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount, phone = true) }
     }
 }
@@ -659,7 +713,7 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     // The phone's words and time are 0.65rem (ta-1jj7, owner-directed design); the rail's stay 0.68rem.
-    val style = css(type.ui, if (phone) 0.65f else 0.68f, 500)
+    val style = if (phone) css(type.ui, 0.75f, 500, lineHeight = 1.3333f) else css(type.ui, 0.68f, 500)
     val live = entry.live
     val rel = Format.relativeTime(updatedAt.toDouble(), now.toDouble())
     // T13.2: an offline row carries more (the "was" words and the copy's glyph): its pieces wrap
@@ -679,6 +733,9 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
                 "waiting" -> t.violet
                 else -> t.faint
             }
+            // W39: on the phone the word is `muted` at rest (7.2:1) and a waiting row's word is 600.
+            val wordColor = if (phone && live.status != "active" && live.status != "waiting") t.muted else color
+            val wordStyle = if (phone && live.status == "waiting") style.copy(fontWeight = androidx.compose.ui.text.font.FontWeight(600)) else style
             // Flex floors: the dot and the ping shrink to 0, the spinner to its two 1.5dp borders.
             when (live.status) {
                 "active" -> SpinnerRing(color, size = 0.65f.rem, stroke = 1.5.dp, modifier = Modifier.flexFloor(3.dp))
@@ -686,7 +743,7 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
                 else -> StatusDot(color, size = 0.4f.rem, modifier = Modifier.flexFloor(0.dp))
             }
             // ta-28i r2: a status this build does not know is the server's word: the label rule.
-            Text(Format.statusCopy[live.status] ?: LabelText.label(live.status), style = style, color = color)
+            Text(Format.statusCopy[live.status] ?: LabelText.label(live.status), style = wordStyle, color = wordColor)
             Text("· $rel", style = style.ltrWords(), color = t.faint)
         } else {
             SmallIcon(TetherIcons.History, t.faint, 12.dp)
@@ -725,8 +782,11 @@ private fun rowDescription(
     location: String?,
     offline: Boolean,
     sync: com.tether.app.client.SessionSync?,
+    phone: Boolean,
+    provider: String,
 ): String = buildString {
     append(name)
+
     if (unseen) append(", changed since you last looked")
     if (entry.live?.handedOffTo != null) append(", handed off")
     when (mode) {
@@ -743,7 +803,15 @@ private fun rowDescription(
     entry.history?.digest?.takeIf { entry.js["digest"] != null && it.newTurns > 0 }?.let {
         append(", ${it.newTurns} new turn${if (it.newTurns == 1) "" else "s"} since you left")
     }
+    // W39: the one-line digest cuts the snippet at the row's edge; the whole of it is read here.
+    if (phone && PhoneLook.DigestOneLine) {
+        entry.history?.digest?.takeIf { entry.js["digest"] != null }?.let { d -> LabelText.hint(d.snippet).takeIf { it.isNotEmpty() }?.let { append(", $it") } }
+    }
     location?.let { append(", ").append(SafeText.line(it)) }
+    // W39: the phone's tile is a single-ink mark: the provider's name is in words here instead.
+    if (phone && PhoneLook.MonochromeProviderTile && provider.isNotEmpty()) {
+        append(", ").append(SafeText.line(Web.SIDEBAR_HARNESSES.firstOrNull { it.first == provider }?.second ?: provider))
+    }
     // T5.3: a content-search hit says where it matched. ta-28i: by the label rule, as drawn.
     entry.snippet?.let { LabelText.hint(it) }?.let { snippet ->
         append(", matched: $snippet")
@@ -760,7 +828,7 @@ private fun rowDescription(
 internal fun SnippetLine(snippet: String, matchCount: Int, phone: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    val style = css(type.ui, if (phone) 0.65f else 0.7f, 400)
+    val style = css(type.ui, if (phone) 0.75f else 0.7f, 400)
     Row(
         Modifier.padding(top = 0.1f.rem),
         verticalAlignment = Alignment.CenterVertically,

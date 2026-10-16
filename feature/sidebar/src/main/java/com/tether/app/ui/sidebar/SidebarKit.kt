@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.hardShadow
 import com.tether.app.ui.icons.ProviderTile
 import com.tether.app.ui.theme.CssLineHeight
@@ -113,8 +114,25 @@ internal fun ProviderCap(
     selected: Boolean = false,
     inRow: Boolean = true,
     letterRem: Float = 0.8f,
+    /**
+     * W39 (ta-v0h8): the phone row's quiet variant: a neutral `slate` tile with a hairline and a single-ink mark,
+     * so colour in the list is state only. Row-only: the harness menu, archived rows and global search keep
+     * their brand tiles ([ProviderTile] itself is unchanged).
+     */
+    monochrome: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
+    if (monochrome) {
+        androidx.compose.foundation.layout.Box(
+            modifier
+                .size(size)
+                .cssSurface(androidx.compose.foundation.shape.RoundedCornerShape(t.radiusSm), t.slate, com.tether.app.ui.components.CssBorder(1.dp, t.lineStrong), emptyList()),
+            contentAlignment = androidx.compose.ui.Alignment.Center,
+        ) {
+            com.tether.app.ui.icons.ProviderLogo(provider, color = t.ink, markSize = size * 0.58f, letterSize = (letterRem * 16f).sp)
+        }
+        return
+    }
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(0.45f.rem)
     val border = null
     val shadows = if (inRow) listOf(hardShadow(1.dp, t.keySide)) else emptyList<CssShadow>()

@@ -8,6 +8,12 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import com.tether.app.ui.components.KeyState
+import com.tether.app.ui.components.resolveKey
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
@@ -39,6 +45,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -219,6 +226,44 @@ object PhoneDrawer {
 }
 
 /**
+ * W39 (ta-v0h8): the phone drawer's look (the session-list redesign, SL-spec as amended by the director).
+ * The four looks the live web does not all share yet each sit behind ONE constant here: flip it to put the
+ * old look back (one line each). Phone only: nothing here is read by the tablet rail.
+ */
+object PhoneLook {
+    /** The filter field is always drawn (the web's SB rule). false: only past 5 sessions, as before. */
+    const val FilterFieldAlwaysVisible = true
+
+    /** The row's provider tile is a neutral single-ink tile. false: the brand tile ([ProviderTile]). */
+    const val MonochromeProviderTile = true
+
+    /** The workspace header's keyboard digit hint is hidden (hint only: no shortcut is bound to it). */
+    const val HideKbdDigits = true
+
+    /** The digest is ONE line ("N new turns" · snippet). false: today's two lines ("… since you left"). */
+    const val DigestOneLine = true
+
+    /** A row is at least this tall, with [RowVPad] above and below its two text lines (director amendment 2). */
+    val RowMinHeight = 56.dp
+    val RowVPad = 9.dp
+
+    /** The 28 dp tile inside the 48 dp drag handle; the handle centres it on x = 24 of the card. */
+    val Tile = 28.dp
+
+    /** The 3 dp selected bar. */
+    val SelectedBar = 3.dp
+
+    /** The card's corner radius; its fill is `graphiteRaised`. */
+    val CardRadius = 12.dp
+
+    /** Added to [PhoneDrawer.Edge] so content sits 12 dp from the panel's edge. */
+    val InnerGutter = 4.dp
+
+    /** The leading slot (handle, avatar, glyph): 48 dp, content centred on x = 24; the title column starts after it + 8. */
+    val Lead = 48.dp
+}
+
+/**
  * T5.1: the web's `components/session-sidebar.tsx` — the drawer's content on a phone and the
  * sidebar column's content in the expanded layout (the host owns the container: width, padding,
  * floor). Stateless over [state]; the only local state is the web component's own (armed end
@@ -344,7 +389,8 @@ private fun SidebarContent(
                     if (endBounds[key]?.contains(at) != true) armedKey = null
                 }
             }
-            .testTag(SidebarTags.Root),
+            .testTag(SidebarTags.Root)
+            .then(if (phone) Modifier.padding(horizontal = PhoneLook.InnerGutter) else Modifier),
     ) {
         val scheduledRow: @Composable () -> Unit = {
             ScheduledNav(count = state.scheduledActionCount, active = state.scheduledActionsActive, onClick = actions.onOpenScheduledActions, phone = phone)
@@ -361,14 +407,21 @@ private fun SidebarContent(
                 onSortOpen = { sortOpen = it; if (it) harnessOpen = false },
             )
         }
-        val showFilter = state.sidebarSessions.size > 5
+        val showFilter = state.sidebarSessions.size > 5 || (phone && PhoneLook.FilterFieldAlwaysVisible)
+        // W39: the phone's filter chips + icon keys (Active, Unread, harness, Hide runs, Sort) under the field.
+        val phoneFilters: @Composable () -> Unit = {
+            FilterBank(
+                state, actions, true,
+                harnessOpen, { harnessOpen = it; if (it) sortOpen = false },
+                sortOpen, { sortOpen = it; if (it) harnessOpen = false },
+            )
+        }
         if (phone) {
-            // ta-1jj7 (owner-directed design): New session, Search and Close share the first 48 dp row.
-            PhoneTopRow(onNewSession = actions.onNewSession, onSearch = actions.onOpenGlobalSearch, onClose = actions.onCloseDrawer)
+            // W39: the title block (Workspaces, N open, Private runtime) and the three keys share the header.
+            PhoneHeader(openCount = view.openCount, onNewSession = actions.onNewSession, onSearch = actions.onOpenGlobalSearch, onClose = actions.onCloseDrawer)
             if (!headerScrolls) {
-                scheduledRow()
-                legendRow()
                 if (showFilter) SessionFilter(state.query, actions.onSessionQueryChange, phone = true)
+                phoneFilters()
                 PhoneRule()
             }
         } else {
@@ -391,9 +444,8 @@ private fun SidebarContent(
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             if (headerScrolls) {
-                item(key = "hdr-scheduled") { scheduledRow() }
-                item(key = "hdr-legend") { legendRow() }
                 if (showFilter) item(key = "hdr-filter") { SessionFilter(state.query, actions.onSessionQueryChange, phone = true) }
+                item(key = "hdr-chips") { phoneFilters() }
                 item(key = "hdr-rule") { PhoneRule() }
             }
             view.blocks.forEachIndexed { position, block ->
@@ -435,7 +487,7 @@ private fun SidebarContent(
             }
             item(key = "archive-stale") {
                 // session-sidebar.tsx:1236 — opens the dialog and asks for a preview of the threshold chosen last.
-                SidebarAddRow(TetherIcons.Archive, 14.dp, ArchiveStaleCopy.ENTRY, ArchiveStaleTags.Entry, phone) {
+                SidebarAddRow(TetherIcons.Archive, 14.dp, ArchiveStaleCopy.ENTRY, ArchiveStaleTags.Entry, phone, topGap = if (phone) 16.dp else null) {
                     val step = ArchiveStaleModel.open(archiveState)
                     archiveState = step.state
                     archiveOrigin = latestOrigin
@@ -462,7 +514,7 @@ private fun SidebarContent(
                 phone = phone,
             )
         }
-        SidebarFooter(phone = phone, onOpenSettings = actions.onOpenSettings, onCollapse = actions.onCollapse)
+        SidebarFooter(phone = phone, onOpenSettings = actions.onOpenSettings, onCollapse = actions.onCollapse, phoneScheduled = scheduledRow)
     }
 
     if (archiveOpen) {
@@ -479,39 +531,96 @@ private fun SidebarContent(
 // ── Header ──────────────────────────────────────────────────────────────────────
 
 /**
- * The phone drawer's first row (ta-1jj7, owner-directed design): the New session key (the row's
- * weight), the global search key and the close key, each at the 48 dp floor and 4 dp apart. The
- * old 16 sp "Workspaces" title is gone: the list legend below says the same word.
+ * W39 (ta-v0h8): the phone drawer's header, one calm block. Start: "Workspaces" 20/700 with its open count
+ * (the legend's number and its "Workspaces, N open" name, moved here), and a green "Private runtime" line
+ * under it (moved from the footer). End: Search all conversations, the cobalt icon-only New session (tooltip
+ * "New session (N)") and Close, each at the 48 dp floor. At a large font the keys wrap under the title.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun PhoneTopRow(onNewSession: () -> Unit, onSearch: (() -> Unit)?, onClose: () -> Unit) {
+private fun PhoneHeader(openCount: Int, onNewSession: () -> Unit, onSearch: (() -> Unit)?, onClose: () -> Unit) {
     val t = LocalTetherTokens.current
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = PhoneDrawer.Floor),
-        verticalAlignment = Alignment.CenterVertically,
+    val type = LocalTetherTypography.current
+    FlowRow(
+        Modifier.fillMaxWidth().heightIn(min = PhoneLook.RowMinHeight),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
     ) {
-        NewSessionKey(onClick = onNewSession, phone = true, modifier = Modifier.weight(1f))
-        // The recessed well's face, as a 48 dp key; its visible words became the label.
-        val shape = RoundedCornerShape(0.625f.rem)
-        Box(
-            Modifier
-                .size(PhoneDrawer.Floor)
-                .clickable(enabled = onSearch != null, role = Role.Button) { onSearch?.invoke() }
-                .semantics {
-                    contentDescription = "Search all conversations"
-                    if (onSearch == null) disabled()
-                }
-                .cssSurface(shape, Color(0xFF111A2B), CssBorder(1.dp, t.line), emptyList()),
-            contentAlignment = Alignment.Center,
-        ) { SmallIcon(TetherIcons.Search, t.muted, 16.dp) }
-        Box(
-            Modifier
-                .size(PhoneDrawer.Floor)
-                .clickable(role = Role.Button, onClickLabel = null, onClick = onClose)
-                .semantics { contentDescription = "Close sessions" },
-            contentAlignment = Alignment.Center,
-        ) { SmallIcon(TetherIcons.X, t.white, 20.dp) }
+        Column(Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "Workspaces",
+                    style = css(type.ui, 1.25f, 700, lineHeight = 1.2f),
+                    color = t.white,
+                    maxLines = 1,
+                    modifier = Modifier.alignByBaseline().semantics { heading(); contentDescription = "Workspaces, $openCount open" },
+                )
+                Text(
+                    "$openCount",
+                    style = css(type.ui, 0.875f, 500),
+                    color = t.faint,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.alignByBaseline().clearAndSetSemantics { },
+                )
+            }
+            Row(
+                Modifier.padding(top = 2.dp).semantics(mergeDescendants = true) { contentDescription = "Private runtime" },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StatusDot(t.running, size = 6.dp)
+                Text("Private runtime", style = css(type.ui, 0.75f, 500, lineHeight = 1.3333f), color = t.muted, maxLines = 1)
+            }
+        }
+        Row(
+            Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(PhoneDrawer.Floor)
+                    .clickable(enabled = onSearch != null, role = Role.Button) { onSearch?.invoke() }
+                    .semantics {
+                        contentDescription = "Search all conversations"
+                        if (onSearch == null) disabled()
+                    },
+                contentAlignment = Alignment.Center,
+            ) { SmallIcon(TetherIcons.Search, t.muted, 20.dp) }
+            // The one primary action: the cobalt key, icon only; the name and the long-press tooltip say what it is.
+            // The key IS the tooltip's anchor (one node: click, name and long-press together, as the chain toggle, ta-btv8).
+            val interaction = remember { MutableInteractionSource() }
+            val pressed by interaction.collectIsPressedAsState()
+            val look = resolveKey(t, KeyClasses.NewSession, if (pressed) KeyState.Pressed else KeyState.Rest)
+            TooltipBox(
+                positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                tooltip = { PlainTooltip { Text("New session (N)") } },
+                state = rememberTooltipState(),
+                modifier = Modifier
+                    .size(PhoneDrawer.Floor)
+                    .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onNewSession)
+                    .clearAndSetSemantics {
+                        testTag = SidebarTags.NewSession
+                        contentDescription = "New session"
+                        role = Role.Button
+                        onClick { onNewSession(); true }
+                    },
+            ) {
+                // The face is 44 dp inside the 48 dp touch target.
+                Box(
+                    Modifier.fillMaxSize().padding(2.dp).cssSurface(RoundedCornerShape(t.radiusMd), look.face, CssBorder(1.dp, look.border), look.shadows),
+                    contentAlignment = Alignment.Center,
+                ) { SmallIcon(TetherIcons.Plus, look.ink, 22.dp) }
+            }
+            Box(
+                Modifier
+                    .size(PhoneDrawer.Floor)
+                    .clickable(role = Role.Button, onClickLabel = null, onClick = onClose)
+                    .semantics { contentDescription = "Close sessions" },
+                contentAlignment = Alignment.Center,
+            ) { SmallIcon(TetherIcons.X, t.white, 20.dp) }
+        }
     }
 }
 
@@ -573,6 +682,27 @@ private fun ScheduledNav(count: Int, active: Boolean, onClick: (() -> Unit)?, ph
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusSm)
+    if (phone) {
+        // W39: on the phone it is the footer's second destination: icon 20, "Scheduled actions" 13/600, the count as today.
+        Row(
+            Modifier
+                .heightIn(min = PhoneDrawer.Floor)
+                .clip(shape)
+                .then(if (active) Modifier.background(t.graphiteRaised, shape).semantics { selected = true } else Modifier)
+                .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
+                .alpha(if (onClick == null) 0.48f else 1f)
+                .padding(horizontal = 8.dp)
+                .testTag(SidebarTags.Scheduled),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val ink = if (active) t.white else t.muted
+            SmallIcon(TetherIcons.CalendarClock, ink, 20.dp)
+            Text("Scheduled actions", style = css(type.ui, 0.8125f, 600), color = ink, maxLines = 1)
+            if (count > 0) CountPill(count, if (active) t.violetStrong else t.lineStrong, 0.64f, if (active) t.violetDeep else t.faint)
+        }
+        return
+    }
     Row(
         Modifier
             .padding(top = if (phone) 0.dp else 0.6f.rem, bottom = if (phone) 0.dp else 1f.rem)
@@ -669,6 +799,7 @@ private fun ListHeader(
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun FilterBank(
     state: SidebarState,
@@ -680,14 +811,7 @@ private fun FilterBank(
     onSortOpen: (Boolean) -> Unit,
 ) {
     val t = LocalTetherTokens.current
-    val bankShape = RoundedCornerShape(t.radiusKey - 1.dp)
-    Row(
-        Modifier.then(
-            Modifier,
-        ),
-        horizontalArrangement = Arrangement.spacedBy(0.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    val harnessKey: @Composable () -> Unit = {
         val harnessLabel = state.harness?.let { id -> Web.SIDEBAR_HARNESSES.firstOrNull { it.first == id }?.second }
         Box {
             BankKey(
@@ -710,24 +834,26 @@ private fun FilterBank(
                 }
             }
         }
-        BankKey(
-            TetherIcons.Activity, state.activeOnly,
-            "Active", phone, switch = true,
-            stateText = if (state.activeOnly) "Showing sessions with work in progress" else "Show sessions with work in progress",
-            onClick = actions.onToggleActiveOnly,
-        )
-        BankKey(
-            TetherIcons.Mail, state.unreadOnly,
-            "Unread", phone, switch = true,
-            stateText = if (state.unreadOnly) "Showing sessions with unread reports" else "Show sessions with unread reports",
-            onClick = actions.onToggleUnreadOnly,
-        )
+    }
+    val activeKey: @Composable () -> Unit = {
+        val stateText = if (state.activeOnly) "Showing sessions with work in progress" else "Show sessions with work in progress"
+        if (phone) PhoneChip(TetherIcons.Activity, "Active", state.activeOnly, stateText, actions.onToggleActiveOnly)
+        else BankKey(TetherIcons.Activity, state.activeOnly, "Active", phone, switch = true, stateText = stateText, onClick = actions.onToggleActiveOnly)
+    }
+    val unreadKey: @Composable () -> Unit = {
+        val stateText = if (state.unreadOnly) "Showing sessions with unread reports" else "Show sessions with unread reports"
+        if (phone) PhoneChip(TetherIcons.Mail, "Unread", state.unreadOnly, stateText, actions.onToggleUnreadOnly)
+        else BankKey(TetherIcons.Mail, state.unreadOnly, "Unread", phone, switch = true, stateText = stateText, onClick = actions.onToggleUnreadOnly)
+    }
+    val hideKey: @Composable () -> Unit = {
         BankKey(
             TetherIcons.BotOff, state.hideAgentRuns,
             "Hide runs", phone, switch = true,
             stateText = if (state.hideAgentRuns) "Hiding background CLI runs launched by agents" else "Hide background CLI runs launched by agents",
             onClick = actions.onToggleHideAgentRuns,
         )
+    }
+    val sortKey: @Composable () -> Unit = {
         Box {
             val sortLabel = if (state.sort == SidebarSort.Created) "Created Date" else "Last Active"
             BankKey(
@@ -744,6 +870,79 @@ private fun FilterBank(
                     MenuItem("Last Active", checked = state.sort == SidebarSort.LastActive, trailingCheck = true, phone = phone) { actions.onSortModeChange(SidebarSort.LastActive); onSortOpen(false) }
                 }
             }
+        }
+    }
+    if (phone) {
+        // W39: Active and Unread are labelled chips (start); harness, Hide runs and Sort stay icon keys (end).
+        // The two groups wrap at a large font, the icon keys under the chips, aligned to the end.
+        FlowRow(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                activeKey()
+                unreadKey()
+            }
+            Row(
+                Modifier.weight(1f),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                harnessKey()
+                hideKey()
+                sortKey()
+            }
+        }
+        return
+    }
+    Row(
+        Modifier.then(
+            Modifier,
+        ),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        harnessKey()
+        activeKey()
+        unreadKey()
+        hideKey()
+        sortKey()
+    }
+}
+
+/**
+ * W39: a labelled filter chip (Active, Unread): the same switch as the rail's icon key, with its words
+ * drawn. 48 dp to touch, 36 dp to see; latched = `violetWash` + a hairline `violetStrong` + `violet`.
+ */
+@Composable
+private fun PhoneChip(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, on: Boolean, stateText: String, onClick: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val shape = RoundedCornerShape(t.radiusMd)
+    Box(
+        Modifier
+            .heightIn(min = PhoneDrawer.Floor)
+            .semantics {
+                contentDescription = label
+                role = Role.Switch
+                stateDescription = (if (on) "On. " else "Off. ") + stateText
+                if (on) selected = true
+            }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        val ink = if (on) t.violet else t.muted
+        Row(
+            Modifier
+                .heightIn(min = 36.dp)
+                .cssSurface(shape, if (on) t.violetWash else Color.Transparent, CssBorder(1.dp, if (on) t.violetStrong else t.line), emptyList())
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SmallIcon(icon, ink, 16.dp)
+            Text(label, style = css(type.ui, 0.8125f, 600), color = ink, maxLines = 1, modifier = Modifier.clearAndSetSemantics { })
         }
     }
 }
@@ -773,6 +972,32 @@ private fun BankKey(
     val shadows = if (on) listOf(
         com.tether.app.ui.theme.CssShadow(inset = true, offsetX = 0.dp, offsetY = 0.dp, blur = 0.dp, spread = 1.dp, color = t.violetStrong),
     ) else emptyList()
+    if (phone) {
+        // W39: a 48 dp key around a 36 dp pill (latched = `violetWash`), glyph 18.
+        Box(
+            Modifier
+                .size(w, h)
+                .semantics {
+                    contentDescription = description
+                    if (switch) {
+                        role = Role.Switch
+                        stateDescription = (if (on) "On. " else "Off. ") + (stateText ?: "")
+                    } else {
+                        role = Role.Button
+                        if (expanded != null) stateDescription = if (expanded) "Menu open" else "Menu closed"
+                    }
+                    if (on) selected = true
+                }
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier.size(36.dp).cssSurface(RoundedCornerShape(t.radiusMd), if (on) t.violetWash else Color.Transparent, null, shadows),
+                contentAlignment = Alignment.Center,
+            ) { SmallIcon(icon, if (on) t.violet else t.muted, 18.dp) }
+        }
+        return
+    }
     Box(
         Modifier
             .size(w, h)
@@ -880,6 +1105,42 @@ private fun SessionFilter(query: String, onChange: (String) -> Unit, phone: Bool
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val interaction = remember { MutableInteractionSource() }
+    if (phone) {
+        // W39: 48 tall, full width, radius 12; the funnel glyph (the web's), a 15 sp field, a 2 dp `violet` ring in focus.
+        val focused by interaction.collectIsFocusedAsState()
+        val fieldShape = RoundedCornerShape(t.radiusMd)
+        Row(
+            Modifier
+                .padding(top = 12.dp)
+                .fillMaxWidth()
+                .cssSurface(fieldShape, t.mineralDeep, CssBorder(if (focused) 2.dp else 1.dp, if (focused) t.violet else t.line))
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            SmallIcon(TetherIcons.Filter, t.faint, 16.dp)
+            val fieldStyle = css(type.ui, 0.9375f, 400).copy(color = t.ink)
+            BasicTextField(
+                value = query,
+                onValueChange = onChange,
+                singleLine = true,
+                textStyle = fieldStyle,
+                cursorBrush = SolidColor(t.violet),
+                interactionSource = interaction,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = PhoneDrawer.Floor)
+                    .semantics { contentDescription = "Filter sessions" },
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) Text("Filter sessions…", style = fieldStyle.ltrWords(), color = t.faint, maxLines = 1)
+                        inner()
+                    }
+                },
+            )
+        }
+        return
+    }
     val shape = RoundedCornerShape(t.radiusSm)
     Row(
         Modifier
@@ -942,7 +1203,7 @@ private fun WorkspaceBlock(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(top = if (first) 0.dp else if (phone) 8.dp else 0.75f.rem)
+            .padding(top = if (first) 0.dp else if (phone) 16.dp else 0.75f.rem)
             .testTag(SidebarTags.block(block.workspace))
             .semantics { contentDescription = SafeText.line(block.name) },
         verticalArrangement = Arrangement.spacedBy(if (phone) 0.dp else 0.15f.rem),
@@ -950,10 +1211,15 @@ private fun WorkspaceBlock(
         BlockHeader(block, actions, offline = !state.connected, phone = phone)
         if (!block.collapsed) {
             Column(
-                if (phone) Modifier else Modifier.padding(start = 0.dp, top = 0.3f.rem, bottom = 0.1f.rem),
+                // W39: on the phone the workspace's sessions sit in ONE rounded card (`graphiteRaised`, radius 12) that
+                // clips them; the 4 dp above it is the header's.
+                if (phone) Modifier.padding(top = 4.dp).clip(RoundedCornerShape(PhoneLook.CardRadius)).background(t.graphiteRaised)
+                else Modifier.padding(start = 0.dp, top = 0.3f.rem, bottom = 0.1f.rem),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                block.rows.forEach { entry ->
+                block.rows.forEachIndexed { unit, entry ->
+                    // Between top-level units (a row with its delegates / chain is ONE unit): a hairline inset to the title column.
+                    if (phone && unit > 0) PhoneDivider()
                     val row: @Composable (SidebarEntry, Boolean) -> Unit = { e, draggable ->
                         SessionRow(
                             entry = e,
@@ -1038,9 +1304,10 @@ private fun WorkspaceBlock(
                     val type = LocalTetherTypography.current
                     Text(
                         if (view.filtering) "No sessions match this filter" else "No sessions yet",
-                        style = css(type.ui, 0.72f, 400),
+                        style = css(type.ui, if (phone) 0.8125f else 0.72f, 400),
                         color = t.faint,
-                        modifier = Modifier.padding(start = 3.25f.rem, end = t.css.spaceMd, top = t.css.spaceXs, bottom = t.css.spaceSm),
+                        modifier = if (phone) Modifier.fillMaxWidth().heightIn(min = PhoneDrawer.Floor).wrapContentHeight(Alignment.CenterVertically).padding(start = 56.dp, end = 12.dp)
+                        else Modifier.padding(start = 3.25f.rem, end = t.css.spaceMd, top = t.css.spaceXs, bottom = t.css.spaceSm),
                     )
                 }
                 if (block.remaining > 0) MoreRow(TetherIcons.ChevronDown, "Show more", count = block.remaining, phone = phone) { onShowMore(block.workspace) }
@@ -1072,11 +1339,22 @@ private fun WorkspaceBlock(
     }
 }
 
+/** The card's hairline between two top-level units: 1 dp `--line`, from the title column (x = 56) to the card's end. */
+@Composable
+private fun PhoneDivider() {
+    val t = LocalTetherTokens.current
+    Box(Modifier.fillMaxWidth().padding(start = 56.dp).height(1.dp).background(t.line))
+}
+
 /** `.workspace-block-header` (globals.css 3035-3137; studio.css 317-322). */
 @Composable
 private fun BlockHeader(block: BlockView, actions: SidebarActions, offline: Boolean, phone: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
+    if (phone) {
+        PhoneBlockHeader(block, actions, offline)
+        return
+    }
     val shape = RoundedCornerShape(t.radiusSm)
     val ink = if (block.isCurrent) t.white else t.muted
     val minHeight = if (phone) PhoneDrawer.Floor else 2.75f.rem
@@ -1182,6 +1460,109 @@ private fun BlockHeader(block: BlockView, actions: SidebarActions, offline: Bool
     }
 }
 
+/**
+ * W39 (ta-v0h8): the phone's workspace header: a plain 48 dp row on the rail, no band. A 32 dp letter tile
+ * centred on x = 24, the name 16/700 at x = 56, the activity dot, the chevron (points down open, right
+ * collapsed); then the star and the + keys. The current workspace shows in the tile (violet letter + ring).
+ */
+@Composable
+private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline: Boolean) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val reduced = LocalReducedMotion.current
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val rotation by animateFloatAsState(
+        if (block.collapsed) (if (rtl) 90f else -90f) else 0f,
+        if (reduced) snap() else tween(t.css.durationFast, easing = t.css.easeOut.toEasing()),
+        label = "workspaceChevron",
+    )
+    Row(Modifier.fillMaxWidth().heightIn(min = PhoneDrawer.Floor), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .weight(1f)
+                .heightIn(min = PhoneDrawer.Floor)
+                .semantics(mergeDescendants = true) {
+                    stateDescription = buildString {
+                        append(if (block.collapsed) "Collapsed" else "Expanded")
+                        if (block.isCurrent) append(", current workspace")
+                        block.activity?.let { a ->
+                            // T13.2 r2: from a saved list the counts are what WAS, never "waiting" now.
+                            when {
+                                offline && a.waiting > 0 -> append(", ${a.waiting} ${if (a.waiting == 1) "was" else "were"} waiting")
+                                offline && a.active > 0 -> append(", ${a.active} ${if (a.active == 1) "was" else "were"} active")
+                                a.waiting > 0 -> append(", ${a.waiting} waiting")
+                                a.active > 0 -> append(", ${a.active} active")
+                            }
+                        }
+                    }
+                }
+                .clickable(role = Role.Button) { actions.onToggleWorkspaceCollapsed(block.workspace) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // .workspace-badge: 32 dp, centred on x = 24 of the 48 dp leading slot (the rows' tiles share the line).
+            Box(Modifier.width(PhoneLook.Lead).clearAndSetSemantics { }, contentAlignment = Alignment.Center) {
+                val badgeShape = RoundedCornerShape(t.radiusSm)
+                Box(
+                    Modifier
+                        .size(32.dp)
+                        .background(Color(0xFF283650), badgeShape)
+                        .then(if (block.isCurrent) Modifier.border(1.dp, t.violetStrong, badgeShape) else Modifier),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        Web.workspaceInitial(block.workspace),
+                        style = css(type.ui, 0.875f, 700, lineHeight = 1f),
+                        color = if (block.isCurrent) t.violet else Color(0xFFC2D1ED),
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                // ta-28i: a workspace's folder name and path are code (server text), LTR.
+                Text(codeLabel(block.name), style = css(type.ui, 1f, 700), color = t.white, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                block.path?.let {
+                    Text(codeLabel(it), style = css(type.ui, 0.75f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            block.activity?.let { a ->
+                Spacer(Modifier.width(8.dp))
+                if (offline && (a.waiting > 0 || a.active > 0)) {
+                    StatusDot(t.faint, size = 0.5f.rem, modifier = Modifier.testTag(SidebarTags.blockDot(block.workspace)))
+                } else if (a.waiting > 0) {
+                    val wash = t.violetWash
+                    WaitingPingDot(
+                        t.violet,
+                        dotSize = 0.5f.rem,
+                        modifier = if (reduced) Modifier.drawBehind { drawCircle(wash, radius = size.minDimension / 2 + 3.dp.toPx()) } else Modifier,
+                    )
+                } else if (a.active > 0) StatusDot(t.running, size = 0.5f.rem)
+            }
+            // The keyboard digit hint (the pinned workspaces' 1-9) is not drawn on a touch phone; nothing is bound to it.
+            if (!PhoneLook.HideKbdDigits && block.index < 9 && block.pinned) {
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .clearAndSetSemantics { }
+                        .widthIn(min = 1.15f.rem)
+                        .border(1.dp, t.line, RoundedCornerShape(0.25f.rem))
+                        .padding(horizontal = 0.3f.rem, vertical = 0.05f.rem),
+                    contentAlignment = Alignment.Center,
+                ) { Text("${block.index + 1}", style = css(type.mono, 0.6f, 400), color = t.faint) }
+            }
+            SmallIcon(TetherIcons.ChevronDown, t.faint, 16.dp, Modifier.padding(horizontal = 8.dp).rotate(rotation))
+        }
+        HeaderAction(
+            if (block.pinned) FilledStar else TetherIcons.Star,
+            18.dp,
+            if (block.pinned) "Unpin ${SafeText.line(block.name)}" else "Keep ${SafeText.line(block.name)} in the sidebar",
+            if (block.pinned) t.violet else t.faint,
+            state = if (block.pinned) "Pinned" else "Not pinned",
+            phone = true,
+        ) { actions.onTogglePinnedProject(block.workspace) }
+        HeaderAction(TetherIcons.Plus, 20.dp, "New session in ${SafeText.line(block.name)}", t.faint, phone = true) { actions.onNewSessionIn(block.workspace) }
+    }
+}
+
 @Composable
 private fun HeaderAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -1229,10 +1610,13 @@ private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone
         }
     }
     val keyboardMode = input.inputMode == androidx.compose.ui.input.InputMode.Keyboard
-    val ink = if (hovered || focused) t.muted else t.faint
+    val ink = if (phone) t.muted else if (hovered || focused) t.muted else t.faint
     val shape = RoundedCornerShape(t.radiusSm)
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val elbow = t.lineStrong
+    // The rail's chevron points down and flips to up; the phone's (W39) points along the text and turns down when open.
     val rotation by animateFloatAsState(
-        if (open) 180f else 0f,
+        if (phone) (if (open) 90f else if (rtl) 180f else 0f) else if (open) 180f else 0f,
         if (reduced) snap() else tween(t.css.durationFast, easing = t.css.easeOut.toEasing()),
         label = "chainChevron",
     )
@@ -1250,15 +1634,33 @@ private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text("Earlier sessions in this handover chain, newest first") } },
         state = rememberTooltipState(),
-        modifier = Modifier
-            .padding(start = 0.9f.rem)
+        modifier = (if (phone) Modifier else Modifier.padding(start = 0.9f.rem))
             .fillMaxWidth()
             .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
+            .then(
+                // W39: the └ elbow, from the head tile's bottom centre (x = 24) down to the toggle's mid-height, then right to x = 36.
+                if (phone) Modifier.drawBehind {
+                    val flip = layoutDirection == LayoutDirection.Rtl
+                    fun x(v: Float) = if (flip) size.width - v.dp.toPx() else v.dp.toPx()
+                    val mid = size.height / 2
+                    val r = 6.dp.toPx()
+                    val path = Path().apply {
+                        moveTo(x(24f), 0f)
+                        lineTo(x(24f), mid - r)
+                        quadraticTo(x(24f), mid, if (flip) x(24f) - r else x(24f) + r, mid)
+                        lineTo(x(36f), mid)
+                    }
+                    drawPath(path, elbow, style = Stroke(1.dp.toPx()))
+                } else Modifier,
+            )
             .focusRing(focused && keyboardMode, shape, t.violet, offset = (-2).dp)
             .clip(shape)
             .focusRequester(focusRequester)
             .clickable(interactionSource = interaction, indication = LocalIndication.current, role = Role.Button, onClick = onToggle)
-            .padding(start = t.css.spaceMd, end = t.css.spaceMd, top = t.css.spaceXs)
+            .then(
+                if (phone) Modifier.padding(start = 38.dp, end = 12.dp)
+                else Modifier.padding(start = t.css.spaceMd, end = t.css.spaceMd, top = t.css.spaceXs),
+            )
             // Compose only gives a node its Button class/clickable on device when it has no exposed children; the label
             // Text kept showing up as a child of a merged node, so the node states its own semantics and clears the rest.
             .clearAndSetSemantics {
@@ -1269,6 +1671,18 @@ private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone
                 onClick { onToggle(); true }
             },
     ) {
+        if (phone) {
+            // W39: chevron 16 centred at x = 46, the label from x = 56 (13/500 `muted`), the suffix as before.
+            val phoneStyle = css(type.ui, 0.8125f, 500, lineHeight = 1.3846f).ltrWords()
+            Box(Modifier.fillMaxWidth().heightIn(min = PhoneDrawer.Floor), contentAlignment = Alignment.CenterStart) {
+                FlowRow(Modifier.fillMaxWidth(), itemVerticalAlignment = Alignment.CenterVertically) {
+                    SmallIcon(TetherIcons.ChevronRight, t.faint, 16.dp, Modifier.padding(end = 2.dp).rotate(rotation))
+                    Text(chain.label, style = phoneStyle, color = ink, maxLines = 1)
+                    if (showSuffix) Text("· ${chain.suffixText}", style = phoneStyle, color = suffixInk, modifier = Modifier.padding(start = 6.dp))
+                }
+            }
+            return@TooltipBox
+        }
         FlowRow(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
@@ -1320,12 +1734,14 @@ private fun MoreRow(
             .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
             .semantics(mergeDescendants = true) { if (expanded != null) stateDescription = if (expanded) "Expanded" else "Collapsed" }
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(start = 0.9f.rem, end = t.css.spaceMd),
+            .padding(start = if (phone) 0.dp else 0.9f.rem, end = if (phone) 12.dp else t.css.spaceMd),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+        horizontalArrangement = Arrangement.spacedBy(if (phone) 0.dp else t.css.spaceSm),
     ) {
-        SmallIcon(icon, t.faint, 14.dp)
-        Text(text, style = css(type.ui, 0.74f, 400), color = t.faint, modifier = Modifier.weight(1f))
+        // W39: on the phone the glyph is centred on x = 24 and the label starts at x = 56.
+        if (phone) Box(Modifier.width(PhoneLook.Lead), contentAlignment = Alignment.Center) { SmallIcon(icon, t.faint, 16.dp) } else SmallIcon(icon, t.faint, 14.dp)
+        if (phone) Spacer(Modifier.width(8.dp))
+        Text(text, style = css(type.ui, if (phone) 0.8125f else 0.74f, if (phone) 500 else 400), color = t.faint, modifier = Modifier.weight(1f))
         count?.let { CountPill(it, t.line, 0.62f) }
         action?.let { Text(it, style = css(type.ui, 0.74f, 680), color = t.muted) }
     }
@@ -1344,28 +1760,34 @@ private fun ResetOrderRow(phone: Boolean, onClick: () -> Unit) {
             .clickable(role = Role.Button, onClick = onClick)
             .padding(bottom = t.css.spaceXs),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs, Alignment.CenterHorizontally),
+        horizontalArrangement = if (phone) Arrangement.Start else Arrangement.spacedBy(t.css.spaceXs, Alignment.CenterHorizontally),
     ) {
-        SmallIcon(TetherIcons.RotateCcw, t.faint, 13.dp)
-        Text("Reset to default order", style = css(type.ui, 0.7f, 400), color = t.faint)
+        if (phone) {
+            Box(Modifier.width(PhoneLook.Lead), contentAlignment = Alignment.Center) { SmallIcon(TetherIcons.RotateCcw, t.faint, 16.dp) }
+            Spacer(Modifier.width(8.dp))
+            Text("Reset to default order", style = css(type.ui, 0.8125f, 500), color = t.faint)
+        } else {
+            SmallIcon(TetherIcons.RotateCcw, t.faint, 13.dp)
+            Text("Reset to default order", style = css(type.ui, 0.7f, 400), color = t.faint)
+        }
     }
 }
 
 /** `.workspace-add-row` (globals.css 3232-3252; studio.css 343-344). */
 @Composable
 private fun AddWorkspaceRow(onClick: () -> Unit, phone: Boolean) =
-    SidebarAddRow(TetherIcons.FolderPlus, 15.dp, "Add workspace", SidebarTags.AddWorkspace, phone, onClick)
+    SidebarAddRow(TetherIcons.FolderPlus, 15.dp, "Add workspace", SidebarTags.AddWorkspace, phone, onClick = onClick)
 
 /** A `.workspace-add-row` key: the Add workspace row and the Archive idle sessions row share it. */
 @Composable
-private fun SidebarAddRow(icon: androidx.compose.ui.graphics.vector.ImageVector, iconSize: androidx.compose.ui.unit.Dp, label: String, tag: String, phone: Boolean, onClick: () -> Unit) {
+private fun SidebarAddRow(icon: androidx.compose.ui.graphics.vector.ImageVector, iconSize: androidx.compose.ui.unit.Dp, label: String, tag: String, phone: Boolean, topGap: androidx.compose.ui.unit.Dp? = null, onClick: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusSm)
     val line = t.line
     Row(
         Modifier
-            .padding(top = t.css.spaceSm)
+            .padding(top = if (phone) topGap ?: 0.dp else t.css.spaceSm)
             .fillMaxWidth()
             .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
             .then(
@@ -1373,14 +1795,21 @@ private fun SidebarAddRow(icon: androidx.compose.ui.graphics.vector.ImageVector,
             )
             .semantics(mergeDescendants = true) { }
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(start = 0.8f.rem, end = t.css.spaceSm)
+            .padding(start = if (phone) 0.dp else 0.8f.rem, end = t.css.spaceSm)
             .testTag(tag),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+        horizontalArrangement = Arrangement.spacedBy(if (phone) 0.dp else t.css.spaceSm),
     ) {
         val ink = t.muted
-        SmallIcon(icon, ink, iconSize)
-        Text(label, style = css(type.ui, 0.75f, 600).ltrWords(), color = ink)
+        if (phone) {
+            // W39: glyph 18 centred on x = 24, label 13/500 `muted` at x = 56, no divider.
+            Box(Modifier.width(PhoneLook.Lead), contentAlignment = Alignment.Center) { SmallIcon(icon, t.faint, 18.dp) }
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = css(type.ui, 0.8125f, 500).ltrWords(), color = ink)
+        } else {
+            SmallIcon(icon, ink, iconSize)
+            Text(label, style = css(type.ui, 0.75f, 600).ltrWords(), color = ink)
+        }
     }
 }
 
@@ -1424,13 +1853,24 @@ private fun ArchivedGroup(
                 .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
                 .semantics(mergeDescendants = true) { stateDescription = if (open) "Expanded" else "Collapsed" }
                 .clickable(role = Role.Button, onClick = onToggle)
-                .padding(horizontal = t.css.spaceMd, vertical = t.css.spaceXs),
+                .padding(horizontal = if (phone) 0.dp else t.css.spaceMd, vertical = if (phone) 0.dp else t.css.spaceXs),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(0.35f.rem),
+            horizontalArrangement = Arrangement.spacedBy(if (phone) 0.dp else 0.35f.rem),
         ) {
-            SmallIcon(TetherIcons.Archive, t.faint, 12.dp)
-            Text("Archived", style = css(type.ui, 0.68f, 400), color = t.faint)
-            Text("${rows.size}", style = css(type.ui, 0.68f * 0.833f, 400), color = t.faint)
+            if (phone) {
+                // W39: Archive 18 on x = 24, "Archived" 14/600 `ink` at x = 56, the count, and a chevron at the end.
+                val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+                Box(Modifier.width(PhoneLook.Lead), contentAlignment = Alignment.Center) { SmallIcon(TetherIcons.Archive, t.muted, 18.dp) }
+                Spacer(Modifier.width(8.dp))
+                Text("Archived", style = css(type.ui, 0.875f, 600), color = t.ink)
+                Text("${rows.size}", style = css(type.ui, 0.8125f, 500), color = t.faint, modifier = Modifier.padding(start = 6.dp))
+                Spacer(Modifier.weight(1f))
+                SmallIcon(TetherIcons.ChevronRight, t.faint, 16.dp, Modifier.padding(end = 12.dp).rotate(if (open) 90f else if (rtl) 180f else 0f))
+            } else {
+                SmallIcon(TetherIcons.Archive, t.faint, 12.dp)
+                Text("Archived", style = css(type.ui, 0.68f, 400), color = t.faint)
+                Text("${rows.size}", style = css(type.ui, 0.68f * 0.833f, 400), color = t.faint)
+            }
         }
         if (open) {
             Column(
@@ -1471,10 +1911,26 @@ private fun jsUpdatedAt(entry: SidebarEntry): Double = (entry.js["updatedAt"] as
 
 /** `.sidebar-footer` (globals.css 1619-1640, 3264-3271, 11120-11129; studio.css 345-348). */
 @Composable
-private fun SidebarFooter(phone: Boolean, onOpenSettings: () -> Unit, onCollapse: (() -> Unit)?) {
+private fun SidebarFooter(phone: Boolean, onOpenSettings: () -> Unit, onCollapse: (() -> Unit)?, phoneScheduled: @Composable () -> Unit = {}) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val line = t.line
+    if (phone) {
+        // W39: a quiet two-destination bar, 56 tall: Settings (start), Scheduled actions (end). "Private runtime" is the header's.
+        androidx.compose.foundation.layout.FlowRow(
+            Modifier
+                .fillMaxWidth()
+                .drawBehind { drawRect(line, Offset.Zero, androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx())) }
+                .heightIn(min = PhoneLook.RowMinHeight),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalArrangement = Arrangement.Center,
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            FooterButton(TetherIcons.Settings, "Open settings", label = "Settings", phone = true, onClick = onOpenSettings)
+            phoneScheduled()
+        }
+        return
+    }
     // `.sidebar-footer` (globals.css 1065): flex, space-between; each side `0 1 auto`, so at a large text
     // size the status span shrinks to its words and never splits one (ta-z4c1).
     CssFlexRow(
@@ -1517,12 +1973,12 @@ private fun FooterButton(icon: androidx.compose.ui.graphics.vector.ImageVector, 
             .widthIn(min = floor)
             .semantics(mergeDescendants = true) { contentDescription = description }
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = if (label != null) 0.25f.rem else 0.dp),
+            .padding(horizontal = if (phone) 8.dp else if (label != null) 0.25f.rem else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(0.5f.rem, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(if (phone) 8.dp else 0.5f.rem, Alignment.CenterHorizontally),
     ) {
-        SmallIcon(icon, t.muted, 17.dp)
-        label?.let { Text(it, style = css(type.ui, 0.75f, 500), color = t.muted, modifier = Modifier.clearAndSetSemantics { }) }
+        SmallIcon(icon, t.muted, if (phone) 20.dp else 17.dp)
+        label?.let { Text(it, style = css(type.ui, if (phone) 0.8125f else 0.75f, if (phone) 600 else 500), color = t.muted, modifier = Modifier.clearAndSetSemantics { }) }
     }
 }
 
