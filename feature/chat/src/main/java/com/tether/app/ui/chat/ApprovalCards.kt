@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -1029,41 +1030,41 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                     .padding(20.dp)
                     .semantics { paneTitle = "The agent is asking a question" }
                     .testTag("question-card"),
-                verticalArrangement = Arrangement.spacedBy(t.css.spaceMd),
             ) {
-                // ta-bp5u: the card's words select in their own containers (the row no longer wraps the whole card), so the
-                // answer field below is outside any selection container and its toolbar lists Select all once.
+                // ta-bp5u (r2): ONE selection container holds the title row, header and question (the web's one continuous
+                // block of card text, .chat-question-head + -header + -text carry no user-select rule); the options and the
+                // answer field sit outside it, so the field's toolbar lists Select all once and its long-press never reaches
+                // the transcript's SafeCopyClipboard. Option buttons set no user-select on the web either, but a <button>'s
+                // label is not drag-selectable in the browsers, so they stay unselectable here as before.
+                val highlight = question != null && submitAttempted && !isAnswered(question) && slotOf(question) !in sel.skipped
                 SelectableRow {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
-                        Icon(TetherIcons.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(15.dp))
-                        Text(
-                            "The agent needs your input",
-                            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.92f), fontWeight = FontWeight(700)),
-                            color = t.white,
-                            modifier = Modifier.weight(1f).semantics { heading(); liveRegion = LiveRegionMode.Polite },
-                        )
-                        if (total > 1) {
-                            // `.chat-question-page { margin-left: auto }`: pushed to the row's end.
+                    Column(Modifier.testTag("question-words"), verticalArrangement = Arrangement.spacedBy(t.css.spaceMd)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
+                            Icon(TetherIcons.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(15.dp))
                             Text(
-                                "Question ${pageIndex + 1} of $total",
-                                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), fontWeight = FontWeight(500)),
-                                color = t.muted,
-                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("question-page"),
+                                "The agent needs your input",
+                                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.92f), fontWeight = FontWeight(700)),
+                                color = t.white,
+                                modifier = Modifier.weight(1f).semantics { heading(); liveRegion = LiveRegionMode.Polite },
                             )
+                            if (total > 1) {
+                                // `.chat-question-page { margin-left: auto }`: pushed to the row's end.
+                                Text(
+                                    "Question ${pageIndex + 1} of $total",
+                                    style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), fontWeight = FontWeight(500)),
+                                    color = t.muted,
+                                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("question-page"),
+                                )
+                            }
                         }
-                    }
-                }
-                if (question != null) {
-                    val highlight = submitAttempted && !isAnswered(question) && slotOf(question) !in sel.skipped
-                    // `.is-unanswered` pads the page in; its `--attention` rule names a token no skin defines,
-                    // so (as on the web) no rule is drawn — the validation sentence below carries it.
-                    Column(
-                        Modifier.fillMaxWidth().padding(start = if (highlight) t.css.spaceSm else 0.dp),
-                        verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
-                    ) {
-                        SelectableRow {
-                            Column(verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
-                                // ta-28i: the agent's question, header and options are prose (SafeText), as on the answered card.
+                        if (question != null) {
+                            // `.is-unanswered` pads the page in; its `--attention` rule names a token no skin defines,
+                            // so (as on the web) no rule is drawn: the validation sentence below carries it.
+                            Column(
+                                Modifier.fillMaxWidth().padding(start = if (highlight) t.css.spaceSm else 0.dp),
+                                verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+                            ) {
+                                // ta-28i: the agent's question and header are prose (SafeText), as on the answered card.
                                 question.header?.let {
                                     Text(
                                         proseText(cut4k(it).uppercase()),
@@ -1080,6 +1081,14 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                                 )
                             }
                         }
+                    }
+                }
+                if (question != null) {
+                    // The old item column's gap (xs) between the words and the options; its start pad when highlighted.
+                    Column(
+                        Modifier.fillMaxWidth().padding(start = if (highlight) t.css.spaceSm else 0.dp, top = t.css.spaceXs),
+                        verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+                    ) {
                         Column(Modifier.fillMaxWidth().padding(top = t.css.spaceXs), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
                             val slot = slotOf(question)
                             val multi = slots.single[slot] != true
@@ -1117,6 +1126,8 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                         }
                     }
                 }
+                // The old column's md gap before the actions; its own px rounding, kept apart from the xs pad below.
+                Spacer(Modifier.height(t.css.spaceMd))
                 FlowRow(
                     Modifier.fillMaxWidth().padding(top = t.css.spaceXs),
                     horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm, Alignment.End),
