@@ -236,7 +236,8 @@ class SidebarBehaviourTest {
     /** ta-1jj7: the compact drawer keeps every action the old one had (the search well became a key). */
     @Test fun phoneDrawerKeepsEveryAction() {
         val withHosts = actions.copy(onOpenGlobalSearch = { events += "search" }, onOpenScheduledActions = { events += "scheduled" })
-        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, F.state(F.drawerSessions), actions = withHosts) }
+        // W39: rows are 56 dp now; fewer of them keep the list-end rows in view.
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, F.state(F.drawerSessions.take(6)), actions = withHosts) }
         rule.waitForIdle()
         listOf(
             "Close sessions", "Search all conversations", "New session", "Filter sessions by harness", "Active", "Unread", "Hide runs",

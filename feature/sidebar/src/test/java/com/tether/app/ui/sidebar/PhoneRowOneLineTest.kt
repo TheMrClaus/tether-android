@@ -56,7 +56,8 @@ abstract class PhoneRowOneLineBase {
         assertTrue("rows are drawn: ${rows.size}", rows.size >= 3)
         rows.forEach { row ->
             val box = row.boundsInRoot
-            assertTrue("a row is at least 48dp: ${box.height}", box.height + 0.5f >= with(rule.density) { PhoneDrawer.Floor.toPx() })
+            // The laid-out size, not the bounds clipped to the viewport: a row half scrolled off is still full height.
+            assertTrue("a row is at least 48dp: ${row.size.height}", row.size.height + 0.5f >= with(rule.density) { PhoneDrawer.Floor.toPx() })
             row.descendants().forEach { d ->
                 val b = d.boundsInRoot
                 assertTrue("${d.tag() ?: d.description()} runs past the row's foot: $b in $box", b.bottom <= box.bottom + 0.5f)

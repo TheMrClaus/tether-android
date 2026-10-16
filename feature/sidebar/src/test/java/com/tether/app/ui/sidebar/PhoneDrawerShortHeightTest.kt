@@ -2,6 +2,7 @@ package com.tether.app.ui.sidebar
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollToIndex
 import com.tether.app.ui.theme.TetherSkin
@@ -35,15 +36,27 @@ class PhoneDrawerShortHeightTest {
         assertTrue("the key $key is above the list $list", key.bottom <= list.top + 0.5f)
     }
 
-    @Test fun theScheduledRowIsInsideTheListAndScrollsAway() {
+    // W39: the filter field, the chips and the rule scroll with the list (the title block with its keys stays fixed).
+    @Test fun theFilterFieldAndChipsScrollAwayWithTheList() {
+        rule.showDrawer()
+        val list = rule.onNodeWithTag(SidebarTags.List).fetchSemanticsNode().boundsInRoot
+        val field = rule.onNodeWithContentDescription("Filter sessions").fetchSemanticsNode().boundsInRoot
+        assertTrue("the field $field is inside the list $list", field.top >= list.top - 0.5f)
+        rule.onNodeWithTag(SidebarTags.List).performScrollToIndex(3)
+        rule.waitForIdle()
+        rule.onNodeWithContentDescription("Filter sessions").assertDoesNotExist()
+        rule.onNodeWithTag(SidebarTags.NewSession).assertIsDisplayed()
+    }
+
+    // W39: Scheduled actions is the footer's: pinned below the list at every height, never scrolled away.
+    @Test fun theScheduledKeyIsTheFootersAndStaysPut() {
         rule.showDrawer()
         val list = rule.onNodeWithTag(SidebarTags.List).fetchSemanticsNode().boundsInRoot
         val scheduled = rule.onNodeWithTag(SidebarTags.Scheduled).fetchSemanticsNode().boundsInRoot
-        assertTrue("scheduled $scheduled is inside the list $list", scheduled.top >= list.top - 0.5f)
-        rule.onNodeWithTag(SidebarTags.Scheduled).assertIsDisplayed()
-        rule.onNodeWithTag(SidebarTags.List).performScrollToIndex(6)
+        assertTrue("scheduled $scheduled is below the list $list", scheduled.top >= list.bottom - 0.5f)
+        rule.onNodeWithTag(SidebarTags.List).performScrollToIndex(3)
         rule.waitForIdle()
-        rule.onNodeWithTag(SidebarTags.Scheduled).assertDoesNotExist()
+        rule.onNodeWithTag(SidebarTags.Scheduled).assertIsDisplayed()
     }
 
     @Test fun theListHasRoomForSeveralRows() {
@@ -58,14 +71,14 @@ class PhoneDrawerShortHeightTest {
 class PhoneDrawerTallHeightTest {
     @get:Rule val rule = createComposeRule()
 
-    @Test fun theScheduledRowSitsAboveTheList() {
+    @Test fun theFilterFieldSitsAboveTheList() {
         rule.showDrawer()
         val list = rule.onNodeWithTag(SidebarTags.List).fetchSemanticsNode().boundsInRoot
-        val scheduled = rule.onNodeWithTag(SidebarTags.Scheduled).fetchSemanticsNode().boundsInRoot
-        assertTrue("scheduled $scheduled is above the list $list", scheduled.bottom <= list.top + 0.5f)
+        val field = rule.onNodeWithContentDescription("Filter sessions").fetchSemanticsNode().boundsInRoot
+        assertTrue("the field $field is above the list $list", field.bottom <= list.top + 0.5f)
         rule.onNodeWithTag(SidebarTags.List).performScrollToIndex(2)
         rule.waitForIdle()
-        rule.onNodeWithTag(SidebarTags.Scheduled).assertIsDisplayed()
+        rule.onNodeWithContentDescription("Filter sessions").assertIsDisplayed()
     }
 }
 
@@ -78,8 +91,8 @@ class PhoneDrawerShortAtTwiceTheTextTest {
     @Test fun theHeaderScrollsAt2x() {
         rule.showDrawer()
         val list = rule.onNodeWithTag(SidebarTags.List).fetchSemanticsNode().boundsInRoot
-        val scheduled = rule.onNodeWithTag(SidebarTags.Scheduled).fetchSemanticsNode().boundsInRoot
-        assertTrue(scheduled.top >= list.top - 0.5f)
+        val field = rule.onNodeWithContentDescription("Filter sessions").fetchSemanticsNode().boundsInRoot
+        assertTrue(field.top >= list.top - 0.5f)
         assertFalse(PhoneDrawer.headerScrolls(915f, 1.0f))
         assertTrue(PhoneDrawer.headerScrolls(915f, 2.0f))
     }

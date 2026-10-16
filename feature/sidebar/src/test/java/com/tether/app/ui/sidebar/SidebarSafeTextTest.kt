@@ -72,7 +72,7 @@ class SidebarSafeTextTest {
         // Labels: bidi controls and invisibles dropped, whitespace collapsed; the words in their stored order.
         assertTrue(shown.contains("Approve the xe.tsil fix"))
         assertTrue(shown.contains("mv old new now"))
-        assertTrue(shown.contains("All ssap tests pass"))
+        assertTrue(shown.any { it.contains("All ssap tests pass") }) // W39: the one-line digest draws " · snippet" after the count
         // A title of only invisibles is spelled out, never an empty row.
         assertTrue(shown.contains("\\u{202E}\\u{200B}"))
         // TalkBack reads the same words.
