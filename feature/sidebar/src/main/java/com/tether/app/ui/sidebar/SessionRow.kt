@@ -581,40 +581,61 @@ internal fun SessionRow(
             }
             // .session-item-end: two taps by design (no modal); the rail's (the phone's moved into the kebab menu).
             if (endable && !phone) {
-                val endShape = RoundedCornerShape(t.radiusSm)
-                Box(
-                    Modifier
-                        .padding(end = if (phone) 0.dp else 0.3f.rem)
-                        .size(if (phone) PhoneDrawer.Floor else 1.75f.rem)
-                        .onGloballyPositioned { endBounds[entry.key] = it.boundsInRoot() }
-                        .semantics {
-                            contentDescription = when {
-                                !endLive -> "End $name, unavailable: connect to end it"
-                                armed -> "Tap again to end $name"
-                                else -> "End $name"
-                            }
-                            role = Role.Button
-                        }
-                        .alpha(if (endLive) 1f else 0.55f)
-                        .clickable(enabled = endLive) {
-                            if (armed) {
-                                onArm(null)
-                                actions.onEndSession(live.id, armedOrigin)
-                            } else {
-                                onArm(entry.key)
-                            }
-                        }
-                        .then(if (armed && endLive) Modifier.background(t.dangerWash, endShape) else Modifier)
-                        .testTag(SidebarTags.end(entry.key)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (armed && endLive) {
-                        Text("END?", style = css(type.ui, 0.62f, 700, trackingEm = 0.02f), color = t.danger, modifier = Modifier.clearAndSetSemantics { })
-                    } else {
-                        SmallIcon(TetherIcons.X, t.faint, if (phone) 12.dp else 11.dp)
-                    }
+                TabletEndControl(entry, name, live!!.id, endLive, armed, armedOrigin, onArm, actions, endBounds)
+            }
+        }
+    }
+}
+
+/**
+ * The tablet rail's two-tap End control. S3f (ta-z0k0): split out of [SessionRow]; the one 1000-line composable it sat in
+ * failed ART's verifier ("type Conflict unexpected as arg to if-eqz") on its `armed && endLive` branch.
+ */
+@Composable
+private fun TabletEndControl(
+    entry: SidebarEntry,
+    name: String,
+    sessionId: String,
+    endLive: Boolean,
+    armed: Boolean,
+    armedOrigin: String?,
+    onArm: (String?) -> Unit,
+    actions: SidebarActions,
+    endBounds: MutableMap<String, Rect>,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val endShape = RoundedCornerShape(t.radiusSm)
+    Box(
+        Modifier
+            .padding(end = 0.3f.rem)
+            .size(1.75f.rem)
+            .onGloballyPositioned { endBounds[entry.key] = it.boundsInRoot() }
+            .semantics {
+                contentDescription = when {
+                    !endLive -> "End $name, unavailable: connect to end it"
+                    armed -> "Tap again to end $name"
+                    else -> "End $name"
+                }
+                role = Role.Button
+            }
+            .alpha(if (endLive) 1f else 0.55f)
+            .clickable(enabled = endLive) {
+                if (armed) {
+                    onArm(null)
+                    actions.onEndSession(sessionId, armedOrigin)
+                } else {
+                    onArm(entry.key)
                 }
             }
+            .then(if (armed && endLive) Modifier.background(t.dangerWash, endShape) else Modifier)
+            .testTag(SidebarTags.end(entry.key)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (armed && endLive) {
+            Text("END?", style = css(type.ui, 0.62f, 700, trackingEm = 0.02f), color = t.danger, modifier = Modifier.clearAndSetSemantics { })
+        } else {
+            SmallIcon(TetherIcons.X, t.faint, 11.dp)
         }
     }
 }
