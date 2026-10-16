@@ -105,8 +105,8 @@ class SidebarSyncTest {
         rule.onNodeWithContentDescription("chat, Active", substring = true).assertDoesNotExist()
         rule.onNodeWithContentDescription("chat, Needs you", substring = true).assertDoesNotExist()
         // ...and the visible words say so too (not only the TalkBack sentence).
-        rule.onNodeWithText("Was running", useUnmergedTree = true).assertExists()
-        rule.onNodeWithText("Was waiting on you", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("Was running", substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("Was waiting on you", substring = true, useUnmergedTree = true).assertExists()
         rule.onNodeWithText("Active", useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithText("Needs you", useUnmergedTree = true).assertDoesNotExist()
     }
@@ -128,8 +128,8 @@ class SidebarSyncTest {
         rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, bare, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions()) }
         rule.onNodeWithContentDescription("Refactor the retry loop, chat, Was running", substring = true).assertExists()
         rule.onNodeWithContentDescription("Approve the lint fix, chat, Was waiting on you", substring = true).assertExists()
-        rule.onNodeWithText("Was running", useUnmergedTree = true).assertExists()
-        rule.onNodeWithText("Was waiting on you", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("Was running", substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("Was waiting on you", substring = true, useUnmergedTree = true).assertExists()
         rule.onNodeWithText("Needs you", useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithText("Active", useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithContentDescription("chat, Needs you", substring = true).assertDoesNotExist()
@@ -157,15 +157,26 @@ class SidebarSyncTest {
         rule.onNodeWithTag(SidebarTags.blockDot(SidebarFixtures.ROOT), useUnmergedTree = true).assertDoesNotExist()
     }
 
+    /** S3a: the phone's End is two taps inside the kebab menu (the rail keeps End x). */
+    private fun openMenuOf(key: String) {
+        rule.onNodeWithTag(SidebarTags.kebab(key)).performClick()
+        rule.waitForIdle()
+    }
+
+    private fun tapEndItem() {
+        rule.onNodeWithTag(SidebarTags.menuItem(com.tether.app.protocol.helpers.SidebarRowModel.RowMenuItemId.End), useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+    }
+
     @Test
-    fun offlineARowsEndControlIsInertAndItsSwipeIsGone() {
+    fun offlineARowsEndItemIsInertAndItsSwipeIsGone() {
         val ended = mutableListOf<String>()
         rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, SidebarSyncFixtures.offline(), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, _ -> ended += id })) }
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).assertIsNotEnabled().performClick()
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
-        rule.waitForIdle()
+        openMenuOf("live:a1")
+        tapEndItem()
+        tapEndItem()
         assertTrue("a saved list never ends a session: $ended", ended.isEmpty())
-        rule.onNodeWithContentDescription("End Refactor the retry loop, unavailable: connect to end it").assertExists()
+        rule.onNodeWithText("Unavailable: connect to end it", useUnmergedTree = true).assertExists()
         rule.onNodeWithTag(SidebarTags.archive("live:a1")).assertDoesNotExist()
     }
 
@@ -174,10 +185,9 @@ class SidebarSyncTest {
         val ended = mutableListOf<String>()
         val state = SidebarSyncFixtures.offline(connected = true).copy(origin = ORIGIN_A)
         rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).assertIsEnabled().performClick()
-        rule.waitForIdle()
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
-        rule.waitForIdle()
+        openMenuOf("live:a1")
+        tapEndItem()
+        tapEndItem()
         assertEquals(listOf("a1@$ORIGIN_A"), ended)
     }
 
@@ -191,18 +201,16 @@ class SidebarSyncTest {
         val ended = mutableListOf<String>()
         var state by mutableStateOf(SidebarSyncFixtures.offline(connected = true).copy(origin = ORIGIN_A))
         rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
-        rule.waitForIdle()
+        openMenuOf("live:a1")
+        tapEndItem()
         rule.runOnIdle { state = state.copy(origin = ORIGIN_B) }
         rule.waitForIdle()
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
-        rule.waitForIdle()
+        tapEndItem()
         assertEquals(listOf("a1@$ORIGIN_A"), ended)
 
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
-        rule.waitForIdle()
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
-        rule.waitForIdle()
+        openMenuOf("live:a1")
+        tapEndItem()
+        tapEndItem()
         assertEquals(listOf("a1@$ORIGIN_A", "a1@$ORIGIN_B"), ended)
     }
 

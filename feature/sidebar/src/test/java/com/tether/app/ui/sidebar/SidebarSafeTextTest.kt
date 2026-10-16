@@ -78,7 +78,7 @@ class SidebarSafeTextTest {
         // TalkBack reads the same words.
         assertTrue(shown.any { it.startsWith("Approve the xe.tsil fix, ") })
         // r2: a status this build does not know is shown by the label rule, drawn and read.
-        assertTrue(shown.toString(), shown.contains("ready"))
+        assertTrue(shown.toString(), shown.any { it.startsWith("ready · ") })
         assertTrue(shown.toString(), shown.any { it.startsWith("Unknown status, chat, ready, ") })
         // The location is a path: code, LTR.
         val location = "re${tok(0x202E)}po"

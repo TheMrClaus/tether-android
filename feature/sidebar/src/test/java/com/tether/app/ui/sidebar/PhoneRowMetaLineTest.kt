@@ -40,14 +40,14 @@ class PhoneRowMetaLineTest {
 
     @Test fun statusWordsAndTheTimeAreStillOnTheRow() {
         show(F.state(F.statusSessions, histories = F.statusHistories, activeId = "a1"))
-        assertTrue("Active", rule.onAllNodes(androidx.compose.ui.test.hasText("Active"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
-        assertTrue("Needs you", rule.onAllNodes(androidx.compose.ui.test.hasText("Needs you"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
-        assertTrue("time", rule.onAllNodes(androidx.compose.ui.test.hasText("· 1m"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue("Active", rule.onAllNodes(androidx.compose.ui.test.hasText("Active", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue("Needs you", rule.onAllNodes(androidx.compose.ui.test.hasText("Needs you", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue("time", rule.onAllNodes(androidx.compose.ui.test.hasText("· 1m", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test fun aShortLocationSharesTheStatusLine() {
         show(F.state(listOf(F.live("m1", "Short one", cwd = "${F.ROOT}/repo", ago = 2))))
-        val time = rule.textNode("· 2m").boundsInRoot
+        val time = rule.textNode("Ready · 2m").boundsInRoot
         val location = rule.textNode("~/repo").boundsInRoot
         assertTrue("the location is on the status line: $location vs $time", location.top < time.bottom && location.bottom > time.top)
         assertTrue("and after it: $location vs $time", location.left > time.right)
@@ -55,7 +55,7 @@ class PhoneRowMetaLineTest {
 
     @Test fun aSixtyCharacterLocationSharesTheStatusLineAndIsCut() {
         show(F.state(listOf(F.live("m2", "Worktree row", cwd = F.LONG_LOCATION, ago = 2))))
-        val time = rule.textNode("· 2m").boundsInRoot
+        val time = rule.textNode("Ready · 2m").boundsInRoot
         val layouts = rule.textLayoutsOf("~" + F.LONG_LOCATION.removePrefix(F.ROOT))
         assertEquals("one location text", 1, layouts.size)
         val l = layouts.single()

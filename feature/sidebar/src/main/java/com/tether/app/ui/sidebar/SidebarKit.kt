@@ -50,6 +50,9 @@ val StudioSidebarScope: TokenScope = TokenScope(":root:where([data-theme^=\"stud
         violet = Color(0xFFA7BDFF),
         violetStrong = Color(0xFF8EAAFF),
         violetWash = Color(0xFF263B66),
+        // S3a: the rail pins these two so both Studio skins draw the same (web studio.css:1241 pins danger-wash: the light skin's #fff0f2 under rail danger text is 1.6:1).
+        violetDeep = Color(0xFFC5D2FF),
+        dangerWash = Color(0xFF3B2431),
         keyFace = Color(0xFF1D2940),
         keyFaceHover = Color(0xFF293851),
         keyFaceDeep = Color(0xFF111A2B),
@@ -116,7 +119,9 @@ internal fun ProviderCap(
     letterRem: Float = 0.8f,
     /**
      * W39 (ta-v0h8): the phone row's quiet variant: a neutral `slate` tile with a hairline and a single-ink mark,
-     * so colour in the list is state only. Row-only: the harness menu, archived rows and global search keep
+     * so colour in the list is state only. It is used only by a session row, and only while
+     * `PhoneLook.MonochromeProviderTile` is on (off since the owner's W40-R1 ruling: brand tiles are back on the phone).
+     * The harness menu, the collapsed Archived group (which does not draw a [SessionRow]) and global search always keep
      * their brand tiles ([ProviderTile] itself is unchanged).
      */
     monochrome: Boolean = false,

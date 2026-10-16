@@ -82,18 +82,16 @@ class PhoneRestyleTest {
         assertTrue("the digest row is ${digest.boundsInRoot.height} px", digest.boundsInRoot.height <= cap)
     }
 
-    @Test fun theDigestIsOneLineCountFirstAndSinceYouLeftIsOnlyInTheDescription() {
+    @Test fun theDigestLeftTheRowsFaceTheBadgeCarriesTheCountAndTheDescriptionTheSnippet() {
         show(F.state(F.statusSessions, histories = F.statusHistories, activeId = "a1"))
         val all = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true).fetchSemanticsNodes()
             .map { it.config.getOrNull(SemanticsProperties.Text)!!.joinToString("") { t -> t.text } }
         assertTrue("the count is drawn: $all", all.any { it == "3 new turns" })
-        assertTrue("the snippet follows the count after a dot: $all", all.any { it.startsWith(" · All four tests pass") })
+        assertFalse("the snippet is not on the row's face any more (S3a: it lives in the menu): $all", all.any { it.contains("All four tests pass") })
         assertFalse("'since you left' is not drawn", all.any { it.contains("since you left") })
         val label = rule.onAllNodes(SemanticsMatcher("the digest row") { n -> n.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull()?.startsWith("Finished while you were away,") == true }).fetchSemanticsNodes().single()
         assertTrue(label.description(), label.description()!!.contains("3 new turns since you left"))
         assertTrue(label.description(), label.description()!!.contains("All four tests pass; the backoff is 250ms."))
-        val layouts = rule.textLayoutsOf(" · All four tests pass; the backoff is 250ms.")
-        assertTrue(layouts.all { it.lineCount == 1 })
     }
 
     @Test fun theRowNamesItsProviderInWordsBecauseTheTileIsMonochrome() {
@@ -114,7 +112,7 @@ class PhoneRestyleTest {
         val at = order.map { o -> names.indexOfFirst { it == o }.also { assertTrue("$o is in the tree: $names", it >= 0) } }
         assertEquals("header and filter order: $names", at.sorted(), at)
         val settings = names.indexOf("Open settings")
-        val scheduled = names.indexOf(SidebarTags.Scheduled)
+        val scheduled = names.indexOf("Scheduled actions")
         assertTrue("sections come before the footer: $names", at.last() < names.indexOfFirst { it.startsWith("New session in") })
         assertTrue("Settings then Scheduled actions close the drawer: $names", settings in 0 until scheduled)
     }
@@ -162,6 +160,6 @@ class ProviderCapMonochromeTest {
         val colours = HashSet<Color>()
         for (x in 0 until px.width) for (y in 0 until px.height) colours += px[x, y]
         assertFalse("no claude orange", Color(0xFFD97757) in colours)
-        assertTrue("the slate tile", TetherSkin.StudioDark.tokens.slate.let { s -> colours.any { it == s } } || colours.isNotEmpty())
+        assertTrue("the slate tile", TetherSkin.StudioDark.tokens.slate.let { s -> colours.any { it == s } })
     }
 }

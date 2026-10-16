@@ -67,14 +67,14 @@ class SidebarRtlNeutralsTest {
 
     @Test fun theMetaSeparatorAndTheEllipsizedLabelsAreLtrUnderRtl() {
         drawer(LayoutDirection.Rtl)
-        assertLtr(directionOf { it.startsWith("· ") }, "a meta \"· rel\"")
+        assertLtr(directionOf { it.contains(" · ") }, "a meta \"· rel\"")
         assertLtr(directionOf { it.startsWith("Filter sessions") }, "the filter placeholder")
         assertLtr(directionOf { it == "Archive idle sessions…" }, "the archive label")
     }
 
     @Test fun theSameWordsAreLtrInAnLtrLayout() {
         drawer(LayoutDirection.Ltr)
-        assertLtr(directionOf { it.startsWith("· ") }, "a meta \"· rel\"")
+        assertLtr(directionOf { it.contains(" · ") }, "a meta \"· rel\"")
         assertLtr(directionOf { it == "Archive idle sessions…" }, "the archive label")
     }
 

@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
@@ -74,38 +75,39 @@ class SidebarBehaviourTest {
         assertEquals(listOf("reopen:h-old"), events)
     }
 
-    @Test fun theEndControlTakesTwoTapsAndDisarmsOnItsOwn() {
+    /** S3a: End is the web's two-step INSIDE the kebab menu (the rail keeps End x). */
+    private fun kebab(name: String) = rule.onNodeWithContentDescription("Actions for $name")
+    private fun endItem() = rule.onNodeWithTag(SidebarTags.menuItem(com.tether.app.protocol.helpers.SidebarRowModel.RowMenuItemId.End), useUnmergedTree = true)
+
+    @Test fun theEndItemTakesTwoTapsAndDisarmsOnItsOwn() {
         show()
-        rule.onNodeWithContentDescription("End Add the version file").performClick()
+        kebab("Add the version file").performClick()
+        endItem().performClick()
         assertTrue("one tap only arms", events.isEmpty())
-        rule.onNodeWithContentDescription("Tap again to end Add the version file").performClick()
+        rule.onNodeWithText("Tap again to end", useUnmergedTree = true).assertExists()
+        endItem().performClick()
         assertEquals(listOf("end:s02"), events)
 
-        rule.onNodeWithContentDescription("End Long task with notices").performClick()
-        rule.onNodeWithContentDescription("Tap again to end Long task with notices").assertExists()
+        kebab("Long task with notices").performClick()
+        endItem().performClick()
+        rule.onNodeWithText("Tap again to end", useUnmergedTree = true).assertExists()
         rule.mainClock.advanceTimeBy(END_SESSION_ARM_MS + 100)
-        rule.onNodeWithContentDescription("Tap again to end Long task with notices").assertDoesNotExist()
-        rule.onNodeWithContentDescription("End Long task with notices").assertExists()
+        rule.onNodeWithText("Tap again to end", useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithText("End session", useUnmergedTree = true).assertExists()
         assertEquals(listOf("end:s02"), events)
     }
 
-    @Test fun armingASecondRowDisarmsTheFirst() {
+    @Test fun openingASecondRowsMenuClosesTheFirstAndDisarmsIt() {
         show()
-        rule.onNodeWithContentDescription("End Add the version file").performClick()
-        rule.onNodeWithContentDescription("End Long task with notices").performClick()
-        rule.onNodeWithContentDescription("End Add the version file").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Tap again to end Long task with notices").assertIsDisplayed()
-    }
-
-    @Test fun pressingElsewhereDisarmsTheEndControl() {
-        show()
-        rule.onNodeWithContentDescription("End Add the version file").performClick()
-        rule.onNodeWithContentDescription("Tap again to end Add the version file").assertExists()
-        // session-sidebar.tsx:821 handleEndBlur: interacting anywhere else disarms at once, not after 4s.
-        row("Long task with notices").performClick()
-        rule.onNodeWithContentDescription("Tap again to end Add the version file").assertDoesNotExist()
-        rule.onNodeWithContentDescription("End Add the version file").performClick()
-        assertEquals("the next tap only re-arms", listOf("select:s03"), events)
+        kebab("Add the version file").performClick()
+        endItem().performClick()
+        rule.onNodeWithText("Tap again to end", useUnmergedTree = true).assertExists()
+        kebab("Long task with notices").performClick()
+        rule.onAllNodesWithTag(SidebarTags.RowMenu, useUnmergedTree = true).assertCountEquals(1)
+        rule.onNodeWithText("Tap again to end", useUnmergedTree = true).assertDoesNotExist()
+        kebab("Add the version file").performClick()
+        rule.onNodeWithText("End session", useUnmergedTree = true).assertExists()
+        assertTrue(events.toString(), events.none { it.startsWith("end:") })
     }
 
     @Test fun holdingTheCapAndLettingGoWithoutMovingCommitsNothing() {
@@ -221,8 +223,7 @@ class SidebarBehaviourTest {
         // Each row's accessible text carries the status words and the unseen cue.
         rule.onNodeWithContentDescription("Refactor the retry loop, chat, Active, 1m", substring = true).assertExists()
         rule.onNodeWithContentDescription("Approve the lint fix, chat, Needs you", substring = true).assertExists()
-        rule.onNodeWithContentDescription("Finished while you were away, changed since you last looked", substring = true).assertExists()
-        rule.onNodeWithContentDescription("3 new turns since you left", substring = true).assertExists()
+                rule.onNodeWithContentDescription("3 new turns since you left", substring = true).assertExists()
         rule.onRoot().assertExists()
     }
 
@@ -242,7 +243,7 @@ class SidebarBehaviourTest {
         listOf(
             "Close sessions", "Search all conversations", "New session", "Filter sessions by harness", "Active", "Unread", "Hide runs",
             "Sort sessions by Created Date", "Filter sessions", "Open settings", "New session in ${F.ROOT.substringAfterLast('/')}",
-            "End Worktree with a service",
+            "Actions for Worktree with a service",
         ).forEach { label ->
             rule.onNodeWithContentDescription(label).assertExists().assert(hasClickAction().or(hasSetTextAction()))
         }

@@ -70,7 +70,7 @@ class SessionDrawerWiringTest {
 
         // The unread row reads so in words, then a tap opens it.
         rule.onNode(
-            SemanticsMatcher("row") { n -> n.config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.startsWith("Finished job, changed since you last looked") } == true },
+            SemanticsMatcher("row") { n -> n.config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.startsWith("Finished job,") && it.contains("changed since you last looked") } == true },
         ).performClick()
         rule.waitForIdle()
         assertEquals(listOf("s1"), selected)

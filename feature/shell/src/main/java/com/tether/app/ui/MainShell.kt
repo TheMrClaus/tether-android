@@ -626,6 +626,11 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                             navigateTo(DashboardView.Scheduled)
                         },
                         scheduledActionsActive = scheduledOpen,
+                        // S3a: the row menu's actions are the header's own (rename dialog, Hand over confirm, Stop handover).
+                        activeHandover = handoverState ?: com.tether.app.client.Handover.MenuState.Hidden,
+                        onRenameSession = { id, name -> renaming = RenameTarget(id, name) },
+                        onHandOver = headerActions.onHandOver,
+                        onStopHandover = headerActions.onStopHandover,
                     )
                 },
                 chat = {

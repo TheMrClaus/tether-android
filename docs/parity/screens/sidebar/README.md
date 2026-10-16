@@ -39,12 +39,16 @@ cover `drawer` and `status` in Machine and Studio.
 
 ## Deliberate deviations and scope notes (for review)
 
-- **No per-row actions menu, no rename in the list.** The web's session list has no row menu.
-  Its row actions are the trailing end control (two taps: × then **End?**, disarmed after 4s) and, on
-  phones, a swipe-left that reveals **Archive**. Both send `kill` (`dashboard.tsx:1314`), because the
-  server archives a killed session. **Pin and rename** live in the workspace header for the open
-  session (T4.1, `dashboard.tsx:1095/1109`). The web never sends `archive`. The app matches this.
-  The four frames are pinned to the corpus in `SidebarSyncTest`.
+- **The phone's row has the web's row menu (S3a, ta-z0k0).** The web's SB row model (tether `ac67c5e4`
+  `lib/sidebar-row-model.ts`, `components/session-row-menu.tsx`) is on the phone: a trailing kebab opens an
+  anchored menu in the web's groups and copy (Rename… / Pin session / Hand over to a new lead on the open row only;
+  Copy Tether id / Copy path / Copy resume command; End session), with the digest's "N new turns since you left" and
+  its snippet at the top. **End is the same two taps, inside the menu** ("Tap again to end", disarmed on close or after
+  4s); the phone's swipe-left **Archive** stays. All of these send `kill`/the header's own frames
+  (`dashboard.tsx:1314`); the web never sends `archive`. One badge slot replaces the unseen dot and the digest lines
+  ("N new turns" / "New" / "Current" on a group head); a handed-off member reads "Handed over · age"; each workspace
+  shows its open count, and the counts sum to the title. The **tablet rail keeps its End x** (the kebab arrives with
+  slice 3b). The frames stay pinned to the corpus in `SidebarSyncTest`.
 - **The sidebar's end control does not open a dialog.** As on the web, the two-tap arm is the
   confirmation (`dashboard.tsx:1311-1313`). The header's End session keeps its confirm dialog (T4.1).
 - **TalkBack reorder.** The web's reorder is pointer-only. The app adds "Move up" / "Move down"

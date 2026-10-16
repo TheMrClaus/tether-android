@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -65,6 +66,17 @@ import com.tether.app.ui.text.proseDirection
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.tether.app.protocol.helpers.Format
+import com.tether.app.protocol.helpers.SidebarRowModel
+import com.tether.app.protocol.fold.truthy
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import com.tether.app.ui.components.focusRing
+import androidx.compose.ui.semantics.stateDescription
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.CssFlexRow
 import com.tether.app.ui.components.flexFloor
@@ -206,6 +218,16 @@ internal fun SessionRow(
     /** T13.2 r3: the server origin the row is drawn for; a swipe captures it when it opens. */
     origin: String?,
     onArm: (String?) -> Unit,
+    /** S3a: this row's kebab menu is open; [onMenuKey] opens (the row's key) or closes (null) the list's one menu. */
+    menuOpen: Boolean = false,
+    onMenuKey: (String?) -> Unit = {},
+    /** The open session's Hand over row state, and which session that is: the menu offers Hand over on that row only. */
+    activeHandover: com.tether.app.client.Handover.MenuState = com.tether.app.client.Handover.MenuState.Hidden,
+    activeSessionId: String? = null,
+    /** The live session this row was handed off to (its start gives "Handed over · age"), when it is listed. */
+    handoverSuccessor: com.tether.app.protocol.model.AgentSession? = null,
+    /** A group head with at least one older member: wears "Current" when nothing else claims the badge slot. */
+    isGroupHead: Boolean = false,
     phone: Boolean,
     swipedSeed: Boolean,
     dragEnabled: Boolean,
@@ -235,6 +257,16 @@ internal fun SessionRow(
     val unseen = Web.hasUnseenWork(entry.js)
     val digest = entry.history?.digest?.takeIf { entry.js["digest"] != null }
     val swipeEnabled = phone && endLive
+    // S3a (SL-spec-3 §a.3/§a.4/§a.1): the SB row model's decisions, ported from the web (core/reducer SidebarRowModel).
+    val digestFacts = if (truthy(entry.js["digest"])) SidebarRowModel.RowDigestFacts(digest?.newTurns ?: 0) else null
+    val badge = SidebarRowModel.rowBadge(unread = entry.unread, digest = digestFacts, isGroupHead = isGroupHead)
+    val statusKind = SidebarRowModel.rowStatusKind(live?.let { SidebarRowModel.RowLiveFacts(it.status, it.handedOffTo) })
+    val handoverAt = if (statusKind == SidebarRowModel.RowStatusKind.Handed) SidebarRowModel.handoverAgeAt(updatedAt, handoverSuccessor?.startedAt) else null
+    val rowCwd = live?.cwd?.takeIf { it.isNotEmpty() } ?: entry.history?.cwd.orEmpty()
+    val handoverAvailable = activeHandover != com.tether.app.client.Handover.MenuState.Hidden && live != null && activeSessionId != null && live.id == activeSessionId
+    val menuGroups = SidebarRowModel.rowMenuGroups(
+        SidebarRowModel.RowMenuFacts(hasLive = live != null, endable = endable, cwd = rowCwd, resumeCommand = live?.resumeCommand, handoverAvailable = handoverAvailable),
+    )
 
     // ── swipe (mobile shortcut; the X stays the primary end control, issue #175) ──
     val swipeX = remember { Animatable(if (swipedSeed && swipeEnabled) -ARCHIVE_WIDTH else 0f) }
@@ -300,8 +332,9 @@ internal fun SessionRow(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(0.2f.rem, Alignment.CenterVertically),
             ) {
-                SmallIcon(TetherIcons.Archive, t.white, 14.dp)
-                Text("ARCHIVE", style = css(type.ui, 0.6f, 700, trackingEm = 0.02f), color = t.white, modifier = Modifier.clearAndSetSemantics { })
+                // W40-R1 (web a710c3dc): `mineral` on `danger`, 8.56:1 (white on danger was 1.77:1).
+                SmallIcon(TetherIcons.Archive, t.mineral, 14.dp)
+                Text("ARCHIVE", style = css(type.ui, 0.6f, 700, trackingEm = 0.02f), color = t.mineral, modifier = Modifier.clearAndSetSemantics { })
             } }
         }
         Row(
@@ -437,7 +470,7 @@ internal fun SessionRow(
                     .weight(1f)
                     .heightIn(min = if (phone) PhoneLook.RowMinHeight else 3.5f.rem)
                     .semantics(mergeDescendants = true) {
-                        contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location, offline, sync, phone, provider)
+                        contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location, offline, sync, phone, provider, badge, handoverAt)
                         if (active) selected = true
                     }
                     .clickable(role = Role.Button) {
@@ -454,7 +487,7 @@ internal fun SessionRow(
                     // :root .session-item: 0.4rem space-sm, padding-left 0 (Studio 0.75rem 0.25rem, studio.css 325).
                     .then(
                         // The title column starts at 56 dp (the 48 dp handle + 8): the card's one text edge.
-                        if (phone) Modifier.padding(top = PhoneLook.RowVPad, bottom = PhoneLook.RowVPad, start = 8.dp, end = 4.dp)
+                        if (phone) Modifier.padding(top = PhoneLook.RowVPad, bottom = PhoneLook.RowVPad, start = 8.dp, end = 8.dp)
                         else Modifier.padding(vertical = 0.75f.rem, horizontal = 0.25f.rem),
                     ),
                 verticalAlignment = Alignment.CenterVertically,
@@ -462,11 +495,17 @@ internal fun SessionRow(
                 horizontalArrangement = Arrangement.spacedBy(if (phone) 0.dp else t.css.spaceSm),
             ) {
                 if (phone) {
-                    PhoneRowBody(
-                        entry = entry, name = name, active = active, unseen = unseen, ink = ink, digest = digest,
-                        location = location, now = now, updatedAt = updatedAt, offline = offline, sync = sync,
+                    PhoneRowWithBadge(
+                        badge = badge,
+                        badgeTag = SidebarTags.badge(entry.key),
                         modifier = Modifier.weight(1f),
-                    )
+                    ) {
+                        PhoneRowBody(
+                            entry = entry, name = name, active = active,
+                            location = location, now = now, updatedAt = updatedAt, offline = offline, sync = sync, handoverAt = handoverAt,
+                            modifier = Modifier,
+                        )
+                    }
                 } else {
                     Column(Modifier.weight(1f).clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(0.2f.rem)) {
                         Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(0.4f.rem)) {
@@ -494,8 +533,54 @@ internal fun SessionRow(
                     SmallIcon(TetherIcons.ChevronRight, ink, 16.dp)
                 }
             }
-            // .session-item-end: two taps by design (no modal); 48dp on a phone (the drawer's one floor, ta-1jj7).
-            if (endable) {
+            // S3a: the phone's trailing 48 dp slot is the kebab and its menu (the End two-step moved inside it).
+            if (phone) {
+                if (menuGroups.isEmpty()) {
+                    // OI-5: no menu item (a history row without a cwd): an empty, non-semantic slot keeps the column aligned.
+                    Box(Modifier.size(PhoneDrawer.Floor))
+                } else {
+                    RowKebab(
+                        entry = entry, name = name, open = menuOpen, dragging = dragging,
+                        onToggle = {
+                            // A swiped-open row snaps back first, so the anchor sits in place (SL-spec-3 §b.4).
+                            if (swipeOpen) snapTo(false)
+                            onMenuKey(if (menuOpen) null else entry.key)
+                        },
+                    ) {
+                        RowMenu(
+                            name = name,
+                            digest = digest,
+                            groups = menuGroups,
+                            pinned = live?.pinned == true,
+                            handover = if (handoverAvailable) activeHandover else null,
+                            endArmed = armed,
+                            endLive = endLive,
+                            liveId = live?.id,
+                            cwd = rowCwd,
+                            resumeCommand = live?.resumeCommand,
+                            onDismiss = { onMenuKey(null) },
+                            onRename = { live?.let { actions.onRenameSession(it.id, it.name) } },
+                            onTogglePin = { live?.let { actions.onTogglePinSession(it.id, !it.pinned) } },
+                            onHandOver = actions.onHandOver,
+                            onStopHandover = actions.onStopHandover,
+                            onEnd = {
+                                if (live != null) {
+                                    if (armed) {
+                                        onArm(null)
+                                        actions.onEndSession(live.id, armedOrigin)
+                                        onMenuKey(null)
+                                    } else {
+                                        onArm(entry.key)
+                                    }
+                                }
+                            },
+                            onDisarm = { if (armed) onArm(null) },
+                        )
+                    }
+                }
+            }
+            // .session-item-end: two taps by design (no modal); the rail's (the phone's moved into the kebab menu).
+            if (endable && !phone) {
                 val endShape = RoundedCornerShape(t.radiusSm)
                 Box(
                     Modifier
@@ -550,85 +635,185 @@ private fun DigestBlock(d: com.tether.app.protocol.model.HistoryDigest, phone: B
 }
 
 /**
- * W39 (ta-v0h8, director amendment 1): the phone's digest is ONE line: "N new turns" 12/600 `ink` (never
- * truncated), then " · " and the snippet 12/400 `faint` (ellipsised first). No count: the snippet alone; no
- * snippet: the count alone. "since you left" and the whole snippet live in the row's description.
- */
-@Composable
-private fun DigestLine(d: com.tether.app.protocol.model.HistoryDigest) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    val snippet = LabelText.hint(d.snippet)
-    val hasCount = d.newTurns > 0
-    if (!hasCount && snippet.isEmpty()) return
-    val lineHeight = 1.3333f
-    Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (hasCount) {
-            Text(
-                "${d.newTurns} new turn${if (d.newTurns == 1) "" else "s"}",
-                style = css(type.ui, 0.75f, 600, lineHeight = lineHeight).ltrWords(),
-                color = t.ink,
-                maxLines = 1,
-                softWrap = false,
-            )
-        }
-        if (snippet.isNotEmpty()) {
-            Text(
-                (if (hasCount) " · " else "") + snippet,
-                style = css(type.ui, 0.75f, 400, lineHeight = lineHeight).copy(textDirection = proseDirection),
-                color = t.faint,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-        }
-    }
-}
-
-/**
- * The phone row's text (ta-1jj7, owner-directed design). Line 1: the unseen dot, the name on ONE line
- * with an end ellipsis (the label carries the whole name), the handoff glyph. Line 2: the status words
- * and time with the location beside them (see [PhoneMetaLine]). Then the digest and a search snippet,
- * as the rail draws them, at 0.65rem. No chevron: the row is the target and says nothing more.
+ * The phone row's text (ta-1jj7, owner-directed design), S3a: TWO lines for every row. Line 1: the name on ONE line with an end
+ * ellipsis (the label carries the whole name; the unseen dot, the handoff glyph and the digest left the row: the trailing badge and
+ * the kebab menu carry them). Line 2: the status words and time with the location beside them (see [PhoneMetaLine]), then a
+ * search snippet when the row surfaced by a content hit. No chevron: the row is the target and says nothing more.
  */
 @Composable
 private fun PhoneRowBody(
     entry: SidebarEntry,
     name: String,
     active: Boolean,
-    unseen: Boolean,
-    ink: Color,
-    digest: com.tether.app.protocol.model.HistoryDigest?,
     location: String?,
     now: Long,
     updatedAt: Long,
     offline: Boolean,
     sync: com.tether.app.client.SessionSync?,
+    handoverAt: Long?,
     modifier: Modifier,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Column(modifier.clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (unseen) Box(Modifier.size(7.dp).background(t.violet, RoundedCornerShape(50)))
-            // `.session-item-head strong` with one line: the plain end ellipsis (WholeWordText at maxLines 1);
-            // a one-line name has no line break to put inside a word (ta-z4c1 keeps the rail's two lines).
-            WholeWordText(
-                name,
-                style = css(type.ui, 0.875f, 600, lineHeight = 1.4286f).copy(textDirection = proseDirection),
-                color = if (active) Color.White else t.ink,
-                maxLines = 1,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            if (entry.live?.handedOffTo != null) SmallIcon(TetherIcons.ArrowRightLeft, ink, 12.dp)
-        }
+        // `.session-item-head strong` with one line: the plain end ellipsis (WholeWordText at maxLines 1);
+        // a one-line name has no line break to put inside a word (ta-z4c1 keeps the rail's two lines).
+        WholeWordText(
+            name,
+            style = css(type.ui, 0.875f, 600, lineHeight = 1.4286f).copy(textDirection = proseDirection),
+            color = if (active) Color.White else t.ink,
+            maxLines = 1,
+        )
         PhoneMetaLine(
-            status = { StatusLine(entry, now, updatedAt, offline, sync, phone = true) },
+            status = { StatusLine(entry, now, updatedAt, offline, sync, phone = true, handoverAt = handoverAt) },
             // ta-28i: the location is a path: code, LTR.
             location = location?.let { path -> { Text(codeLabel(path), style = css(type.ui, 0.75f, 400, lineHeight = 1.3333f), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
         )
-        digest?.let { d -> if (PhoneLook.DigestOneLine) DigestLine(d) else DigestBlock(d, phone = true) }
         entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount, phone = true) }
+    }
+}
+
+/** S3a: below this width the title column keeps with the badge inline, the badge drops to its own line (director A1: one named constant). */
+internal val PhoneBadgeInlineMinTitle = 120.dp
+
+/** S3a: from this font scale the badge always sits on its own line (the existing [PhoneMetaLine] threshold). */
+internal const val PhoneBadgeStackFontScale = 1.5f
+
+/**
+ * SL-spec-3 §a.3: the row's copy column and its ONE badge. Inline (default): `[copy, weight 1][8][badge]` with the badge centred on
+ * the row's height at the end edge. Stacked: the badge drops under the copy, starting at the title column, 4 dp below it. Decided per
+ * row, in this layout: from font scale [PhoneBadgeStackFontScale], or when the copy column with the badge inline would measure under
+ * [PhoneBadgeInlineMinTitle] (director amendment A1; no device-class flag).
+ */
+@Composable
+internal fun PhoneRowWithBadge(
+    badge: SidebarRowModel.RowBadge?,
+    badgeTag: String,
+    modifier: Modifier,
+    body: @Composable () -> Unit,
+) {
+    if (badge == null) {
+        Box(modifier) { body() }
+        return
+    }
+    val fontScale = LocalDensity.current.fontScale
+    androidx.compose.ui.layout.Layout(
+        content = {
+            Box { body() }
+            RowBadgePill(badge, Modifier.testTag(badgeTag))
+        },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val gap = 8.dp.roundToPx()
+        val vGap = 4.dp.roundToPx()
+        val room = constraints.maxWidth
+        val b = measurables[1].measure(androidx.compose.ui.unit.Constraints(0, room, 0, constraints.maxHeight))
+        val inlineTitle = room - gap - b.width
+        val stacked = fontScale >= PhoneBadgeStackFontScale || inlineTitle < PhoneBadgeInlineMinTitle.roundToPx()
+        if (stacked) {
+            val c = measurables[0].measure(androidx.compose.ui.unit.Constraints(0, room, 0, constraints.maxHeight))
+            layout(room, c.height + vGap + b.height) {
+                c.placeRelative(0, 0)
+                b.placeRelative(0, c.height + vGap)
+            }
+        } else {
+            val c = measurables[0].measure(androidx.compose.ui.unit.Constraints(0, inlineTitle, 0, constraints.maxHeight))
+            val h = maxOf(c.height, b.height)
+            layout(room, h) {
+                c.placeRelative(0, (h - c.height) / 2)
+                b.placeRelative(room - b.width, (h - b.height) / 2)
+            }
+        }
+    }
+}
+
+/**
+ * SL-spec-3 §a.3 (web CSS:1371-1374): the one neutral pill. `turns` / `New`: `slate` fill, `lineStrong` border, `white` text;
+ * `Current`: transparent, `lineStrong` border, `muted` text. Min height 22, 8 dp padding, radius 6, 12/650 tabular, one line:
+ * it never truncates (the title does). Its words are in the row's description, so it draws no semantics of its own.
+ */
+@Composable
+internal fun RowBadgePill(badge: SidebarRowModel.RowBadge, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val current = badge is SidebarRowModel.RowBadge.Current
+    val text = when (badge) {
+        is SidebarRowModel.RowBadge.Turns -> SidebarRowModel.newTurnsText(badge.n)
+        SidebarRowModel.RowBadge.New -> "New"
+        SidebarRowModel.RowBadge.Current -> "Current"
+    }
+    val shape = RoundedCornerShape(6.dp)
+    Box(
+        modifier
+            .heightIn(min = 22.dp)
+            .background(if (current) Color.Transparent else t.slate, shape)
+            .border(1.dp, t.lineStrong, shape)
+            .padding(horizontal = 8.dp)
+            .clearAndSetSemantics { },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text,
+            style = css(type.ui, 0.75f, 650, lineHeight = 1.3333f).copy(fontFeatureSettings = "tnum").ltrWords(),
+            color = if (current) t.muted else t.white,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+/** The badge's words for TalkBack (web SS:428-437): the count carries "since you left" and its raw number. */
+internal fun badgeDescription(badge: SidebarRowModel.RowBadge): String = when (badge) {
+    is SidebarRowModel.RowBadge.Turns -> "${badge.n} new turn${if (badge.n == 1) "" else "s"} since you left"
+    SidebarRowModel.RowBadge.New -> "New — changed since you last looked"
+    SidebarRowModel.RowBadge.Current -> "Current — latest session in this group"
+}
+
+/**
+ * SL-spec-3 §a.1: the phone row's kebab in End ×'s 48 dp slot: `EllipsisVertical` 20 `faint`; while its menu is open (or pressed) a
+ * 36 dp `keyFaceHover` face with a `white` glyph. Role Button, `Actions for <name>`, state `Menu closed` / `Menu open`, long-press
+ * tooltip "Session actions". [menu] is the popup, anchored to the 48 dp cell. Inert while the row is lifted for a drag.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun RowKebab(
+    entry: SidebarEntry,
+    name: String,
+    open: Boolean,
+    dragging: Boolean,
+    onToggle: () -> Unit,
+    menu: @Composable () -> Unit,
+) {
+    val t = LocalTetherTokens.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val lit = open || pressed
+    val face = RoundedCornerShape(t.radiusSm)
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text("Session actions") } },
+        state = rememberTooltipState(),
+        modifier = Modifier
+            .size(PhoneDrawer.Floor)
+            .clickable(interaction, indication = null, enabled = !dragging, role = Role.Button, onClick = onToggle)
+            .semantics {
+                contentDescription = "Actions for $name"
+                role = Role.Button
+                stateDescription = if (open) "Menu open" else "Menu closed"
+            }
+            .testTag(SidebarTags.kebab(entry.key)),
+    ) {
+        Box(Modifier.size(PhoneDrawer.Floor), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .focusRing(focused, face, t.violet)
+                    .then(if (lit) Modifier.background(t.keyFaceHover, face) else Modifier),
+                contentAlignment = Alignment.Center,
+            ) { SmallIcon(TetherIcons.EllipsisVertical, if (lit) t.white else t.faint, 20.dp) }
+            if (open) menu()
+        }
     }
 }
 
@@ -709,7 +894,7 @@ private fun ModeTag(mode: String) {
  * AND the words — status is never colour alone. A history-only row shows "8m ago".
  */
 @Composable
-private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline: Boolean, sync: com.tether.app.client.SessionSync?, phone: Boolean = false) {
+private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline: Boolean, sync: com.tether.app.client.SessionSync?, phone: Boolean = false, handoverAt: Long? = null) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     // The phone's words and time are 0.65rem (ta-1jj7, owner-directed design); the rail's stay 0.68rem.
@@ -719,6 +904,48 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
     // T13.2: an offline row carries more (the "was" words and the copy's glyph): its pieces wrap
     // whole at a large font instead of squeezing. A live row keeps its single line.
     StatusFlow(wrap = offline && live != null) {
+        if (phone && live != null) {
+            // S3a (SL-spec-3 §a.4 + SL1 director fix 1): the phone's words, then ONE shared " · " (faint, no spacer before it) and the age.
+            // "Handed over" is the web's word (rowStatusKind); offline it stays "Handed over" with no "was" (a past fact), on a still dot.
+            val handed = handoverAt != null
+            val was = if (offline && !handed) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
+            val color = when {
+                was != null || handed -> t.faint
+                live.status == "active" -> t.running
+                live.status == "waiting" -> t.violet
+                else -> t.faint
+            }
+            val word = when {
+                handed -> SidebarRowModel.HANDED_OVER_WORD
+                was != null -> was
+                else -> Format.statusCopy[live.status] ?: LabelText.label(live.status)
+            }
+            val wordColor = when {
+                handed -> t.muted
+                was != null -> t.faint
+                live.status != "active" && live.status != "waiting" -> t.muted
+                else -> color
+            }
+            val age = if (handed) Format.relativeTime(handoverAt!!.toDouble(), now.toDouble()) else rel
+            val animated = !offline && !handed
+            when {
+                animated && live.status == "active" -> SpinnerRing(color, size = 0.65f.rem, stroke = 1.5.dp, modifier = Modifier.flexFloor(3.dp))
+                animated && live.status == "waiting" -> WaitingPingDot(color, dotSize = 0.4f.rem, modifier = Modifier.flexFloor(0.dp))
+                handed -> StatusDot(t.faint, size = 6.dp, modifier = Modifier.flexFloor(0.dp))
+                else -> StatusDot(color, size = 0.4f.rem, modifier = Modifier.flexFloor(0.dp))
+            }
+            val wordStyle = if (live.status == "waiting" && !handed && was == null) style.copy(fontWeight = androidx.compose.ui.text.font.FontWeight(600)) else style
+            Text(
+                androidx.compose.ui.text.buildAnnotatedString {
+                    pushStyle(androidx.compose.ui.text.SpanStyle(color = wordColor)); append(word); pop()
+                    pushStyle(androidx.compose.ui.text.SpanStyle(color = t.faint, fontWeight = androidx.compose.ui.text.font.FontWeight(500))); append(META_SEPARATOR + age); pop()
+                },
+                style = wordStyle.ltrWords(),
+                softWrap = false,
+            )
+            if (sync != null) com.tether.app.ui.components.FreshnessGlyph(sync, now, Modifier.testTag(SidebarTags.freshness(entry.key)))
+            return@StatusFlow
+        }
         // r2: offline, "was" whether or not the client has an entry for the row.
         val was = if (live != null && offline) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
         if (live != null && was != null) {
@@ -754,6 +981,9 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
     }
 }
 
+/** The ONE separator between a meta line's word and what follows it (status · age, offline, search hits, handed over · age). */
+internal const val META_SEPARATOR = " · "
+
 /** The status line's container: a Row, or (T13.2, [wrap]) a FlowRow whose pieces wrap whole. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -784,11 +1014,17 @@ private fun rowDescription(
     sync: com.tether.app.client.SessionSync?,
     phone: Boolean,
     provider: String,
+    badge: SidebarRowModel.RowBadge? = null,
+    handoverAt: Long? = null,
 ): String = buildString {
     append(name)
 
-    if (unseen) append(", changed since you last looked")
-    if (entry.live?.handedOffTo != null) append(", handed off")
+    // S3a (SL-spec-3 §b.1): the phone reads `name, handed off to X, mode, status, age, freshness, location, matched, badge. digest`;
+    // the badge's own words replace the old ", changed since you last looked" and ", N new turns since you left".
+    if (!phone && unseen) append(", changed since you last looked")
+    if (entry.live?.handedOffTo != null) {
+        if (phone) append(", ").append(entry.handedOffDescription?.replaceFirstChar { it.lowercase() } ?: "handed off to another session") else append(", handed off")
+    }
     when (mode) {
         "headless" -> append(", chat")
         "terminal" -> append(", terminal")
@@ -796,16 +1032,15 @@ private fun rowDescription(
     val rel = Format.relativeTime(updatedAt.toDouble(), now.toDouble())
     val live = entry.live
     val was = if (live != null && offline) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
-    if (live != null) append(", ${was ?: Format.statusCopy[live.status] ?: LabelText.label(live.status)}, $rel")
+    if (live != null && phone && handoverAt != null) append(", ${SidebarRowModel.HANDED_OVER_WORD}, ${Format.relativeTime(handoverAt.toDouble(), now.toDouble())}")
+    else if (live != null) append(", ${was ?: Format.statusCopy[live.status] ?: LabelText.label(live.status)}, $rel")
     else append(", $rel ago")
     // T13.2: the full sentence the row's glyph stands for.
     if (live != null) com.tether.app.ui.components.FreshnessCopy.sessionLabel(sync, now)?.let { append(", $it") }
-    entry.history?.digest?.takeIf { entry.js["digest"] != null && it.newTurns > 0 }?.let {
-        append(", ${it.newTurns} new turn${if (it.newTurns == 1) "" else "s"} since you left")
-    }
-    // W39: the one-line digest cuts the snippet at the row's edge; the whole of it is read here.
-    if (phone && PhoneLook.DigestOneLine) {
-        entry.history?.digest?.takeIf { entry.js["digest"] != null }?.let { d -> LabelText.hint(d.snippet).takeIf { it.isNotEmpty() }?.let { append(", $it") } }
+    if (!phone) {
+        entry.history?.digest?.takeIf { entry.js["digest"] != null && it.newTurns > 0 }?.let {
+            append(", ${it.newTurns} new turn${if (it.newTurns == 1) "" else "s"} since you left")
+        }
     }
     location?.let { append(", ").append(SafeText.line(it)) }
     // W39: the phone's tile is a single-ink mark: the provider's name is in words here instead.
@@ -816,6 +1051,11 @@ private fun rowDescription(
     entry.snippet?.let { LabelText.hint(it) }?.let { snippet ->
         append(", matched: $snippet")
         if (entry.matchCount > 1) append(", ${entry.matchCount} matches")
+    }
+    // S3a: the badge's words at their place, then the digest's snippet (it left the row's face; the menu's block also shows it).
+    if (phone) {
+        badge?.let { append(", ").append(badgeDescription(it)) }
+        entry.history?.digest?.takeIf { entry.js["digest"] != null }?.let { d -> LabelText.hint(d.snippet).takeIf { it.isNotEmpty() }?.let { append(". ").append(it) } }
     }
 }
 
@@ -832,11 +1072,15 @@ internal fun SnippetLine(snippet: String, matchCount: Int, phone: Boolean) {
     Row(
         Modifier.padding(top = 0.1f.rem),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(0.25f.rem),
+        horizontalArrangement = Arrangement.spacedBy(if (phone) 0.dp else 0.25f.rem),
     ) {
         SmallIcon(TetherIcons.Search, t.faint, 11.dp)
+        if (phone) androidx.compose.foundation.layout.Spacer(Modifier.width(4.dp))
         Text(snippet, style = style.copy(textDirection = proseDirection), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-        if (matchCount > 1) Text("·\u00A0$matchCount matches", style = style.ltrWords(), color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.alpha(0.8f))
+        if (matchCount > 1) {
+            // The phone shares the status line's " · " (no spacer before it); the rail keeps its non-breaking form.
+            Text(if (phone) "$META_SEPARATOR$matchCount matches" else "·\u00A0$matchCount matches", style = style.ltrWords(), color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.alpha(0.8f))
+        }
     }
 }
 

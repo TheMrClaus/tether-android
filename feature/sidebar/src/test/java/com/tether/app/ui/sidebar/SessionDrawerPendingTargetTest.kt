@@ -43,7 +43,7 @@ class SessionDrawerPendingTargetTest {
         }
         rule.waitForIdle()
         val unread = SemanticsMatcher("unread row") { n ->
-            n.config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.startsWith("Linked job, changed since you last looked") } == true
+            n.config.getOrNull(SemanticsProperties.ContentDescription)?.any { it.startsWith("Linked job,") && it.contains("New — changed since you last looked") } == true
         }
         assertEquals(1, rule.onAllNodes(unread).fetchSemanticsNodes().size)
         rule.runOnIdle { vm.openSession("p1") }

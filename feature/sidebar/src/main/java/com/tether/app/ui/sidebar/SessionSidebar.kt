@@ -152,6 +152,13 @@ data class SidebarActions(
     val onArchiveStale: (String, Int, String?, String?) -> Boolean = { _, _, _, _ -> false },
     /** use-tether.ts `setArchiveStale(null)`: opening the dialog drops the last reply. */
     val onClearArchiveStale: () -> Unit = {},
+    /** S3a, the row menu (web `onRenameSession` / `onTogglePinSession` / `onHandOver` / `onStopHandover`). (session id, its name). */
+    val onRenameSession: (String, String) -> Unit = { _, _ -> },
+    /** (session id, the new pinned state). */
+    val onTogglePinSession: (String, Boolean) -> Unit = { _, _ -> },
+    /** The open session's Hand over confirm (the shell's); only the open row offers it. */
+    val onHandOver: () -> Unit = {},
+    val onStopHandover: () -> Unit = {},
 )
 
 /** Transient UI state a screenshot or test can start from (the web's component state). */
@@ -173,6 +180,8 @@ data class SidebarUiSeed(
     val focusChain: String? = null,
     /** The "Archive idle sessions" dialog starts open, in this state (a golden's starting point). */
     val archiveStale: ArchiveStaleState? = null,
+    /** S3a: the row whose menu starts open (a golden's starting point). */
+    val menuKey: String? = null,
 )
 
 object SidebarTags {
@@ -187,6 +196,13 @@ object SidebarTags {
     fun blockDot(workspace: String) = "sidebar-block-dot:$workspace"
     fun handle(key: String) = "sidebar-handle:$key"
     fun end(key: String) = "sidebar-end:$key"
+    /** S3a: the phone row's kebab (the tablet keeps [end]). */
+    fun kebab(key: String) = "sidebar-kebab:$key"
+    const val RowMenu = "sidebar-row-menu"
+    const val RowMenuDigest = "sidebar-row-menu-digest"
+    fun menuItem(id: com.tether.app.protocol.helpers.SidebarRowModel.RowMenuItemId) = "sidebar-menu-item:${id.name}"
+    fun badge(key: String) = "sidebar-badge:$key"
+    fun workspaceCount(workspace: String) = "sidebar-workspace-count:$workspace"
     fun archive(key: String) = "sidebar-archive:$key"
     fun block(workspace: String) = "sidebar-block:$workspace"
     fun older(workspace: String) = "sidebar-older:$workspace"
@@ -234,14 +250,11 @@ object PhoneLook {
     /** The filter field is always drawn (the web's SB rule). false: only past 5 sessions, as before. */
     const val FilterFieldAlwaysVisible = true
 
-    /** The row's provider tile is a neutral single-ink tile. false: the brand tile ([ProviderTile]). */
-    const val MonochromeProviderTile = true
+    /** The row's provider tile is a neutral single-ink tile. false: the brand tile ([ProviderTile]). Off: the owner put the coloured logos back (W40-R1, ta-3sq0). */
+    const val MonochromeProviderTile = false
 
     /** The workspace header's keyboard digit hint is hidden (hint only: no shortcut is bound to it). */
     const val HideKbdDigits = true
-
-    /** The digest is ONE line ("N new turns" · snippet). false: today's two lines ("… since you left"). */
-    const val DigestOneLine = true
 
     /** A row is at least this tall, with [RowVPad] above and below its two text lines (director amendment 2). */
     val RowMinHeight = 56.dp
@@ -310,6 +323,8 @@ private fun SidebarContent(
     // The server the dialog was opened for: a run is never delivered to another one.
     var archiveOrigin by remember { mutableStateOf(state.origin) }
     var armedKey by remember { mutableStateOf(seed.armedKey) }
+    // S3a: the row whose kebab menu is open (one shared menu per list, as the web's one popover per rail).
+    var menuKey by remember { mutableStateOf(seed.menuKey) }
     // T13.2 r3: the server the armed end control was armed for; its second tap ends on that server only.
     val latestOrigin by rememberUpdatedState(state.origin)
     var armedOrigin by remember { mutableStateOf(if (seed.armedKey != null) state.origin else null) }
@@ -333,6 +348,11 @@ private fun SidebarContent(
             kotlinx.coroutines.delay(END_SESSION_ARM_MS)
             armedKey = null
         }
+    }
+
+    // The web closes the menu on a list scroll (the anchor would have moved); an armed End never outlives it.
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress && menuKey != null) { menuKey = null; armedKey = null }
     }
 
     val dragPreview = drag?.takeIf { it.engaged }?.let { DragPreview(it.key, it.order) }
@@ -459,6 +479,12 @@ private fun SidebarContent(
                         first = position == 0,
                         armedKey = armedKey,
                         armedOrigin = armedOrigin,
+                        menuKey = menuKey,
+                        onMenuKey = { key ->
+                            // Closing a menu, or moving to another row's, for any reason disarms End (SL-spec-3 §b.3).
+                            if (key != menuKey) armedKey = null
+                            menuKey = key
+                        },
                         onArm = { key ->
                             armedKey = key
                             armedOrigin = if (key != null) latestOrigin else null
@@ -689,6 +715,11 @@ private fun ScheduledNav(count: Int, active: Boolean, onClick: (() -> Unit)?, ph
                 .heightIn(min = PhoneDrawer.Floor)
                 .clip(shape)
                 .then(if (active) Modifier.background(t.graphiteRaised, shape).semantics { selected = true } else Modifier)
+                // C1: the clickable View had no name or role on device; one Button node, named, with its count.
+                .semantics(mergeDescendants = true) {
+                    role = Role.Button
+                    contentDescription = if (count > 0) "Scheduled actions, $count" else "Scheduled actions"
+                }
                 .clickable(enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
                 .alpha(if (onClick == null) 0.48f else 1f)
                 .padding(horizontal = 8.dp)
@@ -1186,6 +1217,8 @@ private fun WorkspaceBlock(
     first: Boolean,
     armedKey: String?,
     armedOrigin: String?,
+    menuKey: String?,
+    onMenuKey: (String?) -> Unit,
     onArm: (String?) -> Unit,
     swipedSeed: String?,
     dragController: DragController,
@@ -1233,6 +1266,12 @@ private fun WorkspaceBlock(
                             sync = if (state.connected) null else e.live?.id?.let { state.syncStates[it] },
                             armed = armedKey == e.key,
                             armedOrigin = armedOrigin,
+                            menuOpen = menuKey == e.key,
+                            onMenuKey = onMenuKey,
+                            activeHandover = state.activeHandover,
+                            activeSessionId = state.activeSessionId,
+                            handoverSuccessor = e.live?.handedOffTo?.let { view.liveSessions[it] },
+                            isGroupHead = block.chainSummaries.containsKey(e.key),
                             origin = state.origin,
                             onArm = onArm,
                             phone = phone,
@@ -1519,7 +1558,19 @@ private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline:
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 // ta-28i: a workspace's folder name and path are code (server text), LTR.
-                Text(codeLabel(block.name), style = css(type.ui, 1f, 700), color = t.white, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // S3a (D-L34-5/22): the workspace's open count follows the name, drawn on collapsed headers too; the name ellipsizes first.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(codeLabel(block.name), style = css(type.ui, 1f, 700), color = t.white, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Text(
+                        "${block.openCount}",
+                        style = css(type.ui, 0.875f, 500).copy(fontFeatureSettings = "tnum"),
+                        color = t.faint,
+                        maxLines = 1,
+                        softWrap = false,
+                        // The web's visually hidden " sessions" (literal: "1 sessions", an open web-side item).
+                        modifier = Modifier.semantics { contentDescription = "${block.openCount} sessions" }.testTag(SidebarTags.workspaceCount(block.workspace)),
+                    )
+                }
                 block.path?.let {
                     Text(codeLabel(it), style = css(type.ui, 0.75f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -1632,7 +1683,7 @@ private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone
     // (an inner clickable under the anchor Box left a separate non-clickable anchor node on device, ta-btv8).
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-        tooltip = { PlainTooltip { Text("Earlier sessions in this handover chain, newest first") } },
+        tooltip = { PlainTooltip { Text("Earlier sessions in this group, newest first") } },
         state = rememberTooltipState(),
         modifier = (if (phone) Modifier else Modifier.padding(start = 0.9f.rem))
             .fillMaxWidth()

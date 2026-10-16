@@ -62,6 +62,11 @@ fun SessionDrawer(
     scheduledActionsActive: Boolean = false,
     /** The wall clock behind the relative times and the "Older" band's 7-day horizon (the web's Date.now()). */
     clock: () -> Long = System::currentTimeMillis,
+    /** S3a: the open session's Hand over row state (the header's), and the row menu's rename / Hand over / Stop handover (the shell's). */
+    activeHandover: com.tether.app.client.Handover.MenuState = com.tether.app.client.Handover.MenuState.Hidden,
+    onRenameSession: (String, String) -> Unit = { _, _ -> },
+    onHandOver: () -> Unit = {},
+    onStopHandover: () -> Unit = {},
 ) {
     RecompositionProbe("SessionDrawer")
     val client = vm.client
@@ -166,6 +171,7 @@ fun SessionDrawer(
         scheduledActionCount = scheduled.schedules.count { it.status != "completed" } + scheduled.continuations.size,
         scheduledActionsActive = scheduledActionsActive,
         archiveStale = archiveStale,
+        activeHandover = activeHandover,
     )
 
     // T5.3 dashboard.tsx:835-844 — debounce the typed filter into a server-side content search;
@@ -224,7 +230,13 @@ fun SessionDrawer(
             },
             onOpenSettings = onOpenSettings ?: { settingsOpen = true },
             onOpenGlobalSearch = vm::openGlobalSearch,
-        ).copy(onOpenScheduledActions = onOpenScheduledActions),
+        ).copy(
+            onOpenScheduledActions = onOpenScheduledActions,
+            onRenameSession = onRenameSession,
+            onTogglePinSession = { id, pinned -> client.pin(id, pinned) },
+            onHandOver = onHandOver,
+            onStopHandover = onStopHandover,
+        ),
     )
 
     // Outside the sidebar's token scope: the web raises these outside `.session-sidebar`.

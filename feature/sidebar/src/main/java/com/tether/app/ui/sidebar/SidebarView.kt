@@ -2,6 +2,7 @@ package com.tether.app.ui.sidebar
 
 import com.tether.app.protocol.helpers.Format
 import com.tether.app.protocol.helpers.SidebarOrder
+import com.tether.app.protocol.helpers.SidebarRowModel
 import com.tether.app.protocol.helpers.SidebarWorkspaces
 import com.tether.app.protocol.helpers.get
 import com.tether.app.protocol.tree.JsArr
@@ -44,6 +45,11 @@ data class SidebarState(
     val origin: String? = null,
     /** v141: the client's latest `archive-stale-result`, which steps the "Archive idle sessions" dialog. */
     val archiveStale: com.tether.app.client.ArchiveStaleReply? = null,
+    /**
+     * S3a: the open session's "Hand over / Stop handover" row state (the header's, from the shell). The row menu offers it on the
+     * open session's row only, and not at all while [com.tether.app.client.Handover.MenuState.Hidden] (the web's `activeHandover`).
+     */
+    val activeHandover: com.tether.app.client.Handover.MenuState = com.tether.app.client.Handover.MenuState.Hidden,
 )
 
 /** One workspace block as rendered (session-sidebar.tsx:997-1190). */
@@ -71,6 +77,8 @@ data class BlockView(
     val olderCount: Int = 0,
     /** The band is expanded: its rows are listed after the recent ones. */
     val olderOpen: Boolean = false,
+    /** S3a (D-L34-5/22): every non-archived session of this workspace, whatever the lens, fold, band or page. Shown after the name. */
+    val openCount: Int = 0,
 )
 
 /** One folded chain as C2 draws it. [rootKey] (the last older member) keys the open/seen state, so it survives a new head. */
@@ -97,6 +105,8 @@ data class SidebarView(
     val delegateChildKeys: Set<String>,
     /** HG: per workspace, the chains' key shape (empty while filtering). The drag order holds one key per chain. */
     val chainKeysByWorkspace: Map<String, List<SidebarOrder.HandoverChainKeys>> = emptyMap(),
+    /** S3a: the live sessions by id: a handed-off row's successor gives its "Handed over" age and its name. */
+    val liveSessions: Map<String, com.tether.app.protocol.model.AgentSession> = emptyMap(),
 )
 
 /** A drag in progress previews its block's tentative order (session-sidebar.tsx:613-621). */
@@ -145,6 +155,11 @@ object SidebarViewModel {
         }
         val groupedRows = Web.groupedByWorkspace(grouped, filtering, state.sessionOrders)
 
+        // S3a: the per-workspace counts and the title are ONE computation, so they always sum (D-L34-22).
+        val counts = SidebarRowModel.workspaceOpenCounts(
+            state.sidebarSessions.map { SidebarRowModel.CountableRow(it.workspace, it.live?.runtimeArchived == true) },
+            state.workspaces,
+        )
         val blocks = ArrayList<BlockView>()
         state.workspaces.forEachIndexed { index, workspace ->
             val grouping = groupedRows[workspace] ?: Web.GroupedRows(emptyList(), emptyMap())
@@ -202,6 +217,7 @@ object SidebarViewModel {
                 // session-sidebar.tsx:1193 — the toggle only once every recent row is on screen.
                 olderCount = if ((page["remaining"] as JsNum).value.toInt() == 0) band.older.size else 0,
                 olderOpen = olderIsOpen,
+                openCount = counts.byWorkspace[workspace] ?: 0,
             )
         }
         return SidebarView(
@@ -211,10 +227,11 @@ object SidebarViewModel {
             querying = querying,
             attentionOn = attentionOn,
             dragEnabled = !filtering,
-            openCount = state.sidebarSessions.count { !Web.isArchivedLike(it.js) },
+            openCount = counts.placed,
             anyVisible = lensed.visibleRows.isNotEmpty() || lensed.hiddenByWorkspace.isNotEmpty(),
             delegateChildKeys = childKeys,
             chainKeysByWorkspace = chainKeys,
+            liveSessions = state.sidebarSessions.mapNotNull { e -> e.live?.let { it.id to it } }.toMap(),
         )
     }
 
