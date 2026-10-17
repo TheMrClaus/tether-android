@@ -7,6 +7,7 @@ import com.tether.app.protocol.tree.JsObj
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -79,6 +80,25 @@ class ProtocolV145To152WireTest {
             }
         }
         assertTrue("the corpus has snapshot frames ($checked)", checked > 0)
+    }
+
+    @Test
+    fun theNewDefaultedFieldsAreNotEncodedWhileAtTheirDefault() {
+        val enc = kotlinx.serialization.json.Json { encodeDefaults = true; explicitNulls = true }
+        val raw = state("")
+            .replace("\"turnOrder\":[]", "\"turnOrder\":[\"t\"]")
+            .replace("\"turnsById\":{}", "\"turnsById\":{\"t\":{\"turnId\":\"t\"}}")
+            .replace("\"queuedMessages\":[]", "\"queuedMessages\":[{\"queueId\":\"q\",\"text\":\"t\"}]")
+        val json = enc.encodeToJsonElement(com.tether.app.protocol.model.SessionProjection.serializer(), adapt(raw).second!!).jsonObject
+        for (k in listOf("sessionErrors", "withdrawnQueueIds")) assertFalse(k, json.containsKey(k))
+        val turn = json["turnsById"]!!.jsonObject["t"]!!.jsonObject
+        for (k in listOf("errorAt", "endedAt")) assertFalse(k, turn.containsKey(k))
+        val queued = json["queuedMessages"]!!.jsonArray[0].jsonObject
+        for (k in listOf("held", "fromSessionId", "fromSessionName")) assertFalse(k, queued.containsKey(k))
+        // ...and a set one is written.
+        val held = adapt(state("").replace("\"queuedMessages\":[]", "\"queuedMessages\":[{\"queueId\":\"q\",\"text\":\"t\",\"held\":true}]")).second!!
+        val written = enc.encodeToJsonElement(com.tether.app.protocol.model.SessionProjection.serializer(), held).jsonObject
+        assertTrue(written["queuedMessages"]!!.jsonArray[0].jsonObject.containsKey("held"))
     }
 
     // ---- turn endedAt / errorAt (w4:592-596) and withdrawnQueueIds (w4:857) -----------------------------------------------
