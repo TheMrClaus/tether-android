@@ -169,6 +169,20 @@ class SidebarGroupsTest {
         assertEquals(listOf(Shape("a", listOf("b"), true, "a")), shape(g))
     }
 
+    @Test fun nameIsCustomMustBeExactlyTrueToNest() {
+        // web `live.nameIsCustom === true`: a non-boolean truthy value must not nest (row has a non-blank history name)
+        fun r(key: String, name: String, custom: com.tether.app.protocol.tree.JsValue) = JsObj.of(
+            "key" to JsStr(key), "name" to JsStr(name), "createdAt" to JsNum(0.0), "updatedAt" to JsNum(0.0),
+            "live" to JsObj.of("id" to JsStr("L$key"), "handedOffFrom" to null, "nameIsCustom" to custom),
+            "history" to JsObj.of("name" to JsStr(name)),
+        )
+        for (truthyNonBool in listOf<com.tether.app.protocol.tree.JsValue>(JsStr("yes"), JsNum(1.0))) {
+            assertEquals(emptyList<Shape>(), shape(SidebarOrder.sidebarGroups(listOf(r("a", "Fix login 2", truthyNonBool), r("b", "Fix login 3", truthyNonBool)))))
+        }
+        val g = SidebarOrder.sidebarGroups(listOf(r("a", "Fix login 2", com.tether.app.protocol.tree.JsBool.TRUE), r("b", "Fix login 3", com.tether.app.protocol.tree.JsBool.TRUE)))
+        assertEquals(listOf(Shape("b", listOf("a"), true, "b")), shape(g))
+    }
+
     @Test fun nameIsCustomWinsOverAHistoryName() {
         val a = liveRow("a", "m 1", nameIsCustom = true, historyName = "m 1")
         val b = liveRow("b", "m 2", nameIsCustom = true, historyName = "m 2")
