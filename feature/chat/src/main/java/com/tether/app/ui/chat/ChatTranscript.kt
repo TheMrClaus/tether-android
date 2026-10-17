@@ -715,7 +715,7 @@ private fun ChatRowContent(
             is ChatItem.Retry -> item.turn.apiRetry?.let { ApiRetryMarker(it) }
             is ChatItem.Approval -> if (segment != null) ApprovalSegmentView(item.approval, segment) else ApprovalCard(item.approval)
             is ChatItem.Question -> QuestionCard(item.question, answered = item.answered)
-            is ChatItem.Outcome -> OutcomeBadge(item.turn, interrupt = item.interrupt, zone = zone)
+            is ChatItem.Outcome -> OutcomeBadge(item.turn, interrupt = item.interrupt, zone = zone, at = item.at)
             is ChatItem.ProviderNotice -> ProviderNoticeRow(item.notice)
             is ChatItem.Compaction -> CompactionRow(item.compaction)
             is ChatItem.SessionNotice -> SessionNoticeRow(item.notice)
@@ -731,7 +731,7 @@ private fun ChatRowContent(
             is ChatItem.TurnDiff -> CodexUnifiedDiff(item.unifiedDiff)
             is ChatItem.TurnReview -> CodexReviewCard(item.review)
             is ChatItem.BgCommand -> BackgroundCommandChip(item.command) { onOpenCommand(item.command.commandId) }
-            is ChatItem.SessionError -> SessionErrorRow(item.text)
+            is ChatItem.SessionError -> SessionErrorRow(item.text, item.ts, zone)
         }
     }
 }
