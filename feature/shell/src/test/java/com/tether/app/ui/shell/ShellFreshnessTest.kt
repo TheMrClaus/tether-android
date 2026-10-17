@@ -158,7 +158,7 @@ class ShellFreshnessTest {
     /**
      * ta-coik.22 r2: the web's header End session is disabled only once the session exited
      * (workspace-header.tsx 90fbb9f :133). Offline it is live; its tap asks (or ends, per the
-     * preference) and the client says the session was not ended while the link is down.
+     * preference) and the client says the link is reconnecting while it is down.
      */
     @Test
     fun offlineTheRedEndSessionKeyIsLiveAsOnTheWeb() {

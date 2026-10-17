@@ -314,6 +314,6 @@ class BrowserPickComposerBehaviourTest {
         assertEquals(0, cleared)
         assertEquals("keep", inputText())
         assertFalse(rule.onAllNodesWithTag(BrowserPickTags.Chip).fetchSemanticsNodes().isEmpty())
-        rule.onNodeWithText("Not connected — the message and its attachments were not sent.").assertExists()
+        rule.onNodeWithText("The secure link is reconnecting — your attachments were not sent. Try again in a moment.").assertExists()
     }
 }

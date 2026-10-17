@@ -573,7 +573,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                         // dashboard.tsx 90fbb9f :1174: the chat on screen becomes the pick first.
                         vm.commitSelection(it.id)
                         // ta-coik.22: live as on the web (workspace-header.tsx 90fbb9f :133); bound to
-                        // the server ([endSessionServer]); offline the client says it was not ended.
+                        // the server ([endSessionServer]); offline the client says the link is reconnecting, as the web does.
                         val server = com.tether.app.ui.chat.endSessionServer(consentOrigin, vm.client.serverUrl.value)
                         // dashboard.tsx 1bf4a465 :1192-1198: an isolated session's end asks about its teardown
                         // first (TeardownConfirmDialog), and that dialog is the confirmation.

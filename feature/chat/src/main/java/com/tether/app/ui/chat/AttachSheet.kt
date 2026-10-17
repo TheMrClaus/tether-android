@@ -353,7 +353,7 @@ class AttachmentStager(
 /** Why a Send with attachments sent nothing (null: it was sent, or there was nothing to send). */
 internal fun attachmentRefusalCopy(result: AttachmentSendResult): String? = when (result) {
     AttachmentSendResult.Sent, AttachmentSendResult.Empty -> null
-    AttachmentSendResult.NotConnected -> "Not connected — the message and its attachments were not sent."
+    AttachmentSendResult.NotConnected -> "The secure link is reconnecting — your attachments were not sent. Try again in a moment."
     // ta-coik.25: NotLive means only "drawn for another server" (RealTetherClient sendAttachments); the
     // web sends on any open link, a session still catching up included.
     AttachmentSendResult.NotLive -> OTHER_SERVER_NOT_SENT

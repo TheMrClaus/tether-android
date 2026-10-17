@@ -44,6 +44,8 @@ class TetherViewModelToastTest {
         override val serverErrors: SharedFlow<ServerErrorText> get() = server
         override val serverUrl: StateFlow<String?> get() = url
         override val consentOrigin: StateFlow<String?> get() = live
+        val epoch = MutableStateFlow(1L)
+        override val linkEpoch: StateFlow<Long> get() = epoch
     }
 
     private fun TestScope.vm(client: ToastClient) =
@@ -138,6 +140,46 @@ class TetherViewModelToastTest {
         client.live.value = B
         advanceUntilIdle()
         assertEquals("1 unsent message was not sent to this server.", vm.toast.value?.text)
+    }
+
+    /** ta-kfrh (use-tether.ts:752-754): the web clears ANY error at socket open; here, each new link epoch. */
+    @Test
+    fun aToastIsClearedWhenANewSocketOpensServerWrittenToo() = runTest(dispatcher) {
+        val client = ToastClient()
+        val vm = vm(client)
+        advanceUntilIdle()
+        assertNull(vm.toast.value)
+        client.local.tryEmit("The secure link is reconnecting. Your input was not sent.")
+        advanceUntilIdle()
+        assertEquals(false, vm.toast.value?.fromServer)
+        client.epoch.value = 2L
+        advanceUntilIdle()
+        assertNull("the next socket open clears the app's toast", vm.toast.value)
+        assertNull(vm.activeToast.value)
+
+        client.server.tryEmit(ServerErrorText("Session not found.", A))
+        advanceUntilIdle()
+        assertEquals("Session not found.", vm.toast.value?.text)
+        client.epoch.value = 3L
+        advanceUntilIdle()
+        assertNull("a server-written toast clears too, as the web's setError(\"\")", vm.toast.value)
+    }
+
+    @Test
+    fun aToastRaisedAfterTheBumpSurvivesUntilTheNextBump() = runTest(dispatcher) {
+        val client = ToastClient()
+        val vm = vm(client)
+        advanceUntilIdle()
+        client.epoch.value = 2L
+        advanceUntilIdle()
+        client.local.tryEmit("The secure link is reconnecting. Your input was not sent.")
+        advanceUntilIdle()
+        assertEquals("The secure link is reconnecting. Your input was not sent.", vm.toast.value?.text)
+        advanceUntilIdle()
+        assertEquals("still there with no new open", "The secure link is reconnecting. Your input was not sent.", vm.toast.value?.text)
+        client.epoch.value = 3L
+        advanceUntilIdle()
+        assertNull(vm.toast.value)
     }
 
     private companion object {

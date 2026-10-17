@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -660,6 +661,11 @@ class TetherViewModel(
         }
         viewModelScope.launch {
             combine(client.connection, client.linkEpoch, ::Pair).collect { (connection, epoch) -> draftComposer.onLink(connection, epoch) }
+        }
+        // ta-kfrh (use-tether.ts:752-754): the web clears ANY error when the socket opens. The app's
+        // `open` is the linkEpoch bump (the new socket, before the handshake); the initial value is skipped.
+        viewModelScope.launch {
+            client.linkEpoch.drop(1).collect { dismissToast() }
         }
         // ta-coik.41 (dashboard.tsx:849-854): the boot restore's grace, armed on each connection.
         viewModelScope.launch {

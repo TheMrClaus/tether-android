@@ -766,7 +766,7 @@ private data class ChatEndDraw(val sessionId: String, val drawnFor: String?)
 /**
  * Workspace header: session name + status badge + actions; mono path line. ta-coik.22: End session
  * is live whenever the session has not exited, as on the web (workspace-header.tsx 90fbb9f :133);
- * offline the client says the session was not ended. [origin] (r3): the live link's server
+ * offline the client says the link is reconnecting (the web's generic "Your input was not sent"). [origin] (r3): the live link's server
  * ([com.tether.app.client.TetherClient.consentOrigin]); [server]: the server a confirmation is bound
  * to ([endSessionServer]); it acts while the link is not to another server ([endConfirmLive]).
  * [confirmBeforeEnd] (T10.1): off, End session sends at once instead of asking.

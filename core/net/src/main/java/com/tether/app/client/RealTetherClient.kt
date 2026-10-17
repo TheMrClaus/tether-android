@@ -5076,7 +5076,7 @@ class RealTetherClient(
             bound.addLast(expectedTurnId)
             InterruptResult.Sent
         }
-        if (result == InterruptResult.NotConnected) emitError("The secure link is reconnecting. The turn was not interrupted.")
+        if (result == InterruptResult.NotConnected) emitError(LINK_RECONNECTING)
         return result
     }
 
@@ -5690,15 +5690,15 @@ class RealTetherClient(
     }
 
     override fun pin(sessionId: String, pinned: Boolean) {
-        sendFrame(ClientMessage.Pin(sessionId, pinned))
+        if (!sendFrame(ClientMessage.Pin(sessionId, pinned))) emitError(LINK_RECONNECTING)
     }
 
     override fun rename(sessionId: String, name: String) {
-        sendFrame(ClientMessage.Rename(sessionId, name))
+        if (!sendFrame(ClientMessage.Rename(sessionId, name))) emitError(LINK_RECONNECTING)
     }
 
     override fun archive(sessionId: String) {
-        sendFrame(ClientMessage.Archive(sessionId))
+        if (!sendFrame(ClientMessage.Archive(sessionId))) emitError(LINK_RECONNECTING)
     }
 
     /**
@@ -5724,7 +5724,7 @@ class RealTetherClient(
             if (expectedOrigin != null && expectedOrigin != origin) return@synchronized false
             ws.send(ClientMessage.Kill(sessionId, teardownConsent).encode())
         }
-        if (sent == false) emitError("The secure link is reconnecting. The session was not ended.")
+        if (sent == false) emitError(LINK_RECONNECTING)
     }
 
     /**
@@ -5741,7 +5741,7 @@ class RealTetherClient(
             if (expectedOrigin != null && expectedOrigin != origin) return@synchronized false
             ws.send(ClientMessage.ArchiveInspect(sessionId, requestId).encode())
         }
-        if (!sent) emitError("The secure link is reconnecting. The session was not ended.")
+        if (!sent) emitError(LINK_RECONNECTING)
         return sent
     }
 

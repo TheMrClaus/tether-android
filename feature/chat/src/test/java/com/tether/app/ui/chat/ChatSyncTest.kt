@@ -394,7 +394,7 @@ class ChatSyncTest {
 
     /**
      * ta-coik.22 r2: offline (no link, so no live origin) the header key and the confirmation are live
-     * too, bound to the configured server; the client then says the session was not ended (the
+     * too, bound to the configured server; the client then says the link is reconnecting (the
      * web's "reconnecting, not sent").
      */
     @Test

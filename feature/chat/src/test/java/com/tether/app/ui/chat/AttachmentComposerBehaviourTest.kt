@@ -38,7 +38,7 @@ import org.robolectric.annotation.Config
  * T7.4: the composer's attachments (chat-view.tsx submit :3104-3188, the attach sheet). The paperclip
  * opens the web's touch sheet; picks are staged, never sent; ONLY an explicit Send (the key, Enter)
  * transmits them, through the one guarded path, and a refusal keeps the draft and the chips and says
- * why (offline: "Not connected — the message and its attachments were not sent."). While a turn runs
+ * why (offline: "The secure link is reconnecting — your attachments were not sent. Try again in a moment."). While a turn runs
  * attachments wait (the web's copy), and command mode refuses them.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -189,7 +189,7 @@ class AttachmentComposerBehaviourTest {
         input().performTextInput("while offline")
         rule.onNodeWithContentDescription("Send message").performClick()
         rule.waitForIdle()
-        rule.onNodeWithText("Not connected — the message and its attachments were not sent.").assertExists()
+        rule.onNodeWithText("The secure link is reconnecting — your attachments were not sent. Try again in a moment.").assertExists()
         assertEquals("while offline", inputText())
         rule.onAllNodesWithTag("staged-attachment").assertCountEquals(1)
         assertEquals(1, attachmentSends.size)

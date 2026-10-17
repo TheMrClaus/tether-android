@@ -141,6 +141,42 @@ class InterruptKillTransmissionTest {
     }
 
     @Test
+    fun offlineInterruptSaysTheLinkIsReconnectingAsTheWebDoes() {
+        val (client, ws) = connected()
+        val origin = client.consentOrigin.value
+        val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
+        h.scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { client.errors.collect { errors += it } }
+        h.enqueueConnect()
+        ws.close(1001, null)
+        h.await(client.connection) { it == ConnectionState.Disconnected }
+        assertEquals(InterruptResult.NotConnected, client.interrupt("s1", origin, T1))
+        awaitErrors(errors, 1)
+        // ta-kfrh: use-tether.ts:379 (the interrupt goes through `send`).
+        assertEquals(listOf("The secure link is reconnecting. Your input was not sent."), errors.toList())
+    }
+
+    @Test
+    fun offlinePinRenameAndArchiveEachSayTheLinkIsReconnectingAndSendNothing() {
+        val (client, ws) = connected()
+        val errors = java.util.concurrent.CopyOnWriteArrayList<String>()
+        h.scope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { client.errors.collect { errors += it } }
+        h.enqueueConnect()
+        ws.close(1001, null)
+        h.await(client.connection) { it == ConnectionState.Disconnected }
+        client.pin("s1", true)
+        client.rename("s1", "new name")
+        client.archive("s1")
+        awaitErrors(errors, 3)
+        // ta-kfrh: use-tether.ts:379 (dashboard.tsx pin/rename through `send`); refused, never held (the closed link carries no frame: an error each, nothing else).
+        assertEquals(List(3) { "The secure link is reconnecting. Your input was not sent." }, errors.toList())
+    }
+
+    private fun awaitErrors(errors: List<String>, n: Int) {
+        val deadline = System.currentTimeMillis() + 20_000
+        while (errors.size < n && System.currentTimeMillis() < deadline) Thread.sleep(10)
+    }
+
+    @Test
     fun aHaltedClientSendsNoInterrupt() {
         val (client, _) = connected()
         val origin = client.consentOrigin.value
@@ -287,7 +323,7 @@ class InterruptKillTransmissionTest {
         // ta-coik.23: the refusal says so in the client's words, as a closed link does (never silent).
         val deadline = System.currentTimeMillis() + 20_000
         while (errors.size < 1 && System.currentTimeMillis() < deadline) Thread.sleep(10)
-        assertEquals(List(1) { "The secure link is reconnecting. The session was not ended." }, errors.toList())
+        assertEquals(List(1) { "The secure link is reconnecting. Your input was not sent." }, errors.toList())
     }
 
     /** ta-coik.69: an End drawn with no server recorded (offline) and tapped after the handshake sends. */
