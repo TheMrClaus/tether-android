@@ -1256,7 +1256,7 @@ private fun WorkspaceBlock(
                 block.rows.forEachIndexed { unit, entry ->
                     // Between top-level units (a row with its delegates / chain is ONE unit): a hairline inset to the title column.
                     if (phone && unit > 0) PhoneDivider()
-                    val row: @Composable (SidebarEntry, Boolean, Boolean) -> Unit = { e, draggable, child ->
+                    val row: @Composable (SidebarEntry, Boolean, SessionVariant, String?) -> Unit = { e, draggable, variant, headProvider ->
                         SessionRow(
                             entry = e,
                             workspace = block.workspace,
@@ -1285,22 +1285,20 @@ private fun WorkspaceBlock(
                             rowBounds = rowBounds,
                             endBounds = endBounds,
                             actions = actions,
-                            tileSize = if (child) PhoneLook.ChildTile else PhoneLook.Tile,
+                            variant = variant,
+                            headProvider = headProvider,
                         )
                     }
-                    row(entry, true, false)
+                    row(entry, true, SessionVariant.Top, null)
                     val children = block.childrenByKey[entry.key].orEmpty()
                     if (children.isNotEmpty()) {
                         val activeChild = children.any { SidebarViewModel.isActiveEntry(state, it) }
                         val open = activeChild || openChildren[entry.key] == true
                         DelegateToggle(children.size, open, phone) { openChildren[entry.key] = !open }
                         if (open) {
-                            Column(
-                                Modifier
-                                    .padding(start = 1.1f.rem)
-                                    .drawBehind { drawRect(t.line, Offset.Zero, androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height)) }
-                                    .padding(start = 1.dp + 0.2f.rem),
-                            ) { children.forEach { child -> row(child, false, true) } }
+                            NestedRows(phone) {
+                                children.forEachIndexed { i, child -> NestedItem(phone, i == children.lastIndex) { row(child, false, SessionVariant.Delegate, null) } }
+                            }
                         }
                     }
                     // HG (tth-0bs) session-sidebar.tsx:985-1030 — the chain's earlier sessions, behind one toggle.
@@ -1317,25 +1315,20 @@ private fun WorkspaceBlock(
                         ) { chainOpen[chain.rootKey] = !open }
                         // Closed rows are not composed: not visible, not focusable, not in semantics (`hidden`).
                         if (open) {
-                            Column(
-                                Modifier
-                                    .padding(start = 1.1f.rem)
-                                    .drawBehind { drawRect(t.line, Offset.Zero, androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height)) }
-                                    .padding(start = 1.dp + 0.2f.rem),
-                            ) {
-                                chain.older.forEach { member ->
-                                    row(member, false, false)
+                            // web tsx:1098: the head's provider, live first.
+                            val headProvider = entry.live?.provider ?: entry.history?.provider
+                            NestedRows(phone) {
+                                chain.older.forEachIndexed { mi, member ->
                                     val kids = block.childrenByKey[member.key].orEmpty()
+                                    // web: the member's delegates are its following siblings, so a member with delegates is not the last child.
+                                    NestedItem(phone, mi == chain.older.lastIndex && kids.isEmpty()) { row(member, false, SessionVariant.Member, headProvider) }
                                     if (kids.isNotEmpty()) {
                                         val kidOpen = kids.any { SidebarViewModel.isActiveEntry(state, it) } || openChildren[member.key] == true
                                         DelegateToggle(kids.size, kidOpen, phone) { openChildren[member.key] = !kidOpen }
                                         if (kidOpen) {
-                                            Column(
-                                                Modifier
-                                                    .padding(start = 1.1f.rem)
-                                                    .drawBehind { drawRect(t.line, Offset.Zero, androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height)) }
-                                                    .padding(start = 1.dp + 0.2f.rem),
-                                            ) { kids.forEach { kid -> row(kid, false, true) } }
+                                            NestedRows(phone) {
+                                                kids.forEachIndexed { i, kid -> NestedItem(phone, i == kids.lastIndex) { row(kid, false, SessionVariant.Delegate, null) } }
+                                            }
                                         }
                                     }
                                 }
@@ -1693,20 +1686,8 @@ private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone
             .fillMaxWidth()
             .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
             .then(
-                // W39: the └ elbow, from the head tile's bottom centre (x = 24) down to the toggle's mid-height, then right to x = 36.
-                if (phone) Modifier.drawBehind {
-                    val flip = layoutDirection == LayoutDirection.Rtl
-                    fun x(v: Float) = if (flip) size.width - v.dp.toPx() else v.dp.toPx()
-                    val mid = size.height / 2
-                    val r = 6.dp.toPx()
-                    val path = Path().apply {
-                        moveTo(x(24f), 0f)
-                        lineTo(x(24f), mid - r)
-                        quadraticTo(x(24f), mid, if (flip) x(24f) - r else x(24f) + r, mid)
-                        lineTo(x(36f), mid)
-                    }
-                    drawPath(path, elbow, style = Stroke(1.dp.toPx()))
-                } else Modifier,
+                // W39: CLOSED the └ from the head tile's bottom centre (x = 24) into the toggle's mid-height; OPEN the spine runs straight on (web `bottom:0`).
+                if (phone) Modifier.headSpine(open, elbow) else Modifier,
             )
             .focusRing(focused && keyboardMode, shape, t.violet, offset = (-2).dp)
             .clip(shape)
@@ -1752,6 +1733,10 @@ private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone
 /** `.session-children-toggle` (globals.css 3185-3217): "N delegate(s)", collapsed by default. */
 @Composable
 private fun DelegateToggle(count: Int, open: Boolean, phone: Boolean, onToggle: () -> Unit) {
+    if (phone) {
+        PhoneDelegateToggle(count, open, onToggle)
+        return
+    }
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Row(

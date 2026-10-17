@@ -241,8 +241,9 @@ internal fun SessionRow(
     rowBounds: MutableMap<String, Rect>,
     endBounds: MutableMap<String, Rect>,
     actions: SidebarActions,
-    /** S3f (web 2cdc119c): the phone tile: 28 dp (the web's coarse `--sb-tile`) on a main row, 22 dp on a delegate child. */
-    tileSize: Dp = PhoneLook.Tile,
+    /** ta-q2t6 slice 2: the row's place in a group (a nested phone row leads with [NestedLead], not the handle); [headProvider] is the chain head's. */
+    variant: SessionVariant = SessionVariant.Top,
+    headProvider: String? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -384,7 +385,7 @@ internal fun SessionRow(
             // .session-drag-handle: the provider cap, a 44dp hit target (2.5rem wide + Compose's
             // minimum touch size) around it.
             var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-            Box(
+            if (phone && variant != SessionVariant.Top) NestedLead(variant, provider, headProvider, active) else Box(
                 Modifier
                     .width(if (phone) PhoneDrawer.Floor else 2.4f.rem)
                     .heightIn(min = if (phone) PhoneLook.RowMinHeight else 2.75f.rem)
@@ -442,7 +443,7 @@ internal fun SessionRow(
                 if (phone) {
                     ProviderCap(
                         provider,
-                        tileSize,
+                        PhoneLook.Tile,
                         Modifier.alpha(if (dragEnabled) 1f else 0.72f),
                         selected = active,
                         letterRem = 0.65f,
@@ -476,7 +477,7 @@ internal fun SessionRow(
                     // :root .session-item: 0.4rem space-sm, padding-left 0 (Studio 0.75rem 0.25rem, studio.css 325).
                     .then(
                         // The title column starts at 56 dp (the 48 dp handle + 8): the card's one text edge.
-                        if (phone) Modifier.padding(top = PhoneLook.RowVPad, bottom = PhoneLook.RowVPad, start = 8.dp, end = 8.dp)
+                        if (phone) Modifier.padding(top = PhoneLook.RowVPad, bottom = PhoneLook.RowVPad, start = if (variant == SessionVariant.Top) 8.dp else NestedTree.Run, end = 8.dp)
                         else Modifier.padding(vertical = 0.75f.rem, horizontal = 0.25f.rem),
                     ),
                 verticalAlignment = Alignment.CenterVertically,
