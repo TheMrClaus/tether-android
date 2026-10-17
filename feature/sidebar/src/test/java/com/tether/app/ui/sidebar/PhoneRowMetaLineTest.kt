@@ -12,6 +12,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.onAllNodesWithText
+import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.theme.TetherSkin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -102,5 +104,48 @@ class PhoneRowMetaLineTest {
         assertTrue("below: $status $location", location.top >= status.bottom)
         assertEquals("from the start", status.left, location.left, 0.5f)
         assertFalse("not squeezed", location.width < 72 * rule.density.density)
+    }
+
+    // ta-j0e8: the web's relativeTimeAgo on the three " ago" sites (history row, its TalkBack text, the "Ended" row).
+    private fun histRow(ago: Long) = F.state(emptyList(), histories = mapOf(F.ROOT to listOf(F.history("hx", "Old chat", cwd = F.ROOT, ago = ago))))
+
+    private fun rowLabel(prefix: String) = rule.onAllNodes(
+        androidx.compose.ui.test.SemanticsMatcher("the row") { n -> n.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull()?.startsWith(prefix) == true },
+    ).fetchSemanticsNodes().first().description()!!
+
+    private fun visible(text: String) = rule.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+
+    @Test fun aHistoryRowSecondsOldReadsJustNowNeverNowAgo() {
+        show(histRow(0))
+        assertTrue(visible("just now"))
+        assertFalse(visible("now ago"))
+        assertTrue(rowLabel("Old chat").contains(", just now"))
+        assertFalse(rowLabel("Old chat").contains("now ago"))
+    }
+
+    @Test fun aHistoryRowMinutesOldReadsNMAgo() {
+        show(histRow(5))
+        assertTrue(visible("5m ago"))
+        assertTrue(rowLabel("Old chat").contains(", 5m ago"))
+    }
+
+    @Test fun aHistoryRowAWeekOldReadsABareDate() {
+        val ago = 8 * 24 * 60L + 12 * 60 // 8.5 days: the date is the same in every zone within +-11h
+        val date = com.tether.app.protocol.helpers.Format.relativeTime((F.NOW - ago * 60_000).toDouble(), F.NOW.toDouble())
+        show(histRow(ago))
+        assertTrue(date, visible(date))
+        assertFalse(visible("$date ago"))
+        assertTrue(rowLabel("Old chat").endsWith(", $date") || rowLabel("Old chat").contains(", $date"))
+        assertFalse(rowLabel("Old chat").contains("$date ago"))
+    }
+
+    @Test fun anArchivedRowSaysEndedJustNow() {
+        rule.setContent {
+            SidebarUnderTest(TetherSkin.StudioDark, F.state(F.groupSessions + F.live("fresh", "Just ended", cwd = F.APP, ago = 0, archived = true), pinned = listOf(F.DOCS, F.APP), current = F.APP, collapsed = listOf(F.DOCS, F.APP)), TetherLayoutClass.Phone, SidebarUiSeed(archivedOpen = true))
+        }
+        rule.waitForIdle()
+        assertTrue(visible("Ended just now"))
+        assertFalse(visible("Ended now ago"))
+        assertTrue(visible("Ended 10h ago"))
     }
 }

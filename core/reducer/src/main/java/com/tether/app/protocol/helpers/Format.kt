@@ -44,6 +44,23 @@ object Format {
     // lib/format.ts:15
     fun projectName(value: String): String = value.split("/").lastOrNull { it.isNotEmpty() } ?: "Root"
 
+    /** lib/format.ts:22-34 relativeParts: null = "now" (< 1 min); else unit + count; unit "date" = 7 days or more. */
+    private fun relativeBucket(timestamp: Double, nowMs: Double): Pair<Char, Double>? {
+        val seconds = max(0.0, floor((nowMs - timestamp) / 1000))
+        if (seconds < 60) return null
+        val minutes = floor(seconds / 60)
+        if (minutes < 60) return 'm' to minutes
+        val hours = floor(minutes / 60)
+        if (hours < 24) return 'h' to hours
+        val days = floor(hours / 24)
+        if (days < 7) return 'd' to days
+        return 'D' to days
+    }
+
+    // toLocaleDateString(undefined, { month: "short", day: "numeric" }) → en-US "Sep 24".
+    private fun shortDate(timestamp: Double, locale: Locale, zone: ZoneId): String =
+        DateTimeFormatter.ofPattern("MMM d", locale).format(instant(timestamp, zone))
+
     // lib/format.ts:19 — the ≥ 7-day branch is host-locale formatted on the web (corpus-uncovered).
     fun relativeTime(
         timestamp: Double,
@@ -51,16 +68,19 @@ object Format {
         locale: Locale = Locale.getDefault(),
         zone: ZoneId = ZoneId.systemDefault(),
     ): String {
-        val seconds = max(0.0, floor((nowMs - timestamp) / 1000))
-        if (seconds < 60) return "now"
-        val minutes = floor(seconds / 60)
-        if (minutes < 60) return "${numberToString(minutes)}m"
-        val hours = floor(minutes / 60)
-        if (hours < 24) return "${numberToString(hours)}h"
-        val days = floor(hours / 24)
-        if (days < 7) return "${numberToString(days)}d"
-        // toLocaleDateString(undefined, { month: "short", day: "numeric" }) → en-US "Sep 24".
-        return DateTimeFormatter.ofPattern("MMM d", locale).format(instant(timestamp, zone))
+        val (unit, n) = relativeBucket(timestamp, nowMs) ?: return "now"
+        return if (unit == 'D') shortDate(timestamp, locale, zone) else "${numberToString(n)}$unit"
+    }
+
+    // lib/format.ts:53 relativeTimeAgo (GH #271): "just now", "5m ago", and a bare date from 7 days (no suffix).
+    fun relativeTimeAgo(
+        timestamp: Double,
+        nowMs: Double = System.currentTimeMillis().toDouble(),
+        locale: Locale = Locale.getDefault(),
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): String {
+        val (unit, n) = relativeBucket(timestamp, nowMs) ?: return "just now"
+        return if (unit == 'D') shortDate(timestamp, locale, zone) else "${numberToString(n)}$unit ago"
     }
 
     // lib/format.ts:37 — host-locale formatted on the web (corpus-uncovered).

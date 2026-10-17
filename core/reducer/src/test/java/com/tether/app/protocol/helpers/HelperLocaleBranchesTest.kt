@@ -10,6 +10,7 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 /**
@@ -36,6 +37,33 @@ class HelperLocaleBranchesTest {
         // exactly 7 days is already the date branch; 6d 23h 59m is still "6d"
         assertEquals("Sep 15", Format.relativeTime(now - 7 * 86_400_000, now, us, utc))
         assertEquals("6d", Format.relativeTime(now - 7 * 86_400_000 + 60_000, now, us, utc))
+    }
+
+    // ta-j0e8: tests/session-sidebar.test.mjs:496-532 (web relativeTimeAgo, GH #271)
+    @Test
+    fun relativeTimeAgoReadsJustNowUnderAMinuteAndNeverNowAgo() {
+        for (ms in listOf(0L, 5_000L, 30_000L, 59_999L)) assertEquals("just now", Format.relativeTimeAgo(now - ms, now, us, utc))
+        assertEquals("just now", Format.relativeTimeAgo(now + 5 * 60_000, now, us, utc)) // a future stamp
+        assertEquals("now", Format.relativeTime(now, now, us, utc)) // relativeTime stays byte-identical
+    }
+
+    @Test
+    fun relativeTimeAgoSuffixesMinutesHoursDays() {
+        assertEquals("1m ago", Format.relativeTimeAgo(now - 60_000, now, us, utc))
+        assertEquals("5m ago", Format.relativeTimeAgo(now - 5 * 60_000 - 1_000, now, us, utc))
+        assertEquals("3h ago", Format.relativeTimeAgo(now - 3 * 3_600_000 - 60_000, now, us, utc))
+        assertEquals("3d ago", Format.relativeTimeAgo(now - 3 * 86_400_000 - 5 * 60_000, now, us, utc))
+        assertEquals("6d ago", Format.relativeTimeAgo(now - 7 * 86_400_000 + 60_000, now, us, utc))
+    }
+
+    @Test
+    fun relativeTimeAgoIsTheBareDateFromSevenDays() {
+        assertEquals("Sep 15", Format.relativeTimeAgo(now - 7 * 86_400_000, now, us, utc))
+        for (d in listOf(7, 9, 24, 200)) {
+            val ts = now - d * 86_400_000.0
+            assertEquals(Format.relativeTime(ts, now, us, utc), Format.relativeTimeAgo(ts, now, us, utc))
+            assertFalse(Format.relativeTimeAgo(ts, now, us, utc).contains("ago"))
+        }
     }
 
     @Test

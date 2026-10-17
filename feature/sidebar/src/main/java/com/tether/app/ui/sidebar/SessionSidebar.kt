@@ -1950,7 +1950,7 @@ private fun ArchivedGroup(
                         Column(verticalArrangement = Arrangement.spacedBy(0.05f.rem)) {
                             Text(SidebarViewModel.archivedName(entry), style = css(type.ui, 0.72f, 550), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
-                                "Ended ${Format.relativeTime(jsUpdatedAt(entry), now.toDouble())} ago",
+                                "Ended ${Format.relativeTimeAgo(jsUpdatedAt(entry), now.toDouble())}",
                                 style = css(type.ui, 0.62f, 400),
                                 color = t.faint,
                             )

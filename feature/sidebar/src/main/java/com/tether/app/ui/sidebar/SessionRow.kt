@@ -1024,7 +1024,7 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
             Text("· $rel", style = style.ltrWords(), color = t.faint)
         } else {
             SmallIcon(TetherIcons.History, t.faint, 12.dp)
-            Text("$rel ago", style = style.ltrWords(), color = t.faint)
+            Text(Format.relativeTimeAgo(updatedAt.toDouble(), now.toDouble()), style = style.ltrWords(), color = t.faint)
         }
         // T13.2 (SYNC_DESIGN §4.2): `history` + "12m" for a saved copy, `cloud-off` for none.
         if (live != null && sync != null) com.tether.app.ui.components.FreshnessGlyph(sync, now, Modifier.testTag(SidebarTags.freshness(entry.key)))
@@ -1084,7 +1084,7 @@ private fun rowDescription(
     val was = if (live != null && offline) com.tether.app.ui.components.FreshnessCopy.qualifiedStatus(live.status, null, now) else null
     if (live != null && phone && handoverAt != null) append(", ${SidebarRowModel.HANDED_OVER_WORD}, ${Format.relativeTime(handoverAt.toDouble(), now.toDouble())}")
     else if (live != null) append(", ${was ?: Format.statusCopy[live.status] ?: LabelText.label(live.status)}, $rel")
-    else append(", $rel ago")
+    else append(", ${Format.relativeTimeAgo(updatedAt.toDouble(), now.toDouble())}")
     // T13.2: the full sentence the row's glyph stands for.
     if (live != null) com.tether.app.ui.components.FreshnessCopy.sessionLabel(sync, now)?.let { append(", $it") }
     if (!phone) {
