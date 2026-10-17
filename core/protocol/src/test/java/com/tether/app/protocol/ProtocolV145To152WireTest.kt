@@ -53,7 +53,7 @@ class ProtocolV145To152WireTest {
     @Test
     fun aMalformedSessionErrorRowIsDroppedAndTheSnapshotAndTheOtherRowsStayIntact() {
         val (adapter, p) = adapt(
-            state(""","sessionErrors":[{"seq":1,"ts":10,"message":"first"},{"seq":2,"ts":20,"message":7},"junk",{"seq":"two","ts":30,"message":"bad seq"},{"seq":3,"ts":40,"message":"last"}]"""),
+            state(""","sessionErrors":[{"seq":1,"ts":10,"message":"first"},{"seq":2,"ts":20,"message":7},"junk",{"seq":3,"ts":40,"message":"last"}]"""),
         )
         assertNotNull("a bad row must not blank the session", p)
         assertEquals("no misfit: the bad rows are dropped, not the key", 0, adapter.misfits)
@@ -63,6 +63,28 @@ class ProtocolV145To152WireTest {
         assertNotNull(p2)
         assertEquals(0, a2.misfits)
         assertEquals(emptyList<Any>(), p2!!.sessionErrors)
+    }
+
+    @Test
+    fun aSessionErrorRowWithAWrongTypeTsIsKeptWithTsNull() {
+        val (adapter, p) = adapt(
+            state(""","sessionErrors":[{"seq":1,"ts":"soon","message":"s"},{"seq":2,"ts":{},"message":"o"},{"seq":3,"ts":true,"message":"b"},{"seq":4,"ts":40,"message":"ok"}]"""),
+        )
+        assertEquals(0, adapter.misfits)
+        assertEquals(listOf("s", "o", "b", "ok"), p!!.sessionErrors.map { it.message })
+        assertEquals(listOf<Long?>(null, null, null, 40L), p.sessionErrors.map { it.ts })
+        assertEquals(listOf<Long?>(1L, 2L, 3L, 4L), p.sessionErrors.map { it.seq })
+    }
+
+    @Test
+    fun aSessionErrorRowWithAWrongTypeSeqIsKeptWithSeqNull() {
+        val (adapter, p) = adapt(
+            state(""","sessionErrors":[{"seq":"two","ts":30,"message":"s"},{"seq":[],"ts":31,"message":"a"},{"seq":5,"ts":32,"message":"ok"}]"""),
+        )
+        assertEquals(0, adapter.misfits)
+        assertEquals(listOf("s", "a", "ok"), p!!.sessionErrors.map { it.message })
+        assertEquals(listOf<Long?>(null, null, 5L), p.sessionErrors.map { it.seq })
+        assertEquals(listOf<Long?>(30L, 31L, 32L), p.sessionErrors.map { it.ts })
     }
 
     @Test

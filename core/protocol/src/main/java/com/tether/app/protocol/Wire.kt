@@ -203,6 +203,18 @@ object LenientEpochMsSerializer : KSerializer<Long> {
     override fun serialize(encoder: Encoder, value: Long) = encoder.encodeLong(value)
 }
 
+/** A nullable number whose wrong-typed / non-finite value reads as null (the row survives), never an error. */
+object NullOnBadNumberSerializer : KSerializer<Long?> {
+    override val descriptor: SerialDescriptor = Long.serializer().nullable.descriptor
+    override fun deserialize(decoder: Decoder): Long? {
+        val el = (decoder as? JsonDecoder)?.decodeJsonElement() ?: return decoder.decodeLong()
+        return el.asLong()
+    }
+    override fun serialize(encoder: Encoder, value: Long?) {
+        if (value == null) encoder.encodeNull() else encoder.encodeLong(value)
+    }
+}
+
 /** [LenientEpochMsSerializer] for an optional field: absent/JSON null stay null. */
 object LenientEpochMsOrNullSerializer : KSerializer<Long?> {
     override val descriptor: SerialDescriptor = Long.serializer().nullable.descriptor
