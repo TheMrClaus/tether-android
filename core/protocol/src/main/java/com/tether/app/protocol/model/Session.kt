@@ -107,7 +107,23 @@ data class AgentSession(
     val handoverBackgroundTasks: JsonElement? = null,
     /** v151: the server's display hint for the successor's name (present only while eligible). Read with [handoverSuccessorHint]. */
     val handoverSuccessorName: JsonElement? = null,
+    /**
+     * v146 (w3:108 reasonixToolApprovalStateSchema): what an open Reasonix engine reports for tool_approval, `{ value, assumed,
+     * options, requested }`. Raw so a malformed value never drops the session row; read it with [toolApprovalState]. Absent
+     * (not Reasonix, a cold engine, or a legacy-shimmed client) is NOT "ask".
+     */
+    val toolApproval: JsonElement? = null,
+    /** v146 r4 (w3:112): Reasonix's live mode id (additive, reasonix only). Raw; read it with [agentModeId]. */
+    val agentMode: JsonElement? = null,
 ) {
+    /** [toolApproval] decoded tolerantly; null when absent or not an object. */
+    val toolApprovalState: ToolApprovalState?
+        get() = ToolApprovalState.of(toolApproval)
+
+    /** [agentMode] when it is a JSON string, else null. */
+    val agentModeId: String?
+        get() = (agentMode as? JsonPrimitive)?.takeIf { it.isString }?.content
+
     /** [handoverStage] when it is a JSON string (the web's `typeof session.handoverStage === "string"`), else null. */
     val handoverStageCode: String?
         get() = (handoverStage as? JsonPrimitive)?.takeIf { it.isString }?.content
@@ -132,6 +148,30 @@ data class AgentSession(
     /** [createdVia] when it is a JSON string (an unknown future stamp is kept as-is), else null. */
     val createdViaStamp: String?
         get() = (createdVia as? JsonPrimitive)?.takeIf { it.isString }?.content
+}
+
+/**
+ * v146 `AgentSession.toolApproval`. [value] stays RAW ("ask" | "auto" | "yolo" today): an unknown string is kept and a null / absent /
+ * non-string value is null, NEVER defaulted to "ask" (the legacy shim exists because "Ask" reads safer than what runs).
+ */
+data class ToolApprovalState(
+    val value: String?,
+    val assumed: Boolean,
+    val options: List<String>,
+    val requested: String?,
+) {
+    companion object {
+        fun of(element: JsonElement?): ToolApprovalState? {
+            val o = element as? JsonObject ?: return null
+            fun str(key: String) = (o[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            return ToolApprovalState(
+                value = str("value"),
+                assumed = (o["assumed"] as? JsonPrimitive)?.takeIf { !it.isString }?.content == "true",
+                options = (o["options"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content },
+                requested = str("requested"),
+            )
+        }
+    }
 }
 
 /** TS `AgentSession.collaborationMode`: `{ mode, settings: { model, reasoning_effort } }`. */
@@ -318,7 +358,13 @@ data class HistorySession(
     // T5.2: v89 (issue #105) the profile the transcript was written under; absent for the
     // implicit default profile. Sent back on `resume` (use-tether.ts resumeHistory).
     val profileId: String? = null,
-)
+    /** v146 (w3:252): the saved Approvals ("ask" | "auto" | "yolo"). Raw so a malformed value never drops the row; read [toolApprovalValue]. */
+    val toolApproval: JsonElement? = null,
+) {
+    /** [toolApproval] when it is a JSON string (an unknown value is kept as-is, never defaulted), else null. */
+    val toolApprovalValue: String?
+        get() = (toolApproval as? JsonPrimitive)?.takeIf { it.isString }?.content
+}
 
 /** v122 HistorySession.spawnedBy (lib/protocol.ts HistorySpawnLink). */
 @Serializable

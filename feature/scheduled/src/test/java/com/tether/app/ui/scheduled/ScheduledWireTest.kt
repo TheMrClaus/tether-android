@@ -47,7 +47,17 @@ class ScheduledWireTest {
         var editor = ScheduleEditor.edit(schedule, now, utc)
         assertEquals(CadenceMode.Custom, editor.mode)
         editor = editor.copy(form = editor.form.copy(name = "Parity weekly (edited)", maxRuns = 2))
-        assertEquals(frames("c2s")[2].toString(), ClientMessage.ScheduleUpdate(schedule.id, submitted(editor)).encode())
+        // The capture's c2s frames are written by the harness from its own input (capture-wire-corpus.mjs:1005), not by the web
+        // editor, so they omit `toolApproval`. The server stored it as null, and an edit sends the stored value back exactly as stored
+        // (scheduled-actions-view.tsx:317), right after permissionMode (the web's key order): the captured update + that key.
+        val captured = frames("c2s")[2]
+        val echoed = linkedMapOf<String, kotlinx.serialization.json.JsonElement>()
+        for ((k, v) in captured["schedule"]!!.jsonObject) {
+            echoed[k] = v
+            if (k == "permissionMode") echoed["toolApproval"] = kotlinx.serialization.json.JsonNull
+        }
+        val expected = JsonObject(captured + ("schedule" to JsonObject(echoed)))
+        assertEquals(expected.toString(), ClientMessage.ScheduleUpdate(schedule.id, submitted(editor)).encode())
     }
 
     @Test fun pauseAndDeleteAreTheCapturedControls() {

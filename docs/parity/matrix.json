@@ -1152,6 +1152,13 @@
   },
   {
    "kind": "client-msg",
+   "artifact": "set-tool-approval",
+   "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate",
+   "android": "PARTIAL",
+   "task": "ta-d3tj.1"
+  },
+  {
+   "kind": "client-msg",
    "artifact": "queue-remove",
    "behavior": "ClientMessage (lib/protocol.ts); validated by protocol-validate.mjs",
    "android": "PARTIAL",

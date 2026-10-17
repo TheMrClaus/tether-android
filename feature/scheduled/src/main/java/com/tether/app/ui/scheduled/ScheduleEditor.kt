@@ -1,5 +1,6 @@
 package com.tether.app.ui.scheduled
 
+import com.tether.app.protocol.OrNull
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.text.format.DateFormat
@@ -197,6 +198,8 @@ data class ScheduleEditor(
             put("cron", f.cron)
             put("timeZone", f.timeZone)
             put("maxRuns", f.maxRuns)
+            // Three states, as stored: the key absent, an explicit null, or the value.
+            f.toolApproval?.let { put("toolApproval", it.value) }
             put("extra", f.extra)
         }.toString()
 
@@ -219,6 +222,12 @@ data class ScheduleEditor(
                     cron = o.s("cron") ?: ScheduledRules.DEFAULT_CRON,
                     timeZone = o.s("timeZone") ?: "UTC",
                     maxRuns = (o["maxRuns"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull,
+                    toolApproval = when (val approval = o["toolApproval"]) {
+                        null -> null
+                        is JsonNull -> OrNull(null)
+                        is JsonPrimitive -> if (approval.isString) OrNull(approval.content) else null
+                        else -> null
+                    },
                     extra = o["extra"] as? JsonObject ?: JsonObject(emptyMap()),
                 ),
                 mode = CadenceMode.entries.firstOrNull { it.key == o.s("mode") } ?: CadenceMode.Preset,

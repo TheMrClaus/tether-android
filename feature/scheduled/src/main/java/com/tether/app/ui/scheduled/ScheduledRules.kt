@@ -1,5 +1,6 @@
 package com.tether.app.ui.scheduled
 
+import com.tether.app.protocol.OrNull
 import com.tether.app.client.ProviderCatalogEntry
 import com.tether.app.client.ScheduledAction
 import com.tether.app.protocol.ScheduledActionInput
@@ -44,6 +45,11 @@ data class ScheduleForm(
     val timeZone: String = "UTC",
     val maxRuns: Int? = null,
     val extra: JsonObject = JsonObject(emptyMap()),
+    /**
+     * v146: the stored Approvals of the schedule being edited, carried unchanged (scheduled-actions-view.tsx:317 `toolApproval:
+     * schedule.toolApproval ?? null`). No control edits it yet (ta-d3tj.3); null = a new schedule. Last, so positional callers hold.
+     */
+    val toolApproval: OrNull<String>? = null,
 )
 
 /** What a submit produced: the frame's input, or the form error the web shows. */
@@ -171,6 +177,7 @@ object ScheduledRules {
         cron = schedule.cron,
         timeZone = schedule.timeZone,
         maxRuns = schedule.maxRuns,
+        toolApproval = schedule.toolApproval,
         extra = schedule.unknown,
     )
 
@@ -234,6 +241,9 @@ object ScheduledRules {
                 cron = form.cron.trim(),
                 timeZone = form.timeZone.trim(),
                 maxRuns = form.maxRuns,
+                // scheduled-actions-view.tsx:379: only a reasonix schedule keeps its Approvals, any other sends null. A new
+                // schedule (nothing stored) omits the key, which the server reads as "none".
+                toolApproval = if (form.toolApproval == null) null else if (form.provider == "reasonix") form.toolApproval else OrNull(null),
                 extra = form.extra,
             ),
         )

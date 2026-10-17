@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * PLAN §5.2: the vendored wire corpus (tether S0.3's capture, re-run at 79c3d37 / v132 by
- * ta-koy and at 887c222 / v137 by T15.8) against the Kotlin wire types.
+ * ta-koy, at 887c222 / v137 by T15.8 and at 19c56e25 / v152 by W48) against the Kotlin wire types.
  *  (a) every s2c frame of every scenario decodes to a KNOWN ServerMessage subtype;
  *  (b) every client example decodes and re-encodes to canonically-equal JSON;
  *  (c) the Kotlin discriminator sets equal the TS unions' sets.
@@ -98,7 +98,7 @@ class WireConformanceTest {
         val seen = manifest["serverTypesSeen"]!!.jsonArray.map { it.jsonPrimitive.content }.toSet()
         val missing = manifest["serverTypesMissing"]!!.jsonArray.map { it.jsonObject.str("type")!! }.toSet()
         assertEquals(serverFrames().mapNotNull { it.second.str("type") }.toSet(), seen)
-        // The corpus is the 887c222 capture: the types added after it (v141/v143) are hand-authored only.
+        // The wire corpus is the 19c56e25 capture (W48): every type but the 6 it never saw is captured (those are hand-authored).
         assertEquals(WireTypeLists.SERVER_TYPES - WireTypeLists.SINCE_PARITY_BASE_SERVER, seen + missing)
         assertEquals(missing, ServerFixtures.HAND_AUTHORED.keys - WireTypeLists.SINCE_PARITY_BASE_SERVER)
     }
@@ -108,7 +108,7 @@ class WireConformanceTest {
     @Test
     fun everyClientExampleRoundTrips() {
         val lines = jsonl(File(corpusDir, "client-examples.jsonl"))
-        assertEquals(71, lines.size) // v131 added overview-subscribe / overview-unsubscribe
+        assertEquals(76, lines.size) // 71 + archive-inspect, set-tool-approval, archive-stale, handover-request, handover-cancel (19c56e25)
         val failures = mutableListOf<String>()
         val types = sortedSetOf<String>()
         for (line in lines) {
@@ -127,7 +127,7 @@ class WireConformanceTest {
         }
         println("WireConformance (b): ${lines.size - failures.size}/${lines.size} client examples round-tripped, ${types.size} types")
         assertEquals("Round-trip failures:\n" + failures.joinToString("\n"), 0, failures.size)
-        // The examples are the 887c222 capture; the client types added after it ride [extraClientFrames].
+        // The examples are the 19c56e25 capture: they cover every client type.
         assertEquals(WireTypeLists.CLIENT_TYPES - WireTypeLists.SINCE_PARITY_BASE_CLIENT, types)
     }
 

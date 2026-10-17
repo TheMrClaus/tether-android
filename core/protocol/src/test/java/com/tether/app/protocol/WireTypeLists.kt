@@ -7,7 +7,8 @@ package com.tether.app.protocol
  * generates from tether lib/protocol.ts at PARITY_BASE (T15.8: 887c222, v137; the
  * v131 Overview frames joined the matrix then). v132-v140 added no message types; v141 (#244) added
  * `archive-stale` / `archive-stale-result`, v143 (#241) `archive-inspect` / `archive-preview` and v144 `server-settings-result`
- * ([SINCE_PARITY_BASE_SERVER], [SINCE_PARITY_BASE_CLIENT]).
+ * ([SINCE_PARITY_BASE_SERVER], [SINCE_PARITY_BASE_CLIENT], both empty since the wire corpus moved to 19c56e25 / v152).
+ * v146 added the client frame `set-tool-approval` (W48; a hand row in matrix.json).
  * WireConformanceTest re-checks these against matrix.json, and against
  * lib/protocol.ts itself when TETHER_PROTOCOL_TS points at one.
  */
@@ -39,19 +40,22 @@ object WireTypeLists {
         "schedule-control", "schedule-create", "schedule-update", "scheduled-actions", "search",
         "send", "server-settings", "session-controls", "set-acp-agents", "set-advanced-settings",
         "set-auto-continue-on-limit", "set-fast-mode", "set-mode", "set-model", "set-providers",
-        "set-reasoning-effort", "set-server-settings", "set-session-order", "stop-command",
+        "set-reasoning-effort", "set-server-settings", "set-session-order", "set-tool-approval", "stop-command",
         "worktree-diff", "worktree-inspect", "worktree-logs", "worktree-script", "worktree-scripts",
         // v131 (opt-in Overview feed)
         "overview-subscribe", "overview-unsubscribe",
     )
 
-    /** Types added after PARITY_BASE (887c222): not in matrix.json until the matrix is rebuilt at a newer base. */
-    val SINCE_PARITY_BASE_SERVER: Set<String> = setOf("archive-preview", "archive-stale-result", "server-settings-result")
+    /**
+     * Types added after the reducer/helpers base (887c222): none now. The wire corpus is re-vendored at 19c56e25 (v152), which
+     * carries them all (W48), so both SINCE_PARITY_BASE_* sets are empty and stay as the hook for the next re-vendor.
+     */
+    val SINCE_PARITY_BASE_SERVER: Set<String> = emptySet()
     /**
      * Server types newer than docs/parity/matrix.json, which is generated at tether 29537e0 (PROTOCOL 143) and so lacks the v144
      * `server-settings-result`; it joins the matrix when the matrix is rebuilt at a newer base (the S0 corpus slice).
      */
     val SINCE_MATRIX_SERVER: Set<String> = setOf("server-settings-result")
 
-    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("archive-inspect", "archive-stale", "handover-request", "handover-cancel")
+    val SINCE_PARITY_BASE_CLIENT: Set<String> = emptySet()
 }

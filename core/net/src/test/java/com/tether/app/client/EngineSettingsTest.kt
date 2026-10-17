@@ -44,10 +44,10 @@ class EngineSettingsTest {
         val v = ServerSettingsView.of(ServerMessage.parse(raw) as ServerMessage.ServerSettings)
         val claude = v.detection(EngineCard.Claude)!!
         assertTrue(claude.found)
-        assertEquals("2.1.284", claude.version)
+        assertEquals("2.1.300", claude.version) // recorded at 19c56e25 (was 2.1.284 at 887c222)
         assertEquals("user PATH", claude.source)
         assertEquals("<HOME>/.claude", claude.configDir)
-        assertEquals("0.159.0", v.detection(EngineCard.Codex)!!.version)
+        assertEquals("0.162.1", v.detection(EngineCard.Codex)!!.version) // was 0.159.0
         // The recorded server detected no DeepSeek Harness: no entry, the card says "scanning…".
         assertNull(v.detection(EngineCard.Dsh))
         assertEquals(listOf("fake"), v.headlessModes)

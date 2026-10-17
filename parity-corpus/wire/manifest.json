@@ -1,6 +1,6 @@
 {
-  "tetherSha": "887c22214126fa662192e2a3adf6f2dd44e69cd6",
-  "protocolVersion": 137,
+  "tetherSha": "19c56e25eab4fdf75fb34bdf3e6962b9fc0ab074",
+  "protocolVersion": 152,
   "frameWrapper": "{ dir: \"s2c\" | \"c2s\", sock?: string, frame } — one per line, arrival order; `sock` names a secondary socket (absent = the primary one)",
   "boots": [
     {
@@ -183,6 +183,14 @@
         "handshake-crash",
         "turn-crash"
       ]
+    },
+    {
+      "label": "teardown",
+      "fakeEngineScript": "(unset: the fake engine echoes the user's text)",
+      "scenarios": [
+        "handshake-teardown",
+        "worktree-teardown"
+      ]
     }
   ],
   "scenarios": [
@@ -249,7 +257,7 @@
     {
       "name": "settings",
       "file": "settings.jsonl",
-      "frames": 19
+      "frames": 21
     },
     {
       "name": "discovery",
@@ -279,7 +287,7 @@
     {
       "name": "worktree",
       "file": "worktree.jsonl",
-      "frames": 22
+      "frames": 26
     },
     {
       "name": "errors",
@@ -315,11 +323,21 @@
       "name": "turn-crash",
       "file": "turn-crash.jsonl",
       "frames": 14
+    },
+    {
+      "name": "handshake-teardown",
+      "file": "handshake-teardown.jsonl",
+      "frames": 3
+    },
+    {
+      "name": "worktree-teardown",
+      "file": "worktree-teardown.jsonl",
+      "frames": 8
     }
   ],
   "ambient": {
     "file": "ambient.jsonl",
-    "frames": 158,
+    "frames": 162,
     "rule": "Ambient server frames never enter a scenario file. `log` records are kept here as a set (one single-record log frame per distinct record, boot then seq order, `boot` names the server), followed by each session's last real `session` row of its boot, taken after the metrics sweep converged. Session rows in scenario files have `metrics` removed (the sweep merges it at timing-dependent moments); these final rows are the SessionMetrics samples. Unsolicited providers-snapshot / providers / scheduled-actions pushes and session rows that only refresh `metrics` or repeat the last row are dropped; each of those types is still recorded as a direct reply in a scenario."
   },
   "serverTypesSeen": [
@@ -348,12 +366,14 @@
     "opencode-controls",
     "opencode-control-result",
     "advanced-settings",
+    "archive-stale-result",
     "server-settings",
     "providers",
     "providers-snapshot",
     "metadata-draft-result",
     "metadata-draft-error",
     "worktree-source",
+    "archive-preview",
     "worktree-scripts",
     "worktree-logs",
     "worktree-diff",
@@ -378,6 +398,10 @@
     {
       "type": "approval_resolved",
       "reason": "declared in ServerMessage but never emitted by server.mjs at this sha: resolutions reach clients only as `event` frames carrying AgentEvent `approval_resolved` (captured in turn-approve)"
+    },
+    {
+      "type": "server-settings-result",
+      "reason": "not elicited by the scripted scenarios (unexplained)"
     },
     {
       "type": "acp-agents",
@@ -415,6 +439,7 @@
     "rename",
     "archive",
     "kill",
+    "archive-inspect",
     "send",
     "run-command",
     "background-command",
@@ -432,6 +457,7 @@
     "approval",
     "question",
     "set-mode",
+    "set-tool-approval",
     "set-model",
     "set-reasoning-effort",
     "set-fast-mode",
@@ -446,6 +472,7 @@
     "server-settings",
     "set-server-settings",
     "detect-engines",
+    "archive-stale",
     "acp-agents",
     "providers",
     "set-acp-agents",
@@ -454,7 +481,9 @@
     "refresh-providers",
     "metadata-draft-request",
     "handoff-brief",
-    "handoff"
+    "handoff",
+    "handover-request",
+    "handover-cancel"
   ],
   "clientTypesSent": [
     "hello",
@@ -483,6 +512,7 @@
     "pin",
     "rename",
     "archive",
+    "archive-inspect",
     "kill",
     "send",
     "run-command",
@@ -515,6 +545,7 @@
     "server-settings",
     "set-server-settings",
     "detect-engines",
+    "archive-stale",
     "acp-agents",
     "providers",
     "set-providers",
@@ -610,6 +641,10 @@
     "Duration-like numbers (keys ending in Ms / ms / Seconds, or named elapsed/duration/latency/uptime/pid) become 0; a parenthesized duration inside text, e.g. `(16 ms)`, becomes `(0 ms)`.",
     "Server-minted ids are replaced by stable ordinals in first-seen order, everywhere they occur (including inside larger strings): UUIDs -> 00000000-0000-4000-8000-<12-digit ordinal>; Tether session ids -> sess-<n>; schedule ids -> sched-<n>; other minted base64url ids under an `id`/`…Id` key (history ids, …) -> id-<n>; 40-hex git shas -> <sha-n>; worktree project hashes -> <project-hash-n>.",
     "Ordering: scenario frames are in arrival order except that, between two client frames, server frames are grouped per socket (primary first) and session rows are coalesced to the last row per session, placed after that socket's other frames. Ambient frames (log records, unsolicited catalog/registry pushes, metrics-only or repeated session rows) are split out — see manifest.ambient and canonicalOrder. Every client frame is sent only after 150 ms of wire silence, and each scenario ends after a full 2.5 s metrics-sweep period.",
-    "Not scrubbed: host-dependent values (CLI detection/versions in server-settings `detected`/`discovered`) — stable across re-runs on one host, but they differ between hosts."
+    "Worktree consent digests (`digest`, `consent`, `scheduleConsent` of a worktree setupPreview, and the `setupConsent` a create echoes) are re-derived over the SAME hooks (commit, setup, teardown, portScript) with the throwaway repository's identity (realpath'd root + remote URL, which differ per scratch dir) replaced by the fixed identity { root: \"/<WORKSPACE_ROOT>/repo\", remote: \"/<WORKSPACE_ROOT>/remote.git\" }; the capture recomputes each raw digest from its real inputs first and fails the run when it cannot, so a changed digest algorithm is a loud failure, never a silent mask. Any other non-zero sha256 digest left in a frame fails the run.",
+    "An archive preview that would run a teardown (`archive-preview.preview` with a `nonce`) carries per-run entropy: the checkout `fingerprint` (it hashes inodes and ctimes) and the one-time `nonce`. The capture recomputes the raw `digest` from sessionId + commit + commands + fingerprint + nonce first (it fails the run when it cannot), then replaces the fingerprint by sha256:ffff…f (64 f) and the nonce by 32 f, and re-derives `digest`/`consent` (and the `teardownConsent` the archive/kill echoes) over the SAME commit and commands with the session's normalised id (sess-<n>) and those two fixed values.",
+    "Every string `binPath` (the host's engine CLI install path in server-settings `detected`) becomes <ENGINE_BIN>; null stays null.",
+    "A string equal to the temp dir itself (the directory listing's `parent` of a throwaway dir) becomes <TMP>, so the corpus does not depend on TMPDIR.",
+    "Not scrubbed: other host-dependent values (CLI detection `version`/`source`/`found` in server-settings `detected`/`discovered`) — stable across re-runs on one host, but they differ between hosts and move with a CLI auto-update."
   ]
 }

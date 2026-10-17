@@ -61,8 +61,8 @@ class SidebarSyncTest {
         assertEquals(example("server-settings"), ClientMessage.ServerSettingsRequest.toJsonObject())
         assertEquals(example("pin"), ClientMessage.Pin("session-0001", true).toJsonObject())
         assertEquals(example("rename"), ClientMessage.Rename("session-0001", "Renamed").toJsonObject())
-        assertEquals(example("archive"), ClientMessage.Archive("session-0001").toJsonObject())
-        assertEquals(example("kill"), ClientMessage.Kill("session-0001").toJsonObject())
+        assertEquals(example("archive"), ClientMessage.Archive("session-0001", teardownConsent = "none").toJsonObject())
+        assertEquals(example("kill"), ClientMessage.Kill("session-0001", teardownConsent = "sha256:" + "0".repeat(64)).toJsonObject())
     }
 
     // ---- server -> client: the recorded frames fold ------------------------------------------

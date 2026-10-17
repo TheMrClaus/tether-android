@@ -161,4 +161,33 @@ data class OverviewPendingPanel(
     val items: List<OverviewPending> = emptyList(),
     val total: Int = 0,
     val outsideFilters: Int = 0,
+    /**
+     * v145 (#258, w2:459): console-level attention items that are not sessions; `total` does NOT count them. Unknown kinds and
+     * malformed items are skipped ([OverviewConsoleItemListSerializer]).
+     */
+    @Serializable(with = OverviewConsoleItemListSerializer::class)
+    val consoleItems: List<OverviewConsoleItem> = emptyList(),
 )
+
+/**
+ * v145 (#258, protocol-schema-w2.ts overviewConsoleItemSchema). [kind] is RAW ("client_ip_ask" | "client_ip_warning"); the
+ * list serializer skips any other. The rest is kept as sent (a newer server's value is not narrowed here).
+ */
+@Serializable
+data class OverviewConsoleItem(
+    val id: String,
+    val kind: String,
+    /** ask: "confirm" | "choose". */
+    val askKind: String? = null,
+    val suggestedSource: String? = null,
+    val label: String? = null,
+    /** warning: the effective mode the owner is on. */
+    val source: String? = null,
+    /** warning: when the condition was first seen (ms epoch). */
+    val since: Long? = null,
+    val summary: String = "",
+) {
+    companion object {
+        val KINDS: Set<String> = setOf("client_ip_ask", "client_ip_warning")
+    }
+}

@@ -27,6 +27,14 @@ roborazzi {
 }
 tasks.named("check") { dependsOn("verifyRoborazziDebug") }
 
+// The log dialog's corpus screenshot renders parity-corpus/wire/ambient.jsonl (LogFixtures.corpusLog): declare it, so a
+// re-vendor of the wire corpus re-runs the tests and the golden check instead of coming back UP-TO-DATE.
+tasks.withType<Test>().configureEach {
+    val corpus = rootProject.layout.projectDirectory.dir("parity-corpus/wire")
+    inputs.dir(corpus).withPropertyName("parityCorpusWire").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("tether.parityCorpusWire", corpus.asFile.absolutePath)
+}
+
 dependencies {
     implementation(project(":feature:chat"))
     implementation(project(":feature:sidebar"))
