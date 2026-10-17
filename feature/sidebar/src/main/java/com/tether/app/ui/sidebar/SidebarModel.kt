@@ -148,10 +148,13 @@ object SidebarModel {
             val lastSeenAt = max(lastSeen[history.historyId] ?: 0L, history.lastSeenAt ?: 0L)
             val isOpen = history.historyId == openingHistoryId ||
                 (live != null && (live.id == activeId || live.id == pendingSessionId))
+            // ta-hkk7.2: a handed-over session (live `handedOffTo`) is never unread and carries no digest, whatever its
+            // status; only standalone sessions and the latest of a chain are. Live-linked rows only (history has no handedOffTo).
+            val handedOver = !live?.handedOffTo.isNullOrEmpty()
             // The "changed while away" digest only on a not-open row still unseen locally.
-            val digest = history.digest?.takeIf { !isOpen && lastSeenAt < history.updatedAt }
+            val digest = history.digest?.takeIf { !handedOver && !isOpen && lastSeenAt < history.updatedAt }
             // A live row that finished while another was open reads unread before discovery catches up.
-            val unread = !isOpen &&
+            val unread = !handedOver && !isOpen &&
                 (live == null || live.status == "ready" || live.status == "exited") &&
                 lastSeenAt < (live?.updatedAt ?: history.updatedAt)
             val historyJs = historyJs(history)
