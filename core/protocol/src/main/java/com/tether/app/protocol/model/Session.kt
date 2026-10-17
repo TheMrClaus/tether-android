@@ -47,6 +47,11 @@ data class AgentSession(
     // authoritative. Absent when the server holds no journal for the session, or before v130.
     val lastSeq: Long? = null,
     val nameIsCustom: Boolean = false,
+    /**
+     * v152 (W28): true when Tether generated the name itself (nameSource default/derived/llm/agent); false for a typed name and
+     * for no provenance. Absent (older server) = false. Only names the operator typed nest in the sidebar.
+     */
+    val nameGenerated: Boolean = false,
     val parentSessionId: String? = null,
     val handedOffTo: String? = null,
     // T6.3: lib/protocol.ts:1723 — an imported replay (or replay-only provider) Tether does not drive.

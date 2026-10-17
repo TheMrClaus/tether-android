@@ -39,6 +39,8 @@ import kotlinx.serialization.json.longOrNull
  * `teardownConsent`, `ScheduledActionInput.setupConsent`, `SessionWorktree` / `WorktreeScriptsSnapshot`
  * `setupSkipped` / `teardownSkipped`. An older native client that sends no consent still gets its worktree,
  * without its hooks (fail closed, by the server's decision); the native floor stays 129.
+ * v150-v152 are additive too and ride this model without a hello bump (the hello stays 143, ta-ylh/ta-3uk precedent): v152
+ * AgentSession.nameGenerated is understood additively (absent = false; ignoreUnknownKeys covers older readers).
  *
  * Also what the app advertises: [PROTOCOL_VERSION] is defined as this value.
  */

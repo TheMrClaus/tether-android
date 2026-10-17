@@ -1,8 +1,10 @@
 package com.tether.app.protocol.helpers
 
+import com.tether.app.protocol.fold.jsTrim
 import com.tether.app.protocol.fold.strictEquals
 import com.tether.app.protocol.fold.truthy
 import com.tether.app.protocol.tree.JsArr
+import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsNull
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsStr
@@ -247,9 +249,58 @@ object SidebarOrder {
         val m = SEQUENCE_NAME.matchEntire(s) ?: return null
         val digits = m.groupValues[2]
         if (digits.length > 3) return null
+        if (isIdPrefix(m.groupValues[1])) return null // W28 (D-L41-19): "Fix issue 234", "PR#12" are IDs, not sequences
         val base = m.groupValues[1].trimEnd { it == ' ' || it == '-' || it == '_' || it == '#' || it == '.' }.lowercase(Locale.ROOT)
         if (!LETTER.containsMatchIn(base)) return null
         return SequenceName(base, digits.toInt())
+    }
+
+    private val ID_WORDS = setOf("issue", "issues", "pr", "prs", "pull", "pulls", "bug", "bugs", "ticket", "tickets", "task", "tasks", "gh")
+    private fun isIdSeparator(c: Char) = c == ' ' || c == '-' || c == '_' || c == ':' || c == '.'
+
+    /** JS `text.replace(/[A-Z]/g, ...)`: ASCII-only lowercasing (never a Locale or Unicode fold). */
+    private fun asciiLower(text: String): String {
+        val sb = StringBuilder(text.length)
+        for (c in text) sb.append(if (c in 'A'..'Z') c + 32 else c)
+        return sb.toString()
+    }
+
+    /** JS trailingLetterRun: letters per UTF-16 code unit (a lone surrogate or any non-letter is a boundary). */
+    private fun trailingLetterRun(text: String): String {
+        var start = text.length
+        while (start > 0 && text[start - 1].isLetter()) start--
+        return text.substring(start)
+    }
+
+    /**
+     * W28 isIdPrefix (web lib/sidebar-order.ts @ 1415dfaf :201-213): the prefix before the trailing digits names an ID
+     * ("issue 3", "PR#12", "gh-273", "pull request 5"), not a sequence.
+     */
+    private fun isIdPrefix(prefix: String): Boolean {
+        val p = prefix.trimEnd(::isIdSeparator)
+        if (p.endsWith("#")) return true
+        val w = trailingLetterRun(p)
+        val lower = asciiLower(w)
+        if (lower in ID_WORDS) return true
+        if (lower == "pullrequest" || lower == "pullrequests") return true
+        if (lower == "request" || lower == "requests") {
+            val rest = p.substring(0, p.length - w.length).trimEnd(::isIdSeparator)
+            return asciiLower(trailingLetterRun(rest)) == "pull"
+        }
+        return false
+    }
+
+    /**
+     * W28 nestsByName (web :266-271, D-L41-11): only a name Tether did not generate nests. A row needs a live session AND
+     * (live.nameIsCustom === true OR (live.nameGenerated !== true AND no non-blank native history name)).
+     */
+    private fun nestsByName(entry: JsValue): Boolean {
+        val live = entry["live"]
+        if (!truthy(live)) return false
+        if (live["nameIsCustom"] == JsBool.TRUE) return true
+        if (live["nameGenerated"] == JsBool.TRUE) return false
+        val historyName = entry["history"]["name"] as? JsStr
+        return historyName == null || jsTrim(historyName.value).isEmpty()
     }
 
     /** A handover chain's shape + whether it merges several units, and the key whose slot the group takes (D-L34-24/26). */
@@ -316,7 +367,7 @@ object SidebarOrder {
             if (chain == null && key in chained) continue
             if (chain == null && key in cycleKeys) continue
             val older = chain?.older ?: emptyList()
-            units += GroupUnit(entry, older, if (older.isNotEmpty()) rowKey(older.last())!! else key, parseSequenceName(nameOf(entry)))
+            units += GroupUnit(entry, older, if (older.isNotEmpty()) rowKey(older.last())!! else key, if (nestsByName(entry)) parseSequenceName(nameOf(entry)) else null)
         }
         val buckets = LinkedHashMap<String, MutableList<GroupUnit>>()
         for (unit in units) unit.parsed?.let { buckets.getOrPut(it.base) { ArrayList() } += unit }

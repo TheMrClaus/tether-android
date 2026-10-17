@@ -71,7 +71,7 @@ class SidebarGroupsTest {
         val cases: List<Pair<String?, SequenceName?>> = listOf(
             "monsters3" to SequenceName("monsters", 3), "realms 14" to SequenceName("realms", 14),
             "  Realms   14  " to SequenceName("realms", 14), "Monsters-3" to SequenceName("monsters", 3),
-            "monsters_#3" to SequenceName("monsters", 3), "x01" to SequenceName("x", 1), "x000" to SequenceName("x", 0),
+            "monsters_#3" to null, "x01" to SequenceName("x", 1), "x000" to SequenceName("x", 0),
             "v1.2" to SequenceName("v1", 2), "Report 2025" to null, "PR 1234" to null, "foo 123" to SequenceName("foo", 123),
             "#3" to null, "2 3" to null, "foo 3." to null, "monsters" to null, "" to null, "Ärger 2" to SequenceName("ärger", 2),
             "ärger 3" to SequenceName("ärger", 3), "foo\n3" to null, "\u00a0foo 3" to SequenceName("\u00a0foo", 3), null to null,
@@ -81,6 +81,109 @@ class SidebarGroupsTest {
             "foo 3 " to SequenceName("foo", 3), "foo 3\n" to SequenceName("foo", 3), "foo 3\u2028" to null,
         )
         for ((input, expected) in cases) assertEquals("parse(${input?.let { "\"$it\"" }})", expected, SidebarOrder.parseSequenceName(input))
+    }
+
+    // ---- W28 ID rule (web tests/sidebar-nest-rules.test.mjs @ 1415dfaf R1 + spec §2) ----
+    @Test fun idRuleWordsAndHashParseToNull() {
+        val ids = listOf(
+            "Fix issue 234", "issue 12", "Issues 12", "PR 12", "pr12", "gh273", "gh-273", "pull 5", "pull request 5", "pull_request 5",
+            "PR: 12", "Pull Request 5", "PullRequests 5", "PULL-REQUESTS 5", "2pr 3", "bug 3", "Ticket 4", "task 7",
+            "PR#12", "monster #3", "monsters_#3", "#3", "C# 2", "Fix issue 243", "Fix issue 244",
+            "\uD835\uDC00pr 3", "ISSUE 3", "ISSUES 4",
+        )
+        for (name in ids) assertNull(name, SidebarOrder.parseSequenceName(name))
+    }
+
+    @Test fun idRuleKeepsRealSequences() {
+        val seq = listOf(
+            Triple("monster 3", "monster", 3), Triple("debug 2", "debug", 2), Triple("subtask 3", "subtask", 3), Triple("realms12", "realms", 12),
+            Triple("arena7", "arena", 7), Triple("spring 2", "spring", 2), Triple("ts35", "ts", 35), Triple("hub3", "hub", 3), Triple("ugh 3", "ugh", 3),
+            Triple("xpull request 5", "xpull request", 5), Triple("fixPR12", "fixpr", 12), Triple("realms 14", "realms", 14),
+        )
+        for ((name, base, n) in seq) assertEquals(name, SequenceName(base, n), SidebarOrder.parseSequenceName(name))
+    }
+
+    /** WC6: expectations from the web function on 1415dfaf (node import), not hand-derived. */
+    @Test fun idRuleEdgeCasesAsciiOnlyLowering() {
+        assertNull(SidebarOrder.parseSequenceName("\uD835\uDC00pr 3")) // the run stops at the surrogate; "pr" is an ID word
+        assertNull(SidebarOrder.parseSequenceName("ISSUE 3"))
+        assertEquals(SequenceName("ticket", 4), SidebarOrder.parseSequenceName("tic\u212Aet 4")) // Kelvin sign is not an ASCII K
+        assertEquals(SequenceName("i\u0307ssue", 3), SidebarOrder.parseSequenceName("\u0130ssue 3")) // U+0130 lowers to i + U+0307 in the base
+        assertEquals(SequenceName("pull\u00a0request", 5), SidebarOrder.parseSequenceName("pull\u00a0request 5")) // NBSP is no separator
+    }
+
+    @Test fun idRuleIsLocaleIndependent() {
+        val saved = java.util.Locale.getDefault()
+        try {
+            java.util.Locale.setDefault(java.util.Locale("tr"))
+            assertNull(SidebarOrder.parseSequenceName("ISSUE 3"))
+            assertNull(SidebarOrder.parseSequenceName("TICKET 4"))
+        } finally { java.util.Locale.setDefault(saved) }
+    }
+
+    // ---- W28 nest-by-name gate (web R2) ----
+    private fun liveRow(key: String, name: String, nameIsCustom: Boolean? = null, nameGenerated: Boolean? = null, historyName: String? = null): JsObj {
+        val live = JsObj.of(
+            "id" to JsStr("L$key"), "handedOffFrom" to null,
+            "nameIsCustom" to nameIsCustom?.let { com.tether.app.protocol.tree.JsBool.of(it) },
+            "nameGenerated" to nameGenerated?.let { com.tether.app.protocol.tree.JsBool.of(it) },
+        )
+        return JsObj.of(
+            "key" to JsStr(key), "name" to JsStr(name), "createdAt" to JsNum(0.0), "updatedAt" to JsNum(0.0), "live" to live,
+            "history" to historyName?.let { JsObj.of("name" to JsStr(it)) },
+        )
+    }
+
+    @Test fun generatedLiveNamesDoNotGroup() {
+        assertEquals(emptyList<Shape>(), shape(SidebarOrder.sidebarGroups(listOf(liveRow("a", "Fix login 2", nameGenerated = true), liveRow("b", "Fix login 3", nameGenerated = true)))))
+    }
+
+    @Test fun typedLiveRowsGroup() {
+        val g = SidebarOrder.sidebarGroups(listOf(liveRow("a", "Fix login 2", nameIsCustom = true), liveRow("b", "Fix login 3", nameIsCustom = true)))
+        assertEquals(listOf(Shape("b", listOf("a"), true, "b")), shape(g))
+    }
+
+    @Test fun nameGeneratedFalseOrAbsentWithNoHistoryNameGroups() {
+        val g = SidebarOrder.sidebarGroups(listOf(liveRow("a", "arena2", nameGenerated = false), liveRow("b", "arena3")))
+        assertEquals(listOf(Shape("b", listOf("a"), true, "b")), shape(g))
+    }
+
+    @Test fun historyOnlyRowsNeverGroupAndDoNotJoinATypedRow() {
+        assertEquals(emptyList<Shape>(), shape(SidebarOrder.sidebarGroups(listOf(hist("h1", "monster 1"), hist("h2", "monster 2")))))
+        assertEquals(emptyList<Shape>(), shape(SidebarOrder.sidebarGroups(listOf(liveRow("l", "monster 1", nameIsCustom = true), hist("h", "monster 2")))))
+    }
+
+    @Test fun liveRowShowingAHistoryNameDoesNotNest() {
+        val a = liveRow("a", "Fix login 2", nameIsCustom = false, historyName = "Fix login 2")
+        val b = liveRow("b", "Fix login 3", nameIsCustom = false, historyName = "Fix login 3")
+        assertEquals(emptyList<Shape>(), shape(SidebarOrder.sidebarGroups(listOf(a, b))))
+    }
+
+    @Test fun nullSourceNoHistoryNameNestsWithATypedSibling() {
+        val g = SidebarOrder.sidebarGroups(listOf(liveRow("a", "arena7"), liveRow("b", "arena2", nameIsCustom = true)))
+        assertEquals(listOf(Shape("a", listOf("b"), true, "a")), shape(g))
+    }
+
+    @Test fun blankHistoryNameDoesNotBlockNesting() {
+        val g = SidebarOrder.sidebarGroups(listOf(liveRow("a", "arena7", historyName = "  "), liveRow("b", "arena2")))
+        assertEquals(listOf(Shape("a", listOf("b"), true, "a")), shape(g))
+    }
+
+    @Test fun nameIsCustomWinsOverAHistoryName() {
+        val a = liveRow("a", "m 1", nameIsCustom = true, historyName = "m 1")
+        val b = liveRow("b", "m 2", nameIsCustom = true, historyName = "m 2")
+        assertEquals(listOf(Shape("b", listOf("a"), true, "b")), shape(SidebarOrder.sidebarGroups(listOf(a, b))))
+    }
+
+    @Test fun issueIdsStayApartButFormalChainsAreUnchanged() {
+        assertEquals(emptyList<Shape>(), shape(SidebarOrder.sidebarGroups(listOf(row("a", "Fix issue 243"), row("b", "Fix issue 244")))))
+        // a formal handover chain of generated names still folds
+        val a = liveRow("a", "x", nameGenerated = true)
+        val b = JsObj.of(
+            "key" to JsStr("b"), "name" to JsStr("y"), "createdAt" to JsNum(0.0), "updatedAt" to JsNum(0.0),
+            "live" to JsObj.of("id" to JsStr("Lb"), "handedOffFrom" to JsStr("La"), "nameGenerated" to com.tether.app.protocol.tree.JsBool.TRUE),
+        )
+        assertEquals(listOf(Shape("b", listOf("a"), false, "a")), shape(SidebarOrder.sidebarGroups(listOf(a, b))))
     }
 
     // ---- sidebarGroups order (D-L34-27) ----
@@ -116,9 +219,9 @@ class SidebarGroupsTest {
         assertTrue(SidebarOrder.sidebarGroups(listOf(row("only", "solo 1"))).isEmpty())
     }
 
-    @Test fun historyOnlyMembersJoinANameGroup() {
+    @Test fun historyOnlyMembersNeverJoinANameGroup() { // W28 (web tests/sidebar-groups.test.mjs:95-98)
         val g = SidebarOrder.sidebarGroups(listOf(hist("h1", "realms 13"), row("l", "realms 14"), hist("h2", "Realms 12")))
-        assertEquals(listOf(Shape("l", listOf("h1", "h2"), true, "l")), shape(g))
+        assertEquals(emptyList<Shape>(), shape(g))
     }
 
     @Test fun twoChainsAndAManualSingletonInOneBucket() {
