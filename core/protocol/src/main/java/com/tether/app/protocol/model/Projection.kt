@@ -1,5 +1,9 @@
+@file:OptIn(ExperimentalSerializationApi::class)
+
 package com.tether.app.protocol.model
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.nullable
@@ -70,7 +74,9 @@ data class SessionProjection(
      * newest 20). A row that does not fit is dropped, never fatal to the snapshot ([SessionErrorListSerializer]); the FOLD is R1.
      */
     @Serializable(with = SessionErrorListSerializer::class)
-    val sessionErrors: List<SessionErrorProjection> = emptyList(),
+    // (W48) The v145-v152 additions are @EncodeDefault NEVER: a consumer that encodes with encodeDefaults (the v40 parity rule, the
+    // demo trees) keeps the exact bytes it had before the field existed. They still decode and encode when set.
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val sessionErrors: List<SessionErrorProjection> = emptyList(),
     val unattributedPermissionDenials: List<PermissionDenialProjection> = emptyList(),
     val providerNotices: List<ProviderNoticeProjection> = emptyList(),
     val notices: List<SessionNotice> = emptyList(),
@@ -83,7 +89,7 @@ data class SessionProjection(
      * unlike removedQueueIds). Absent = empty. Non-string entries are dropped.
      */
     @Serializable(with = SkippingStringListSerializer::class)
-    val withdrawnQueueIds: List<String> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val withdrawnQueueIds: List<String> = emptyList(),
 )
 
 /**
@@ -126,9 +132,9 @@ data class TurnProjection(
     val providerNotices: List<ProviderNoticeProjection> = emptyList(),
     val error: String? = null,
     /** v145 (#256): the first `error` event's journal ts; absent on a pre-#256 projection. */
-    val errorAt: Long? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val errorAt: Long? = null,
     /** v145 (#256): the turn_end journal ts; absent until the turn ended (and on a pre-#256 projection). */
-    val endedAt: Long? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val endedAt: Long? = null,
     /** Written by process_exit; undeclared in protocol.ts but present on the wire. */
     val exit: ProcessExit? = null,
     val warnings: List<TurnWarning> = emptyList(),
@@ -163,7 +169,7 @@ data class TurnBlock(
      * v149 (GH #265, w4:464): present on a `user_message` block another Tether session sent (`message_session`), never the
      * operator's own words.
      */
-    val from: MessageSource? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val from: MessageSource? = null,
 )
 
 /** v149 `from`: the sending session of a peer message. */
@@ -338,10 +344,10 @@ data class QueuedMessage(
      * v147 (tth-6lw, w4:748): literal `true` on a row that must NOT be sent automatically (composed while the engine was still
      * opening and the open failed). Absent / false = a normal row.
      */
-    val held: Boolean = false,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val held: Boolean = false,
     /** v149 (GH #265): the sending session of a "peer" row; absent on every other row. */
-    val fromSessionId: String? = null,
-    val fromSessionName: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val fromSessionId: String? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val fromSessionName: String? = null,
 ) {
     /** v149 (queued-message.ts isPeerQueuedMessage): a row another session sent (origin "system", noticeKind "peer"). */
     val isPeer: Boolean get() = originKind == QueuedOrigin.SYSTEM && noticeKindValue == QueuedOrigin.PEER
