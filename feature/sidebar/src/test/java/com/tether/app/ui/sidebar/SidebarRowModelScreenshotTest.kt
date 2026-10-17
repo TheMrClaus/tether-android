@@ -223,7 +223,7 @@ class SidebarBadges360Font13ScreenshotTest(private val skin: TetherSkin) {
                 skin,
                 F.state(sessions, histories = histories, current = F.APP), // W43: no activeId, so the head z1 shows its unread badge (an active row is never unread)
                 TetherLayoutClass.Phone,
-                SidebarUiSeed(openChains = setOf("history:h-z0"), openChildren = setOf("live:z1")), // ta-7ox8 B3: z0 has a history row, so the chain's rootKey is "history:h-z0" (proved by a probe), not "live:z0"
+                SidebarUiSeed(openChains = setOf("history:h-z0"), openChildren = setOf("history:h-z1")), // W43 refute minor 2: z1 has a history row, so its key is "history:h-z1" (ta-7ox8 B3: z0 has a history row, so the chain's rootKey is "history:h-z0" (proved by a probe), not "live:z0")
                 SidebarActions(onCollapse = {}),
             )
         }

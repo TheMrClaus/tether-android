@@ -90,6 +90,16 @@ class SidebarHandedUnreadTest {
         assertTrue(out.getValue("history:hc").unread)
     }
 
+    @Test fun anUnreadDelegateChildOfAHandedOverMemberKeepsItsUnread() {
+        // The child is not handed over itself: only the handed-over parent loses its dot (W43 refute minor 1, kills "also gate delegate children").
+        val child = F.live("uc", "Delegate uc", historyId = "huc", ago = 1, parent = "a")
+        val sessions = listOf(live("a", "ha", ago = 6, to = "b"), live("b", "hb", ago = 3, from = "a"), child)
+        val out = rows(sessions, listOf(hist("ha", ago = 8), hist("hb", ago = 4), hist("huc", ago = 2))).associateBy { it.key }
+        assertFalse(out.getValue("history:ha").unread)
+        assertTrue("the delegate child keeps its unread", out.getValue("history:huc").unread)
+        assertTrue(out.getValue("history:huc").js["digest"] != null)
+    }
+
     @Test fun aHistoryOnlyRowAndARowWhoseLiveIsGoneKeepTodaysBehaviour() {
         // No live: HistorySession carries no handedOffTo, so the row stays unread (the server clamp's job).
         val r = rows(emptyList(), listOf(hist("h"))).single()
