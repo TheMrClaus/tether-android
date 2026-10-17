@@ -135,7 +135,7 @@ internal sealed interface ChatItem {
     }
 
     /** A non-ok outcome; T6.6 [interrupt]: the turn's `turn_interrupted` notice (issue #184), if any. */
-    data class Outcome(val turn: TurnProjection, override val startsGroup: Boolean, val interrupt: InterruptNoticeView? = null) : ChatItem {
+    data class Outcome(val turn: TurnProjection, override val startsGroup: Boolean, val interrupt: InterruptNoticeView? = null, val at: Double? = null) : ChatItem {
         override val key: String get() = "${turn.turnId}/outcome"
     }
 
@@ -171,8 +171,8 @@ internal sealed interface ChatItem {
      * T6.7: the session's `lastError` (an `error` event with no turn, events.mjs:2729), after the
      * turns (chat-view.tsx:3534-3536). [text] is the engine's words, cleaned.
      */
-    data class SessionError(val scope: String, val text: String) : ChatItem {
-        override val key: String get() = "$scope/last-error"
+    data class SessionError(val scope: String, val text: String, val ts: Double? = null, val keySuffix: String = "last-error") : ChatItem {
+        override val key: String get() = "$scope/$keySuffix"
         override val startsGroup: Boolean get() = true
     }
 
@@ -291,6 +291,7 @@ internal fun buildChatItems(
     val finishedBg = finishedBackgroundCommands(state)
     var bgIndex = 0
     var lastTs = 0.0
+    val errors = SessionErrorFlusher(sessionErrorEntries(projection, tree), scope) { items.add(it) }
     fun flushBg(ts: Double) {
         while (bgIndex < finishedBg.size && finishedBg[bgIndex].startedAt <= ts) items.add(ChatItem.BgCommand(finishedBg[bgIndex++]))
     }
@@ -301,6 +302,7 @@ internal fun buildChatItems(
         // Monotonic clamp: a turn with no startedAt inherits the last known stamp.
         val startedAt = (turnObj?.get("startedAt") as? JsNum)?.value ?: turn.startedAt?.toDouble()
         lastTs = maxOf(lastTs, startedAt ?: lastTs)
+        errors.flush(lastTs, drop = turnIndex == trimmed && trimmed > 0)
         flushBg(lastTs)
         val treeBlocks = turnObj?.get("blocksById") as? JsObj
         fun rawFor(blockId: String): JsObj? =
@@ -398,12 +400,13 @@ internal fun buildChatItems(
         answeredList.filter { blocksById?.has(it.toolId) != true }.forEach { items.add(ChatItem.Answered(turnId, it, opens())) }
         if (turn.apiRetry != null && turn.status != Vocab.TURN_DONE) items.add(ChatItem.Retry(turn, opens()))
         if (turn.outcome != null && turn.outcome != Vocab.OUTCOME_OK) {
-            items.add(ChatItem.Outcome(turn, opens(), if (turn.outcome == Vocab.OUTCOME_CANCELLED) interrupts[turnId] else null))
+            items.add(ChatItem.Outcome(turn, opens(), if (turn.outcome == Vocab.OUTCOME_CANCELLED) interrupts[turnId] else null, outcomeAt(turnObj, turn)))
         }
     }
+    errors.flush(Double.POSITIVE_INFINITY, drop = false) // errors newer than every turn (chat-view.tsx:3877)
     flushBg(Double.POSITIVE_INFINITY) // any command launched after the last turn
-    // T6.7 (chat-view.tsx:3534-3536): an error that belongs to no turn, as a `.chat-outcome-error` row.
-    sessionErrorText(projection.lastError)?.let { items.add(ChatItem.SessionError(scope, it)) }
+    // T6.7 (chat-view.tsx:3534-3536): the pre-R1 `lastError` row, only where no session-error row already says it.
+    fallbackLastError(projection.lastError, sessionErrorEntries(projection, tree))?.let { items.add(ChatItem.SessionError(scope, it)) }
     // T6.6 (chat-view.tsx:3537-3539): the session's own provider notices, one `.notices` stack.
     if (noticeLabel != null) {
         var inStack = false
@@ -427,3 +430,8 @@ internal fun buildChatItems(
 /** T6.7: the session's `lastError` as the row shows it (cleaned, bounded), or null when nothing is left. */
 internal fun sessionErrorText(lastError: String?): String? =
     com.tether.app.client.LabelText.clean(lastError, NOTICE_BODY_MAX).ifEmpty { null }
+
+/** W50-R1 (chat-view.tsx:3802): `turn.errorAt ?? turn.endedAt`, the tree's number first (a fractional ts stays whole). */
+internal fun outcomeAt(turnObj: JsObj?, turn: TurnProjection): Double? =
+    (turnObj?.get("errorAt") as? JsNum)?.value ?: (turnObj?.get("endedAt") as? JsNum)?.value
+        ?: turn.errorAt?.toDouble() ?: turn.endedAt?.toDouble()

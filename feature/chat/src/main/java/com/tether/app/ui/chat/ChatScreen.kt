@@ -429,7 +429,7 @@ fun ChatScreen(
         // ta-4vun / ta-lz64 (the web at tether 29537e0, L1 spec section 4): the transcript's box cannot be shorter than its own
         // vertical padding (`.chat-scroll`, 2rem x 2 on the desktop, 1.5rem x 2 on the phone), so where its region shrinks
         // below that it overflows the region downward, painted over the composer's static top strip and under the well.
-        val transcriptShown = session != null && projection != null && projection.turnOrder.isNotEmpty() && activeRun == null
+        val transcriptShown = session != null && projection != null && chatHasHistory(projection, tree) && activeRun == null
         val spacingNow = transcriptSpacing(t, com.tether.app.ui.components.currentLayoutClass() == com.tether.app.ui.components.TetherLayoutClass.Phone)
         TranscriptOverComposer(
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -466,7 +466,7 @@ fun ChatScreen(
                     )
                 } }
 
-                projection.turnOrder.isEmpty() -> WithSendBubbles(sends) {
+                !chatHasHistory(projection, tree) -> WithSendBubbles(sends) {
                     EmptyCentered(
                         label = "Headless agent",
                         title = "Send a message to start the conversation.",

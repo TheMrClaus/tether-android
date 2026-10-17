@@ -37,7 +37,7 @@ import com.tether.app.ui.theme.TetherWeights
  * cancelled turn muted; the words carry the state.
  */
 @Composable
-internal fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier, interrupt: InterruptNoticeView? = null, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()) {
+internal fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier, interrupt: InterruptNoticeView? = null, zone: java.time.ZoneId = java.time.ZoneId.systemDefault(), at: Double? = null) {
     val t = LocalTetherTokens.current
     val outcome = turn.outcome ?: return
     if (outcome == Vocab.OUTCOME_OK) return
@@ -64,7 +64,9 @@ internal fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier, i
             fontFamily = Manrope,
             fontWeight = TetherWeights.body,
             fontSize = 12.48.sp,
+            modifier = Modifier.weight(1f, fill = false),
         )
+        OutcomeStamp(at, zone)
     }
 }
 
@@ -74,22 +76,24 @@ internal fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier, i
  * warning triangle. [text] is the engine's words, already cleaned ([sessionErrorText]).
  */
 @Composable
-internal fun SessionErrorRow(text: String, modifier: Modifier = Modifier) {
+internal fun SessionErrorRow(text: String, ts: Double? = null, zone: java.time.ZoneId = java.time.ZoneId.systemDefault(), modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
+    val stamp = outcomeStampText(ts, zone)
     Row(
         modifier
             .background(t.tintXs, RoundedCornerShape(TetherDimens.radiusSm))
             .padding(horizontal = 8.dp, vertical = 4.dp)
             // T6.7 r2: said as what it is (the web's row has only the glyph; no caption is added).
             .clearAndSetSemantics {
-                contentDescription = "Session error: $text"
+                contentDescription = "Session error: $text" + (if (stamp.isEmpty()) "" else " at $stamp")
                 testTag = SESSION_ERROR_TAG
             },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.danger, modifier = Modifier.size(13.dp))
-        Text(text, color = t.danger, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.48.sp)
+        Text(text, color = t.danger, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.48.sp, modifier = Modifier.weight(1f, fill = false))
+        OutcomeStamp(ts, zone)
     }
 }
 
