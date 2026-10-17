@@ -28,11 +28,17 @@ import com.tether.app.protocol.helpers.PanelWidths
 import com.tether.app.protocol.helpers.PendingInput
 import com.tether.app.protocol.helpers.PendingWorkspace
 import com.tether.app.protocol.helpers.SidebarOrder
+import com.tether.app.protocol.helpers.SidebarOrder.ChainMemberFacts
+import com.tether.app.protocol.helpers.SidebarOrder.ChainSuffix
+import com.tether.app.protocol.helpers.SidebarOrder.ChainSuffixKind
+import com.tether.app.protocol.helpers.SidebarOrder.HandoverChainKeys
 import com.tether.app.protocol.helpers.SidebarWorkspaces
 import com.tether.app.protocol.helpers.SpawnMarker
 import com.tether.app.protocol.helpers.SpinnerWords
 import com.tether.app.protocol.helpers.VersionCompare
+import com.tether.app.protocol.helpers.get
 import com.tether.app.protocol.tree.JsArr
+import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
@@ -81,6 +87,31 @@ object HelperAdapters {
     private val EN_US: Locale = Locale.US
 
     private fun undef(value: Any?): Any? = value ?: Undefined
+
+    private fun chainKeys(v: JsValue?): List<HandoverChainKeys> = (v as JsArr).map { c ->
+        HandoverChainKeys((c["headKey"] as JsStr).value, (c["olderKeys"] as JsArr).map { (it as JsStr).value }, (c["anchorKey"] as? JsStr)?.value)
+    }
+
+    private fun chains(v: JsValue?): List<SidebarOrder.HandoverChain> =
+        (v as JsArr).map { SidebarOrder.HandoverChain(it["head"]!!, (it["older"] as JsArr).toList()) }
+
+    private fun groups(v: JsValue?): List<SidebarOrder.SidebarGroup> = (v as JsArr).map {
+        SidebarOrder.SidebarGroup(it["head"]!!, (it["older"] as JsArr).toList(), it["multiUnit"] == JsBool.TRUE, (it["anchorKey"] as JsStr).value)
+    }
+
+    private fun facts(v: JsValue?): List<ChainMemberFacts> = (v as JsArr).map { m ->
+        fun b(k: String) = m[k] == JsBool.TRUE
+        ChainMemberFacts((m["key"] as JsStr).value, b("selected"), b("waiting"), b("active"), b("unread"))
+    }
+
+    private fun strings(v: JsValue?): List<String> = (v as JsArr).map { (it as JsStr).value }
+
+    private fun suffix(v: JsValue?): ChainSuffix? = (v as? JsObj)?.let {
+        ChainSuffix(
+            when ((it["kind"] as JsStr).value) { "waiting" -> ChainSuffixKind.Waiting; "active" -> ChainSuffixKind.Active; else -> ChainSuffixKind.New },
+            (it["count"] as JsNum).value.toInt(),
+        )
+    }
 
     private val adapters: Map<String, (Args) -> Any?> = buildMap {
         fun reg(table: String, fn: String, call: (Args) -> Any?) = put("$table.$fn", call)
@@ -288,6 +319,35 @@ object HelperAdapters {
         reg("sidebar-order", "applySidebarOrder") { SidebarOrder.applySidebarOrder(it.arr(0), it.v(1)) }
         reg("sidebar-order", "sortSidebarEntries") { SidebarOrder.sortSidebarEntries(it.arr(0), it.v(1), IcuTestCollator.EN_US) }
         reg("sidebar-order", "moveSidebarEntry") { SidebarOrder.moveSidebarEntry(it.arr(0), it.v(1), it.v(2)) }
+        reg("sidebar-order", "handoverChains") { a ->
+            SidebarOrder.handoverChains(a.arr(0).toList()).map { TaggedObject(mapOf("head" to it.head, "older" to JsArr.of(it.older))) }
+        }
+        reg("sidebar-order", "parseSequenceName") { a ->
+            SidebarOrder.parseSequenceName((a.v(0) as? JsStr)?.value)?.let { TaggedObject(mapOf("base" to JsStr(it.base), "n" to JsNum(it.n.toDouble()))) }
+        }
+        // the corpus adapter's one-arg sidebarGroups uses the default nameOf (`e.name ?? ""`)
+        reg("sidebar-order", "sidebarGroups") { a ->
+            SidebarOrder.sidebarGroups(a.arr(0).toList()).map {
+                TaggedObject(mapOf("head" to it.head, "older" to JsArr.of(it.older), "multiUnit" to (if (it.multiUnit) JsBool.TRUE else JsBool.FALSE), "anchorKey" to JsStr(it.anchorKey)))
+            }
+        }
+        reg("sidebar-order", "placeGroupMembers") { a -> JsArr.of(SidebarOrder.placeGroupMembers(a.arr(0).toList(), groups(a.v(1)))) }
+        reg("sidebar-order", "groupBandRecency") { a -> JsNum(SidebarOrder.groupBandRecency(a.v(0)!!, a.arr(1).toList())) }
+        reg("sidebar-order", "foldHandoverChains") { a ->
+            val r = SidebarOrder.foldHandoverChains(a.arr(0).toList(), a.v(1)?.let { chains(it) })
+            TaggedObject(mapOf("rows" to JsArr.of(r.rows), "olderByHeadKey" to r.olderByHeadKey.mapValues { JsArr.of(it.value) }))
+        }
+        reg("sidebar-order", "collapseChainOrder") { a -> SidebarOrder.collapseChainOrder(strings(a.v(0)), chainKeys(a.v(1))).map { JsStr(it) } }
+        reg("sidebar-order", "expandChainOrder") { a -> SidebarOrder.expandChainOrder(strings(a.v(0)), chainKeys(a.v(1))).map { JsStr(it) } }
+        reg("sidebar-order", "summarizeChainMembers") { a ->
+            val r = SidebarOrder.summarizeChainMembers(facts(a.v(0)))
+            TaggedObject(mapOf(
+                "reasonKeys" to r.reasonKeys.map { JsStr(it) },
+                "suffix" to r.suffix?.let { TaggedObject(mapOf("kind" to JsStr(it.kind.name.lowercase()), "count" to JsNum(it.count.toDouble()))) },
+            ))
+        }
+        reg("sidebar-order", "chainToggleLabel") { a -> JsStr(SidebarOrder.chainToggleLabel(a.num(0).toInt())) }
+        reg("sidebar-order", "chainSuffixText") { a -> JsStr(SidebarOrder.chainSuffixText(suffix(a.v(0)))) }
 
         // lib/sidebar-workspaces.mjs
         reg("sidebar-workspaces", "sidebarWorkspaceList") { SidebarWorkspaces.sidebarWorkspaceList(it.v(0), it.v(1)) }
