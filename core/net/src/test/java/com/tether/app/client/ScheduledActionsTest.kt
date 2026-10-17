@@ -46,6 +46,26 @@ class ScheduledActionsTest {
         return line["frame"]!!.jsonObject
     }
 
+    /** The captured server snapshot as an OLDER server sent it (v87-v142): neither v143's `setupConsent` nor v146's `toolApproval`. */
+    private fun olderServer(frame: JsonObject): String =
+        frame.toString().replace(",\"toolApproval\":null", "").replace(",\"setupConsent\":null", "")
+
+    /**
+     * The captured client frame plus the keys an edit echoes from the stored schedule. The capture's c2s frames are written by the
+     * harness from its own input, not by the web editor (parity-harness capture-wire-corpus.mjs:1005 `{ ...schedule, name, maxRuns }`),
+     * so they omit `toolApproval` / `setupConsent`; the stored schedule carries both as null, and an edit sends a stored value back
+     * exactly as stored (scheduled-actions-view.tsx:317, :406), in the web's key order (toolApproval after permissionMode).
+     */
+    private fun withStoredKeys(frame: JsonObject): JsonObject {
+        val out = linkedMapOf<String, kotlinx.serialization.json.JsonElement>()
+        for ((k, v) in frame["schedule"]!!.jsonObject) {
+            out[k] = v
+            if (k == "permissionMode") out["toolApproval"] = kotlinx.serialization.json.JsonNull
+        }
+        out["setupConsent"] = kotlinx.serialization.json.JsonNull
+        return JsonObject(frame + ("schedule" to JsonObject(out)))
+    }
+
     private fun parse(frame: JsonObject) = ScheduledActionsParse.state(ServerMessage.parse(frame) as ServerMessage.ScheduledActions)
 
     // ---- decoding ---------------------------------------------------------------------------
@@ -115,19 +135,40 @@ class ScheduledActionsTest {
     /** tether #241 adds `setupConsent` (v143, now modelled): an edit starting from the stored schedule sends it back unchanged. */
     @Test fun anUnknownFieldRoundTripsThroughAnEdit() {
         val frame = TetherJson.parseToJsonElement(
-            captured("s2c")[1].toString().replace("\"runs\":[]", "\"runs\":[],\"setupConsent\":\"sha256:${"a".repeat(64)}\""),
+            olderServer(captured("s2c")[1]).replace("\"runs\":[]", "\"runs\":[],\"setupConsent\":\"sha256:${"a".repeat(64)}\""),
         ).jsonObject
         val schedule = parse(frame).schedules.single()
+        assertNull("an older server stores no Approvals", schedule.toolApproval)
         assertEquals(com.tether.app.protocol.OrNull("sha256:${"a".repeat(64)}"), schedule.setupConsent)
         assertNull("it is modelled now, so it is no unknown field", schedule.unknown["setupConsent"])
         val encoded = ClientMessage.ScheduleUpdate(schedule.id, schedule.toInput()).toJsonObject()
         val input = encoded["schedule"]!!.jsonObject
-        assertEquals(ScheduledActionInput.KEYS.toList(), input.keys.toList())
+        assertEquals(ScheduledActionInput.KEYS.toList() - "toolApproval", input.keys.toList())
         assertEquals(JsonPrimitive("sha256:${"a".repeat(64)}"), input["setupConsent"])
     }
 
+    /** v146 (protocol-schema-w4.ts:667): the Approvals of a schedule are three-state and raw; an edit sends the stored value as stored. */
+    @Test fun aStoredToolApprovalIsKeptRawAndEchoedInTheWebsKeyOrder() {
+        val base = olderServer(captured("s2c")[1])
+        for ((stored, wireForm) in listOf("yolo" to "\"yolo\"", "turbo" to "\"turbo\"")) {
+            val schedule = parse(TetherJson.parseToJsonElement(base.replace("\"permissionMode\":null", "\"permissionMode\":null,\"toolApproval\":$wireForm")).jsonObject).schedules.single()
+            assertEquals("an unknown value is kept, never defaulted", com.tether.app.protocol.OrNull(stored), schedule.toolApproval)
+            assertNull("modelled, so not an unknown field", schedule.unknown["toolApproval"])
+            val input = ClientMessage.ScheduleUpdate(schedule.id, schedule.toInput()).toJsonObject()["schedule"]!!.jsonObject
+            assertEquals(wireForm, input["toolApproval"].toString())
+            val keys = input.keys.toList()
+            assertEquals("toolApproval follows permissionMode, before sandboxPolicy", listOf("permissionMode", "toolApproval", "sandboxPolicy"), keys.subList(keys.indexOf("permissionMode"), keys.indexOf("permissionMode") + 3))
+        }
+        val nulled = parse(captured("s2c")[1]).schedules.single()
+        assertEquals(com.tether.app.protocol.OrNull<String>(null), nulled.toolApproval)
+        assertEquals("null", ClientMessage.ScheduleUpdate(nulled.id, nulled.toInput()).toJsonObject()["schedule"]!!.jsonObject["toolApproval"].toString())
+        val absent = parse(TetherJson.parseToJsonElement(base).jsonObject).schedules.single()
+        assertNull(absent.toolApproval)
+        assertFalse(ClientMessage.ScheduleUpdate(absent.id, absent.toInput()).toJsonObject()["schedule"]!!.jsonObject.containsKey("toolApproval"))
+    }
+
     @Test fun aStoredNullApprovalStaysAnExplicitNullAndAnAbsentOneStaysAbsent() {
-        val base = captured("s2c")[1].toString()
+        val base = olderServer(captured("s2c")[1])
         val nulled = parse(TetherJson.parseToJsonElement(base.replace("\"runs\":[]", "\"runs\":[],\"setupConsent\":null")).jsonObject).schedules.single()
         assertEquals(com.tether.app.protocol.OrNull<String>(null), nulled.setupConsent)
         assertEquals("null", ClientMessage.ScheduleUpdate(nulled.id, nulled.toInput()).toJsonObject()["schedule"]!!.jsonObject["setupConsent"].toString())
@@ -177,9 +218,9 @@ class ScheduledActionsTest {
         val created = parse(captured("s2c")[1]).schedules.single()
         // The create, built as the web's submit builds it.
         assertTrue(h.client.createSchedule(created.toInput()))
-        assertEquals(c2s[1].toString(), h.expectFrame("schedule-create").toString())
+        assertEquals(withStoredKeys(c2s[1]).toString(), h.expectFrame("schedule-create").toString())
         assertTrue(h.client.updateSchedule("sched-0001", created.toInput().copy(name = "Parity weekly (edited)", maxRuns = 2)))
-        assertEquals(c2s[2].toString(), h.expectFrame("schedule-update").toString())
+        assertEquals(withStoredKeys(c2s[2]).toString(), h.expectFrame("schedule-update").toString())
         assertTrue(h.client.controlSchedule("sched-0001", "pause"))
         assertEquals(c2s[3].toString(), h.expectFrame("schedule-control").toString())
         assertTrue(h.client.controlSchedule("sched-0001", "delete"))

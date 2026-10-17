@@ -58,6 +58,12 @@ data class ScheduledAction(
      * an explicit null). Null: not sent (an older server). An edit's starting input carries it unchanged.
      */
     val setupConsent: com.tether.app.protocol.OrNull<String>? = null,
+    /**
+     * v146 (protocol-schema-w4.ts:667): the Reasonix Approvals saved with the schedule, as the server stored them: a raw string
+     * ("ask" | "auto" | "yolo"; an unknown value is kept, never defaulted), an explicit null, or absent (null here: an older server).
+     * An edit's starting input carries it unchanged (scheduled-actions-view.tsx:317).
+     */
+    val toolApproval: com.tether.app.protocol.OrNull<String>? = null,
 ) {
     /**
      * The schedule as an edit's starting input: its own fields plus [unknown] (written back
@@ -69,6 +75,7 @@ data class ScheduledAction(
         useWorktree = useWorktree, cron = cron, timeZone = timeZone, maxRuns = maxRuns,
         // v143: the stored approval is modelled ([ScheduledActionInput.setupConsent]); a stored null stays an explicit null.
         setupConsent = setupConsent,
+        toolApproval = toolApproval,
         extra = unknown,
     )
 
@@ -144,6 +151,12 @@ object ScheduledActionsParse {
             null -> null
             is kotlinx.serialization.json.JsonNull -> com.tether.app.protocol.OrNull(null)
             is JsonPrimitive -> if (consent.isString) com.tether.app.protocol.OrNull(consent.content) else null
+            else -> null
+        },
+        toolApproval = when (val approval = o["toolApproval"]) {
+            null -> null
+            is kotlinx.serialization.json.JsonNull -> com.tether.app.protocol.OrNull(null)
+            is JsonPrimitive -> if (approval.isString) com.tether.app.protocol.OrNull(approval.content) else null
             else -> null
         },
     )

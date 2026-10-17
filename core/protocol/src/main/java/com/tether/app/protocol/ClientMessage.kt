@@ -136,6 +136,11 @@ sealed interface ClientMessage {
         val approvalPolicy: OrNull<String>? = null,
         /** TS `"auto_review" | null`, optional. */
         val approvalsReviewer: OrNull<String>? = null,
+        /**
+         * v146 (lv:49): TS `"ask" | "auto" | "yolo" | null`, optional (Reasonix Approvals). Three states: null omitted, `OrNull(null)`
+         * an explicit JSON null, `OrNull(v)` the value (raw: never defaulted to "ask"). The app sends none until the Approvals UI (ta-d3tj.3).
+         */
+        val toolApproval: OrNull<String>? = null,
         val requestId: String? = null,
     ) : ClientMessage {
         override fun toJsonObject() = frame("create") {
@@ -153,6 +158,7 @@ sealed interface ClientMessage {
             opt("reasoningEffort", reasoningEffort)
             if (approvalPolicy != null) put("approvalPolicy", approvalPolicy.value)
             if (approvalsReviewer != null) put("approvalsReviewer", approvalsReviewer.value)
+            if (toolApproval != null) put("toolApproval", toolApproval.value)
             opt("requestId", requestId)
         }
 
@@ -568,10 +574,24 @@ sealed interface ClientMessage {
 
     // ---- per-session engine controls -------------------------------------------
 
-    data class SetMode(val sessionId: String, val permissionMode: String) : ClientMessage {
+    /** [requestId]: v146 (lu:345), optional: the reply correlation id; null is omitted. */
+    data class SetMode(val sessionId: String, val permissionMode: String, val requestId: String? = null) : ClientMessage {
         override fun toJsonObject() = frame("set-mode") {
             put("sessionId", sessionId)
             put("permissionMode", permissionMode)
+            opt("requestId", requestId)
+        }
+    }
+
+    /**
+     * v146 (tth-oi7, lu:352; protocol.ts:903): the operator's explicit Reasonix Approvals change, the only runtime tool_approval
+     * write. [toolApproval] is "ask" | "auto" | "yolo" (required, sent verbatim: never normalised or defaulted).
+     */
+    data class SetToolApproval(val sessionId: String, val toolApproval: String, val requestId: String? = null) : ClientMessage {
+        override fun toJsonObject() = frame("set-tool-approval") {
+            put("sessionId", sessionId)
+            put("toolApproval", toolApproval)
+            opt("requestId", requestId)
         }
     }
 
@@ -961,6 +981,12 @@ data class ScheduledActionInput(
      * non-isolated save and "Save without setup"); null is omitted. Honoured server-side only for an owner's save.
      */
     val setupConsent: OrNull<String>? = null,
+    /**
+     * v146 (lv:306): the Reasonix Approvals saved with the schedule, TS `"ask" | "auto" | "yolo" | null`, optional. Null is omitted,
+     * `OrNull(null)` an explicit JSON null, `OrNull(v)` the value, raw. Written in the web's key order (after permissionMode). An
+     * edit sends the stored value back exactly as stored (scheduled-actions-view.tsx:317).
+     */
+    val toolApproval: OrNull<String>? = null,
     val extra: JsonObject = EMPTY_EXTRA,
 ) {
     fun toJsonObject(): JsonObject = buildJsonObject {
@@ -972,6 +998,7 @@ data class ScheduledActionInput(
         put("model", model)
         put("reasoningEffort", reasoningEffort)
         put("permissionMode", permissionMode)
+        if (toolApproval != null) put("toolApproval", toolApproval.value)
         put("sandboxPolicy", sandboxPolicy)
         put("useWorktree", useWorktree)
         put("cron", cron)
@@ -985,7 +1012,7 @@ data class ScheduledActionInput(
         /** The fields this client models, in the web's order (scheduled-actions-view.tsx submit). */
         val KEYS: Set<String> = linkedSetOf(
             "name", "prompt", "cwd", "provider", "profileId", "model", "reasoningEffort",
-            "permissionMode", "sandboxPolicy", "useWorktree", "cron", "timeZone", "maxRuns", "setupConsent",
+            "permissionMode", "toolApproval", "sandboxPolicy", "useWorktree", "cron", "timeZone", "maxRuns", "setupConsent",
         )
 
         private val EMPTY_EXTRA = JsonObject(emptyMap())
@@ -1008,6 +1035,11 @@ data class ScheduledActionInput(
                 !r.o.containsKey("setupConsent") -> null
                 r.o["setupConsent"] is JsonNull -> OrNull(null)
                 else -> OrNull(r.str("setupConsent"))
+            },
+            toolApproval = when {
+                !r.o.containsKey("toolApproval") -> null
+                r.o["toolApproval"] is JsonNull -> OrNull(null)
+                else -> OrNull(r.str("toolApproval"))
             },
             extra = JsonObject(r.o.filterKeys { it !in KEYS }),
         )
@@ -1097,6 +1129,7 @@ private object ClientDecoders {
                 reasoningEffort = r.o.str("reasoningEffort"),
                 approvalPolicy = r.orNull("approvalPolicy"),
                 approvalsReviewer = r.orNull("approvalsReviewer"),
+                toolApproval = r.orNull("toolApproval"),
                 requestId = r.o.str("requestId"),
             )
         },
@@ -1193,7 +1226,8 @@ private object ClientDecoders {
                 else -> throw MalformedFrame("answers.answers must be an object or an array")
             }
         },
-        "set-mode" to { r -> ClientMessage.SetMode(r.str("sessionId"), r.str("permissionMode")) },
+        "set-mode" to { r -> ClientMessage.SetMode(r.str("sessionId"), r.str("permissionMode"), r.o.str("requestId")) },
+        "set-tool-approval" to { r -> ClientMessage.SetToolApproval(r.str("sessionId"), r.str("toolApproval"), r.o.str("requestId")) },
         "set-model" to { r -> ClientMessage.SetModel(r.str("sessionId"), r.str("model")) },
         "set-reasoning-effort" to { r -> ClientMessage.SetReasoningEffort(r.str("sessionId"), r.str("reasoningEffort")) },
         "set-fast-mode" to { r -> ClientMessage.SetFastMode(r.str("sessionId"), r.bool("enabled")) },

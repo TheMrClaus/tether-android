@@ -213,6 +213,8 @@ sealed interface ServerMessage {
         /** "off" | "cooldown" | "on". */
         val fastModeState: String? = null,
         val fastModeDisabledReason: String? = null,
+        /** v146 (w5:1207): the session's live mode id (Reasonix's Normal / Plan); absent otherwise. */
+        val currentMode: String? = null,
     ) : ServerMessage
 
     /** [snapshot]: CodexControlCatalogSnapshot, raw. */
@@ -860,6 +862,7 @@ private object ServerDecoders {
                 modes = r.optList("modes", ModeOption.serializer()),
                 fastModeState = r.o.str("fastModeState"),
                 fastModeDisabledReason = r.o.str("fastModeDisabledReason"),
+                currentMode = r.o.str("currentMode"),
             )
         },
         "codex-controls" to { r -> ServerMessage.CodexControls(r.str("sessionId"), r.obj("snapshot")) },

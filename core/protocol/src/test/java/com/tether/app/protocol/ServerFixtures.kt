@@ -102,8 +102,6 @@ object ServerFixtures {
 
     val HAND_AUTHORED: Map<String, String> = mapOf(
         "server-settings-result" to SERVER_SETTINGS_RESULT,
-        "archive-preview" to ARCHIVE_PREVIEW,
-        "archive-stale-result" to ARCHIVE_STALE_RESULT,
         "approval" to APPROVAL,
         "approval_resolved" to APPROVAL_RESOLVED,
         "acp-agents" to ACP_AGENTS,

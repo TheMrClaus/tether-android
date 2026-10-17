@@ -65,6 +65,12 @@ data class SessionProjection(
     val status: String = Vocab.SESSION_READY,
     val lastTurnOutcome: String? = null,
     val lastError: String? = null,
+    /**
+     * v145 (#256, protocol-schema-w4.ts sessionErrorProjectionSchema): every turn-less `error`, oldest first (the server keeps the
+     * newest 20). A row that does not fit is dropped, never fatal to the snapshot ([SessionErrorListSerializer]); the FOLD is R1.
+     */
+    @Serializable(with = SessionErrorListSerializer::class)
+    val sessionErrors: List<SessionErrorProjection> = emptyList(),
     val unattributedPermissionDenials: List<PermissionDenialProjection> = emptyList(),
     val providerNotices: List<ProviderNoticeProjection> = emptyList(),
     val notices: List<SessionNotice> = emptyList(),
@@ -72,6 +78,25 @@ data class SessionProjection(
     val turnsById: Map<String, TurnProjection> = emptyMap(),
     val activeTurnId: String? = null,
     val queuedMessages: List<QueuedMessage> = emptyList(),
+    /**
+     * v145 (#249, w4:857): the last 50 queueIds the operator WITHDREW, oldest first (settled, but not proof of delivery,
+     * unlike removedQueueIds). Absent = empty. Non-string entries are dropped.
+     */
+    @Serializable(with = SkippingStringListSerializer::class)
+    val withdrawnQueueIds: List<String> = emptyList(),
+)
+
+/**
+ * v145 (#256): one turn-less `error` event. [seq] / [ts] are null only for a never-journaled event (the schema's own nullable).
+ * [cause] stays RAW ("auth_expired" | "usage_limit" today): an unknown cause keeps the row.
+ */
+@Serializable
+data class SessionErrorProjection(
+    val seq: Long? = null,
+    @Serializable(with = com.tether.app.protocol.LenientEpochMsOrNullSerializer::class)
+    val ts: Long? = null,
+    val message: String,
+    val cause: String? = null,
 )
 
 @Serializable
@@ -100,6 +125,10 @@ data class TurnProjection(
     val compactions: List<CompactionProjection> = emptyList(),
     val providerNotices: List<ProviderNoticeProjection> = emptyList(),
     val error: String? = null,
+    /** v145 (#256): the first `error` event's journal ts; absent on a pre-#256 projection. */
+    val errorAt: Long? = null,
+    /** v145 (#256): the turn_end journal ts; absent until the turn ended (and on a pre-#256 projection). */
+    val endedAt: Long? = null,
     /** Written by process_exit; undeclared in protocol.ts but present on the wire. */
     val exit: ProcessExit? = null,
     val warnings: List<TurnWarning> = emptyList(),
@@ -130,7 +159,16 @@ data class TurnBlock(
     /** Only ever literal true; never false. */
     val aborted: Boolean? = null,
     val subagent: SubagentThread? = null,
+    /**
+     * v149 (GH #265, w4:464): present on a `user_message` block another Tether session sent (`message_session`), never the
+     * operator's own words.
+     */
+    val from: MessageSource? = null,
 )
+
+/** v149 `from`: the sending session of a peer message. */
+@Serializable
+data class MessageSource(val sessionId: String, val name: String)
 
 /**
  * v15 / v112 (lib/protocol.ts AttachmentMeta): what the operator attached, as the journal keeps it.
@@ -296,7 +334,18 @@ data class QueuedMessage(
      * message was queued, so it can say how long it has waited. Absent on every other row.
      */
     val queuedAt: Double? = null,
+    /**
+     * v147 (tth-6lw, w4:748): literal `true` on a row that must NOT be sent automatically (composed while the engine was still
+     * opening and the open failed). Absent / false = a normal row.
+     */
+    val held: Boolean = false,
+    /** v149 (GH #265): the sending session of a "peer" row; absent on every other row. */
+    val fromSessionId: String? = null,
+    val fromSessionName: String? = null,
 ) {
+    /** v149 (queued-message.ts isPeerQueuedMessage): a row another session sent (origin "system", noticeKind "peer"). */
+    val isPeer: Boolean get() = originKind == QueuedOrigin.SYSTEM && noticeKindValue == QueuedOrigin.PEER
+
     val atToolBoundary: Boolean get() = flushMode == "next-call"
 
     /** Port of lib/queued-message.mjs queuedMessageOrigin: absent = "user", unknown = null. */
@@ -330,6 +379,8 @@ object QueuedOrigin {
     const val HANDOVER_REQUEST = "handover-request"
     /** v150: the successor's first prompt row; hidden from the composer queue, as the web. */
     const val HANDOVER = "handover"
+    /** v149: a peer session's message (`message_session`). */
+    const val PEER = "peer"
     val NOTICE_KINDS: Set<String> = setOf("spawn", "command", "continuation", HANDOVER, HANDOVER_REQUEST)
 
     /**
