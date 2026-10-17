@@ -105,6 +105,35 @@ class NestedTreeTest {
         assertTrue(words.toString(), words.none { it.contains("spine", true) || it.contains("elbow", true) || it.contains("connector", true) })
     }
 
+    /**
+     * ta-hkk7.6 (W44 minor 2, mutation c2 = a `contentDescription` on the connector box): structurally, nothing between a nested row and the block
+     * carries semantics, and no node lying fully inside the 6 dp connector band left of the nested wrapper does.
+     */
+    @Test fun theConnectorBandAndTheWrappersCarryNoSemantics() {
+        show()
+        fun carries(n: androidx.compose.ui.semantics.SemanticsNode) = n.config.getOrNull(SemanticsProperties.ContentDescription) != null ||
+            n.config.getOrNull(SemanticsProperties.Text) != null || n.config.getOrNull(SemanticsProperties.Role) != null ||
+            n.config.any { (_, v) -> v is androidx.compose.ui.semantics.AccessibilityAction<*> }
+        val nested = listOf("live:n2", "live:n1", "live:n0", "live:nd", "live:hd1", "live:hd2")
+        for (k in nested) {
+            var p = rule.onNodeWithTag(SidebarTags.row(k)).fetchSemanticsNode().parent
+            var reachedBlock = false
+            while (p != null) {
+                if (p.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("sidebar-block:") == true) { reachedBlock = true; break }
+                assertFalse("$k: an ancestor between the row and its block carries semantics: ${p.config}", carries(p))
+                p = p.parent
+            }
+            assertTrue("$k reaches its block", reachedBlock)
+        }
+        val all = rule.onAllNodes(SemanticsMatcher("any") { true }, useUnmergedTree = true).fetchSemanticsNodes()
+        val band = 6 * rule.density.density
+        for (k in nested) {
+            val row = rule.onNodeWithTag(SidebarTags.row(k)).fetchSemanticsNode().boundsInRoot
+            val inBand = all.filter { it.boundsInRoot.left >= row.left - band - 1f && it.boundsInRoot.right <= row.left + 1f && it.boundsInRoot.height > 0f && it.boundsInRoot.top >= row.top - 1f && it.boundsInRoot.bottom <= row.bottom + 1f }
+            assertTrue("$k: the connector band holds ${inBand.map { it.config }}", inBand.none { carries(it) })
+        }
+    }
+
     @Test fun theElbowLeadMirrorsInRtl() {
         show(rtl = true)
         val lead = nodes(NestedTags.Lead).first().boundsInRoot.center.x

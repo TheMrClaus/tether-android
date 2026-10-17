@@ -882,6 +882,8 @@ internal val PhoneLocationMinWidth = 72.dp
  * The phone row's second line: the status cluster at its natural width, then the separator (the same " · " the age has: no gap)
  * and the location, which takes what is left (an end ellipsis) and drops to a line of its own ONLY when less than
  * [PhoneLocationMinWidth] remains (ta-hkk7.1: at every font scale; a dropped path starts bare, the separator is drawn only on the shared line).
+ * The 72 dp is the path's own width AFTER the separator (the status and the separator are measured first). App-only: the web has no drop
+ * rule (one nowrap line, the location `flex: 1 1 0` with an ellipsis), so the threshold follows no web value.
  * The location is never absent: it is also in the row's label.
  */
 @Composable
