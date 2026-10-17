@@ -710,15 +710,12 @@ private fun PhoneRowBody(
             status = { StatusLine(entry, now, updatedAt, offline, sync, phone = true, handoverAt = handoverAt) },
             // ta-28i: the location is a path: code, LTR.
             // The web draws "· location" (session-sidebar.tsx:409, the separator inside the location span): the shared separator, then the path.
+            // ta-hkk7.1: the separator and the path are two pieces; the separator is drawn only when the path shares the age's line.
+            separator = location?.let {
+                { Text(META_SEPARATOR, style = css(type.ui, 0.75f, 400, lineHeight = 1.3333f), color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { }) }
+            },
             location = location?.let { path ->
-                {
-                    val locStyle = css(type.ui, 0.75f, 400, lineHeight = 1.3333f)
-                    Row {
-                        // ta-7ox8 B1: the SAME " · " the age carries (no gap, spacer or padding before it): the space before the path's dot equals the space before the age's.
-                        Text(META_SEPARATOR, style = locStyle, color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { })
-                        Text(codeLabel(path), style = locStyle, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
+                { Text(codeLabel(path), style = css(type.ui, 0.75f, 400, lineHeight = 1.3333f), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             },
         )
         entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount, phone = true) }
@@ -881,31 +878,21 @@ private fun RowKebab(
 internal val PhoneLocationMinWidth = 72.dp
 
 /**
- * The phone row's second line. Below font scale 1.5 it is one row: the status cluster at its natural
- * width, then the location (it carries its own " · ", the same one the age has: no gap between), which takes what is left (an end ellipsis) and drops to a line
- * of its own ONLY when less than [PhoneLocationMinWidth] remains. From 1.5x the pieces may wrap (rows
- * already grow with the text). The location is never absent: it is also in the row's label.
+ * The phone row's second line: the status cluster at its natural width, then the separator (the same " · " the age has: no gap)
+ * and the location, which takes what is left (an end ellipsis) and drops to a line of its own ONLY when less than
+ * [PhoneLocationMinWidth] remains (ta-hkk7.1: at every font scale; a dropped path starts bare, the separator is drawn only on the shared line).
+ * The location is never absent: it is also in the row's label.
  */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-internal fun PhoneMetaLine(status: @Composable () -> Unit, location: (@Composable () -> Unit)?) {
+internal fun PhoneMetaLine(status: @Composable () -> Unit, location: (@Composable () -> Unit)?, separator: (@Composable () -> Unit)? = null) {
     if (location == null) {
         status()
-        return
-    }
-    if (LocalDensity.current.fontScale >= 1.5f) {
-        androidx.compose.foundation.layout.FlowRow(
-            verticalArrangement = Arrangement.spacedBy(1.6.dp),
-            itemVerticalAlignment = Alignment.CenterVertically,
-        ) {
-            status()
-            location()
-        }
         return
     }
     androidx.compose.ui.layout.Layout(
         content = {
             Box { status() }
+            Box { separator?.invoke() }
             Box { location() }
         },
     ) { measurables, constraints ->
@@ -913,16 +900,18 @@ internal fun PhoneMetaLine(status: @Composable () -> Unit, location: (@Composabl
         val room = constraints.maxWidth
         val loose = androidx.compose.ui.unit.Constraints(0, room, 0, constraints.maxHeight)
         val s = measurables[0].measure(loose)
-        val remaining = room - s.width
+        val sep = measurables[1].measure(androidx.compose.ui.unit.Constraints(0, room, 0, constraints.maxHeight))
+        val remaining = room - s.width - sep.width
         if (remaining >= PhoneLocationMinWidth.roundToPx()) {
-            val l = measurables[1].measure(androidx.compose.ui.unit.Constraints(0, remaining, 0, constraints.maxHeight))
-            val h = maxOf(s.height, l.height)
-            layout(s.width + l.width, h) {
+            val l = measurables[2].measure(androidx.compose.ui.unit.Constraints(0, remaining, 0, constraints.maxHeight))
+            val h = maxOf(s.height, sep.height, l.height)
+            layout(s.width + sep.width + l.width, h) {
                 s.placeRelative(0, (h - s.height) / 2)
-                l.placeRelative(s.width, (h - l.height) / 2)
+                sep.placeRelative(s.width, (h - sep.height) / 2)
+                l.placeRelative(s.width + sep.width, (h - l.height) / 2)
             }
         } else {
-            val l = measurables[1].measure(loose)
+            val l = measurables[2].measure(loose)
             layout(maxOf(s.width, l.width), s.height + vGap + l.height) {
                 s.placeRelative(0, 0)
                 l.placeRelative(0, s.height + vGap)

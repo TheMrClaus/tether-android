@@ -74,11 +74,16 @@ class PhoneRowMetaLineTest {
     }
 
     // The rule itself, on fixed pieces: a 100 dp status cluster and a location, in rows of three widths.
-    private fun measure(width: Int): Pair<androidx.compose.ui.geometry.Rect, androidx.compose.ui.geometry.Rect> {
+    private fun measure(width: Int) = measure3(width).let { it.first to it.third }
+
+    private var placedSeparator = false
+
+    private fun measure3(width: Int): Triple<androidx.compose.ui.geometry.Rect, androidx.compose.ui.geometry.Rect, androidx.compose.ui.geometry.Rect> {
         rule.setContent {
             Box(Modifier.width(width.dp)) {
                 PhoneMetaLine(
                     status = { Box(Modifier.size(100.dp, 14.dp).testTag("status")) },
+                    separator = { Text(META_SEPARATOR, maxLines = 1, softWrap = false, modifier = Modifier.testTag("separator")) },
                     location = { Text("~/repo/a/long/path/that/never/fits/the/line/at/all", maxLines = 1, modifier = Modifier.testTag("location")) },
                 )
             }
@@ -87,22 +92,28 @@ class PhoneRowMetaLineTest {
         val s = rule.onNodeWithTag("status").getBoundsInRoot()
         val l = rule.onNodeWithTag("location").getBoundsInRoot()
         val d = rule.density.density
-        return androidx.compose.ui.geometry.Rect(s.left.value * d, s.top.value * d, s.right.value * d, s.bottom.value * d) to
-            androidx.compose.ui.geometry.Rect(l.left.value * d, l.top.value * d, l.right.value * d, l.bottom.value * d)
+        fun r(b: androidx.compose.ui.unit.DpRect) = androidx.compose.ui.geometry.Rect(b.left.value * d, b.top.value * d, b.right.value * d, b.bottom.value * d)
+        val sepNode = rule.onNodeWithTag("separator")
+        val placed = sepNode.fetchSemanticsNode().layoutInfo.isPlaced
+        placedSeparator = placed
+        return Triple(r(s), if (placed) r(sepNode.getBoundsInRoot()) else androidx.compose.ui.geometry.Rect.Zero, r(l))
     }
 
     @Test fun theLocationBesideTheStatusKeepsAtLeast72dp() {
-        // 180 dp: 100 leaves 80 (>= 72): beside. ta-7ox8 B1: no gap (the location carries the same " · " the age has).
-        val (status, location) = measure(180)
+        // 200 dp: 100 + the separator leaves >= 72: beside. ta-7ox8 B1: no gap (the location carries the same " · " the age has).
+        val (status, sep, location) = measure3(200)
         assertTrue("beside: $status $location", location.left >= status.right && location.top < status.bottom)
-        assertEquals("no gap before the location's own separator", status.right, location.left, 0.5f)
+        assertEquals("no gap before the separator", status.right, sep.left, 0.5f)
+        assertEquals("the path follows the separator", sep.right, location.left, 0.5f)
+        assertTrue("a shared-line path has its separator", placedSeparator && sep.width > 0f)
         assertTrue("at least 72dp: ${location.width}", location.width + 1f >= 72 * rule.density.density)
     }
 
     @Test fun lessThan72dpRemainingPutsTheLocationOnItsOwnLine() {
         // 170 dp: 100 leaves 70 (< 72): below, from the line's start.
-        val (status, location) = measure(170)
+        val (status, sep, location) = measure3(170)
         assertTrue("below: $status $location", location.top >= status.bottom)
+        assertFalse("a dropped path starts bare: the separator is not placed (no leading \" · \")", placedSeparator)
         assertEquals("from the start", status.left, location.left, 0.5f)
         assertFalse("not squeezed", location.width < 72 * rule.density.density)
     }
