@@ -95,6 +95,27 @@ class RowMenuBehaviourTest {
         }
     }
 
+    /**
+     * ta-hkk7.4 (W46 WC1): at the ACCESSIBILITY layer each item is ONE node. Compose emits a fake Role-only child under any node that has a
+     * Role, merges descendants and has children (`emitFakeNodes`); that child is invisible to `onAllNodes(useUnmergedTree)`, so the test
+     * asks the node for its replaced children (the list the AccessibilityNodeProvider walks). Role, Disabled and the click sit on the tagged node.
+     */
+    @Test fun everyMenuItemIsOneAccessibilityNodeWithNoButtonChild() {
+        show(state(handover = Handover.MenuState.Blocked("Handover under way.")))
+        open("live:open")
+        val getter = androidx.compose.ui.semantics.SemanticsNode::class.java.methods.first { it.name.startsWith("getReplacedChildren") }
+        for (id in RowMenuItemId.entries.filter { has(it) }) {
+            val node = rule.onNodeWithTag(SidebarTags.menuItem(id), useUnmergedTree = true).fetchSemanticsNode()
+            @Suppress("UNCHECKED_CAST")
+            val kids = getter.invoke(node) as List<androidx.compose.ui.semantics.SemanticsNode>
+            assertTrue("$id: no Role child (fake Button): ${kids.map { it.config }}", kids.none { it.config.contains(SemanticsProperties.Role) })
+            val c = node.config
+            assertEquals("$id", androidx.compose.ui.semantics.Role.Button, c.getOrNull(SemanticsProperties.Role))
+            assertTrue("$id click on the same node", c.contains(androidx.compose.ui.semantics.SemanticsActions.OnClick))
+            assertEquals("$id disabled only when blocked", id == RowMenuItemId.Handover, c.contains(SemanticsProperties.Disabled))
+        }
+    }
+
     @Test fun aBlockedHandOverIsAButtonThatSaysDisabled() {
         show(state(handover = Handover.MenuState.Blocked("Handover under way.")))
         open("live:open")

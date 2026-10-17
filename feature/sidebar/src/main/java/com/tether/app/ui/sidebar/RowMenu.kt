@@ -54,8 +54,10 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -404,12 +406,17 @@ private fun MenuItem(
                 }
             }
             .clickable(interaction, indication = null, role = Role.Button) { if (!disabled) onClick() } // aria-disabled: focusable, does nothing
-            .semantics(mergeDescendants = true) {
-                role = Role.Button
-                if (disabled) disabled()
-            }
             .padding(horizontal = 12.dp, vertical = 6.dp)
-            .testTag(SidebarTags.menuItem(id)),
+            // ta-hkk7.4: ONE node per item. A `.semantics(mergeDescendants){ role }` after `.clickable(role)` made Compose emit a fake
+            // Role-only child Button (emitFakeNodes) under the clickable; the node states its own semantics instead (the ChainToggle
+            // precedent). Not `enabled = false`: a blocked item stays focusable, the web's aria-disabled.
+            .clearAndSetSemantics {
+                testTag = SidebarTags.menuItem(id)
+                role = Role.Button
+                contentDescription = if (desc != null) "$label. $desc" else label
+                if (disabled) disabled()
+                onClick { if (!disabled) onClick(); true }
+            },
         // ta-7ox8 B2 (studio.css:1440-1444): with a description the glyph sits in row 1 of the web's grid, centred on the LABEL line
         // (14sp x 1.2857 = 18 dp), not on the whole block; a one-line item stays centred in the item's minimum height.
         verticalAlignment = if (desc != null) Alignment.Top else Alignment.CenterVertically,
