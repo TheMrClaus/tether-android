@@ -9,7 +9,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -64,6 +66,7 @@ import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.text.proseDirection
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tether.app.protocol.helpers.Format
 import com.tether.app.protocol.helpers.SidebarRowModel
@@ -236,6 +239,8 @@ internal fun SessionRow(
     rowBounds: MutableMap<String, Rect>,
     endBounds: MutableMap<String, Rect>,
     actions: SidebarActions,
+    /** S3f (web 2cdc119c): the phone tile: 28 dp (the web's coarse `--sb-tile`) on a main row, 22 dp on a delegate child. */
+    tileSize: Dp = PhoneLook.Tile,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -313,29 +318,11 @@ internal fun SessionRow(
         if (swipeEnabled) {
             // .session-item-swipe-archive: revealed behind the row; fires at once (the swipe was step one).
             val revealed = swipeOpen || swipeActive || swipeX.value < 0f
-            Box(Modifier.matchParentSize(), contentAlignment = Alignment.CenterEnd) { Column(
-                Modifier
-                    .width(ARCHIVE_WIDTH.dp)
-                    .fillMaxHeight()
-                    .alpha(if (revealed) 1f else 0f)
-                    .background(t.danger, if (phone) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(t.radiusSm))
-                    .semantics {
-                        contentDescription = "Archive $name"
-                        role = Role.Button
-                    }
-                    .clickable(enabled = swipeOpen) {
-                        val drawnFor = swipeOrigin
-                        snapTo(false)
-                        actions.onEndSession(live.id, drawnFor)
-                    }
-                    .testTag(SidebarTags.archive(entry.key)),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(0.2f.rem, Alignment.CenterVertically),
-            ) {
-                // W40-R1 (web a710c3dc): `mineral` on `danger`, 8.56:1 (white on danger was 1.77:1).
-                SmallIcon(TetherIcons.Archive, t.mineral, 14.dp)
-                Text("ARCHIVE", style = css(type.ui, 0.6f, 700, trackingEm = 0.02f), color = t.mineral, modifier = Modifier.clearAndSetSemantics { })
-            } }
+            SwipeArchiveAction(entry.key, name, revealed, swipeOpen, phone) {
+                val drawnFor = swipeOrigin
+                snapTo(false)
+                actions.onEndSession(live!!.id, drawnFor)
+            }
         }
         Row(
             Modifier
@@ -454,11 +441,12 @@ internal fun SessionRow(
                 if (phone) {
                     ProviderCap(
                         provider,
-                        if (PhoneLook.MonochromeProviderTile) PhoneLook.Tile else PhoneDrawer.Cap,
+                        tileSize,
                         Modifier.alpha(if (dragEnabled) 1f else 0.72f),
                         selected = active,
                         letterRem = 0.65f,
                         monochrome = PhoneLook.MonochromeProviderTile,
+                        phoneTile = true,
                     )
                 } else {
                     ProviderCap(provider, 1.75f.rem, Modifier.alpha(if (dragEnabled) 1f else 0.72f), selected = active)
@@ -588,6 +576,42 @@ internal fun SessionRow(
 }
 
 /**
+ * The phone swipe's ARCHIVE action behind the row. S3f (ta-3sq0, web 15618c82): its keyboard focus ring is `mineral`, inset 2 dp
+ * (cobalt on the pale danger face was 1.07:1).
+ */
+@Composable
+private fun BoxScope.SwipeArchiveAction(key: String, name: String, revealed: Boolean, open: Boolean, phone: Boolean, onArchive: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val keyboard = androidx.compose.ui.platform.LocalInputModeManager.current.inputMode == androidx.compose.ui.input.InputMode.Keyboard
+    val shape = if (phone) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(t.radiusSm)
+    Box(Modifier.matchParentSize(), contentAlignment = Alignment.CenterEnd) {
+        Column(
+            Modifier
+                .width(ARCHIVE_WIDTH.dp)
+                .fillMaxHeight()
+                .alpha(if (revealed) 1f else 0f)
+                .background(t.danger, shape)
+                .focusRing(focused && keyboard, shape, t.mineral, offset = (-2).dp)
+                .semantics {
+                    contentDescription = "Archive $name"
+                    role = Role.Button
+                }
+                .clickable(interactionSource = interaction, indication = LocalIndication.current, enabled = open, onClick = onArchive)
+                .testTag(SidebarTags.archive(key)),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(0.2f.rem, Alignment.CenterVertically),
+        ) {
+            // W40-R1 (web a710c3dc): `mineral` on `danger`, 8.56:1 (white on danger was 1.77:1).
+            SmallIcon(TetherIcons.Archive, t.mineral, 14.dp)
+            Text("ARCHIVE", style = css(type.ui, 0.6f, 700, trackingEm = 0.02f), color = t.mineral, modifier = Modifier.clearAndSetSemantics { })
+        }
+    }
+}
+
+/**
  * The tablet rail's two-tap End control. S3f (ta-z0k0): split out of [SessionRow]; the one 1000-line composable it sat in
  * failed ART's verifier ("type Conflict unexpected as arg to if-eqz") on its `armed && endLive` branch.
  */
@@ -688,7 +712,16 @@ private fun PhoneRowBody(
         PhoneMetaLine(
             status = { StatusLine(entry, now, updatedAt, offline, sync, phone = true, handoverAt = handoverAt) },
             // ta-28i: the location is a path: code, LTR.
-            location = location?.let { path -> { Text(codeLabel(path), style = css(type.ui, 0.75f, 400, lineHeight = 1.3333f), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+            // The web draws "· location" (session-sidebar.tsx:409, the separator inside the location span): the shared separator, then the path.
+            location = location?.let { path ->
+                {
+                    val locStyle = css(type.ui, 0.75f, 400, lineHeight = 1.3333f)
+                    Row {
+                        Text(META_SEPARATOR.trimEnd(), style = locStyle, color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { })
+                        Text(codeLabel(path), style = locStyle, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+                    }
+                }
+            },
         )
         entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount, phone = true) }
     }

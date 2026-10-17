@@ -149,7 +149,10 @@ internal fun RowMenu(
         else -> ""
     }
 
+    // S3f (B2): a Popup is its own window and does not inherit the composition's layout direction: carry it in.
+    val direction = androidx.compose.ui.platform.LocalLayoutDirection.current
     Popup(popupPositionProvider = provider, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+      androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides direction) {
         val shape = RoundedCornerShape(t.radiusMd)
         Column(
             Modifier
@@ -203,6 +206,7 @@ internal fun RowMenu(
             // RM `aria-live="polite"`: the armed End and a copy are announced; sighted users read the label itself.
             Box(Modifier.size(1.dp).clearAndSetSemantics { liveRegion = LiveRegionMode.Polite; contentDescription = live })
         }
+      }
     }
 }
 

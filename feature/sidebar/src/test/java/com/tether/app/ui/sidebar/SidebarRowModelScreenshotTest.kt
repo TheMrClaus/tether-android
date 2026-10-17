@@ -52,7 +52,7 @@ private fun badgeSessions() = F.chain(3, "b", ago = 5, names = listOf("Probe the
 )
 
 private fun badgeHistories() = mapOf(
-    F.ROOT to listOf(
+    F.APP to listOf(
         F.history("h-n1", "Review the changelog", ago = 20, seenAgo = 90, digest = HistoryDigest(3, "Reordered the migration notes.")),
         F.history("h-n2", "Rename the config keys", ago = 30, seenAgo = 90, digest = HistoryDigest(1, "Found two stale keys.")),
         F.history("h-n3", "Port the importer tests", ago = 40, seenAgo = 400, digest = HistoryDigest(250, "Ported all of them.")),
@@ -73,7 +73,6 @@ fun rowState(shot: RowShot): SidebarState = when (shot) {
         F.groupSessions + F.live("d3", "Draft the changelog", cwd = F.DOCS, ago = 20 * DAY),
         pinned = listOf(F.DOCS, F.ROOT),
         current = F.APP,
-        collapsed = listOf(F.ROOT),
         histories = mapOf(F.ROOT to listOf(F.history("h-run", "Background CLI run", ago = 3).copy(origin = "agent-cli-child"))),
     )
     RowShot.NameGroup, RowShot.NameGroupOpen -> F.state(
@@ -212,7 +211,7 @@ class SidebarBadges360Font13ScreenshotTest(private val skin: TetherSkin) {
         val sessions = F.chain(2, "z", ago = 5, names = listOf("Plan the importer", "Ship the importer")).map { if (it.id == "z0") it.copy(historyId = "h-z0") else it } +
             F.live("zc", "Index the fixtures", ago = 7, parent = "z1", historyId = "h-zc")
         val histories = mapOf(
-            F.ROOT to listOf(
+            F.APP to listOf(
                 F.history("h-z0", "Plan the importer", ago = 6, seenAgo = 400, digest = HistoryDigest(250, "Ported all of them.")),
                 F.history("h-zc", "Index the fixtures", ago = 7, seenAgo = 90),
             ),

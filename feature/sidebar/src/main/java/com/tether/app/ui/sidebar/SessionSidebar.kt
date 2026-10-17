@@ -263,6 +263,9 @@ object PhoneLook {
     /** The 28 dp tile inside the 48 dp drag handle; the handle centres it on x = 24 of the card. */
     val Tile = 28.dp
 
+    /** A delegate child's tile (web `.session-item-lead-tile .provider-glyph`, 1.375rem). */
+    val ChildTile = 22.dp
+
     /** The 3 dp selected bar. */
     val SelectedBar = 3.dp
 
@@ -1253,7 +1256,7 @@ private fun WorkspaceBlock(
                 block.rows.forEachIndexed { unit, entry ->
                     // Between top-level units (a row with its delegates / chain is ONE unit): a hairline inset to the title column.
                     if (phone && unit > 0) PhoneDivider()
-                    val row: @Composable (SidebarEntry, Boolean) -> Unit = { e, draggable ->
+                    val row: @Composable (SidebarEntry, Boolean, Boolean) -> Unit = { e, draggable, child ->
                         SessionRow(
                             entry = e,
                             workspace = block.workspace,
@@ -1282,9 +1285,10 @@ private fun WorkspaceBlock(
                             rowBounds = rowBounds,
                             endBounds = endBounds,
                             actions = actions,
+                            tileSize = if (child) PhoneLook.ChildTile else PhoneLook.Tile,
                         )
                     }
-                    row(entry, true)
+                    row(entry, true, false)
                     val children = block.childrenByKey[entry.key].orEmpty()
                     if (children.isNotEmpty()) {
                         val activeChild = children.any { SidebarViewModel.isActiveEntry(state, it) }
@@ -1296,7 +1300,7 @@ private fun WorkspaceBlock(
                                     .padding(start = 1.1f.rem)
                                     .drawBehind { drawRect(t.line, Offset.Zero, androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height)) }
                                     .padding(start = 1.dp + 0.2f.rem),
-                            ) { children.forEach { child -> row(child, false) } }
+                            ) { children.forEach { child -> row(child, false, true) } }
                         }
                     }
                     // HG (tth-0bs) session-sidebar.tsx:985-1030 — the chain's earlier sessions, behind one toggle.
@@ -1320,7 +1324,7 @@ private fun WorkspaceBlock(
                                     .padding(start = 1.dp + 0.2f.rem),
                             ) {
                                 chain.older.forEach { member ->
-                                    row(member, false)
+                                    row(member, false, false)
                                     val kids = block.childrenByKey[member.key].orEmpty()
                                     if (kids.isNotEmpty()) {
                                         val kidOpen = kids.any { SidebarViewModel.isActiveEntry(state, it) } || openChildren[member.key] == true
@@ -1331,7 +1335,7 @@ private fun WorkspaceBlock(
                                                     .padding(start = 1.1f.rem)
                                                     .drawBehind { drawRect(t.line, Offset.Zero, androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height)) }
                                                     .padding(start = 1.dp + 0.2f.rem),
-                                            ) { kids.forEach { kid -> row(kid, false) } }
+                                            ) { kids.forEach { kid -> row(kid, false, true) } }
                                         }
                                     }
                                 }
@@ -1567,8 +1571,8 @@ private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline:
                         color = t.faint,
                         maxLines = 1,
                         softWrap = false,
-                        // The web's visually hidden " sessions" (literal: "1 sessions", an open web-side item).
-                        modifier = Modifier.semantics { contentDescription = "${block.openCount} sessions" }.testTag(SidebarTags.workspaceCount(block.workspace)),
+                        // The web's visually hidden " sessions", agreeing with its count (web d07c853f: "1 session").
+                        modifier = Modifier.semantics { contentDescription = "${block.openCount} session${if (block.openCount == 1) "" else "s"}" }.testTag(SidebarTags.workspaceCount(block.workspace)),
                     )
                 }
                 block.path?.let {

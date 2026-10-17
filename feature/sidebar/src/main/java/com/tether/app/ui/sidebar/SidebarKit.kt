@@ -125,8 +125,27 @@ internal fun ProviderCap(
      * their brand tiles ([ProviderTile] itself is unchanged).
      */
     monochrome: Boolean = false,
+    /**
+     * S3f (ta-3sq0, web 2cdc119c): the phone row's tile. A verified brand mark wears its brand tile (corner 7 dp, no lip);
+     * a letter fallback keeps the neutral `slate` tile with a `lineStrong` hairline and an `ink` letter.
+     */
+    phoneTile: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
+    if (phoneTile && !monochrome) {
+        ProviderTile(
+            provider = provider,
+            modifier = modifier.size(size),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(7.dp),
+            background = t.slate,
+            border = com.tether.app.ui.components.CssBorder(1.dp, t.lineStrong),
+            shadows = emptyList(),
+            color = t.ink,
+            markSize = size * 0.58f,
+            letterSize = (letterRem * 16f).sp,
+        )
+        return
+    }
     if (monochrome) {
         androidx.compose.foundation.layout.Box(
             modifier

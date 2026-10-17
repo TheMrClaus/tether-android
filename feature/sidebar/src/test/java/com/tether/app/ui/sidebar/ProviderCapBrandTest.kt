@@ -56,4 +56,29 @@ class ProviderCapBrandTest {
         assertTrue("a letter keeps the raised tile", (acp[raised] ?: 0) > acp.values.sum() / 3)
         rule.onNodeWithText("A").assertExists()
     }
+
+    /** S3f (ta-3sq0, web 2cdc119c): the phone row's tile at its 28 dp main and 22 dp delegate sizes keeps the brand colour; a letter fallback is the neutral slate tile. */
+    @Test
+    fun thePhoneRowTileWearsItsBrandColourAtBothSizesAndTheLetterKeepsSlate() {
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
+                Row {
+                    for (id in listOf("claude", "codex", "dsh")) {
+                        ProviderCap(id, PhoneLook.Tile, Modifier.testTag("main-$id"), phoneTile = true)
+                        ProviderCap(id, PhoneLook.ChildTile, Modifier.testTag("child-$id"), phoneTile = true)
+                    }
+                    ProviderCap("acp", PhoneLook.Tile, Modifier.testTag("main-acp"), phoneTile = true)
+                }
+            }
+        }
+        for (size in listOf("main", "child")) {
+            for ((id, bg) in listOf("claude" to Color(0xFFD97757), "codex" to Color(0xFF0D0D0D), "dsh" to Color(0xFFFFFFFF))) {
+                val px = colours("$size-$id")
+                assertTrue("$size $id: brand background", (px[bg] ?: 0) > px.values.sum() / 3)
+            }
+        }
+        val slate = TetherSkin.StudioDark.tokens.slate
+        val acp = colours("main-acp")
+        assertTrue("a letter keeps the neutral slate tile", (acp[slate] ?: 0) > acp.values.sum() / 3)
+    }
 }

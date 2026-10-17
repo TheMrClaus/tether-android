@@ -116,6 +116,11 @@ class RowModelUiTest {
         assertEquals("3 sessions", description(SidebarTags.workspaceCount(F.APP)))
     }
 
+    @Test fun aCountOfOneReadsAsOneSession() {
+        show(F.state(listOf(F.live("only", "Lone session", ago = 5)), current = F.APP))
+        assertEquals("1 session", description(SidebarTags.workspaceCount(F.APP)))
+    }
+
     @Test fun theTitleCountIsTheSumOfTheBlocksAndNoLensMovesAnyCount() {
         val base = F.state(F.groupSessions, pinned = listOf(F.DOCS), current = F.APP, histories = mapOf(F.APP to listOf(F.history("h1", "Old thread", ago = 5000, seenAgo = 4000))))
         val all = SidebarViewModel.view(base)

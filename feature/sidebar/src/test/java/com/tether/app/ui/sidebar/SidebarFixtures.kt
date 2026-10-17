@@ -96,6 +96,7 @@ object SidebarFixtures {
      * so the lone side's name carries a trailing zero-width space: it parses to no sequence key (the digits no longer end the name), draws
      * the same pixels, and the split stays a split (S3a commit 1, lead ruling S4-1).
      */
+    // The U+200B keeps S4 name grouping from merging the lone member into the chain's sequence, so the goldens stay byte-identical.
     fun archivedMiddleChain(): List<AgentSession> =
         chain(4, "x", ago = 5, names = listOf("Chain x0\u200B", "Chain x1", "Chain x2", "Chain x3"), archivedAt = setOf(1))
 
