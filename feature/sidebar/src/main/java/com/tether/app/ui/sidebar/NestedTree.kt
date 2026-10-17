@@ -17,6 +17,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.layout.Layout
+import androidx.compose.runtime.remember
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -124,24 +128,74 @@ internal fun Modifier.nestedConnector(isLast: Boolean, color: Color): Modifier =
     }
 }
 
-/** The head spine through a group toggle: CLOSED the slice-1 └ into the toggle's mid-height, OPEN straight on (web `bottom:0`). */
-internal fun Modifier.headSpine(open: Boolean, color: Color): Modifier = drawBehind {
+/**
+ * The head spine through a group toggle: CLOSED the slice-1 └ into the toggle's mid-height, OPEN straight on (web `bottom:0`).
+ * [overhang] is how far ABOVE the toggle's top the line starts: the web's `top: calc((--sb-tile - --sb-row) / 2)`. A toggle directly under its
+ * head row gets 0 here and its line is joined to the tile by [HeadSpineGroup] (measured); a chain toggle that follows a delegate block
+ * keeps the web's constant, (RowMinHeight - Tile) / 2, into the preceding sibling (W46 WC4).
+ */
+internal fun Modifier.headSpine(open: Boolean, color: Color, overhang: Dp = 0.dp): Modifier = drawBehind {
     val flip = layoutDirection == LayoutDirection.Rtl
     fun x(v: Float) = if (flip) size.width - v.dp.toPx() else v.dp.toPx()
     val stroke = Stroke(1.dp.toPx())
+    val top = -overhang.toPx()
     if (open) {
-        drawLine(color, androidx.compose.ui.geometry.Offset(x(24f), 0f), androidx.compose.ui.geometry.Offset(x(24f), size.height), stroke.width)
+        drawLine(color, androidx.compose.ui.geometry.Offset(x(24f), top), androidx.compose.ui.geometry.Offset(x(24f), size.height), stroke.width)
         return@drawBehind
     }
     val mid = size.height / 2
     val r = 6.dp.toPx()
     val path = Path().apply {
-        moveTo(x(24f), 0f)
+        moveTo(x(24f), top)
         lineTo(x(24f), mid - r)
         quadraticTo(x(24f), mid, if (flip) x(24f) - r else x(24f) + r, mid)
         lineTo(x(36f), mid)
     }
     drawPath(path, color, style = stroke)
+}
+
+/** The head row's measured height for [HeadSpineGroup]'s draw phase: written in measure, read in draw, never snapshot state (no recomposition). */
+private class HeadSpineGeometry { var headHeight = 0 }
+
+/**
+ * ta-hkk7.5: a head row and the group toggle directly under it (phone), so the spine starts AT the head tile's bottom edge. The web's
+ * `top: calc((--sb-tile - --sb-row) / 2)`; the tile is centred in the head row at every font scale (the row is a `CenterVertically` Row
+ * around a centred tile), so the tile's bottom lies (row - tile) / 2 above the row's bottom and the line starts there. It is drawn ON TOP of
+ * the head (`drawWithContent`: the active head's opaque face would hide a `drawBehind`), over the segment from the tile's bottom to the
+ * row's bottom; the toggle draws its own line on from there. Its own composable so the large row / block composables gain no logic.
+ * The rail (not [phone]) emits the two as before.
+ */
+@Composable
+internal fun HeadSpineGroup(phone: Boolean, head: @Composable () -> Unit, toggle: @Composable () -> Unit) {
+    if (!phone) {
+        head()
+        toggle()
+        return
+    }
+    val color = LocalTetherTokens.current.lineStrong
+    val geo = remember { HeadSpineGeometry() }
+    Layout(
+        content = { Box { head() }; Box { toggle() } },
+        modifier = Modifier.drawWithContent {
+            drawContent()
+            val flip = layoutDirection == LayoutDirection.Rtl
+            val x = if (flip) size.width - NestedTree.SpineX.toPx() else NestedTree.SpineX.toPx()
+            val h = geo.headHeight.toFloat()
+            // One px into the tile's own (same-colour) border so rounding in the centring never leaves a gap.
+            val tileBottom = kotlin.math.floor((h + PhoneLook.Tile.roundToPx()) / 2f) - 1f
+            drawLine(color, androidx.compose.ui.geometry.Offset(x, tileBottom), androidx.compose.ui.geometry.Offset(x, h), 1.dp.toPx())
+        },
+    ) { measurables, constraints ->
+        val loose = constraints.copy(minHeight = 0)
+        val headP = measurables[0].measure(loose)
+        val toggleP = measurables[1].measure(loose)
+        geo.headHeight = headP.height
+        val w = maxOf(headP.width, toggleP.width).coerceIn(constraints.minWidth, constraints.maxWidth)
+        layout(w, headP.height + toggleP.height) {
+            headP.place(0, 0)
+            toggleP.place(0, headP.height)
+        }
+    }
 }
 
 /** The rows under a group's toggle: phone = indented 30 (the connectors are each row's own), the rail keeps its 1 dp rule. */

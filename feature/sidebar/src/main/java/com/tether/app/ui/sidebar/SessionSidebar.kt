@@ -1289,42 +1289,54 @@ private fun WorkspaceBlock(
                             headProvider = headProvider,
                         )
                     }
-                    row(entry, true, SessionVariant.Top, null)
                     val children = block.childrenByKey[entry.key].orEmpty()
+                    val chain = block.chainSummaries[entry.key]
+                    val chainIsOpen = chain != null && chainOpen[chain.rootKey] == true
+                    // ta-hkk7.5: the toggle directly under the head row is grouped with it (the spine starts at the tile); a chain toggle
+                    // that follows a delegate block keeps the web's constant 14 dp into that block.
+                    val chainToggle: @Composable () -> Unit = {
+                        if (chain != null) {
+                            ChainToggle(
+                                chain = chain,
+                                headName = SafeText.line(LabelText.title(Web.sidebarSessionName(entry.js))),
+                                open = chainIsOpen,
+                                phone = phone,
+                                focusSeed = focusChain == chain.rootKey,
+                                tag = SidebarTags.chainToggle(entry.key),
+                                spineOverhang = if (children.isNotEmpty()) (PhoneLook.RowMinHeight - PhoneLook.Tile) / 2 else 0.dp,
+                            ) { chainOpen[chain.rootKey] = !chainIsOpen }
+                        }
+                    }
                     if (children.isNotEmpty()) {
                         val activeChild = children.any { SidebarViewModel.isActiveEntry(state, it) }
                         val open = activeChild || openChildren[entry.key] == true
-                        DelegateToggle(children.size, open, phone) { openChildren[entry.key] = !open }
+                        HeadSpineGroup(phone, { row(entry, true, SessionVariant.Top, null) }) { DelegateToggle(children.size, open, phone) { openChildren[entry.key] = !open } }
                         if (open) {
                             NestedRows(phone) {
                                 children.forEachIndexed { i, child -> NestedItem(phone, i == children.lastIndex) { row(child, false, SessionVariant.Delegate, null) } }
                             }
                         }
+                        chainToggle()
+                    } else if (chain != null) {
+                        HeadSpineGroup(phone, { row(entry, true, SessionVariant.Top, null) }, chainToggle)
+                    } else {
+                        row(entry, true, SessionVariant.Top, null)
                     }
-                    // HG (tth-0bs) session-sidebar.tsx:985-1030 — the chain's earlier sessions, behind one toggle.
-                    val chain = block.chainSummaries[entry.key]
+                    // HG (tth-0bs) session-sidebar.tsx:985-1030 — the chain's earlier sessions, behind one toggle (above).
                     if (chain != null) {
-                        val open = chainOpen[chain.rootKey] == true
-                        ChainToggle(
-                            chain = chain,
-                            headName = SafeText.line(LabelText.title(Web.sidebarSessionName(entry.js))),
-                            open = open,
-                            phone = phone,
-                            focusSeed = focusChain == chain.rootKey,
-                            tag = SidebarTags.chainToggle(entry.key),
-                        ) { chainOpen[chain.rootKey] = !open }
                         // Closed rows are not composed: not visible, not focusable, not in semantics (`hidden`).
-                        if (open) {
+                        if (chainIsOpen) {
                             // web tsx:1098: the head's provider, live first.
                             val headProvider = entry.live?.provider ?: entry.history?.provider
                             NestedRows(phone) {
                                 chain.older.forEachIndexed { mi, member ->
                                     val kids = block.childrenByKey[member.key].orEmpty()
                                     // web: the member's delegates are its following siblings, so a member with delegates is not the last child.
-                                    NestedItem(phone, mi == chain.older.lastIndex && kids.isEmpty()) { row(member, false, SessionVariant.Member, headProvider) }
-                                    if (kids.isNotEmpty()) {
+                                    val memberRow: @Composable () -> Unit = { NestedItem(phone, mi == chain.older.lastIndex && kids.isEmpty()) { row(member, false, SessionVariant.Member, headProvider) } }
+                                    if (kids.isEmpty()) memberRow()
+                                    else {
                                         val kidOpen = kids.any { SidebarViewModel.isActiveEntry(state, it) } || openChildren[member.key] == true
-                                        DelegateToggle(kids.size, kidOpen, phone) { openChildren[member.key] = !kidOpen }
+                                        HeadSpineGroup(phone, memberRow) { DelegateToggle(kids.size, kidOpen, phone) { openChildren[member.key] = !kidOpen } }
                                         if (kidOpen) {
                                             NestedRows(phone) {
                                                 kids.forEachIndexed { i, kid -> NestedItem(phone, i == kids.lastIndex) { row(kid, false, SessionVariant.Delegate, null) } }
@@ -1641,7 +1653,7 @@ private fun HeaderAction(
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone: Boolean, focusSeed: Boolean, tag: String, onToggle: () -> Unit) {
+private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone: Boolean, focusSeed: Boolean, tag: String, spineOverhang: androidx.compose.ui.unit.Dp = 0.dp, onToggle: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val reduced = LocalReducedMotion.current
@@ -1687,7 +1699,7 @@ private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, phone
             .heightIn(min = if (phone) PhoneDrawer.Floor else 2.75f.rem)
             .then(
                 // W39: CLOSED the └ from the head tile's bottom centre (x = 24) into the toggle's mid-height; OPEN the spine runs straight on (web `bottom:0`).
-                if (phone) Modifier.headSpine(open, elbow) else Modifier,
+                if (phone) Modifier.headSpine(open, elbow, spineOverhang) else Modifier,
             )
             .focusRing(focused && keyboardMode, shape, t.violet, offset = (-2).dp)
             .clip(shape)
