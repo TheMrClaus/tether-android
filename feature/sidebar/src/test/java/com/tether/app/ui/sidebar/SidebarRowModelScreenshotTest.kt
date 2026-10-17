@@ -208,20 +208,49 @@ class SidebarBadges360Font13ScreenshotTest(private val skin: TetherSkin) {
     @get:Rule val rule = createComposeRule()
 
     @Test fun badges() {
-        val sessions = F.chain(2, "z", ago = 5, names = listOf("Plan the importer", "Ship the importer")).map { if (it.id == "z0") it.copy(historyId = "h-z0") else it } +
+        val sessions = F.chain(2, "z", ago = 5, names = listOf("Plan the importer", "Ship the importer")).map { if (it.id == "z0") it.copy(historyId = "h-z0") else if (it.id == "z1") it.copy(historyId = "h-z1") else it } +
             F.live("zc", "Index the fixtures", ago = 7, parent = "z1", historyId = "h-zc")
         val histories = mapOf(
             F.APP to listOf(
-                F.history("h-z0", "Plan the importer", ago = 6, seenAgo = 400, digest = HistoryDigest(250, "Ported all of them.")),
+                F.history("h-z0", "Plan the importer", ago = 6, seenAgo = 400),
+                // W43: z0 is handed over (no badge); the stacked "99+ new turns" now sits on the chain head z1.
+                F.history("h-z1", "Ship the importer", ago = 5, seenAgo = 400, digest = HistoryDigest(250, "Ported all of them.")),
                 F.history("h-zc", "Index the fixtures", ago = 7, seenAgo = 90),
             ),
         )
         rule.snapContent(skin, "sidebar-badges-360-font-1.3x", "phone") {
             SidebarUnderTest(
                 skin,
-                F.state(sessions, histories = histories, current = F.APP, activeId = "z1"),
+                F.state(sessions, histories = histories, current = F.APP), // W43: no activeId, so the head z1 shows its unread badge (an active row is never unread)
                 TetherLayoutClass.Phone,
                 SidebarUiSeed(openChains = setOf("history:h-z0"), openChildren = setOf("live:z1")), // ta-7ox8 B3: z0 has a history row, so the chain's rootKey is "history:h-z0" (proved by a probe), not "live:z0"
+                SidebarActions(onCollapse = {}),
+            )
+        }
+    }
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(it) }
+    }
+}
+
+/** W43 (ta-hkk7.2): a handed-over row whose work is newer than its last-seen mark and which carries a digest shows NO badge; the "Handed over" word stays. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w360dp-h800dp-420dpi")
+class SidebarHandedOverNoBadgeScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun handedOver() {
+        val sessions = F.chain(2, "k", ago = 5, names = listOf("Plan the importer", "Ship the importer")).map { if (it.id == "k0") it.copy(historyId = "h-k0") else it }
+        val histories = mapOf(F.APP to listOf(F.history("h-k0", "Plan the importer", ago = 6, seenAgo = 400, digest = HistoryDigest(12, "Ported all of them."))))
+        rule.snapContent(skin, "sidebar-handed-over-no-badge", "phone") {
+            SidebarUnderTest(
+                skin,
+                F.state(sessions, histories = histories, current = F.APP),
+                TetherLayoutClass.Phone,
+                SidebarUiSeed(openChains = setOf("history:h-k0")),
                 SidebarActions(onCollapse = {}),
             )
         }

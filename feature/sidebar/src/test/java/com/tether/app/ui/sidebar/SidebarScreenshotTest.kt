@@ -109,10 +109,15 @@ fun sidebarState(shot: SidebarShot): SidebarState = when (shot) {
 private fun chainSuffixSessions() =
     F.chain(112, "w", ago = 5, status = { if (it == 0) "waiting" else if (it == 1) "active" else "ready" }) +
         F.chain(3, "v", ago = 15, status = { if (it == 1) "active" else "ready" }) +
-        F.chain(3, "u", ago = 25).map { if (it.id == "u0") it.copy(historyId = "h-u0") else it }
+        F.chain(3, "u", ago = 25).map { if (it.id == "u0") it.copy(historyId = "h-u0") else it } +
+        // W43: u0 is handed over, so it no longer counts as unread; the chain's "N new" now comes from this unread delegate child of an older member.
+        F.live("uc", "Index the fixtures", ago = 27, parent = "u0", historyId = "h-uc")
 
 private fun chainSuffixHistories() = mapOf(
-    F.APP to listOf(F.history("h-u0", "Chain u0", cwd = F.APP, ago = 27, seenAgo = 90, digest = null)),
+    F.APP to listOf(
+        F.history("h-u0", "Chain u0", cwd = F.APP, ago = 27, seenAgo = 90, digest = null),
+        F.history("h-uc", "Index the fixtures", cwd = F.APP, ago = 27, seenAgo = 90, digest = null),
+    ),
 )
 
 fun sidebarSeed(shot: SidebarShot): SidebarUiSeed = when (shot) {
