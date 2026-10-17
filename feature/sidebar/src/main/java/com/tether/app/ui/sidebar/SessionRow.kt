@@ -210,7 +210,8 @@ internal fun SessionRow(
     now: Long,
     /**
      * T13.2 r2: the list is not live (no connection). The row's status then says "was" on a still
-     * dot whatever [sync] holds, and End session is disabled: a saved list never ends a session.
+     * dot whatever [sync] holds. End session is NOT gated on it (web parity): a tap runs the usual two steps and the
+     * client refuses the send with its reconnect notice; nothing is queued.
      */
     offline: Boolean,
     /** T13.2: this row's freshness while the list is not live (null = none known): the glyph and age only. */
@@ -256,12 +257,11 @@ internal fun SessionRow(
     val updatedAt = SidebarModel.rowUpdatedAt(entry)
     val mode = (Web.sidebarSessionMode(entry.js) as? com.tether.app.protocol.tree.JsStr)?.value
     val endable = live != null && !live.runtimeArchived
-    // T13.2 r2: shown but inert while offline (the client refuses an End session then, too).
-    val endLive = endable && !offline
+    // ta-hmzy: no connection term (web parity): End is live offline too; the client refuses the send with its reconnect notice.
     val location = SidebarModel.rowLocation(entry, workspace)
     val unseen = Web.hasUnseenWork(entry.js)
     val digest = entry.history?.digest?.takeIf { entry.js["digest"] != null }
-    val swipeEnabled = phone && endLive
+    val swipeEnabled = phone && endable
     // S3a (SL-spec-3 §a.3/§a.4/§a.1): the SB row model's decisions, ported from the web (core/reducer SidebarRowModel).
     val digestFacts = if (truthy(entry.js["digest"])) SidebarRowModel.RowDigestFacts(digest?.newTurns ?: 0) else null
     val badge = SidebarRowModel.rowBadge(unread = entry.unread, digest = digestFacts, isGroupHead = isGroupHead)
@@ -542,7 +542,6 @@ internal fun SessionRow(
                             pinned = live?.pinned == true,
                             handover = if (handoverAvailable) activeHandover else null,
                             endArmed = armed,
-                            endLive = endLive,
                             liveId = live?.id,
                             cwd = rowCwd,
                             resumeCommand = live?.resumeCommand,
@@ -569,7 +568,7 @@ internal fun SessionRow(
             }
             // .session-item-end: two taps by design (no modal); the rail's (the phone's moved into the kebab menu).
             if (endable && !phone) {
-                TabletEndControl(entry, name, live!!.id, endLive, armed, armedOrigin, onArm, actions, endBounds)
+                TabletEndControl(entry, name, live!!.id, armed, armedOrigin, onArm, actions, endBounds)
             }
         }
     }
@@ -613,14 +612,13 @@ private fun BoxScope.SwipeArchiveAction(key: String, name: String, revealed: Boo
 
 /**
  * The tablet rail's two-tap End control. S3f (ta-z0k0): split out of [SessionRow]; the one 1000-line composable it sat in
- * failed ART's verifier ("type Conflict unexpected as arg to if-eqz") on its `armed && endLive` branch.
+ * failed ART's verifier ("type Conflict unexpected as arg to if-eqz") on its armed branch.
  */
 @Composable
 private fun TabletEndControl(
     entry: SidebarEntry,
     name: String,
     sessionId: String,
-    endLive: Boolean,
     armed: Boolean,
     armedOrigin: String?,
     onArm: (String?) -> Unit,
@@ -637,14 +635,12 @@ private fun TabletEndControl(
             .onGloballyPositioned { endBounds[entry.key] = it.boundsInRoot() }
             .semantics {
                 contentDescription = when {
-                    !endLive -> "End $name, unavailable: connect to end it"
                     armed -> "Tap again to end $name"
                     else -> "End $name"
                 }
                 role = Role.Button
             }
-            .alpha(if (endLive) 1f else 0.55f)
-            .clickable(enabled = endLive) {
+            .clickable {
                 if (armed) {
                     onArm(null)
                     actions.onEndSession(sessionId, armedOrigin)
@@ -652,11 +648,11 @@ private fun TabletEndControl(
                     onArm(entry.key)
                 }
             }
-            .then(if (armed && endLive) Modifier.background(t.dangerWash, endShape) else Modifier)
+            .then(if (armed) Modifier.background(t.dangerWash, endShape) else Modifier)
             .testTag(SidebarTags.end(entry.key)),
         contentAlignment = Alignment.Center,
     ) {
-        if (armed && endLive) {
+        if (armed) {
             Text("END?", style = css(type.ui, 0.62f, 700, trackingEm = 0.02f), color = t.danger, modifier = Modifier.clearAndSetSemantics { })
         } else {
             SmallIcon(TetherIcons.X, t.faint, 11.dp)

@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -169,15 +170,66 @@ class SidebarSyncTest {
     }
 
     @Test
-    fun offlineARowsEndItemIsInertAndItsSwipeIsGone() {
+    fun offlineARowsEndItemIsLiveAndItsSwipeIsThere() {
         val ended = mutableListOf<String>()
-        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, SidebarSyncFixtures.offline(), TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, _ -> ended += id })) }
+        val state = SidebarSyncFixtures.offline().copy(origin = ORIGIN_A)
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
         openMenuOf("live:a1")
         tapEndItem()
         tapEndItem()
-        assertTrue("a saved list never ends a session: $ended", ended.isEmpty())
-        rule.onNodeWithText("Unavailable: connect to end it", useUnmergedTree = true).assertExists()
-        rule.onNodeWithTag(SidebarTags.archive("live:a1")).assertDoesNotExist()
+        assertEquals(listOf("a1@$ORIGIN_A"), ended)
+        rule.onAllNodesWithText("Unavailable: connect to end it", useUnmergedTree = true).fetchSemanticsNodes().let { assertTrue(it.isEmpty()) }
+        rule.onNodeWithTag(SidebarTags.archive("live:a1")).assertExists()
+    }
+
+    private fun desc(key: String) =
+        rule.onNodeWithTag(SidebarTags.end(key)).fetchSemanticsNode().config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString()
+
+    @Test
+    fun offlineTheTabletsEndXIsEnabledAndEndsWithItsTwoTaps() {
+        val ended = mutableListOf<String>()
+        val state = SidebarSyncFixtures.offline().copy(origin = ORIGIN_A)
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state, TetherLayoutClass.Expanded, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).assertIsEnabled()
+        val rest = desc("live:a1")!!
+        assertTrue(rest, rest.startsWith("End ") && !rest.contains("navailable"))
+        val name = rest.removePrefix("End ")
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
+        rule.waitForIdle()
+        assertEquals("Tap again to end $name", desc("live:a1"))
+        assertTrue(ended.isEmpty())
+        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("a1@$ORIGIN_A"), ended)
+    }
+
+    /** Armed offline, the link returns, the second tap ends once with the armed origin (the web has no connection term). */
+    @Test
+    fun anEndArmedOfflineStillEndsOnceAfterTheLinkReturns() {
+        val ended = mutableListOf<String>()
+        var state by mutableStateOf(SidebarSyncFixtures.offline().copy(origin = ORIGIN_A))
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
+        openMenuOf("live:a1")
+        tapEndItem()
+        rule.runOnIdle { state = SidebarSyncFixtures.offline(connected = true).copy(origin = ORIGIN_A) }
+        rule.waitForIdle()
+        tapEndItem()
+        assertEquals(listOf("a1@$ORIGIN_A"), ended)
+    }
+
+    /** Armed online, the link drops, the second tap still ends once (the client then refuses it with its reconnect notice). */
+    @Test
+    fun anEndArmedOnlineStillEndsOnceAfterTheLinkDrops() {
+        val ended = mutableListOf<String>()
+        var state by mutableStateOf(SidebarSyncFixtures.offline(connected = true).copy(origin = ORIGIN_A))
+        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
+        openMenuOf("live:a1")
+        tapEndItem()
+        rule.runOnIdle { state = SidebarSyncFixtures.offline().copy(origin = ORIGIN_A) }
+        rule.waitForIdle()
+        tapEndItem()
+        assertEquals(listOf("a1@$ORIGIN_A"), ended)
     }
 
     @Test

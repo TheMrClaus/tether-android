@@ -114,7 +114,6 @@ internal fun RowMenu(
     pinned: Boolean,
     handover: Handover.MenuState?,
     endArmed: Boolean,
-    endLive: Boolean,
     liveId: String?,
     cwd: String,
     resumeCommand: String?,
@@ -195,9 +194,8 @@ internal fun RowMenu(
                         }
                         RowMenuItemId.End -> MenuItem(
                             id, TetherIcons.CircleStop,
-                            if (endArmed && endLive) "Tap again to end" else "End session",
-                            desc = if (!endLive) "Unavailable: connect to end it" else null,
-                            disabled = !endLive, danger = true, armed = endArmed && endLive,
+                            if (endArmed) "Tap again to end" else "End session",
+                            danger = true, armed = endArmed,
                             onBlurDisarm = onDisarm,
                         ) { onEnd() }
                     }

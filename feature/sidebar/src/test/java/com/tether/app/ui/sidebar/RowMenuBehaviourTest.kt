@@ -6,7 +6,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -184,15 +186,17 @@ class RowMenuBehaviourTest {
         rule.onAllNodesWithText("End session", useUnmergedTree = true).fetchSemanticsNodes().let { assertEquals(1, it.size) }
     }
 
-    @Test fun offlineEndIsShownDisabledWithItsReasonAndNeverEnds() {
+    /** ta-hmzy: End has no connection term (web parity). The UI half: enabled, no 'Unavailable', two taps end once. */
+    @Test fun offlineEndIsEnabledAndEndsWithItsTwoTaps() {
         val ended = mutableListOf<String>()
-        show(state(connected = false), SidebarActions(onEndSession = { id, _ -> ended += id }))
+        show(state(connected = false), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" }))
         open("live:a1")
+        item(RowMenuItemId.End).onFirst().assertIsEnabled()
         rule.onNodeWithTag(SidebarTags.menuItem(RowMenuItemId.End), useUnmergedTree = true).performClick()
         rule.onNodeWithTag(SidebarTags.menuItem(RowMenuItemId.End), useUnmergedTree = true).performClick()
         rule.waitForIdle()
-        assertTrue(ended.isEmpty())
-        rule.onAllNodesWithText("Unavailable: connect to end it", useUnmergedTree = true).fetchSemanticsNodes().let { assertEquals(1, it.size) }
+        assertEquals(listOf("a1@https://a.example"), ended)
+        assertTrue(rule.onAllNodesWithText("Unavailable: connect to end it", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
     }
 
     @Test fun theMenuClosesWhenItsRowGoesAway() {
