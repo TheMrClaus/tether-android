@@ -23,23 +23,16 @@ import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
 /**
- * W35 (ta-b6m9) + W39 (ta-ftl7): cases[10..90] of tether ac67c5e4's sidebar-order table (lib/sidebar-order.ts) = the 25
- * `handoverFoldCases` of 7cc0f38c (byte-identical) + the 56 SB-2 `sequenceGroupCases`, kept OUT of parity-corpus/ (whose
- * pins stay at 887c222 / v137) in src/test/resources/helpers/sidebar-chains-ac67c5e4.json, run through their OWN adapter
+ * W35 (ta-b6m9) + W39 (ta-ftl7): cases[10..129] of tether 19c56e25's sidebar-order table (lib/sidebar-order.ts) = the 25
+ * `handoverFoldCases` + the SB-2 `sequenceGroupCases` + the W28 nesting cases (120 in all), kept OUT of parity-corpus/ (whose
+ * pins stay at 887c222 / v137) in src/test/resources/helpers/sidebar-chains-19c56e25.json, run through their OWN adapter
  * table so HelperAdapters' exercised-set check is unchanged. The Map result (`$map`) is encoded as the typed layer does.
  */
 @RunWith(Parameterized::class)
 class SidebarChainsCaseTableTest(private val index: Int, private val fn: String) {
 
     companion object {
-        /**
-         * W28 (ta-hkk7.3): cases of the vendored ac67c5e4 file whose expectation the web changed (typed-names-only gate + ID rule),
-         * with the NEW literal result from the 1415dfaf preview corpus (120/120 agree). Delete on re-vendor at "ON MAIN".
-         * 29 = parseSequenceName("monsters_#3") -> null; 50 = the history-only realms group -> no groups.
-         */
-        private val W28_PENDING_FLIPS: Map<Int, JsValue> = mapOf(29 to JsNull, 50 to JsArr.of(emptyList()))
-
-        private const val RESOURCE = "/helpers/sidebar-chains-ac67c5e4.json"
+        private const val RESOURCE = "/helpers/sidebar-chains-19c56e25.json"
         val table: JsObj by lazy { CanonicalJson.parse(SidebarChainsCaseTableTest::class.java.getResource(RESOURCE)!!.readText()) as JsObj }
         private val cases get() = (table["cases"] as JsArr).map { it as JsObj }
 
@@ -111,21 +104,21 @@ class SidebarChainsCaseTableTest(private val index: Int, private val fn: String)
         val case = cases[index]
         val args = (case["args"] as JsArr).toList()
         val actual = CanonicalJson.encodeTagged(adapters.getValue(fn)(args))
-        val diff = TreeDiff.diff(W28_PENDING_FLIPS[index] ?: case["result"], actual, limit = 20)
+        val diff = TreeDiff.diff(case["result"], actual, limit = 20)
         assertTrue(
-            "$fn(${JsCodec.canonical(case["args"]!!)})\n  expected ${JsCodec.canonical(W28_PENDING_FLIPS[index] ?: case["result"]!!)}\n  actual   ${JsCodec.canonical(actual)}\n" +
+            "$fn(${JsCodec.canonical(case["args"]!!)})\n  expected ${JsCodec.canonical(case["result"]!!)}\n  actual   ${JsCodec.canonical(actual)}\n" +
                 diff.joinToString("\n") { it.render() },
             diff.isEmpty(),
         )
     }
 
-    /** The file is the recorded 81 cases of ac67c5e4, every fn has an adapter here, and none is orphaned. */
+    /** The file is the recorded 120 cases of 19c56e25, every fn has an adapter here, and none is orphaned. */
     @Test
     fun theCaseFileIsScopedAndPinned() {
-        assertEquals("ac67c5e4ffdb1fcfa3b4176929cdecb407b7b19c", table["tetherSha"].str)
+        assertEquals("19c56e25eab4fdf75fb34bdf3e6962b9fc0ab074", table["tetherSha"].str)
         assertTrue((table["recipe"].str ?: "").isNotEmpty())
         assertEquals(64, (table["sourceSha256"].str ?: "").length)
-        assertEquals(81, cases.size)
+        assertEquals(120, cases.size)
         assertEquals(adapters.keys, cases.map { it["fn"].str!! }.toSet())
     }
 }
