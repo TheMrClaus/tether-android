@@ -14,6 +14,8 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import com.tether.app.client.Handover
 import com.tether.app.protocol.helpers.SidebarRowModel.RowMenuItemId
 import com.tether.app.protocol.model.HistoryDigest
@@ -43,10 +45,23 @@ class RowMenuBehaviourTest {
     private fun state(activeId: String? = "open", handover: Handover.MenuState = Handover.MenuState.Enabled, connected: Boolean = true) =
         F.state(sessions, histories = histories, activeId = activeId, connected = connected).copy(activeHandover = handover, origin = "https://a.example")
 
+    private var input: androidx.compose.ui.input.InputModeManager? = null
+
     private fun show(state: SidebarState, actions: SidebarActions = SidebarActions(), seed: SidebarUiSeed = SidebarUiSeed(), layout: TetherLayoutClass = TetherLayoutClass.Phone) {
-        rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state, layout, seed, actions) }
+        rule.setContent {
+            input = androidx.compose.ui.platform.LocalInputModeManager.current
+            SidebarUnderTest(TetherSkin.StudioDark, state, layout, seed, actions)
+        }
         rule.waitForIdle()
     }
+
+    private fun keyboardMode() {
+        rule.runOnIdle { input!!.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard) }
+        rule.waitForIdle()
+    }
+
+    private fun focused(tag: String) = rule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().config.getOrNull(SemanticsProperties.Focused) == true
+    private fun itemFocused(id: RowMenuItemId) = focused(SidebarTags.menuItem(id))
 
     private fun open(key: String) {
         rule.onNodeWithTag(SidebarTags.kebab(key)).performClick()
@@ -65,6 +80,27 @@ class RowMenuBehaviourTest {
         // vertical order = the groups' order
         val tops = order.map { rule.onNodeWithTag(SidebarTags.menuItem(it), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top }
         assertEquals(tops.sorted(), tops)
+    }
+
+    /** ta-7ox8 B5: EVERY item is a Button for TalkBack; the disabled Hand over also says disabled. */
+    @Test fun everyMenuItemIsAButtonAndABlockedHandOverIsDisabled() {
+        show(state())
+        open("live:open")
+        val all = RowMenuItemId.entries.filter { has(it) }
+        assertEquals(RowMenuItemId.entries.toList(), all)
+        for (id in all) {
+            val c = rule.onNodeWithTag(SidebarTags.menuItem(id), useUnmergedTree = true).fetchSemanticsNode().config
+            assertEquals("$id", androidx.compose.ui.semantics.Role.Button, c.getOrNull(SemanticsProperties.Role))
+            assertFalse("$id enabled", c.contains(SemanticsProperties.Disabled))
+        }
+    }
+
+    @Test fun aBlockedHandOverIsAButtonThatSaysDisabled() {
+        show(state(handover = Handover.MenuState.Blocked("Handover under way.")))
+        open("live:open")
+        val c = rule.onNodeWithTag(SidebarTags.menuItem(RowMenuItemId.Handover), useUnmergedTree = true).fetchSemanticsNode().config
+        assertEquals(androidx.compose.ui.semantics.Role.Button, c.getOrNull(SemanticsProperties.Role))
+        assertTrue(c.contains(SemanticsProperties.Disabled))
     }
 
     @Test fun handOverIsOfferedOnTheOpenRowOnly() {
@@ -222,5 +258,36 @@ class RowMenuBehaviourTest {
         rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
         rule.waitForIdle()
         assertEquals(listOf("a1"), ended)
+    }
+
+    // ---- ta-7ox8 B4 (session-row-menu.tsx:68-152): keyboard-mode focus ---------------------------------------
+    // First-item focus on open and Escape/Tab need focus INSIDE the popup window, which Robolectric never grants (a test-framework
+    // requestFocus on a popup node stays unfocused too): those two are verified on the device (receipt), not here.
+
+    @Test fun aTouchOpenFocusesNothing() {
+        show(state())
+        open("live:open")
+        assertTrue(menuOpen())
+        assertTrue("no item takes focus on a touch open", RowMenuItemId.entries.none { has(it) && itemFocused(it) })
+    }
+
+    @Test fun pinClosesTheMenuAndReturnsFocusToTheKebab() {
+        show(state())
+        keyboardMode()
+        open("live:open")
+        rule.onNodeWithTag(SidebarTags.menuItem(RowMenuItemId.Pin), useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        assertFalse(menuOpen())
+        assertTrue("the kebab has focus again", focused(SidebarTags.kebab("live:open")))
+    }
+
+    @Test fun renameClosesTheMenuAndDoesNotReturnFocus() {
+        show(state())
+        keyboardMode()
+        open("live:open")
+        rule.onNodeWithTag(SidebarTags.menuItem(RowMenuItemId.Rename), useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        assertFalse(menuOpen())
+        assertFalse("the rename dialog owns focus, not the kebab", focused(SidebarTags.kebab("live:open")))
     }
 }

@@ -94,7 +94,7 @@ class RowModelUiTest {
         val pane = rule.onNodeWithTag(SidebarTags.RowMenu, useUnmergedTree = true).fetchSemanticsNode().config.getOrNull(SemanticsProperties.PaneTitle)
         assertEquals("Actions for Refactor the retry loop", pane)
         // every item is a Button; the digest block is not actionable
-        for (id in listOf(SidebarRowModel.RowMenuItemId.Rename, SidebarRowModel.RowMenuItemId.End)) {
+        for (id in listOf(SidebarRowModel.RowMenuItemId.Rename, SidebarRowModel.RowMenuItemId.Pin, SidebarRowModel.RowMenuItemId.CopyId, SidebarRowModel.RowMenuItemId.CopyPath, SidebarRowModel.RowMenuItemId.End)) {
             val c = rule.onNodeWithTag(SidebarTags.menuItem(id), useUnmergedTree = true).fetchSemanticsNode().config
             assertEquals(androidx.compose.ui.semantics.Role.Button, c.getOrNull(SemanticsProperties.Role))
         }

@@ -79,6 +79,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import com.tether.app.ui.components.focusRing
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.stateDescription
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.CssFlexRow
@@ -713,8 +714,9 @@ private fun PhoneRowBody(
                 {
                     val locStyle = css(type.ui, 0.75f, 400, lineHeight = 1.3333f)
                     Row {
-                        Text(META_SEPARATOR.trimEnd(), style = locStyle, color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { })
-                        Text(codeLabel(path), style = locStyle, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+                        // ta-7ox8 B1: the SAME " · " the age carries (no gap, spacer or padding before it): the space before the path's dot equals the space before the age's.
+                        Text(META_SEPARATOR, style = locStyle, color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { })
+                        Text(codeLabel(path), style = locStyle, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             },
@@ -840,12 +842,20 @@ private fun RowKebab(
     val focused by interaction.collectIsFocusedAsState()
     val lit = open || pressed
     val face = RoundedCornerShape(t.radiusSm)
+    // ta-7ox8 B4: keyboard-mode focus contract for the menu (first item on open; Pin/End/Escape/Tab come back here).
+    val kebabFocus = KebabFocus(
+        keyboard = androidx.compose.ui.platform.LocalInputModeManager.current.inputMode == androidx.compose.ui.input.InputMode.Keyboard,
+        requester = remember { androidx.compose.ui.focus.FocusRequester() },
+        focus = androidx.compose.ui.platform.LocalFocusManager.current,
+        scope = rememberCoroutineScope(),
+    )
     TooltipBox(
         positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
         tooltip = { PlainTooltip { Text("Session actions") } },
         state = rememberTooltipState(),
         modifier = Modifier
             .size(PhoneDrawer.Floor)
+            .then(Modifier.focusRequester(kebabFocus.requester))
             .clickable(interaction, indication = null, enabled = !dragging, role = Role.Button, onClick = onToggle)
             .semantics {
                 contentDescription = "Actions for $name"
@@ -862,7 +872,7 @@ private fun RowKebab(
                     .then(if (lit) Modifier.background(t.keyFaceHover, face) else Modifier),
                 contentAlignment = Alignment.Center,
             ) { SmallIcon(TetherIcons.EllipsisVertical, if (lit) t.white else t.faint, 20.dp) }
-            if (open) menu()
+            if (open) androidx.compose.runtime.CompositionLocalProvider(LocalKebabFocus provides kebabFocus) { menu() }
         }
     }
 }
@@ -872,7 +882,7 @@ internal val PhoneLocationMinWidth = 72.dp
 
 /**
  * The phone row's second line. Below font scale 1.5 it is one row: the status cluster at its natural
- * width, a 5.6 dp gap, then the location, which takes what is left (an end ellipsis) and drops to a line
+ * width, then the location (it carries its own " · ", the same one the age has: no gap between), which takes what is left (an end ellipsis) and drops to a line
  * of its own ONLY when less than [PhoneLocationMinWidth] remains. From 1.5x the pieces may wrap (rows
  * already grow with the text). The location is never absent: it is also in the row's label.
  */
@@ -885,7 +895,6 @@ internal fun PhoneMetaLine(status: @Composable () -> Unit, location: (@Composabl
     }
     if (LocalDensity.current.fontScale >= 1.5f) {
         androidx.compose.foundation.layout.FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(5.6.dp),
             verticalArrangement = Arrangement.spacedBy(1.6.dp),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
@@ -900,18 +909,17 @@ internal fun PhoneMetaLine(status: @Composable () -> Unit, location: (@Composabl
             Box { location() }
         },
     ) { measurables, constraints ->
-        val gap = 5.6.dp.roundToPx()
         val vGap = 1.6.dp.roundToPx()
         val room = constraints.maxWidth
         val loose = androidx.compose.ui.unit.Constraints(0, room, 0, constraints.maxHeight)
         val s = measurables[0].measure(loose)
-        val remaining = room - s.width - gap
+        val remaining = room - s.width
         if (remaining >= PhoneLocationMinWidth.roundToPx()) {
             val l = measurables[1].measure(androidx.compose.ui.unit.Constraints(0, remaining, 0, constraints.maxHeight))
             val h = maxOf(s.height, l.height)
-            layout(s.width + gap + l.width, h) {
+            layout(s.width + l.width, h) {
                 s.placeRelative(0, (h - s.height) / 2)
-                l.placeRelative(s.width + gap, (h - l.height) / 2)
+                l.placeRelative(s.width, (h - l.height) / 2)
             }
         } else {
             val l = measurables[1].measure(loose)

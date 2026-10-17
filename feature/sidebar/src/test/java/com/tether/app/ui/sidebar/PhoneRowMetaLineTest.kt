@@ -92,14 +92,15 @@ class PhoneRowMetaLineTest {
     }
 
     @Test fun theLocationBesideTheStatusKeepsAtLeast72dp() {
-        // 180 dp: 100 + 5.6 gap leaves 74.4 (>= 72): beside.
+        // 180 dp: 100 leaves 80 (>= 72): beside. ta-7ox8 B1: no gap (the location carries the same " · " the age has).
         val (status, location) = measure(180)
         assertTrue("beside: $status $location", location.left >= status.right && location.top < status.bottom)
+        assertEquals("no gap before the location's own separator", status.right, location.left, 0.5f)
         assertTrue("at least 72dp: ${location.width}", location.width + 1f >= 72 * rule.density.density)
     }
 
     @Test fun lessThan72dpRemainingPutsTheLocationOnItsOwnLine() {
-        // 170 dp: 100 + 5.6 gap leaves 64.4 (< 72): below, from the line's start.
+        // 170 dp: 100 leaves 70 (< 72): below, from the line's start.
         val (status, location) = measure(170)
         assertTrue("below: $status $location", location.top >= status.bottom)
         assertEquals("from the start", status.left, location.left, 0.5f)

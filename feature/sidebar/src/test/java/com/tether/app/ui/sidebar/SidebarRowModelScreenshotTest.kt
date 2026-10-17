@@ -221,7 +221,7 @@ class SidebarBadges360Font13ScreenshotTest(private val skin: TetherSkin) {
                 skin,
                 F.state(sessions, histories = histories, current = F.APP, activeId = "z1"),
                 TetherLayoutClass.Phone,
-                SidebarUiSeed(openChains = setOf("live:z0"), openChildren = setOf("live:z1")),
+                SidebarUiSeed(openChains = setOf("history:h-z0"), openChildren = setOf("live:z1")), // ta-7ox8 B3: z0 has a history row, so the chain's rootKey is "history:h-z0" (proved by a probe), not "live:z0"
                 SidebarActions(onCollapse = {}),
             )
         }

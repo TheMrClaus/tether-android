@@ -29,7 +29,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -54,6 +66,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
+import kotlinx.coroutines.launch
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.tether.app.client.Handover
@@ -100,6 +113,29 @@ internal class RowMenuPosition(private val gapPx: Int, private val marginPx: Int
         return IntOffset(left, top)
     }
 }
+
+/**
+ * ta-7ox8 B4 (session-row-menu.tsx:68-152): the kebab's half of the keyboard focus contract, provided by RowKebab around its menu.
+ * KEYBOARD MODE ONLY ([keyboard], read where the kebab is drawn): a touch open focuses nothing. [returnFocus] puts focus back on
+ * the kebab (the web's `onClose(true)`: Pin, armed End, Escape); with [then] it continues to the next/previous tabbable (Tab).
+ */
+internal class KebabFocus(
+    val keyboard: Boolean,
+    val requester: FocusRequester,
+    private val focus: FocusManager,
+    private val scope: kotlinx.coroutines.CoroutineScope,
+) {
+    fun returnFocus(then: FocusDirection? = null) {
+        if (!keyboard) return
+        scope.launch {
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { requester.requestFocus() }
+            if (then != null) focus.moveFocus(then)
+        }
+    }
+}
+
+internal val LocalKebabFocus = staticCompositionLocalOf<KebabFocus?> { null }
 
 /**
  * S3a (SL-spec-3 §a.2, §b.2): the web's row menu (`SessionRowMenu`) as an anchored popup under the kebab. Items, order, copy and
@@ -150,11 +186,46 @@ internal fun RowMenu(
 
     // S3f (B2): a Popup is its own window and does not inherit the composition's layout direction: carry it in.
     val direction = androidx.compose.ui.platform.LocalLayoutDirection.current
+    // B4: the kebab's contract (null = none: a menu not drawn from a kebab) and the first/last items' requesters.
+    val kebab = LocalKebabFocus.current
+    val keyboard = kebab?.keyboard == true
+    val firstReq = remember { FocusRequester() }
+    val lastReq = remember { FocusRequester() }
+    val shown = groups.flatten().filter { it != RowMenuItemId.Handover || (handover != null && handover != Handover.MenuState.Hidden) }
+    fun reqFor(id: RowMenuItemId): FocusRequester? = when {
+        id == shown.firstOrNull() -> firstReq
+        id == shown.lastOrNull() -> lastReq
+        else -> null
+    }
     Popup(popupPositionProvider = provider, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
       androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides direction) {
         val shape = RoundedCornerShape(t.radiusMd)
+        val focus = LocalFocusManager.current
+        // RM:68-88: keyboard open focuses the first item (touch: nothing; the web leaves rings to :focus-visible).
+        // The popup is its own window with its own input mode: carry the kebab's keyboard mode in, or its items cannot take focus.
+        val popupInput = androidx.compose.ui.platform.LocalInputModeManager.current
+        LaunchedEffect(Unit) {
+            if (keyboard) {
+                popupInput.requestInputMode(androidx.compose.ui.input.InputMode.Keyboard)
+                androidx.compose.runtime.withFrameNanos { }
+                runCatching { firstReq.requestFocus() }
+            }
+        }
         Column(
             Modifier
+                // RM:105-125: Tab closes, returns to the kebab and continues from it; Escape closes and returns; arrows wrap, Home/End.
+                .onPreviewKeyEvent { e ->
+                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (e.key) {
+                        Key.Escape -> { onDismiss(); kebab?.returnFocus(); true }
+                        Key.Tab -> { onDismiss(); kebab?.returnFocus(if (e.isShiftPressed) FocusDirection.Previous else FocusDirection.Next); true }
+                        Key.DirectionDown -> { if (!focus.moveFocus(FocusDirection.Down)) runCatching { firstReq.requestFocus() }; true }
+                        Key.DirectionUp -> { if (!focus.moveFocus(FocusDirection.Up)) runCatching { (if (shown.size > 1) lastReq else firstReq).requestFocus() }; true }
+                        Key.MoveHome -> { runCatching { firstReq.requestFocus() }; true }
+                        Key.MoveEnd -> { runCatching { (if (shown.size > 1) lastReq else firstReq).requestFocus() }; true }
+                        else -> false
+                    }
+                }
                 .width(width)
                 .heightIn(max = maxHeight)
                 .shadow(8.dp, shape)
@@ -173,15 +244,16 @@ internal fun RowMenu(
                 if (index > 0) MenuSeparator()
                 group.forEach { id ->
                     when (id) {
-                        RowMenuItemId.Rename -> MenuItem(id, TetherIcons.Pencil, "Rename…") { onDisarm(); onDismiss(); onRename() }
-                        RowMenuItemId.Pin -> MenuItem(id, TetherIcons.Pin, if (pinned) "Unpin session" else "Pin session") { onDisarm(); onDismiss(); onTogglePin() }
-                        RowMenuItemId.Handover -> HandoverItem(handover, onDisarm, onDismiss, onHandOver, onStopHandover)
+                        RowMenuItemId.Rename -> MenuItem(id, TetherIcons.Pencil, "Rename…", focusRequester = reqFor(id)) { onDisarm(); onDismiss(); onRename() }
+                        RowMenuItemId.Pin -> MenuItem(id, TetherIcons.Pin, if (pinned) "Unpin session" else "Pin session", focusRequester = reqFor(id)) { onDisarm(); onDismiss(); onTogglePin(); kebab?.returnFocus() }
+                        RowMenuItemId.Handover -> HandoverItem(handover, reqFor(id), onDisarm, onDismiss, onHandOver, onStopHandover)
                         RowMenuItemId.CopyId, RowMenuItemId.CopyPath, RowMenuItemId.CopyResume -> {
                             val copy = copyCopy(id)
                             val done = copied == id
                             MenuItem(
                                 id, if (done) TetherIcons.Check else copy.icon, if (done) copy.copied else copy.label,
                                 desc = if (id == RowMenuItemId.CopyResume) RESUME_WARNING else null,
+                                focusRequester = reqFor(id),
                             ) {
                                 onDisarm()
                                 val text = when (id) { RowMenuItemId.CopyId -> liveId; RowMenuItemId.CopyPath -> cwd; else -> resumeCommand }.orEmpty()
@@ -197,7 +269,8 @@ internal fun RowMenu(
                             if (endArmed) "Tap again to end" else "End session",
                             danger = true, armed = endArmed,
                             onBlurDisarm = onDisarm,
-                        ) { onEnd() }
+                            focusRequester = reqFor(id),
+                        ) { if (endArmed) kebab?.returnFocus(); onEnd() }
                     }
                 }
             }
@@ -254,6 +327,7 @@ private fun DigestBlockInMenu(turns: Int, snippet: String) {
 @Composable
 private fun HandoverItem(
     state: Handover.MenuState?,
+    req: FocusRequester?,
     onDisarm: () -> Unit,
     onDismiss: () -> Unit,
     onHandOver: () -> Unit,
@@ -262,15 +336,15 @@ private fun HandoverItem(
     when (state) {
         null, Handover.MenuState.Hidden -> Unit
         Handover.MenuState.Stopping ->
-            MenuItem(RowMenuItemId.Handover, null, Handover.STOPPING_LABEL, spinner = true, disabled = true) { }
+            MenuItem(RowMenuItemId.Handover, null, Handover.STOPPING_LABEL, spinner = true, disabled = true, focusRequester = req) { }
         is Handover.MenuState.Stop ->
-            MenuItem(RowMenuItemId.Handover, TetherIcons.CircleX, Handover.STOP_LABEL, desc = listOf(state.stageLine, Handover.STOP_EFFECT).filter { it.isNotEmpty() }.joinToString(" ")) {
+            MenuItem(RowMenuItemId.Handover, TetherIcons.CircleX, Handover.STOP_LABEL, desc = listOf(state.stageLine, Handover.STOP_EFFECT).filter { it.isNotEmpty() }.joinToString(" "), focusRequester = req) {
                 onDisarm(); onDismiss(); onStopHandover()
             }
         is Handover.MenuState.Blocked ->
-            MenuItem(RowMenuItemId.Handover, TetherIcons.ArrowRightLeft, "Hand over to a new lead", desc = state.reason, disabled = true) { }
+            MenuItem(RowMenuItemId.Handover, TetherIcons.ArrowRightLeft, "Hand over to a new lead", desc = state.reason, disabled = true, focusRequester = req) { }
         Handover.MenuState.Enabled ->
-            MenuItem(RowMenuItemId.Handover, TetherIcons.ArrowRightLeft, "Hand over to a new lead") { onDisarm(); onDismiss(); onHandOver() }
+            MenuItem(RowMenuItemId.Handover, TetherIcons.ArrowRightLeft, "Hand over to a new lead", focusRequester = req) { onDisarm(); onDismiss(); onHandOver() }
     }
 }
 
@@ -290,6 +364,7 @@ private fun MenuItem(
     armed: Boolean = false,
     spinner: Boolean = false,
     onBlurDisarm: (() -> Unit)? = null,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit,
 ) {
     val t = LocalTetherTokens.current
@@ -319,6 +394,7 @@ private fun MenuItem(
         Modifier
             .fillMaxWidth()
             .heightIn(min = RowMenuLook.ItemMinHeight)
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .focusRing(focused, shape, t.violet)
             .background(face, shape)
             .onFocusChanged { state ->
@@ -334,10 +410,12 @@ private fun MenuItem(
             }
             .padding(horizontal = 12.dp, vertical = 6.dp)
             .testTag(SidebarTags.menuItem(id)),
-        verticalAlignment = Alignment.CenterVertically,
+        // ta-7ox8 B2 (studio.css:1440-1444): with a description the glyph sits in row 1 of the web's grid, centred on the LABEL line
+        // (14sp x 1.2857 = 18 dp), not on the whole block; a one-line item stays centred in the item's minimum height.
+        verticalAlignment = if (desc != null) Alignment.Top else Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+        Box(if (desc != null) Modifier.size(20.dp, 18.dp) else Modifier.size(20.dp), contentAlignment = Alignment.Center) {
             if (spinner) SpinnerRing(t.muted, 14.dp) else if (icon != null) SmallIcon(icon, glyph, 18.dp)
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
