@@ -98,8 +98,9 @@ data class SessionProjection(
  */
 @Serializable
 data class SessionErrorProjection(
+    @Serializable(with = com.tether.app.protocol.NullOnBadNumberSerializer::class)
     val seq: Long? = null,
-    @Serializable(with = com.tether.app.protocol.LenientEpochMsOrNullSerializer::class)
+    @Serializable(with = com.tether.app.protocol.NullOnBadNumberSerializer::class)
     val ts: Long? = null,
     val message: String,
     val cause: String? = null,
