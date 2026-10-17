@@ -51,7 +51,10 @@ class HelperCorpusIntegrityTest {
 
     @Test
     fun everyRecordedFnHasAnAdapterAndEveryAdapterIsExercised() {
-        val recorded = HelperTable.names().flatMap { name -> HelperTable.load(name).cases.map { "$name.${it.fn}" } }.toSet()
+        // ta-d3tj.9 (B7): the side file's cases exercise the shared sidebar-order adapters too; R1 deletes this union line with the file.
+        val sideFile = CanonicalJson.parse(SidebarChainsCaseTableTest::class.java.getResource("/helpers/sidebar-chains-19c56e25.json")!!.readText()) as JsObj
+        val recorded = HelperTable.names().flatMap { name -> HelperTable.load(name).cases.map { "$name.${it.fn}" } }.toSet() +
+            (sideFile["cases"] as JsArr).map { "sidebar-order.${(it as JsObj)["fn"].str}" }
         assertEquals("fns with no Kotlin adapter", emptySet<String>(), recorded - HelperAdapters.keys)
         assertEquals("adapters no case exercises", emptySet<String>(), HelperAdapters.keys - recorded)
     }
