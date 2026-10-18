@@ -5,7 +5,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.text.TextLayoutResult
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.theme.TetherSkin
@@ -39,6 +39,7 @@ class SessionRowWholeWordsTest {
             .filter { it.layoutInput.text.text == name }
         assertTrue("the row's name is drawn: ${layouts.map { it.layoutInput.text.text }}", layouts.isNotEmpty())
         layouts.forEach { l -> assertEquals("one line, never wrapped", 1, l.lineCount) }
-        rule.onNodeWithContentDescription(name, substring = true).assertExists()
+        val rowLabel = rule.onNodeWithTag(SidebarTags.row("live:w1"), useUnmergedTree = true).fetchSemanticsNode()
+        assertTrue(rowLabel.toString(), rule.onAllNodes(androidx.compose.ui.test.hasContentDescription(name, substring = true), useUnmergedTree = true).fetchSemanticsNodes().any { it.config.getOrNull(SemanticsProperties.ContentDescription)?.any { d -> d.startsWith(name) } == true })
     }
 }
