@@ -96,3 +96,54 @@ class SpineProfileTest {
         }
     }
 }
+
+/**
+ * ta-hkk7.7 item 1 (wave-check B1): the chain toggle's constant 14 dp stub. A chain toggle after a delegate block draws its line from 14 dp ABOVE its
+ * top (web studio.css:1388, `top: calc((--sb-tile - --sb-row) / 2)`), up into the preceding sibling; the last delegate row has no `::after`, so a gap
+ * stays between that row's centre and the stub. Probed on the pixel column at the spine x (mirrored in RTL).
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class ChainStubTest {
+    @get:Rule val rule = createComposeRule()
+
+    private fun probe(seed: SidebarUiSeed, delegatesOpen: Boolean, rtl: Boolean = false) {
+        var line = Color.Unspecified
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) { line = LocalTetherTokens.current.lineStrong }
+            CompositionLocalProvider(LocalLayoutDirection provides if (rtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                SidebarUnderTest(TetherSkin.StudioDark, DelegatesAndChainFixture.state, seed = seed)
+            }
+        }
+        rule.waitForIdle()
+        val d = rule.density.density
+        val root = rule.onNodeWithTag(SidebarTags.Root).fetchSemanticsNode().boundsInRoot
+        val head = rule.onNodeWithTag(SidebarTags.row("live:c2")).fetchSemanticsNode().boundsInRoot
+        val toggle = rule.onNodeWithTag(SidebarTags.chainToggle("live:c2")).fetchSemanticsNode().boundsInRoot
+        val bmp = rule.onNodeWithTag(SidebarTags.Root).captureToImage().asAndroidBitmap()
+        fun at(x: Int, y: Int) = bmp.getPixel(x, y) and 0xFFFFFF
+        val strong = line.toArgb() and 0xFFFFFF
+        fun isLine(c: Int) = listOf(16, 8, 0).all { sh -> Math.abs(((c shr sh) and 0xFF) - ((strong shr sh) and 0xFF)) <= 10 }
+        val x0 = (if (rtl) head.right - 24 * d else head.left + 24 * d).let { (it - root.left).toInt() }
+        val toggleTop = (toggle.top - root.top).toInt()
+        val x = (x0 - 2..x0 + 2).firstOrNull { isLine(at(it, toggleTop + 2)) } ?: x0
+        assertTrue("the toggle's own line is at x=$x", isLine(at(x, toggleTop + 2)))
+        // (a) the unbroken run up from the toggle ends 14 dp above its top (+-1 px)
+        var top = toggleTop + 2
+        while (top > 0 && isLine(at(x, top - 1))) top--
+        val stub = 14 * d
+        assertTrue("(a) the stub starts ${(toggleTop - top) / d} dp above the toggle (want 14 +-1 px): top=$top toggleTop=$toggleTop", Math.abs((toggleTop - top) - stub) <= 1.0)
+        // (b) background directly above it
+        val bgX = x + (if (rtl) -(10 * d).toInt() else (10 * d).toInt())
+        assertTrue("(b) background above the stub: ${at(x, top - 2).toString(16)} vs ${at(bgX, top - 2).toString(16)}", !isLine(at(x, top - 2)))
+        // (c) no line between the preceding sibling's centre and the stub: the line does not climb into the delegate block
+        val prevCentre = if (delegatesOpen) (rule.onNodeWithTag(SidebarTags.row("live:cd")).fetchSemanticsNode().boundsInRoot.center.y - root.top).toInt()
+        else (toggleTop - 24 * d).toInt() // the 48 dp delegate toggle's own mid-height
+        val from = prevCentre + (1 * d).toInt() + (if (delegatesOpen) 0 else 0)
+        for (y in from..top - 2) assertTrue("(c) no line at y=$y between the previous sibling's centre ($prevCentre) and the stub ($top)", !isLine(at(x, y)))
+    }
+
+    @Test fun stubIsFourteenDpIntoTheLastOpenDelegateRowAndNoFurther() = probe(DelegatesAndChainFixture.open, true)
+    @Test fun stubIsFourteenDpUnderTheClosedDelegateToggle() = probe(DelegatesAndChainFixture.delegatesClosed, false)
+    @Test fun mirroredInRtl() = probe(DelegatesAndChainFixture.open, true, rtl = true)
+}
