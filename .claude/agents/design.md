@@ -61,5 +61,7 @@ For each brief:
    that reworks itself for hundreds of steps pays twice for judgement the run already buys. Keep
    your context small — read the sections your brief names, never a whole doc corpus. If something
    looks wrong, record it as a candidate in the receipt and let the lead decide. Your final message to the lead is a hand-back of at most ~1.5k chars: the verdict line and the receipt path. Every caveat or doubt goes under the receipt's `## Open items`, which the lead always reads.
+   In a fix round, answer the findings your brief lists — those and only those; a note you agree with
+   is a candidate in your receipt, not extra work.
 
 <!-- canonical: app-orchestration — refresh with `game-orchestration install --fleet app --all`; don't hand-edit this file here -->

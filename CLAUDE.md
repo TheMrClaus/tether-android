@@ -67,7 +67,8 @@ single-file, non-design, non-core edit itself (policy rule 3).
   (the judges judge), and their answer back is that receipt, never raw output.
 - Plans are challenged by `wave-check` **before** briefs go out; design verdicts come from the
   critics against one reference, with `design-director` ruling where they disagree. Never
-  self-judge. UI claims are verified with a real-browser capture at the run doc's viewports.
+  self-judge. A judge's finding is BLOCKING only with a bar line, evidence and the smallest fix — the
+  rest are notes; the lead triages before dispatch (gauntlet-core › Findings). UI claims are verified with a real-browser capture at the run doc's viewports.
 - The lead keeps the build gates, the shared dev instance (single-instance: wait, never kill), the
   pushes and the deploys — and verifies a deploy against the served artifact.
 - Jev (TypeSafe) is **advisory**: triage, evidence filtering and the tool-call gate — never the

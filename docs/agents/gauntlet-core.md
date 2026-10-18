@@ -9,7 +9,8 @@ disagree, the run doc wins for that run and the lead reports the contradiction.
 ## The loop
 
 A piece is built, rendered or measured, and **judged blind against its bar**. If it loses, the judge
-names the **single biggest gap** and the maker goes back in with a *changed* candidate. Nothing is
+names every BLOCKING finding, ranked (the first is the biggest); the lead triages them and the maker
+answers the ones its brief lists in one *changed* candidate (*Findings*, below). Nothing is
 accepted on a maker's description of its own work. **Loop until the owner stops you**: a wave
 boundary or a named owner checkpoint is the only place the run stops, and at a checkpoint the lead
 stops, publishes and asks — it never decides on the owner's behalf.
@@ -32,11 +33,65 @@ ship it — that includes text, copy and numbers, not just images. Copying also 
 judgement (a screen judged against the thing it was copied from always "wins"). Nothing user-facing
 carries a reference product's name.
 
+## Findings — what a judge reports, and what happens to it
+
+Every judge — `design-director`, `wave-check`, a critic, a refuter, a verifier — reports in two
+classes only. A judge asked for gaps nearly always finds some; this keeps that from becoming rework.
+
+- **BLOCKING** — the artefact fails a bar line, shown. It carries all three: **the bar line**, quoted
+  with its source (a plan/`DECISIONS` requirement, a gate or budget number, or — for pixels — the
+  plate/reference id, the element on it and the property that differs); **the evidence** (capture +
+  region, `file:line`, the gate's output line — a pixel gap must show at the run's viewing size, the
+  device frame at 1:1; one seen only zoomed in is a NOTE); **the smallest change that closes it**. Missing any
+  of the three, it is a NOTE, whatever its author called it.
+- **NOTE** — everything else: polish, taste with no plate element behind it (labelled `taste`), a
+  better idea, a risk with no failing case, a test for a case the bar does not name. Notes stay in
+  the verdict file; they are never dispatched by default and never make a REJECT.
+
+One verdict names **every** BLOCKING finding, ranked (first = biggest), so one fix round can
+answer every one the lead keeps; it never pads the list — "no blocking findings" is a complete verdict, and APPROVE/PASS.
+The hand-back carries the BLOCKING lines only. A blind critic's gap is triaged like any other, never
+pasted into a brief verbatim: a difference the winner or plate shows can be cited, a remedy the
+critic proposes on its own is a NOTE, and nothing from a replica split is dispatched.
+
+**The lead triages every finding before anything is dispatched**, one line each in the run's
+`findings.tsv` (run-artefacts dir, tab-separated: `id piece judge round class disposition reason`):
+`fix` (BLOCKING, cited, reproduced — it goes into the one fix-round brief); `rejected` + reason —
+`uncited` (no bar line, or the line does not say that), `not-reproduced`, `out-of-scope` (another
+piece, a SETTLED or `OWNER` decision) or `late` (below); `overruled` (a `fix` the owner or
+`design-director` later ruled against); `noted`; `note-dispatched` (a note briefed anyway, with the
+reason). Rejected findings join the run's SETTLED list, so no later round re-raises them. The lead
+never rejects a cited, reproduced BLOCKING finding on taste — a critic's goes to `design-director`,
+a `design-director` one to the owner — and on `wave-check`'s findings the lead is the party judged,
+so every one it rejects is listed in the wave report. The fix-round brief lists its `fix` findings
+by id with their bar lines; the maker answers those and only those — no hardening, abstraction or
+tests the bar does not ask for.
+
+**A re-review reopens two things only:** each prior `fix` finding (closed or still open, with
+evidence) and a regression the change introduced (cite the diff hunk or changed region, and the bar
+line). A new finding on what the change did not touch is `late`: recorded, not blocking — unless it
+fails a gate number or a stated requirement; then the lead promotes it (`fix`, reason
+`late-promoted: …`) and it still counts as the judge's miss. A candidate regenerated wholesale has
+changed in full. A REJECT counts toward the three-rejection rule only if one of its BLOCKING findings
+survived triage.
+
+**Measured every wave:** the wave report carries the `FINDINGS:` line of `game-orchestration findings
+<ledger>`, whose table gives per judge: BLOCKING issued, held = `fix`, rejected by reason, late,
+notes, notes dispatched (`round` is 1 for a first review, 2+ for a re-review). A judge held under 70% across 5+ BLOCKING findings is a policy finding: its next brief
+quotes the rejected lines as what is not blocking; a second such wave goes to the owner.
+
+**Nothing unmeasurable is dispatched.** Every piece in the wave plan, and the brief that makes it,
+names its **instrument** (gate or harness command, critics workflow, or judge) and its **bar line**
+(the exact requirement, number, or plate/reference + the elements it is judged on). Without both it
+is not dispatched — the lead makes it measurable first (a `scout` writes the check, or the owner
+names the plate) — and `wave-check` returns it UNMEASURABLE, a BLOCKING finding citing this rule.
+
 ## What a wave is
 
 A wave **starts** with the lead's plan in the run-artefacts dir (`w<N>-plan.md`: *Verified at
 dispatch · Wave · Open questions for wave-check · LIVE STATUS*) and a `wave-check` pass over it
-**before any brief goes out**.
+**before any brief goes out**. Every piece in the plan names its instrument and its bar line
+(*Findings*, above).
 
 A wave **ends** when all of this is true:
 
@@ -48,8 +103,8 @@ A wave **ends** when all of this is true:
    <tracker…>`; over either, demote first — `~/gauntlet/tools/jev_triage.py done --tracker <digest>` holds on an
    oversize one, and no wave report is posted on one);
 3. anything user-visible is **deployed and the served artifact verified**;
-4. the models line is recorded (`game-orchestration models --fleet app <session-id>`, routing rule
-   6) — and once the run is over budget, or the owner asks, the wave report carries the per-role
+4. the models line and the `FINDINGS:` line are recorded (`game-orchestration models --fleet app
+   <session-id>`, routing rule 6; `game-orchestration findings <ledger>`) — and once the run is over budget, or the owner asks, the wave report carries the per-role
    spend (`game-orchestration cost <session-id>` — per role, never per agent count);
 5. a **short wave report** is posted: what landed (shas), what was refuted, what is next.
 

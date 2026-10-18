@@ -28,6 +28,9 @@ data/content entry, and small convention-following edits.
   never `sleep N; tail log` as its own step (each re-reads your whole context). A fix round after
   refuters is a fresh lane: if your context passes ~200k, stop, write the receipt and hand back. Your final message to the lead is a hand-back of at most ~1.5k chars: the verdict line and the receipt path. Every caveat or doubt goes under the receipt's `## Open items`, which the lead always reads.
 - **Never grade your own output.** Independent verification comes from elsewhere.
+- **As a refuter or verifier** you report BLOCKING findings (the bar line quoted, the evidence, the
+  smallest change) or NOTEs — never an uncited gap; "nothing blocking" is a complete answer
+  (`docs/agents/gauntlet-core.md` › Findings).
 - Log your own work in this repo's beads store (`bd update <id> --append-notes …`), or if your
   brief names no bead, report back with files touched, the exact verification output, and
   everything you refuted.
