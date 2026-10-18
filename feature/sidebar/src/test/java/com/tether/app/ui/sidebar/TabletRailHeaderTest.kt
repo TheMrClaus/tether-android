@@ -22,13 +22,13 @@ import org.robolectric.annotation.Config
 
 private const val ATLAS = "/srv/atlas-web"
 
-/** A 9-letter workspace with a session waiting on the user: the header's name, count and waiting dot at the 272 rail. */
+/** A 9-letter workspace with 12 open sessions (a two-digit count, as the web's "atlas-web 12"), one waiting on the user: the header's name, count and waiting dot at the 272 rail. */
 private fun atlasState(): SidebarState {
     val sessions = listOf(
         SidebarFixtures.live("w1", "Approve the lint fix", cwd = ATLAS, status = "waiting", ago = 3),
         SidebarFixtures.live("w2", "Migrate the legacy importer", cwd = ATLAS, ago = 30),
         SidebarFixtures.live("w3", "Write the release notes", cwd = ATLAS, ago = 90),
-    )
+    ) + (4..12).map { SidebarFixtures.live("w$it", "Session $it", cwd = ATLAS, ago = 100L + it) }
     return SidebarFixtures.state(sessions, current = ATLAS, activeId = "w2")
 }
 
