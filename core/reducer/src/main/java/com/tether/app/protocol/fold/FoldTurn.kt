@@ -85,6 +85,9 @@ private fun foldTurnStarted(state: JsObj, event: JsObj): JsObj {
         "activeTurnId" to event["turnId"],
         "turnOrder" to state["turnOrder"].arr!!.add(event["turnId"] ?: JsNull),
         "turnsById" to turnsById.put(turnKey, turn),
+        // events.ts:2940 (#256): a new turn supersedes the previous turn-less error as the "current" one;
+        // the durable record stays in `sessionErrors`.
+        "lastError" to JsNull,
     )
 }
 
@@ -117,7 +120,7 @@ private fun foldUserMessageAccepted(state: JsObj, event: JsObj): JsObj {
 // engines/events.ts peerFrom (v149, fe4aa8c0): `{ sessionId, name }` bounded; a missing or empty id drops the whole `from`.
 private const val PEER_FROM_NAME_CHARS = 80
 
-private fun peerFrom(value: JsValue?): JsObj? {
+internal fun peerFrom(value: JsValue?): JsObj? {
     val o = value as? JsObj ?: return null
     val sessionId = boundedIdentifier(o["sessionId"]) ?: return null
     val name = boundedDisplayText(o["name"] as? JsStr ?: JsStr(""), PEER_FROM_NAME_CHARS)
@@ -403,6 +406,20 @@ private fun foldWarning(state: JsObj, event: JsObj, type: String): JsObj {
     }
 }
 
+// events.ts:1092 foldSessionError (#256): `{ seq, ts, message, cause? }`, idempotent by seq, newest MAX_SESSION_ERRORS kept.
+private fun foldSessionError(state: JsObj, event: JsObj): JsArr {
+    val existing = state["sessionErrors"] as? JsArr ?: JsArr.EMPTY
+    val seqValue = event["seq"]
+    val seq: JsValue? = if (isFiniteNumber(seqValue)) seqValue else null
+    if (seq != null && existing.any { strictEquals(it.obj?.get("seq"), seq) }) return existing
+    val entry = JsObj.of(
+        "seq" to (seq ?: JsNull),
+        "ts" to (nonNegativeFiniteNumber(event["ts"]) ?: JsNull),
+        "message" to event["message"],
+    ).spread(if (truthy(event["cause"])) JsObj.of("cause" to event["cause"]) else JsObj.EMPTY)
+    return existing.add(entry).slice(-Limits.MAX_SESSION_ERRORS)
+}
+
 // events.mjs:2692
 private fun foldError(state: JsObj, event: JsObj): JsObj {
     val authExpired = event["cause"].str == "auth_expired"
@@ -412,12 +429,23 @@ private fun foldError(state: JsObj, event: JsObj): JsObj {
     } else {
         state["accountAuth"]
     }
-    if (isNullish(event["turnId"])) return state.with("lastError" to event["message"], "accountAuth" to accountAuth)
+    // events.ts:3544: ONLY a turn-less error appends to `sessionErrors` (with lastError and accountAuth).
+    if (isNullish(event["turnId"])) {
+        return state.with(
+            "lastError" to event["message"],
+            "sessionErrors" to foldSessionError(state, event),
+            "accountAuth" to accountAuth,
+        )
+    }
     if (!isOpenCurrentTurn(state, event["turnId"])) {
         return if (!latch) state else state.put("accountAuth", accountAuth)
     }
     val next = updateTurn(state) { turn ->
+        // events.ts:3553-3554 (#256): journal-stamped time of the FIRST error (same first-wins rule); a key only when stamped.
+        val errorAt = nonNegativeFiniteNumber(event["ts"])
         turn.put("error", coalesce(turn["error"], event["message"])).spread(
+            if (isNullish(turn["error"]) && isNullish(turn["errorAt"]) && errorAt != null) JsObj.of("errorAt" to errorAt) else JsObj.EMPTY,
+        ).spread(
             if (isNullish(turn["errorCause"]) && truthy(event["cause"])) JsObj.of("errorCause" to event["cause"]) else JsObj.EMPTY,
         )
     }
@@ -431,6 +459,8 @@ private fun foldTurnEnd(state: JsObj, event: JsObj): JsObj {
         val completed = turn.with(
             "status" to js("done"),
             "outcome" to event["outcome"],
+            // events.ts:3572 (#256): journal-stamped end time; a key only when stamped.
+            "endedAt" to nonNegativeFiniteNumber(event["ts"]),
         ).spread(
             if (isNullish(turn["errorCause"]) && truthy(event["cause"])) JsObj.of("errorCause" to event["cause"]) else JsObj.EMPTY,
         )

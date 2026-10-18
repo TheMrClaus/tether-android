@@ -71,15 +71,16 @@ internal class SessionErrorFlusher(
 }
 
 /**
- * Before R1 the live fold sets only `lastError` (FoldTurn.kt:415) and keeps the snapshot's `sessionErrors`,
- * so the old `lastError` row stays as the fallback: it shows when the cleaned lastError is non-empty AND
- * the session has no errors, or it differs from the cleaned message of the LAST entry (a v152 snapshot
- * carries both, set together, and must not draw the row twice). R1 removes it.
+ * The `lastError` row survives as the fallback for a server older than v145 (floor 129), whose snapshot carries only
+ * `lastError`. It shows when the cleaned lastError is non-empty AND no session-error entry carries the same cleaned
+ * message. Since R1 (ta-d3tj.10) the app's own fold appends the entry together with `lastError`, and a v145+ snapshot
+ * carries both, so the row never draws twice: not even when a replayed error left `lastError` on an entry that is not
+ * the last (W51 ruling 8; the web, which has no lastError row, draws the entries only).
  */
 internal fun fallbackLastError(lastError: String?, entries: List<SessionErrorEntry>): String? {
     val text = sessionErrorText(lastError) ?: return null
-    val last = entries.lastOrNull() ?: return text
-    return text.takeIf { it != sessionErrorMessage(last.message) }
+    if (entries.any { sessionErrorMessage(it.message) == text }) return null
+    return text
 }
 
 /** One gate for the empty state and the transcript floor (ChatScreen): turns, session errors, or the fallback row. */

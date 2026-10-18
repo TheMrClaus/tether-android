@@ -470,4 +470,19 @@ class CreateFrameTest {
     }
 
     private fun JsObj.flag(key: String) = this[key] == JsBool.TRUE
+
+    /**
+     * ta-d3tj.10 (R1, ruling 6): the draft form now carries `toolApproval` ("ask" at start, web draft-form.ts:427) as a pure
+     * passthrough. The Create frame still sends NO `toolApproval` key for any provider and any choice until ta-d3tj.3.
+     */
+    @Test
+    fun theDraftFormsToolApprovalIsNeverSentOnTheCreateFrame() {
+        assertEquals(JsStr("ask"), DraftForm.INITIAL_DRAFT_FORM["toolApproval"])
+        for (provider in listOf("claude", "codex", "opencode", "reasonix", "pi")) {
+            for (choice in listOf("ask", "auto", "yolo")) {
+                val wire = CreateFrame.build(form("toolApproval" to choice), entry(provider), DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
+                assertFalse("$provider/$choice", "toolApproval" in wire)
+            }
+        }
+    }
 }

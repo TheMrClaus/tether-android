@@ -405,7 +405,7 @@ internal fun buildChatItems(
     }
     errors.flush(Double.POSITIVE_INFINITY, drop = false) // errors newer than every turn (chat-view.tsx:3877)
     flushBg(Double.POSITIVE_INFINITY) // any command launched after the last turn
-    // T6.7 (chat-view.tsx:3534-3536): the pre-R1 `lastError` row, only where no session-error row already says it.
+    // T6.7: the `lastError` row stays as the fallback for a server before v145 (no sessionErrors), only where no entry says it (R1).
     fallbackLastError(projection.lastError, sessionErrorEntries(projection, tree))?.let { items.add(ChatItem.SessionError(scope, it)) }
     // T6.6 (chat-view.tsx:3537-3539): the session's own provider notices, one `.notices` stack.
     if (noticeLabel != null) {

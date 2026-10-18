@@ -23,8 +23,8 @@ class HelperCorpusIntegrityTest {
 
     @Test
     fun manifestPinsProtocolAndTetherSha() {
-        assertEquals(137.0, manifest["protocolVersion"].num)
-        assertEquals("887c22214126fa662192e2a3adf6f2dd44e69cd6", manifest["tetherSha"].str)
+        assertEquals(152.0, manifest["protocolVersion"].num)
+        assertEquals("19c56e25eab4fdf75fb34bdf3e6962b9fc0ab074", manifest["tetherSha"].str)
         val environment = (manifest["helpers"] as JsObj)["environment"] as JsObj
         assertEquals("UTC", environment["timeZone"].str)
         assertEquals(1790078400000.0, environment["referenceNowMs"].num)
@@ -46,17 +46,23 @@ class HelperCorpusIntegrityTest {
             }
         }
         assertTrue(mismatches.joinToString("\n"), mismatches.isEmpty())
-        assertEquals(807, HelperTable.names().sumOf { HelperTable.load(it).cases.size })
+        assertEquals(927, HelperTable.names().sumOf { HelperTable.load(it).cases.size })
     }
 
     @Test
     fun everyRecordedFnHasAnAdapterAndEveryAdapterIsExercised() {
-        // ta-d3tj.9 (B7): the side file's cases exercise the shared sidebar-order adapters too; R1 deletes this union line with the file.
-        val sideFile = CanonicalJson.parse(SidebarChainsCaseTableTest::class.java.getResource("/helpers/sidebar-chains-19c56e25.json")!!.readText()) as JsObj
-        val recorded = HelperTable.names().flatMap { name -> HelperTable.load(name).cases.map { "$name.${it.fn}" } }.toSet() +
-            (sideFile["cases"] as JsArr).map { "sidebar-order.${(it as JsObj)["fn"].str}" }
+        val recorded = HelperTable.names().flatMap { name -> HelperTable.load(name).cases.map { "$name.${it.fn}" } }.toSet()
         assertEquals("fns with no Kotlin adapter", emptySet<String>(), recorded - HelperAdapters.keys)
         assertEquals("adapters no case exercises", emptySet<String>(), HelperAdapters.keys - recorded)
+    }
+
+    /** ta-d3tj.10 (R1): the 130 sidebar-order cases (10 + the 120 of the retired side file) all run through the shared adapters. */
+    @Test
+    fun theSidebarOrderTableHolds130CasesAndEveryFnHasAnAdapter() {
+        val table = HelperTable.load("sidebar-order")
+        assertEquals(130, table.cases.size)
+        assertEquals(14, table.cases.map { it.fn }.toSet().size)
+        assertEquals(emptySet<String>(), table.cases.map { "sidebar-order.${it.fn}" }.toSet() - HelperAdapters.keys)
     }
 
     /** The exporter's own skip notes, each accounted for (never a silent gap). */
@@ -72,7 +78,7 @@ class HelperCorpusIntegrityTest {
         assertEquals(expected, actual)
         val skippedModules = ((manifest["helpers"] as JsObj)["skippedModules"] as JsArr).map { (it as JsObj)["module"].str }
         assertEquals(
-            listOf("lib/session-order.mjs", "lib/session-seen.mjs", "components/session-sidebar.tsx (hasUnseenWork, hasWorkInProgress, grouping)"),
+            listOf("lib/session-order.ts", "lib/session-seen.ts", "components/session-sidebar.tsx (hasUnseenWork, hasWorkInProgress, grouping)"),
             skippedModules,
         )
     }

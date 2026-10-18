@@ -45,8 +45,17 @@ private fun foldContextCompacted(state: JsObj, event: JsObj): JsObj {
     }
 }
 
-// events.mjs:1059
+// events.ts:1212 PI_DIALOG_CANCELLED_NOTICE_ID (ed9ca75a, tth-npv): the ONE session-level notice a Pi session keeps for
+// dialogs cancelled for want of an open turn; unlike every other notice (first-wins by noticeId) it is REPLACED in
+// place by its latest instance.
+private const val PI_DIALOG_CANCELLED_NOTICE_ID = "pi-dialog-cancelled"
+
+// events.ts:1214
 private fun appendProviderNotice(notices: JsArr, notice: JsObj): JsArr {
+    if (strictEquals(notice["noticeId"], JsStr(PI_DIALOG_CANCELLED_NOTICE_ID))) {
+        val at = notices.indexOfFirst { strictEquals(it.obj?.get("noticeId"), notice["noticeId"]) }
+        if (at != -1) return notices.set(at, notice)
+    }
     if (notices.any { strictEquals(it.obj?.get("noticeId"), notice["noticeId"]) }) return notices
     return notices.add(notice).slice(-Limits.PROVIDER_PROJECTION_LIMITS.providerNotices)
 }

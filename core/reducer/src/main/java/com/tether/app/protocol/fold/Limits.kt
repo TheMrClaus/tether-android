@@ -154,6 +154,9 @@ object Limits {
     // events.mjs:967 (79c3d37) — v130 (S13.1-C): how many removed queueIds the projection retains.
     const val MAX_REMOVED_QUEUE_IDS = 50
 
+    // events.ts:1089 (#256): bound on SessionProjection.sessionErrors (newest kept).
+    const val MAX_SESSION_ERRORS = 20
+
     // events.mjs:958
     const val MAX_SPAWNED_RUN_KEYS = 2000
 
@@ -173,7 +176,13 @@ object Limits {
     val SPAWNED_RUN_COMPARED_FIELDS: List<String> = listOf(
         "origin", "provider", "title", "prompt", "mode", "model", "cwd", "logFile", "nativeId",
         "parentTurnId", "toolId", "status", "exitCode", "signal", "startedAt", "endedAt",
+        // events.ts:1681 SPAWNED_RUN_SUMMARY_FIELDS (#257)
+        "inputTokens", "cachedInputTokens", "outputTokens", "reasoningTokens", "totalTokens", "toolCalls",
+        "toolCallsPartial", "finalMessage", "finalMessageTruncated",
     )
+
+    // events.ts:1679 (#257)
+    const val SPAWNED_RUN_SUMMARY_MESSAGE_CAP_CHARS = 8_000
 
     // events.mjs:1003
     const val MAX_SPAWNED_RUN_MEDIA = 48

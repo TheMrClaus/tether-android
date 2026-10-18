@@ -13,10 +13,10 @@ class MirrorVersionTest {
         val sha = Regex("\"tetherSha\"\\s*:\\s*\"([0-9a-f]+)\"").find(manifest)!!.groupValues[1]
         assertEquals("re-synced corpus: bump REDUCER_CORPUS_SHA (it invalidates local checkpoints)", sha, REDUCER_CORPUS_SHA)
         assertEquals("$sha/v$REDUCER_PROTOCOL_VERSION", REDUCER_VERSION)
-        // T15.8: the corpus re-synced at 887c222 (v137: deferred-row queuedAt, #222 grants folded).
-        assertEquals("887c22214126fa662192e2a3adf6f2dd44e69cd6/v137", REDUCER_VERSION)
-        // ta-m7ef: the app models v143 on the wire, but the fold (the corpus) is still v137's: no checkpoint is cleared.
-        assertEquals(137, REDUCER_PROTOCOL_VERSION)
+        // ta-d3tj.10 (R1): the reducer + helpers re-vendored at web 19c56e25 (v152); every fold hunk is ported, so no revision suffix.
+        assertEquals("19c56e25eab4fdf75fb34bdf3e6962b9fc0ab074/v152", REDUCER_VERSION)
+        // The hello/advertised protocol stays 143 (ta-d3tj.7 bumps it last); the FOLD is v152's, so older checkpoints re-base.
+        assertEquals(152, REDUCER_PROTOCOL_VERSION)
         assertEquals(143, TARGET_PROTOCOL_VERSION)
     }
 }

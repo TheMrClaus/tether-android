@@ -16,9 +16,9 @@ class CorpusIntegrityTest {
     private val files = (manifest["files"] as JsArr).map { it as JsObj }
 
     @Test
-    fun protocolVersionIs137() {
-        // T15.8: the protocol corpora moved to tether 887c222 (v137).
-        assertEquals(137.0, manifest["protocolVersion"].num)
+    fun protocolVersionIs152() {
+        // ta-d3tj.10 (R1): the reducer + helpers corpora moved to tether 19c56e25 (v152).
+        assertEquals(152.0, manifest["protocolVersion"].num)
     }
 
     @Test
@@ -77,10 +77,10 @@ class CorpusIntegrityTest {
     }
 
     @Test
-    fun referenceEventsMjsMatchesItsRecordedSha() {
+    fun referenceEventsTsMatchesItsRecordedSha() {
         val dir = File(CanonicalJson.corpusDir, "reference")
         val recorded = File(dir, "SHA256").readText().trim().substringBefore(' ')
-        assertEquals(recorded, CanonicalJson.sha256Hex(File(dir, "events.mjs").readBytes()))
-        assertTrue(recorded.startsWith("10070cbec06ebe64")) // events.mjs @ 887c222
+        assertEquals(recorded, CanonicalJson.sha256Hex(File(dir, "events.ts").readBytes()))
+        assertTrue(recorded.startsWith("64fd00e52ecd1f9f")) // engines/events.ts @ 19c56e25 (events.mjs was renamed to .ts upstream)
     }
 }

@@ -6,7 +6,7 @@ was generated from (TRACKER.md's PARITY_BASE line says which base each layer is 
 
 | Corpus | Source branch @ sha | Manifest tetherSha |
 |---|---|---|
-| reducer+helpers | `(detached)` @ `887c222` | `887c22214126fa662192e2a3adf6f2dd44e69cd6` |
+| reducer+helpers | `(detached)` @ `19c56e25` | `19c56e25eab4fdf75fb34bdf3e6962b9fc0ab074` |
 | wire | `(detached)` @ `19c56e25` | `19c56e25eab4fdf75fb34bdf3e6962b9fc0ab074` |
 | tokens | `(detached)` @ `887c222` | `887c222` |
 | screens (PNGs gitignored) | `android-parity/ta-lx3` @ `97af028` | `97af028a88a99588af5db8f350e2a43aacf53935` |
@@ -15,8 +15,14 @@ T15.8 (re-baseline at tether `887c222`, v137): reducer+helpers and wire moved; s
 screens exporter fails at `887c222` (its seed clicks `button.mobile-menu`, which the redesigned top
 bar no longer renders), so the screens stayed at `3f69e4f` until ta-lx3 fixed it tether-side (below).
 
-W48 (ta-d3tj.1): the WIRE corpus alone moved to tether `19c56e25` (v152; `sync-corpus.sh - <src> - -`). reducer+helpers
-and `corpus-manifest.json` stay at `887c222` / v137 until R1 (ta-d3tj.10) re-vendors them with the folds, so the two bases differ on purpose.
+W48 (ta-d3tj.1): the WIRE corpus alone moved to tether `19c56e25` (v152; `sync-corpus.sh - <src> - -`), leaving reducer+helpers at `887c222`
+/ v137 until R1.
+
+R1 (ta-d3tj.10): reducer+helpers and `corpus-manifest.json` re-vendored at tether `19c56e25` (v152; `sync-corpus.sh <src> - - -`, the output
+byte-identical to the one W47 generated and saved). Wire and reducer+helpers are now at the same base; tokens and screens stay at `887c222`.
+`reference/events.mjs` is replaced by `reference/events.ts` (hand-copied, `sync-corpus.sh` does not touch `reference/`): `engines/events.ts` at
+`19c56e25`, sha256 `64fd00e52ecd1f9f3ec983ae956c9631a56238ae25040a672350ca8c21655ccd` (recorded in `reference/SHA256`, pinned by CorpusIntegrityTest).
+Upstream renamed events.mjs to events.ts (9ee02e9b); the FoldSourceChecksTest label set (74) is unchanged.
 
 ta-ccu: tokens are the unmodified `887c222` export (run twice, byte-identical). Against the old
 Studio-reduced `356b456` file it retires 21 Machine-era material tokens (every one transparent, 0 or
