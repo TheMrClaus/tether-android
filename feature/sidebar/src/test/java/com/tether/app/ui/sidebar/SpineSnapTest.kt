@@ -45,6 +45,28 @@ class SpineLocalXTest {
         }
     }
 
+    /** The DRAW call sites' x (what each Modifier/drawWithContent uses), at densities where raw and naive-per-scope rounding differ from the snapped column. */
+    @Test fun callSiteXsAreTheSnappedColumnAtDensitiesWhereRawAndNaiveDiffer() {
+        for (dn in listOf(2.6f, 2.625f, 2.75f)) {
+            val d = Density(dn)
+            val pad = with(d) { NestedTree.RowsPad.roundToPx() }
+            val snapped = Math.round(with(d) { NestedTree.SpineX.toPx() }).toFloat()
+            val w = 1000f
+            for (flip in listOf(false, true)) {
+                fun m(x: Float) = if (flip) w - x else x
+                assertEquals("toggle $dn flip=$flip", m(snapped), toggleLineX(d, flip, w), 0f)
+                assertEquals("group $dn flip=$flip", m(snapped), groupLineX(d, flip, w), 0f)
+                assertEquals("connector $dn flip=$flip", m(snapped - pad), connectorLineX(d, flip, w), 0f)
+            }
+        }
+        // the variants really differ from the snapped column (so the asserts above are not vacuous):
+        val raw26 = with(Density(2.6f)) { NestedTree.SpineX.toPx() } // 62.4 px, unsnapped
+        assertTrue("raw 2.6 $raw26 != snapped", raw26 != toggleLineX(Density(2.6f), false, 1000f))
+        val d = Density(2.75f)
+        val naive = with(d) { NestedTree.RowsPad.roundToPx() } + Math.round(-NestedTree.Run.value * 2.75f) // 83 - 16 = 67
+        assertTrue("naive per-scope $naive != snapped ${toggleLineX(d, false, 1000f)}", naive.toFloat() != toggleLineX(d, false, 1000f) )
+    }
+
     @Test fun theNaivePerScopeRoundingWouldNotHold() {
         // the shape of the bug the sweep guards: rounding the connector's own local x (-Run) leaves 2.75 a px off
         val d = Density(2.75f)
