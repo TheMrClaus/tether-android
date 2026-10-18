@@ -22,6 +22,10 @@ class NestedTreeScreenshotTest(private val skin: TetherSkin) {
         SidebarUnderTest(skin, NestedFixture.state, TetherLayoutClass.Phone, NestedFixture.seed, SidebarActions(onCollapse = {}))
     }
 
+    @Test fun openTreeDelegatesAndChain() = rule.snapContent(skin, "sidebar-nested-open-tree-delegates-and-chain", "phone") {
+        SidebarUnderTest(skin, DelegatesAndChainFixture.state, TetherLayoutClass.Phone, DelegatesAndChainFixture.open, SidebarActions(onCollapse = {}))
+    }
+
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
