@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -194,6 +195,7 @@ object SidebarTags {
     fun row(key: String) = "sidebar-row:$key"
     fun freshness(key: String) = "sidebar-freshness:$key"
     fun blockDot(workspace: String) = "sidebar-block-dot:$workspace"
+    const val RailChevron = "sidebar-rail-chevron"
     fun handle(key: String) = "sidebar-handle:$key"
     fun end(key: String) = "sidebar-end:$key"
     /** S3a: the phone row's kebab (the tablet keeps [end]). */
@@ -1038,7 +1040,7 @@ private fun WorkspaceBlock(
             .semantics { contentDescription = SafeText.line(block.name) },
         verticalArrangement = Arrangement.spacedBy(if (compact) 0.dp else 0.15f.rem),
     ) {
-        BlockHeader(block, actions, offline = !state.connected, compact = compact)
+        BlockHeader(block, actions, offline = !state.connected, compact = compact, rail = !phone)
         if (!block.collapsed) {
             Column(
                 // W39: on the phone the workspace's sessions sit in ONE rounded card (`graphiteRaised`, radius 12) that
@@ -1189,10 +1191,8 @@ private fun PhoneDivider() {
 
 /** `.workspace-block-header` (globals.css 3035-3137; studio.css 317-322). */
 @Composable
-private fun BlockHeader(block: BlockView, actions: SidebarActions, offline: Boolean, compact: Boolean) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    PhoneBlockHeader(block, actions, offline)
+private fun BlockHeader(block: BlockView, actions: SidebarActions, offline: Boolean, compact: Boolean, rail: Boolean) {
+    PhoneBlockHeader(block, actions, offline, rail)
 }
 
 /**
@@ -1201,7 +1201,7 @@ private fun BlockHeader(block: BlockView, actions: SidebarActions, offline: Bool
  * collapsed); then the star and the + keys. The current workspace shows in the tile (violet letter + ring).
  */
 @Composable
-private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline: Boolean) {
+private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline: Boolean, rail: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val reduced = LocalReducedMotion.current
@@ -1234,12 +1234,15 @@ private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline:
                 .clickable(role = Role.Button) { actions.onToggleWorkspaceCollapsed(block.workspace) },
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // .workspace-badge: 32 dp, centred on x = 24 of the 48 dp leading slot (the rows' tiles share the line).
-            Box(Modifier.width(PhoneLook.Lead).clearAndSetSemantics { }, contentAlignment = Alignment.Center) {
+            // W53b: the tablet rail orders the header as the web does (session-sidebar.tsx workspace-block-toggle: chevron, then
+            // .workspace-badge, then the name; studio.css:1318): the chevron FIRST, no trailing chevron column, no 48 dp lead slot.
+            if (rail) SmallIcon(TetherIcons.ChevronDown, t.faint, 16.dp, Modifier.padding(start = 4.dp, end = 2.dp).rotate(rotation).testTag(SidebarTags.RailChevron))
+            // .workspace-badge: 32 dp, centred on x = 24 of the 48 dp leading slot (the rows' tiles share the line); 28 dp on the rail.
+            Box(if (rail) Modifier.clearAndSetSemantics { } else Modifier.width(PhoneLook.Lead).clearAndSetSemantics { }, contentAlignment = Alignment.Center) {
                 val badgeShape = RoundedCornerShape(t.radiusSm)
                 Box(
                     Modifier
-                        .size(32.dp)
+                        .size(if (rail) 28.dp else 32.dp)
                         .background(Color(0xFF283650), badgeShape)
                         .then(if (block.isCurrent) Modifier.border(1.dp, t.violetStrong, badgeShape) else Modifier),
                     contentAlignment = Alignment.Center,
@@ -1250,12 +1253,14 @@ private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline:
                         color = if (block.isCurrent) t.violet else Color(0xFFC2D1ED),
                     )
                 }
+                // W53b: on the rail the activity dot rides the tile's corner (out of the flow: the name keeps the width).
+                if (rail) Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-1).dp)) { BlockActivityDot(block, offline, withGap = false) }
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(if (rail) 4.dp else 8.dp))
             Column(Modifier.weight(1f)) {
                 // ta-28i: a workspace's folder name and path are code (server text), LTR.
                 // S3a (D-L34-5/22): the workspace's open count follows the name, drawn on collapsed headers too; the name ellipsizes first.
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (rail) 4.dp else 6.dp)) {
                     Text(codeLabel(block.name), style = css(type.ui, 1f, 700), color = t.white, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     Text(
                         "${block.openCount}",
@@ -1271,19 +1276,7 @@ private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline:
                     Text(codeLabel(it), style = css(type.ui, 0.75f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            block.activity?.let { a ->
-                Spacer(Modifier.width(8.dp))
-                if (offline && (a.waiting > 0 || a.active > 0)) {
-                    StatusDot(t.faint, size = 0.5f.rem, modifier = Modifier.testTag(SidebarTags.blockDot(block.workspace)))
-                } else if (a.waiting > 0) {
-                    val wash = t.violetWash
-                    WaitingPingDot(
-                        t.violet,
-                        dotSize = 0.5f.rem,
-                        modifier = if (reduced) Modifier.drawBehind { drawCircle(wash, radius = size.minDimension / 2 + 3.dp.toPx()) } else Modifier,
-                    )
-                } else if (a.active > 0) StatusDot(t.running, size = 0.5f.rem)
-            }
+            if (!rail) BlockActivityDot(block, offline, withGap = true)
             // The keyboard digit hint (the pinned workspaces' 1-9) is not drawn on a touch phone; nothing is bound to it.
             if (!PhoneLook.HideKbdDigits && block.index < 9 && block.pinned) {
                 Spacer(Modifier.width(8.dp))
@@ -1296,7 +1289,7 @@ private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline:
                     contentAlignment = Alignment.Center,
                 ) { Text("${block.index + 1}", style = css(type.mono, 0.6f, 400), color = t.faint) }
             }
-            SmallIcon(TetherIcons.ChevronDown, t.faint, 16.dp, Modifier.padding(horizontal = 8.dp).rotate(rotation))
+            if (!rail) SmallIcon(TetherIcons.ChevronDown, t.faint, 16.dp, Modifier.padding(horizontal = 8.dp).rotate(rotation))
         }
         HeaderAction(
             if (block.pinned) FilledStar else TetherIcons.Star,
@@ -1308,6 +1301,25 @@ private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline:
         ) { actions.onTogglePinnedProject(block.workspace) }
         HeaderAction(TetherIcons.Plus, 20.dp, "New session in ${SafeText.line(block.name)}", t.faint, compact = true) { actions.onNewSessionIn(block.workspace) }
     }
+}
+
+/** The workspace's activity dot: waiting (violet, pinging), active (running) or, from a saved list, a faint one. */
+@Composable
+private fun BlockActivityDot(block: BlockView, offline: Boolean, withGap: Boolean) {
+    val t = LocalTetherTokens.current
+    val reduced = LocalReducedMotion.current
+    val a = block.activity ?: return
+    if (withGap) Spacer(Modifier.width(8.dp))
+    if (offline && (a.waiting > 0 || a.active > 0)) {
+        StatusDot(t.faint, size = 0.5f.rem, modifier = Modifier.testTag(SidebarTags.blockDot(block.workspace)))
+    } else if (a.waiting > 0) {
+        val wash = t.violetWash
+        WaitingPingDot(
+            t.violet,
+            dotSize = 0.5f.rem,
+            modifier = if (reduced) Modifier.drawBehind { drawCircle(wash, radius = size.minDimension / 2 + 3.dp.toPx()) } else Modifier,
+        )
+    } else if (a.active > 0) StatusDot(t.running, size = 0.5f.rem)
 }
 
 @Composable
