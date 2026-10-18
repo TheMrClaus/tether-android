@@ -1236,13 +1236,13 @@ private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline:
         ) {
             // W53b: the tablet rail orders the header as the web does (session-sidebar.tsx workspace-block-toggle: chevron, then
             // .workspace-badge, then the name; studio.css:1318): the chevron FIRST, no trailing chevron column, no 48 dp lead slot.
-            if (rail) SmallIcon(TetherIcons.ChevronDown, t.faint, 16.dp, Modifier.padding(start = 4.dp, end = 2.dp).rotate(rotation).testTag(SidebarTags.RailChevron))
-            // .workspace-badge: 32 dp, centred on x = 24 of the 48 dp leading slot (the rows' tiles share the line); 28 dp on the rail.
+            if (rail) SmallIcon(TetherIcons.ChevronDown, t.faint, 16.dp, Modifier.padding(start = 2.dp, end = 1.dp).rotate(rotation).testTag(SidebarTags.RailChevron))
+            // .workspace-badge: 32 dp, centred on x = 24 of the 48 dp leading slot (the rows' tiles share the line); 24 dp on the rail (the web's badge is 22).
             Box(if (rail) Modifier.clearAndSetSemantics { } else Modifier.width(PhoneLook.Lead).clearAndSetSemantics { }, contentAlignment = Alignment.Center) {
                 val badgeShape = RoundedCornerShape(t.radiusSm)
                 Box(
                     Modifier
-                        .size(if (rail) 28.dp else 32.dp)
+                        .size(if (rail) 24.dp else 32.dp)
                         .background(Color(0xFF283650), badgeShape)
                         .then(if (block.isCurrent) Modifier.border(1.dp, t.violetStrong, badgeShape) else Modifier),
                     contentAlignment = Alignment.Center,
@@ -1260,7 +1260,7 @@ private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline:
             Column(Modifier.weight(1f)) {
                 // ta-28i: a workspace's folder name and path are code (server text), LTR.
                 // S3a (D-L34-5/22): the workspace's open count follows the name, drawn on collapsed headers too; the name ellipsizes first.
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (rail) 4.dp else 6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (rail) 3.dp else 6.dp)) {
                     Text(codeLabel(block.name), style = css(type.ui, 1f, 700), color = t.white, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                     Text(
                         "${block.openCount}",
