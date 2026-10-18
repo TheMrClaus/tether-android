@@ -68,6 +68,14 @@ internal object NestedTree {
     val Radius = 6.dp
 }
 
+/**
+ * ta-hkk7.7: the ONE x (in a draw scope whose origin lies [scopeOffsetPx] device px right of the group's origin) of every segment of a spine:
+ * the group-frame x is round(SpineX px), so the head spine, the toggle's line and each member connector land on the same device column at
+ * any density. [scopeOffsetPx] is an integer (k * RowsPad.roundToPx(), where Compose places the padded rows), so RTL mirroring stays exact.
+ */
+internal fun spineLocalX(density: androidx.compose.ui.unit.Density, scopeOffsetPx: Int): Float =
+    with(density) { kotlin.math.round(NestedTree.SpineX.toPx()) - scopeOffsetPx }
+
 /** A member row's lead: `↳` (16, `faint`), plus a 16 provider mark when [provider] differs from [headProvider] (web `differsFromHead`). */
 @Composable
 internal fun ElbowLead(headProvider: String?, provider: String) {
@@ -113,18 +121,20 @@ internal fun Modifier.nestedConnector(isLast: Boolean, color: Color): Modifier =
     val flip = layoutDirection == LayoutDirection.Rtl
     val run = NestedTree.Run.toPx()
     fun x(fromStart: Float) = if (flip) size.width - fromStart else fromStart
+    // the spine's x in this (padded) frame: the group's one pixel-snapped column, not -Run
+    val sx = spineLocalX(this, NestedTree.RowsPad.roundToPx())
     val mid = size.height / 2
     val r = minOf(NestedTree.Radius.toPx(), run)
     val stroke = Stroke(1.dp.toPx())
     val path = Path().apply {
-        moveTo(x(-run), 0f)
-        lineTo(x(-run), mid - r)
-        quadraticTo(x(-run), mid, if (flip) x(-run) - r else x(-run) + r, mid)
+        moveTo(x(sx), 0f)
+        lineTo(x(sx), mid - r)
+        quadraticTo(x(sx), mid, if (flip) x(sx) - r else x(sx) + r, mid)
         lineTo(x(0f), mid)
     }
     drawPath(path, color, style = stroke)
     if (!isLast) {
-        drawLine(color, androidx.compose.ui.geometry.Offset(x(-run), mid), androidx.compose.ui.geometry.Offset(x(-run), size.height), stroke.width)
+        drawLine(color, androidx.compose.ui.geometry.Offset(x(sx), mid), androidx.compose.ui.geometry.Offset(x(sx), size.height), stroke.width)
     }
 }
 
@@ -136,7 +146,8 @@ internal fun Modifier.nestedConnector(isLast: Boolean, color: Color): Modifier =
  */
 internal fun Modifier.headSpine(open: Boolean, color: Color, overhang: Dp = 0.dp): Modifier = drawBehind {
     val flip = layoutDirection == LayoutDirection.Rtl
-    fun x(v: Float) = if (flip) size.width - v.dp.toPx() else v.dp.toPx()
+    val sx = spineLocalX(this, 0)
+    fun x(v: Float) = if (flip) size.width - (if (v == 24f) sx else v.dp.toPx()) else (if (v == 24f) sx else v.dp.toPx())
     val stroke = Stroke(1.dp.toPx())
     val top = -overhang.toPx()
     if (open) {
@@ -179,7 +190,7 @@ internal fun HeadSpineGroup(phone: Boolean, head: @Composable () -> Unit, toggle
         modifier = Modifier.drawWithContent {
             drawContent()
             val flip = layoutDirection == LayoutDirection.Rtl
-            val x = if (flip) size.width - NestedTree.SpineX.toPx() else NestedTree.SpineX.toPx()
+            val x = spineLocalX(this, 0).let { if (flip) size.width - it else it }
             val h = geo.headHeight.toFloat()
             // One px into the tile's own (same-colour) border so rounding in the centring never leaves a gap.
             val tileBottom = kotlin.math.floor((h + PhoneLook.Tile.roundToPx()) / 2f) - 1f
