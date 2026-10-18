@@ -71,10 +71,26 @@ class PanelWidthGeometryTest {
         assertNull(PanelWidthGeometry.parseStored(true))
     }
 
-    /** The defaults (no stored width): Studio's rail 17rem and inspector 18rem at every width (studio.css:48-49). */
+    /** The defaults (no stored width): Studio's rail 17rem and inspector 18rem (studio.css:48-49). */
     @Test fun defaultsFollowTheCascade() {
         assertEquals(272, PanelWidthGeometry.defaultWidth(rail))
         assertEquals(288, PanelWidthGeometry.defaultWidth(inspector))
+    }
+
+    /** W53 (D-L34-32, studio.css:1257): the rail is 20rem from a 90rem (1440) window; the inspector never changes. */
+    @Test fun theRailDefaultIs320FromAt1440() {
+        assertEquals(272, PanelWidthGeometry.defaultWidth(rail, 1439))
+        assertEquals(320, PanelWidthGeometry.defaultWidth(rail, 1440))
+        assertEquals(288, PanelWidthGeometry.defaultWidth(inspector, 1440))
+        assertEquals(272, PanelWidthGeometry.effectiveWidth(rail, null, 1439))
+        assertEquals(320, PanelWidthGeometry.effectiveWidth(rail, null, 1440))
+        assertEquals(320, PanelWidthGeometry.effectiveWidth(rail, null, 1680))
+    }
+
+    /** A stored, operator-dragged width still wins at any window width. */
+    @Test fun aStoredWidthWinsOverTheWideDefault() {
+        assertEquals(300, PanelWidthGeometry.effectiveWidth(rail, 300, 1680))
+        assertEquals(272, PanelWidthGeometry.effectiveWidth(rail, 272, 1680))
     }
 
     /** The defaults agree with the generated token export (D9) in both Studio skins. */

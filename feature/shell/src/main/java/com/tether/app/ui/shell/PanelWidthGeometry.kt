@@ -74,17 +74,25 @@ object PanelWidthGeometry {
 
     /**
      * The width of a column with nothing stored — Studio's `--rail-width` / `--inspector-width`:
-     * rail 17rem and inspector 18rem at every width (studio.css:48-49, which cascade over the
+     * rail 17rem (20rem from a 90rem window, W53) and inspector 18rem (studio.css:48-49, which cascade over the
      * globals.css `:root` values at the same specificity).
      */
     fun defaultWidth(kind: PanelKind): Int = if (kind == PanelKind.Rail) 272 else 288
+
+    /** D-L34-32 (studio.css:1257 at 19c56e25): the rail's default is 20rem from a 90rem (1440) window up. */
+    const val WIDE_RAIL_VIEWPORT = 1440
+    const val WIDE_RAIL_WIDTH = 320
+
+    /** The default width at [viewportWidth]: the rail is [WIDE_RAIL_WIDTH] from [WIDE_RAIL_VIEWPORT] up, else [defaultWidth]. */
+    fun defaultWidth(kind: PanelKind, viewportWidth: Int): Int =
+        if (kind == PanelKind.Rail && viewportWidth >= WIDE_RAIL_VIEWPORT) WIDE_RAIL_WIDTH else defaultWidth(kind)
 
     /**
      * The rendered width: the stored width through the CSS `clamp()` that `panelWidthCss` emits
      * (panel-widths.mjs:101-106, re-clamped against the live viewport), else the theme default.
      */
     fun effectiveWidth(kind: PanelKind, stored: Int?, viewportWidth: Int): Int {
-        val parsed = stored?.let { parseStored(it) } ?: return defaultWidth(kind)
+        val parsed = stored?.let { parseStored(it) } ?: return defaultWidth(kind, viewportWidth)
         return clamp(kind, parsed.toDouble(), viewportWidth)
     }
 }

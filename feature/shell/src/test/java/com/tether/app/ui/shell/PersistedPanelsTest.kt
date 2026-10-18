@@ -202,3 +202,23 @@ internal class RefusingPrefsStore : androidx.datastore.core.DataStore<androidx.d
 
 private fun androidx.compose.ui.test.junit4.ComposeTestRule.onAllNodesWithTagExists(tag: String): Boolean =
     onAllNodes(androidx.compose.ui.test.hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty()
+
+/** W53 (D-L34-32): from 1440 dp a double-tap reset returns the rail to 320 (the web clears its inline width: the stylesheet's 20rem shows). */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w1680dp-h1050dp-mdpi")
+class PersistedPanelsWideResetTest : PersistedPanelsBase() {
+    @Test fun aResetOnAWideWindowReturnsTheRailTo320() {
+        seed(PanelPrefs(sidebarWidth = 360))
+        show()
+        awaitWidth(ShellTags.Sidebar, 360f)
+        rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput { doubleClick(center) }
+        awaitStored(PanelPrefs())
+        recompose()
+        awaitWidth(ShellTags.Sidebar, 320f)
+    }
+
+    @Test fun nothingStoredOnAWideWindowIs320() {
+        show()
+        awaitWidth(ShellTags.Sidebar, 320f)
+    }
+}
