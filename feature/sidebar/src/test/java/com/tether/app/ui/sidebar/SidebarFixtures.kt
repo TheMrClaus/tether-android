@@ -14,6 +14,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tether.app.protocol.helpers.JsCollator
 import com.tether.app.protocol.model.AgentSession
@@ -253,8 +254,8 @@ private val StudioRail = Color(0xFF141D2E)
  * real ones). The phone drawer follows SessionDrawerHost in lockstep (ta-1jj7, owner-directed
  * design: the compact full-screen drawer; ta-8znp: the foot inset): an opaque full-width panel on the
  * fixed `#141d2e`, no backdrop, padded by [PhoneDrawer]'s design minimum per side (the system-bar and
- * cutout insets are zero here; the host's own test measures them). The expanded layout's 264dp rail
- * column keeps `1.35rem 0.875rem 0.75rem`.
+ * cutout insets are zero here; the host's own test measures them). The expanded layout's rail
+ * column ([railWidth], 272 by default) keeps `1.35rem 0.875rem 0.75rem`.
  */
 @Composable
 fun SidebarUnderTest(
@@ -263,13 +264,15 @@ fun SidebarUnderTest(
     layout: TetherLayoutClass = TetherLayoutClass.Phone,
     seed: SidebarUiSeed = SidebarUiSeed(),
     actions: SidebarActions = SidebarActions(),
+    /** The expanded rail's width: 272 is PanelWidthGeometry's default below 1440 dp, 320 from there up (W53). */
+    railWidth: Dp = 272.dp,
 ) {
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides true) {
             val t = LocalTetherTokens.current
             BoxWithConstraints(Modifier.fillMaxSize().background(t.mineral)) {
                 val phone = layout == TetherLayoutClass.Phone
-                val width = if (phone) maxWidth else 264.dp
+                val width = if (phone) maxWidth else railWidth
                 Box(
                     Modifier
                         .width(width)

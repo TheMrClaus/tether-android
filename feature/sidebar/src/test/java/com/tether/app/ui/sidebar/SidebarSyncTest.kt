@@ -7,6 +7,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performClick
@@ -182,25 +183,17 @@ class SidebarSyncTest {
         rule.onNodeWithTag(SidebarTags.archive("live:a1")).assertExists()
     }
 
-    private fun desc(key: String) =
-        rule.onNodeWithTag(SidebarTags.end(key)).fetchSemanticsNode().config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString()
-
     @Test
-    fun offlineTheTabletsEndXIsEnabledAndEndsWithItsTwoTaps() {
+    fun offlineTheTabletsEndItemIsLiveAndEndsWithItsTwoTaps() {
         val ended = mutableListOf<String>()
         val state = SidebarSyncFixtures.offline().copy(origin = ORIGIN_A)
         rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, state, TetherLayoutClass.Expanded, SidebarUiSeed(), SidebarActions(onEndSession = { id, o -> ended += "$id@$o" })) }
         rule.waitForIdle()
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).assertIsEnabled()
-        val rest = desc("live:a1")!!
-        assertTrue(rest, rest.startsWith("End ") && !rest.contains("navailable"))
-        val name = rest.removePrefix("End ")
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
-        rule.waitForIdle()
-        assertEquals("Tap again to end $name", desc("live:a1"))
+        assertTrue("no End x on the tablet", rule.onAllNodesWithTag(SidebarTags.end("live:a1"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        openMenuOf("live:a1")
+        tapEndItem()
         assertTrue(ended.isEmpty())
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
-        rule.waitForIdle()
+        tapEndItem()
         assertEquals(listOf("a1@$ORIGIN_A"), ended)
     }
 

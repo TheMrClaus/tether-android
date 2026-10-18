@@ -267,18 +267,35 @@ class RowMenuBehaviourTest {
         assertFalse(menuOpen())
     }
 
-    /** The tablet rail keeps its End × and its two-step (wave-check item 1): S3a changes the phone branch only. */
-    @Test fun theTabletRailStillHasItsEndXAndItsTwoStep() {
+    /** W53: the tablet rail is the same list: a kebab, no End x, the same menu and two-step; the menu's own close disarms End (endBounds retired). */
+    @Test fun theTabletRailHasTheKebabAndTheMenusTwoStep() {
         val ended = mutableListOf<String>()
         show(state(), SidebarActions(onEndSession = { id, _ -> ended += id }), layout = TetherLayoutClass.Expanded)
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).assertExists()
-        assertTrue("no kebab on the tablet", rule.onAllNodesWithTag(SidebarTags.kebab("live:a1"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
+        assertTrue("no End x on the tablet", rule.onAllNodesWithTag(SidebarTags.end("live:a1"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        open("live:a1")
+        assertTrue(menuOpen())
+        val endItem = SidebarTags.menuItem(RowMenuItemId.End)
+        rule.onNodeWithTag(endItem, useUnmergedTree = true).performClick()
         rule.waitForIdle()
         assertTrue(ended.isEmpty())
-        rule.onNodeWithTag(SidebarTags.end("live:a1")).performClick()
+        rule.onNodeWithTag(endItem, useUnmergedTree = true).performClick()
         rule.waitForIdle()
         assertEquals(listOf("a1"), ended)
+    }
+
+    /** W53: closing the menu on the tablet disarms End (the root press handler is gone with endBounds). */
+    @Test fun theTabletMenuClosingDisarmsEnd() {
+        val ended = mutableListOf<String>()
+        show(state(), SidebarActions(onEndSession = { id, _ -> ended += id }), layout = TetherLayoutClass.Expanded)
+        open("live:a1")
+        rule.onNodeWithTag(SidebarTags.menuItem(RowMenuItemId.End), useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        open("live:a1") // the kebab again closes the menu
+        assertFalse(menuOpen())
+        open("live:a1")
+        rule.onNodeWithTag(SidebarTags.menuItem(RowMenuItemId.End), useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        assertTrue("the first tap after a re-open is step one again, not the end", ended.isEmpty())
     }
 
     // ---- ta-7ox8 B4 (session-row-menu.tsx:68-152): keyboard-mode focus ---------------------------------------

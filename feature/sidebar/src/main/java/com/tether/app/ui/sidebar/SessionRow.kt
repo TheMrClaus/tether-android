@@ -201,7 +201,7 @@ class DragController internal constructor(
  * lines at the 48 dp floor: the provider cap in a 48 dp handle, then ONE name line with an end
  * ellipsis over a meta line (status words and time, the location beside them when 72 dp or more
  * remains), then the 48 dp end key. Nothing the rail's row carries is dropped; the full name stays
- * in the TalkBack label. Every phone branch is under [phone]; the rail's row is unchanged.
+ * in the TalkBack label. One list: the tablet rail draws this same row (W53); only the phone swipes to archive.
  */
 @Composable
 internal fun SessionRow(
@@ -233,13 +233,13 @@ internal fun SessionRow(
     handoverSuccessor: com.tether.app.protocol.model.AgentSession? = null,
     /** A group head with at least one older member: wears "Current" when nothing else claims the badge slot. */
     isGroupHead: Boolean = false,
+    /** The phone drawer: only it swipes to archive (the web's isMobile is off at 48rem). The row's look is the one list's, on both. */
     phone: Boolean,
     swipedSeed: Boolean,
     dragEnabled: Boolean,
     dragging: Boolean,
     dragController: DragController,
     rowBounds: MutableMap<String, Rect>,
-    endBounds: MutableMap<String, Rect>,
     actions: SidebarActions,
     /** ta-q2t6 slice 2: the row's place in a group (a nested phone row leads with [NestedLead], not the handle); [headProvider] is the chain head's. */
     variant: SessionVariant = SessionVariant.Top,
@@ -299,7 +299,7 @@ internal fun SessionRow(
     }
 
     // W39 (ta-v0h8): on the phone the card clips the row, so the row itself is square (the card rounds its ends).
-    val rowShape = if (phone) androidx.compose.ui.graphics.RectangleShape else RoundedCornerShape(0.625f.rem)
+    val rowShape = androidx.compose.ui.graphics.RectangleShape
     val rowFace = when {
         active -> Color(0xFF243657)
         else -> Color.Transparent
@@ -314,7 +314,7 @@ internal fun SessionRow(
             .onGloballyPositioned { rowBounds[entry.key] = it.boundsInRoot() }
             .alpha(if (dragging) 0.72f else 1f)
             .cssSurface(rowShape, rowFace, rowBorder, rowShadows)
-            .then(if (phone) Modifier.clipToBounds() else Modifier.padding(end = 0.15f.rem))
+            .clipToBounds()
             .testTag(SidebarTags.row(entry.key)),
     ) {
         if (swipeEnabled) {
@@ -334,7 +334,7 @@ internal fun SessionRow(
                 .then(if (rowFace != Color.Transparent) Modifier.background(rowFace, rowShape) else Modifier)
                 // W39: the selected row's 3 dp `violet` bar at the start edge, full row height (mirrors in RTL).
                 .then(
-                    if (phone && active) Modifier.drawBehind {
+                    if (active) Modifier.drawBehind {
                         val w = PhoneLook.SelectedBar.toPx()
                         val x = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) size.width - w else 0f
                         drawRect(t.violet, Offset(x, 0f), androidx.compose.ui.geometry.Size(w, size.height))
@@ -385,10 +385,10 @@ internal fun SessionRow(
             // .session-drag-handle: the provider cap, a 44dp hit target (2.5rem wide + Compose's
             // minimum touch size) around it.
             var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-            if (phone && variant != SessionVariant.Top) NestedLead(variant, provider, headProvider, active) else Box(
+            if (variant != SessionVariant.Top) NestedLead(variant, provider, headProvider, active) else Box(
                 Modifier
-                    .width(if (phone) PhoneDrawer.Floor else 2.4f.rem)
-                    .heightIn(min = if (phone) PhoneLook.RowMinHeight else 2.75f.rem)
+                    .width(PhoneDrawer.Floor)
+                    .heightIn(min = PhoneLook.RowMinHeight)
                     .onGloballyPositioned { handleCoords = it }
                     .testTag(SidebarTags.handle(entry.key))
                     .semantics {
@@ -440,27 +440,23 @@ internal fun SessionRow(
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                if (phone) {
-                    ProviderCap(
-                        provider,
-                        PhoneLook.Tile,
-                        Modifier.alpha(if (dragEnabled) 1f else 0.72f),
-                        selected = active,
-                        letterRem = 0.65f,
-                        monochrome = PhoneLook.MonochromeProviderTile,
-                        phoneTile = true,
-                    )
-                } else {
-                    ProviderCap(provider, 1.75f.rem, Modifier.alpha(if (dragEnabled) 1f else 0.72f), selected = active)
-                }
+                ProviderCap(
+                    provider,
+                    PhoneLook.Tile,
+                    Modifier.alpha(if (dragEnabled) 1f else 0.72f),
+                    selected = active,
+                    letterRem = 0.65f,
+                    monochrome = PhoneLook.MonochromeProviderTile,
+                    phoneTile = true,
+                )
             }
             // .session-item: the nav button — copy + chevron.
             Row(
                 Modifier
                     .weight(1f)
-                    .heightIn(min = if (phone) PhoneLook.RowMinHeight else 3.5f.rem)
+                    .heightIn(min = PhoneLook.RowMinHeight)
                     .semantics(mergeDescendants = true) {
-                        contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location, offline, sync, phone, provider, badge, handoverAt)
+                        contentDescription = rowDescription(name, entry, mode, unseen, now, updatedAt, location, offline, sync, true, provider, badge, handoverAt)
                         if (active) selected = true
                     }
                     .clickable(role = Role.Button) {
@@ -477,100 +473,65 @@ internal fun SessionRow(
                     // :root .session-item: 0.4rem space-sm, padding-left 0 (Studio 0.75rem 0.25rem, studio.css 325).
                     .then(
                         // The title column starts at 56 dp (the 48 dp handle + 8): the card's one text edge.
-                        if (phone) Modifier.padding(top = PhoneLook.RowVPad, bottom = PhoneLook.RowVPad, start = if (variant == SessionVariant.Top) 8.dp else NestedTree.Run, end = 8.dp)
-                        else Modifier.padding(vertical = 0.75f.rem, horizontal = 0.25f.rem),
+                        Modifier.padding(top = PhoneLook.RowVPad, bottom = PhoneLook.RowVPad, start = if (variant == SessionVariant.Top) 8.dp else NestedTree.Run, end = 8.dp),
                     ),
                 verticalAlignment = Alignment.CenterVertically,
-                // The grid gap: space-md on a phone, space-sm from 48rem (globals.css 4052-4058).
-                horizontalArrangement = Arrangement.spacedBy(if (phone) 0.dp else t.css.spaceSm),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                if (phone) {
-                    PhoneRowWithBadge(
-                        badge = badge,
-                        badgeTag = SidebarTags.badge(entry.key),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        PhoneRowBody(
-                            entry = entry, name = name, active = active,
-                            location = location, now = now, updatedAt = updatedAt, offline = offline, sync = sync, handoverAt = handoverAt,
-                            modifier = Modifier,
-                        )
-                    }
-                } else {
-                    Column(Modifier.weight(1f).clearAndSetSemantics { }, verticalArrangement = Arrangement.spacedBy(0.2f.rem)) {
-                        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(0.4f.rem)) {
-                            if (unseen) {
-                                Box(Modifier.padding(top = 0.45f.rem).size(7.dp).background(t.violet, RoundedCornerShape(50)))
-                            }
-                            // `.session-item-head strong`: -webkit-line-clamp 2, whole words (globals.css 10917-10923, ta-z4c1).
-                            WholeWordText(
-                                name,
-                                style = (css(type.ui, 0.78f, 600, lineHeight = 1.45f))
-                                    .copy(textDirection = proseDirection),
-                                color = (if (active) Color.White else t.ink),
-                                maxLines = 2,
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
-                            if (live?.handedOffTo != null) SmallIcon(TetherIcons.ArrowRightLeft, ink, 12.dp, Modifier.padding(top = 0.2f.rem))
-                        }
-                        StatusLine(entry, now, updatedAt, offline, sync)
-                        digest?.let { d -> DigestBlock(d, phone = false) }
-                        // ta-28i: the location is a path: code, LTR.
-                        location?.let { Text(codeLabel(it), style = css(type.ui, 0.64f, 400), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                        entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount, phone = false) }
-                    }
-                    // `<ChevronRight size={16}>`, drawn at 16px even in the desktop's 0.75rem grid column.
-                    SmallIcon(TetherIcons.ChevronRight, ink, 16.dp)
+                PhoneRowWithBadge(
+                    badge = badge,
+                    badgeTag = SidebarTags.badge(entry.key),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    PhoneRowBody(
+                        entry = entry, name = name, active = active,
+                        location = location, now = now, updatedAt = updatedAt, offline = offline, sync = sync, handoverAt = handoverAt,
+                        modifier = Modifier,
+                    )
                 }
             }
             // S3a: the phone's trailing 48 dp slot is the kebab and its menu (the End two-step moved inside it).
-            if (phone) {
-                if (menuGroups.isEmpty()) {
-                    // OI-5: no menu item (a history row without a cwd): an empty, non-semantic slot keeps the column aligned.
-                    Box(Modifier.size(PhoneDrawer.Floor))
-                } else {
-                    RowKebab(
-                        entry = entry, name = name, open = menuOpen, dragging = dragging,
-                        onToggle = {
-                            // A swiped-open row snaps back first, so the anchor sits in place (SL-spec-3 §b.4).
-                            if (swipeOpen) snapTo(false)
-                            onMenuKey(if (menuOpen) null else entry.key)
-                        },
-                    ) {
-                        RowMenu(
-                            name = name,
-                            digest = digest,
-                            groups = menuGroups,
-                            pinned = live?.pinned == true,
-                            handover = if (handoverAvailable) activeHandover else null,
-                            endArmed = armed,
-                            liveId = live?.id,
-                            cwd = rowCwd,
-                            resumeCommand = live?.resumeCommand,
-                            onDismiss = { onMenuKey(null) },
-                            onRename = { live?.let { actions.onRenameSession(it.id, it.name) } },
-                            onTogglePin = { live?.let { actions.onTogglePinSession(it.id, !it.pinned) } },
-                            onHandOver = actions.onHandOver,
-                            onStopHandover = actions.onStopHandover,
-                            onEnd = {
-                                if (live != null) {
-                                    if (armed) {
-                                        onArm(null)
-                                        actions.onEndSession(live.id, armedOrigin)
-                                        onMenuKey(null)
-                                    } else {
-                                        onArm(entry.key)
-                                    }
+            if (menuGroups.isEmpty()) {
+                // OI-5: no menu item (a history row without a cwd): an empty, non-semantic slot keeps the column aligned.
+                Box(Modifier.size(PhoneDrawer.Floor))
+            } else {
+                RowKebab(
+                    entry = entry, name = name, open = menuOpen, dragging = dragging,
+                    onToggle = {
+                        // A swiped-open row snaps back first, so the anchor sits in place (SL-spec-3 §b.4).
+                        if (swipeOpen) snapTo(false)
+                        onMenuKey(if (menuOpen) null else entry.key)
+                    },
+                ) {
+                    RowMenu(
+                        name = name,
+                        digest = digest,
+                        groups = menuGroups,
+                        pinned = live?.pinned == true,
+                        handover = if (handoverAvailable) activeHandover else null,
+                        endArmed = armed,
+                        liveId = live?.id,
+                        cwd = rowCwd,
+                        resumeCommand = live?.resumeCommand,
+                        onDismiss = { onMenuKey(null) },
+                        onRename = { live?.let { actions.onRenameSession(it.id, it.name) } },
+                        onTogglePin = { live?.let { actions.onTogglePinSession(it.id, !it.pinned) } },
+                        onHandOver = actions.onHandOver,
+                        onStopHandover = actions.onStopHandover,
+                        onEnd = {
+                            if (live != null) {
+                                if (armed) {
+                                    onArm(null)
+                                    actions.onEndSession(live.id, armedOrigin)
+                                    onMenuKey(null)
+                                } else {
+                                    onArm(entry.key)
                                 }
-                            },
-                            onDisarm = { if (armed) onArm(null) },
-                        )
-                    }
+                            }
+                        },
+                        onDisarm = { if (armed) onArm(null) },
+                    )
                 }
-            }
-            // .session-item-end: two taps by design (no modal); the rail's (the phone's moved into the kebab menu).
-            if (endable && !phone) {
-                TabletEndControl(entry, name, live!!.id, armed, armedOrigin, onArm, actions, endBounds)
             }
         }
     }
@@ -609,71 +570,6 @@ private fun BoxScope.SwipeArchiveAction(key: String, name: String, revealed: Boo
             SmallIcon(TetherIcons.Archive, t.mineral, 14.dp)
             Text("ARCHIVE", style = css(type.ui, 0.6f, 700, trackingEm = 0.02f), color = t.mineral, modifier = Modifier.clearAndSetSemantics { })
         }
-    }
-}
-
-/**
- * The tablet rail's two-tap End control. S3f (ta-z0k0): split out of [SessionRow]; the one 1000-line composable it sat in
- * failed ART's verifier ("type Conflict unexpected as arg to if-eqz") on its armed branch.
- */
-@Composable
-private fun TabletEndControl(
-    entry: SidebarEntry,
-    name: String,
-    sessionId: String,
-    armed: Boolean,
-    armedOrigin: String?,
-    onArm: (String?) -> Unit,
-    actions: SidebarActions,
-    endBounds: MutableMap<String, Rect>,
-) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    val endShape = RoundedCornerShape(t.radiusSm)
-    Box(
-        Modifier
-            .padding(end = 0.3f.rem)
-            .size(1.75f.rem)
-            .onGloballyPositioned { endBounds[entry.key] = it.boundsInRoot() }
-            .semantics {
-                contentDescription = when {
-                    armed -> "Tap again to end $name"
-                    else -> "End $name"
-                }
-                role = Role.Button
-            }
-            .clickable {
-                if (armed) {
-                    onArm(null)
-                    actions.onEndSession(sessionId, armedOrigin)
-                } else {
-                    onArm(entry.key)
-                }
-            }
-            .then(if (armed) Modifier.background(t.dangerWash, endShape) else Modifier)
-            .testTag(SidebarTags.end(entry.key)),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (armed) {
-            Text("END?", style = css(type.ui, 0.62f, 700, trackingEm = 0.02f), color = t.danger, modifier = Modifier.clearAndSetSemantics { })
-        } else {
-            SmallIcon(TetherIcons.X, t.faint, 11.dp)
-        }
-    }
-}
-
-/** The digest under a row: "N new turns since you left" and its snippet (the phone draws both at 0.65rem). */
-@Composable
-private fun DigestBlock(d: com.tether.app.protocol.model.HistoryDigest, phone: Boolean) {
-    val t = LocalTetherTokens.current
-    val type = LocalTetherTypography.current
-    val rem = if (phone) 0.75f else 0.7f
-    Column(Modifier.padding(top = 0.1f.rem), verticalArrangement = Arrangement.spacedBy(0.05f.rem)) {
-        if (d.newTurns > 0) {
-            Text("${d.newTurns} new turn${if (d.newTurns == 1) "" else "s"} since you left", style = css(type.ui, rem, 600), color = t.violet)
-        }
-        val snippet = LabelText.hint(d.snippet)
-        if (snippet.isNotEmpty()) Text(snippet, style = css(type.ui, rem, 400).copy(textDirection = proseDirection), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
