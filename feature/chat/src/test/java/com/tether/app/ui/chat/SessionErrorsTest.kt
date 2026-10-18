@@ -139,8 +139,11 @@ class SessionErrorsTest {
     @Test fun outcomeAtIsErrorAtElseEndedAtElseNone() {
         val f = SessionErrorFixtures.twoTurns
         val turn = f.projection.turnsById.getValue("t1")
-        val obj = (f.tree["turnsById"] as JsObj)["t1"] as JsObj
-        assertNull(outcomeAt(obj, turn))
+        val folded = (f.tree["turnsById"] as JsObj)["t1"] as JsObj
+        // R1: the app's own fold stamps the turn end (events.ts:3572), so the folded turn already carries endedAt.
+        assertEquals(ChatFixtures.T_IDLE.toDouble(), outcomeAt(folded, turn)!!, 0.0)
+        val obj = folded.remove("endedAt").remove("errorAt")
+        assertNull(outcomeAt(obj, turn.copy(endedAt = null, errorAt = null)))
         assertEquals(5.5, outcomeAt(obj.put("endedAt", js(5.5)), turn)!!, 0.0)
         assertEquals(7.25, outcomeAt(obj.put("endedAt", js(5.5)).put("errorAt", js(7.25)), turn)!!, 0.0)
         assertEquals(5.5, outcomeAt(obj.put("errorAt", com.tether.app.protocol.tree.JsNull).put("endedAt", js(5.5)), turn)!!, 0.0)

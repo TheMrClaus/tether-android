@@ -3,6 +3,7 @@ package com.tether.app.protocol.fold
 import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsNull
+import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
 import com.tether.app.protocol.tree.JsValue
@@ -120,8 +121,24 @@ private fun foldTaskStarted(state: JsObj, event: JsObj): JsObj {
         "taskType" to jsOrUndefined(boundedDisplayText(event["taskType"], labelChars)),
         "subagentType" to jsOrUndefined(boundedDisplayText(event["subagentType"], labelChars)),
     )
+    // events.ts:2766-2772 (GH #264(d) F1): a task_started that follows a terminal record of the SAME id
+    // is a later run (a resumed background agent), so it reopens the record instead of folding into it.
+    val tasks = state["backgroundTasks"].arr!!
+    val index = tasks.indexOfFirst { strictEquals(it.obj?.get("taskId"), JsStr(taskId)) }
+    val existing = if (index == -1) null else tasks[index].obj
+    if (existing != null && isTerminalTask(existing["status"])) {
+        return state.put("backgroundTasks", tasks.set(index, reopenBackgroundTask(existing, patch)))
+    }
     return foldBackgroundTask(state, taskId, patch)
 }
+
+// events.ts:2346 reopenBackgroundTask: the launcher join survives; everything the finished run reported is dropped.
+private fun reopenBackgroundTask(existing: JsObj, patch: JsObj): JsObj =
+    JsObj.of(
+        "taskId" to existing["taskId"],
+        "toolUseId" to coalesce(existing["toolUseId"], JsNull),
+        "live" to JsBool.FALSE,
+    ).spread(patch)
 
 // events.mjs:2000
 private fun foldTaskProgress(state: JsObj, event: JsObj): JsObj {
@@ -143,14 +160,42 @@ private fun foldTaskCompleted(state: JsObj, event: JsObj): JsObj {
     val taskId = taskIdentifier(event["taskId"]) ?: return state
     val status = normalizeTaskStatus(event["status"])
     if (status == null || status !in Limits.TASK_TERMINAL_STATUSES) return state
-    val toolUseId = boundedIdentifier(event["toolUseId"])
+    val toolUseId = boundedIdentifier(event["toolUseId"])?.takeIf { it.isNotEmpty() }
+    // events.ts:2813-2814 (v148): the only free text a task record may carry, re-bounded here.
+    val summary = boundedDisplayText(event["summary"], Limits.PROVIDER_PROJECTION_LIMITS.proseChars)?.takeIf { it.isNotEmpty() }
+    val outputFile = boundedDisplayText(event["outputFile"], Limits.PROVIDER_PROJECTION_LIMITS.pathChars)?.takeIf { it.isNotEmpty() }
+    val totalTokens = nonNegativeFiniteNumber(event["totalTokens"])
+    val toolUses = nonNegativeFiniteNumber(event["toolUses"])
+    val durationMs = nonNegativeFiniteNumber(event["durationMs"])
+    // events.ts:2818-2833: a completion on an ALREADY-terminal record is a duplicate/replay: a conflicting
+    // status is ignored, a matching one only FILLS IN what the record lacks.
+    val held = state["backgroundTasks"].arr!!.firstOrNull { strictEquals(it.obj?.get("taskId"), JsStr(taskId)) }?.obj
+    if (held != null && isTerminalTask(held["status"])) {
+        if (!strictEquals(held["status"], JsStr(status))) return state
+        return foldBackgroundTask(
+            state,
+            taskId,
+            JsObj.of(
+                "status" to js(status),
+                "live" to JsBool.FALSE,
+                "summary" to summary?.takeIf { held["summary"] == null }?.let { js(it) },
+                "outputFile" to outputFile?.takeIf { held["outputFile"] == null }?.let { js(it) },
+                "toolUseId" to toolUseId?.takeIf { !truthy(held["toolUseId"]) }?.let { js(it) },
+                "totalTokens" to totalTokens,
+                "toolUses" to toolUses,
+                "durationMs" to durationMs,
+            ),
+        )
+    }
     val patch = JsObj.of(
         "status" to js(status),
         "live" to JsBool.FALSE,
-        "toolUseId" to toolUseId?.takeIf { it.isNotEmpty() }?.let { js(it) },
-        "totalTokens" to nonNegativeFiniteNumber(event["totalTokens"]),
-        "toolUses" to nonNegativeFiniteNumber(event["toolUses"]),
-        "durationMs" to nonNegativeFiniteNumber(event["durationMs"]),
+        "summary" to summary?.let { js(it) },
+        "outputFile" to outputFile?.let { js(it) },
+        "toolUseId" to toolUseId?.let { js(it) },
+        "totalTokens" to totalTokens,
+        "toolUses" to toolUses,
+        "durationMs" to durationMs,
     )
     return foldBackgroundTask(state, taskId, patch)
 }
@@ -296,6 +341,42 @@ private fun foldBackgroundCommandOutput(state: JsObj, event: JsObj): JsObj {
 
 // ---- spawned runs ----
 
+// events.ts:1676-1698 (#257, 7fbac699 + f1cf7129): the bounded reading of a CLI child's own result.
+private val SPAWNED_RUN_COUNT_FIELDS = listOf("inputTokens", "cachedInputTokens", "outputTokens", "reasoningTokens", "totalTokens", "toolCalls")
+
+private fun normalizeSpawnedRunSummary(event: JsObj): JsObj {
+    var out = JsObj.EMPTY
+    for (field in SPAWNED_RUN_COUNT_FIELDS) {
+        val value = event[field]
+        if (value is JsNum && value.value.isFinite() && kotlin.math.floor(value.value) == value.value &&
+            kotlin.math.abs(value.value) <= 9007199254740991.0 && value.value >= 0
+        ) {
+            out = out.put(field, value)
+        }
+    }
+    if (out.has("toolCalls") && event["toolCallsPartial"] === JsBool.TRUE) out = out.put("toolCallsPartial", JsBool.TRUE)
+    val finalMessage = event["finalMessage"]
+    if (finalMessage is JsStr && finalMessage.value.isNotEmpty()) {
+        out = out.put("finalMessage", boundedDisplayText(finalMessage, Limits.SPAWNED_RUN_SUMMARY_MESSAGE_CAP_CHARS)?.let { js(it) })
+        if (event["finalMessageTruncated"] === JsBool.TRUE) out = out.put("finalMessageTruncated", JsBool.TRUE)
+    }
+    return out
+}
+
+// events.ts:1700: a later lifecycle update that carries no reading must not wipe the one already folded.
+private fun carrySpawnedRunSummary(existing: JsObj, next: JsObj): JsObj {
+    var carried = next
+    for (field in SPAWNED_RUN_COUNT_FIELDS) {
+        if (carried[field] == null && existing[field] != null) carried = carried.put(field, existing[field])
+    }
+    if (next["toolCalls"] == null && existing["toolCallsPartial"] === JsBool.TRUE) carried = carried.put("toolCallsPartial", JsBool.TRUE)
+    if (carried["finalMessage"] == null && existing["finalMessage"] != null) {
+        carried = carried.put("finalMessage", existing["finalMessage"])
+        if (existing["finalMessageTruncated"] === JsBool.TRUE) carried = carried.put("finalMessageTruncated", JsBool.TRUE)
+    }
+    return carried
+}
+
 // events.mjs:964
 private fun normalizeSpawnedRun(event: JsObj): JsObj? {
     val limits = Limits.PROVIDER_PROJECTION_LIMITS
@@ -329,7 +410,7 @@ private fun normalizeSpawnedRun(event: JsObj): JsObj? {
         "signal" to boundedSignal(event["signal"]),
         "startedAt" to (nonNegativeFiniteNumber(event["startedAt"]) ?: js(0)),
         "endedAt" to (nonNegativeFiniteNumber(event["endedAt"]) ?: JsNull),
-    )
+    ).spread(normalizeSpawnedRunSummary(event))
 }
 
 // events.mjs:996
@@ -399,10 +480,11 @@ private fun foldSpawnedRunUpdated(state: JsObj, event: JsObj): JsObj {
         )
     }
     val existing = runs[index].obj!!
-    if (sameSpawnedRun(existing, next)) {
+    val carried = carrySpawnedRunSummary(existing, next)
+    if (sameSpawnedRun(existing, carried)) {
         return if (spawnedRunKeys === state["spawnedRunKeys"]) state else state.put("spawnedRunKeys", spawnedRunKeys)
     }
-    val merged = next.with(
+    val merged = carried.with(
         "output" to coalesce(existing["output"], js("")),
         "outputTruncated" to js(existing["outputTruncated"] === JsBool.TRUE),
         "media" to existing["media"].arr,

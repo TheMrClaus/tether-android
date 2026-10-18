@@ -288,20 +288,37 @@ object ModelPicker {
         val retiresOn: String? = null,
     )
 
-    // lib/model-picker.mjs:419 — SOURCE OF TRUTH for every date: the model-deprecations page
-    // (verified 2026-08-06 upstream). Retired entries are kept to document why an id is absent.
+    // lib/model-picker.ts:458 (web 19c56e25) — SOURCE OF TRUTH for every date: the model-deprecations page.
+    // Retired entries are kept to document why an id is absent.
     val CLAUDE_MODEL_CATALOG: List<CatalogModel> = listOf(
+        CatalogModel("claude-fable-5-1", "Fable 5.1", "Most capable · hardest, longest-running tasks · 1M context", aliases = listOf("fable", "best"), reviewAfter = "2027-09-01"),
         CatalogModel("claude-fable-5", "Fable 5", "Most capable · hardest, longest-running tasks · 1M context", reviewAfter = "2027-06-09"),
-        CatalogModel("claude-mythos-5", "Mythos 5", "Fable-class · invitation-only (Project Glasswing)"),
-        CatalogModel("claude-opus-5", "Opus 5", "Opus 5 · complex agentic coding · 1M context", aliases = listOf("opus", "best", "opusplan"), reviewAfter = "2027-07-24"),
+        // Mythos 5.1: in the CLI 2.1.291 model config (family "mythos", display_name "Mythos 5.1",
+        // first_party id claude-mythos-5-1) and Active on model-deprecations (read 2026-10-06, "Not
+        // sooner than September 1, 2027"). It is invite-only, so supportedModels never lists it for an
+        // ordinary account — this row is how a Glasswing operator can pick it. Same underlying model as Fable 5.1.
+        CatalogModel("claude-mythos-5-1", "Mythos 5.1", "Fable 5.1-class · invitation-only (Project Glasswing) · 1M context", reviewAfter = "2027-09-01"),
+        CatalogModel("claude-mythos-5", "Mythos 5", "Fable-class · invitation-only (Project Glasswing)", reviewAfter = "2027-06-09"),
+        // opusplan: in the CLI it resolves to opus in plan mode and sonnet otherwise; Tether lists it under Opus because that is its plan-mode model.
+        CatalogModel("claude-opus-5-5", "Opus 5.5", "Opus 5.5 · complex agentic coding · 1M context", aliases = listOf("opus", "opusplan"), reviewAfter = "2027-09-22"),
+        CatalogModel("claude-opus-5", "Opus 5", "Opus 5 · complex agentic coding · 1M context", reviewAfter = "2027-07-24"),
         CatalogModel("claude-opus-4-8", "Opus 4.8", "Previous-generation Opus · 1M context", reviewAfter = "2027-05-28"),
         CatalogModel("claude-opus-4-7", "Opus 4.7", "Opus 4.7 · 1M context", reviewAfter = "2027-04-16"),
         CatalogModel("claude-opus-4-6", "Opus 4.6", "Opus 4.6 · 1M context", reviewAfter = "2027-02-05"),
         CatalogModel("claude-opus-4-5", "Opus 4.5", "Opus 4.5 · legacy", reviewAfter = "2026-11-24"),
-        CatalogModel("claude-sonnet-5", "Sonnet 5", "Sonnet 5 · near-Opus coding at Sonnet cost · 1M context", aliases = listOf("sonnet"), reviewAfter = "2027-06-30"),
+        CatalogModel("claude-sonnet-5-5", "Sonnet 5.5", "Sonnet 5.5 · near-Opus coding at Sonnet cost · 1M context", aliases = listOf("sonnet"), reviewAfter = "2027-09-28"),
+        CatalogModel("claude-sonnet-5", "Sonnet 5", "Sonnet 5 · near-Opus coding at Sonnet cost · 1M context", reviewAfter = "2027-06-30"),
         CatalogModel("claude-sonnet-4-6", "Sonnet 4.6", "Previous-generation Sonnet · 1M context", reviewAfter = "2027-02-17"),
-        CatalogModel("claude-sonnet-4-5", "Sonnet 4.5", "Sonnet 4.5 · legacy", reviewAfter = "2026-11-30"),
-        CatalogModel("claude-haiku-4-5", "Haiku 4.5", "Fastest · quick answers · 200K context", aliases = listOf("haiku"), reviewAfter = "2026-10-15"),
+        CatalogModel("claude-sonnet-4-5", "Sonnet 4.5", "Sonnet 4.5 · legacy", retiresOn = "2026-11-30"),
+        // Haiku 5.5: CLI 2.1.295 supportedModels reports alias "haiku" -> resolvedModel claude-haiku-5-5
+        // ("Haiku 5.5 · Fastest for quick answers"; no context window reported). No reviewAfter and no
+        // price on purpose: neither was read from a source (usage-analytics falls back to costPartial).
+        CatalogModel("claude-haiku-5-5", "Haiku 5.5", "Haiku 5.5 · Fastest for quick answers", aliases = listOf("haiku")),
+        // Haiku 4.5: model-deprecations (read 2026-10-15) lists claude-haiku-4-5-20251001 Active with
+        // "Not sooner than October 15, 2026" - the same date this row carried, i.e. no NEW date was published.
+        // No reviewAfter on purpose (as Haiku 5.5): re-using today's date would fail the canary forever and
+        // a made-up one would be invented. Add one when the page publishes a later tentative date.
+        CatalogModel("claude-haiku-4-5", "Haiku 4.5", "Fastest · quick answers · 200K context"),
         // --- Retired: filtered out by date, listed so the absence is explained. ---
         CatalogModel("claude-opus-4-1", "Opus 4.1", "Retired", retiresOn = "2026-08-05"),
         CatalogModel("claude-opus-4-0", "Opus 4", "Retired", retiresOn = "2026-06-15"),
@@ -315,13 +332,13 @@ object ModelPicker {
 
     private val BRACKET_SUFFIX = Regex("\\[[^\\]]*]\\z")
 
-    // lib/model-picker.mjs:445 — the id without its context-window suffix, trimmed and lowercased.
+    // lib/model-picker.ts:~490 — the id without its context-window suffix, trimmed and lowercased.
     fun baseModelId(value: JsValue?): String =
         if (value is JsStr) baseModelId(value.value) else ""
 
     fun baseModelId(value: String): String = jsTrim(BRACKET_SUFFIX.replaceFirst(jsTrim(value), "")).lowercase()
 
-    // lib/model-picker.mjs:456 — the catalog entries the live list doesn't already offer, minus retired ones.
+    // lib/model-picker.ts:512 — the catalog entries the live list doesn't already offer, minus retired ones.
     fun legacyModelRows(provider: JsValue?, liveRows: JsValue?, today: JsValue?): JsArr {
         if (!provider.isStr("claude")) return JsArr.EMPTY
         val day = today.nonEmptyStr ?: return JsArr.EMPTY

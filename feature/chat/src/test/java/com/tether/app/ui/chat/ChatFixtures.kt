@@ -210,7 +210,13 @@ fun ChatHost(
 ) {
     TetherTheme(choiceFor(skin)) {
         // ta-coik.37: the derivation runs inline (no wall-clock waits); the off-main behaviour has its own test.
-        CompositionLocalProvider(LocalReducedMotion provides reducedMotion, LocalChatDerivationDispatcher provides kotlinx.coroutines.Dispatchers.Unconfined) {
+        // ta-d3tj.10 (R1): the app's own fold now fills errorAt / endedAt / sessionErrors, so any harness can show a stamp:
+        // the stamp clock and locale are pinned HERE (zone = [ChatFixtures.zone], passed by the callers), never the real clock.
+        CompositionLocalProvider(
+            LocalReducedMotion provides reducedMotion,
+            LocalChatDerivationDispatcher provides kotlinx.coroutines.Dispatchers.Unconfined,
+            LocalStampClock provides StampClock({ SessionErrorFixtures.NOW }, { java.util.Locale.US }),
+        ) {
             Box(
                 (if (wellWidth != null) Modifier.width(wellWidth) else Modifier.fillMaxWidth())
                     .height(wellHeight)

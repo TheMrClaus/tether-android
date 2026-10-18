@@ -234,7 +234,8 @@ class InterruptErrorBehaviourTest {
         host(client)
         rule.onNodeWithText("Engine exited before the turn finished: rate limited by the provider.").assertExists()
         rule.onNodeWithTag(SESSION_ERROR_TAG).assertExists()
-        rule.onNodeWithContentDescription("Session error: The Claude CLI could not start: command not found (claude)").assertExists()
+        // R1: the app's own fold now stamps the entry (journal ts), so the description is "<message> at <stamp>"; the prefix is the message.
+        rule.onNodeWithContentDescription("Session error: The Claude CLI could not start: command not found (claude)", substring = true).assertExists()
         // process_exit folds (turn.exit) but draws nothing, as on the web.
         rule.onNodeWithText("exit code", substring = true, ignoreCase = true).assertDoesNotExist()
         rule.onNodeWithText("signal", substring = true, ignoreCase = true).assertDoesNotExist()
@@ -541,7 +542,8 @@ class InterruptErrorBehaviourTest {
     @Test
     fun theSessionErrorRowSaysWhatItIs() {
         transcript(InterruptErrorFixtures.errors)
-        rule.onNodeWithContentDescription("Session error: The Claude CLI could not start: command not found (claude)").assertExists()
+        // R1: the app's own fold now stamps the entry (journal ts), so the description is "<message> at <stamp>"; the prefix is the message.
+        rule.onNodeWithContentDescription("Session error: The Claude CLI could not start: command not found (claude)", substring = true).assertExists()
         // r3: said once: the words are not a second node TalkBack would read after the description.
         rule.onNodeWithText("The Claude CLI could not start: command not found (claude)").assertDoesNotExist()
     }

@@ -72,6 +72,9 @@ object DraftForm {
         return request
     }
 
+    // lib/draft-form.ts:55
+    const val DEFAULT_DRAFT_TOOL_APPROVAL = "ask"
+
     // lib/draft-form.ts:176
     val INITIAL_DRAFT_FORM: JsObj = JsObj.of(
         "key" to JsStr(""),
@@ -79,6 +82,9 @@ object DraftForm {
         "reasoningEffort" to JsStr(""),
         "mode" to JsStr(""),
         "autoMode" to JsBool.FALSE,
+        // lib/draft-form.ts:427 — every Reasonix draft starts at Ask (DEFAULT_DRAFT_TOOL_APPROVAL, :55); a pure passthrough
+        // until ta-d3tj.3: nothing in the app sends it.
+        "toolApproval" to JsStr(DEFAULT_DRAFT_TOOL_APPROVAL),
         "cwd" to JsStr(""),
         "useWorktree" to JsBool.FALSE,
         "worktreeMode" to JsStr("branch-off"),
@@ -302,6 +308,8 @@ object DraftForm {
         )
         result = result.put("mode", resolveMode(entry, userModified["mode"], current["mode"], initial["mode"], prefs["mode"]))
         result = result.put("autoMode", js(resolveAutoMode(entry, userModified["autoMode"], current["autoMode"], prefs["autoMode"])))
+        // lib/draft-form.ts:758 — a late RESOLVE that lands the draft on another provider drops the Approvals choice.
+        if (!strictEquals(result["key"], current["key"])) result = result.put("toolApproval", JsStr(DEFAULT_DRAFT_TOOL_APPROVAL))
 
         if (!truthy(userModified["cwd"]) && initial["cwd"] != null) result = result.put("cwd", initial["cwd"])
         if (!truthy(userModified["useWorktree"]) && initial["useWorktree"] != null) result = result.put("useWorktree", initial["useWorktree"])
@@ -326,6 +334,12 @@ object DraftForm {
         val form = obj(state["form"])
         val userModified = obj(state["userModified"])
         fun withForm(nextForm: JsObj, nextModified: JsObj) = obj(state).put("form", nextForm).put("userModified", nextModified)
+        // lib/draft-form.ts:984 — switching to ANOTHER provider drops the Approvals choice; re-picking the same entry keeps it.
+        fun toolApprovalAfterSwitch(nextKey: JsValue?): JsValue? =
+            if (strictEquals(form["key"], nextKey)) form["toolApproval"] else JsStr(DEFAULT_DRAFT_TOOL_APPROVAL)
+        // lib/draft-form.ts:1019/:1045 — `codexCurrent: same entry ? state.codexCurrent : null` (an absent key stays absent).
+        fun withCodexCurrent(next: JsObj, nextKey: JsValue?): JsObj =
+            next.put("codexCurrent", if (strictEquals(form["key"], nextKey)) state["codexCurrent"] else JsNull)
         val entry = action["entry"]
         val preferences = action["preferences"]
         return when ((action["type"] as? JsStr)?.value) {
@@ -344,14 +358,17 @@ object DraftForm {
                 val prefsModel = normalizeId(prefs["model"])
                 val modelFromPrefs = if (prefsModel.isNotEmpty()) resolveCanonicalModelId(entryModels(entry), JsStr(prefsModel)) != "" else false
                 val effortFromPrefs = truthy(next["reasoningEffort"])
-                withForm(
-                    form.put("key", entry["key"]).spread(next),
-                    userModified.with(
-                        "key" to JsBool.TRUE,
-                        "model" to js(modelFromPrefs),
-                        "reasoningEffort" to js(effortFromPrefs),
-                        "autoMode" to next["autoMode"],
+                withCodexCurrent(
+                    withForm(
+                        form.put("key", entry["key"]).spread(next).put("toolApproval", toolApprovalAfterSwitch(entry["key"])),
+                        userModified.with(
+                            "key" to JsBool.TRUE,
+                            "model" to js(modelFromPrefs),
+                            "reasoningEffort" to js(effortFromPrefs),
+                            "autoMode" to next["autoMode"],
+                        ),
                     ),
+                    entry["key"],
                 )
             }
 
@@ -362,20 +379,24 @@ object DraftForm {
                 val reasoningEffort = resolveReasoningEffortForModel(models, JsStr(model), JsStr(normalizeId(prefs["reasoningEffort"])))
                 val mode = normalizeId(prefs["mode"]).ifEmpty { defaultModeFor(entry["provider"]) }
                 val autoMode = (prefs["autoMode"] as? JsBool)?.value ?: false
-                withForm(
-                    form.with(
-                        "key" to entry["key"],
-                        "model" to JsStr(model),
-                        "reasoningEffort" to JsStr(reasoningEffort),
-                        "mode" to JsStr(mode),
-                        "autoMode" to js(autoMode),
+                withCodexCurrent(
+                    withForm(
+                        form.with(
+                            "key" to entry["key"],
+                            "model" to JsStr(model),
+                            "reasoningEffort" to JsStr(reasoningEffort),
+                            "mode" to JsStr(mode),
+                            "autoMode" to js(autoMode),
+                            "toolApproval" to toolApprovalAfterSwitch(entry["key"]),
+                        ),
+                        userModified.with(
+                            "key" to JsBool.TRUE,
+                            "model" to JsBool.TRUE,
+                            "reasoningEffort" to js(reasoningEffort.isNotEmpty()),
+                            "autoMode" to js(autoMode),
+                        ),
                     ),
-                    userModified.with(
-                        "key" to JsBool.TRUE,
-                        "model" to JsBool.TRUE,
-                        "reasoningEffort" to js(reasoningEffort.isNotEmpty()),
-                        "autoMode" to js(autoMode),
-                    ),
+                    entry["key"],
                 )
             }
 
@@ -395,6 +416,9 @@ object DraftForm {
             "SET_MODE_FROM_USER" -> withForm(form.put("mode", action["mode"]), userModified.put("mode", JsBool.TRUE))
 
             "SET_AUTO_MODE_FROM_USER" -> withForm(form.put("autoMode", action["autoMode"]), userModified.put("autoMode", JsBool.TRUE))
+
+            // lib/draft-form.ts:1089
+            "SET_TOOL_APPROVAL_FROM_USER" -> obj(state).put("form", form.put("toolApproval", action["toolApproval"]))
 
             "SET_CWD_FROM_USER" -> withForm(form.put("cwd", action["cwd"]), userModified.put("cwd", JsBool.TRUE))
 

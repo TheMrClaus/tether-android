@@ -196,12 +196,20 @@ private fun hasQueueId(state: JsObj, queueId: JsValue?): Boolean =
 private fun foldQueuedAdded(state: JsObj, event: JsObj): JsObj {
     if (hasQueueId(state, event["queueId"])) return state
     val deferred = truthy(event["flushMode"])
+    // events.ts:3714 (v149/GH #265, 1aaba290): the sending session of a "peer" or "handover" row, bounded like `from`.
+    val peerSender = if (event["noticeKind"].str == "peer" || event["noticeKind"].str == "handover") {
+        peerFrom(JsObj.of("sessionId" to event["fromSessionId"], "name" to event["fromSessionName"]))
+    } else {
+        null
+    }
     val message = JsObj.of(
         "queueId" to event["queueId"],
         "text" to event["text"],
         "flushMode" to (if (deferred) event["flushMode"] else null),
         "origin" to (if (truthy(event["origin"])) event["origin"] else null),
         "noticeKind" to (if (truthy(event["noticeKind"])) event["noticeKind"] else null),
+        "fromSessionId" to peerSender?.get("sessionId"),
+        "fromSessionName" to peerSender?.get("name"),
         "queuedAt" to (if (deferred) nonNegativeFiniteNumber(event["ts"]) else null),
     )
     return state.put("queuedMessages", state["queuedMessages"].arr!!.add(message))
@@ -213,7 +221,15 @@ private fun foldQueuedUpdated(state: JsObj, event: JsObj): JsObj {
     var queued = state["queuedMessages"].arr!!
     for (i in queued.indices) {
         val m = queued[i]
-        if (strictEquals(m.obj?.get("queueId"), event["queueId"])) queued = queued.set(i, m.obj!!.put("text", event["text"]))
+        if (strictEquals(m.obj?.get("queueId"), event["queueId"])) {
+            // events.ts:3734-3741 (v147): `held: true` marks a prompt that must never be auto-delivered; an
+            // explicit `held: false` clears it; absent leaves the flag as it is.
+            var next = m.obj!!.put("text", event["text"])
+            val held = event["held"]
+            if (held is JsBool && held.value) next = next.put("held", JsBool.TRUE)
+            else if (held is JsBool && !held.value) next = next.remove("held")
+            queued = queued.set(i, next)
+        }
     }
     return state.put("queuedMessages", queued)
 }
@@ -224,6 +240,21 @@ private fun foldQueuedRemoved(state: JsObj, event: JsObj): JsObj {
     // v130 (S13.1-C): remember the id (bounded, deduped, newest last) so a snapshot proves it was
     // accepted even after it left the queue. `?? []`: a projection folded before v130 has no list.
     val queueId = event["queueId"] ?: JsNull
+    // events.ts:3761-3773 (#249): reason "withdrawn" is the operator's own removal, NOT an acceptance: it goes
+    // to `withdrawnQueueIds` (never proof of delivery), and a flushed-then-requeued id leaves `removedQueueIds`.
+    if (event["reason"].str == "withdrawn") {
+        val priorWithdrawn = state["withdrawnQueueIds"].let { if (it == null || it is JsNull) JsArr.EMPTY else it.arr!! }
+        val withdrawn = priorWithdrawn.filterKeep { !strictEquals(it, queueId) }.add(queueId)
+        val priorRemoved = state["removedQueueIds"].arr
+        var next = state.put("queuedMessages", state["queuedMessages"].arr!!.filterKeep { !strictEquals(it.obj?.get("queueId"), event["queueId"]) })
+        if (priorRemoved != null && priorRemoved.any { strictEquals(it, queueId) }) {
+            next = next.put("removedQueueIds", priorRemoved.filterKeep { !strictEquals(it, queueId) })
+        }
+        return next.put(
+            "withdrawnQueueIds",
+            if (withdrawn.size > Limits.MAX_REMOVED_QUEUE_IDS) withdrawn.slice(-Limits.MAX_REMOVED_QUEUE_IDS) else withdrawn,
+        )
+    }
     val prior = state["removedQueueIds"].let { if (it == null || it is JsNull) JsArr.EMPTY else it.arr!! }
     val removed = prior.filterKeep { !strictEquals(it, queueId) }.add(queueId)
     return state.with(

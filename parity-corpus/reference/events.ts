@@ -114,7 +114,7 @@ const CLAUDE_INTERRUPT_MARKERS = new Set([
   "[Request interrupted by user]",
 ]);
 
-function matchesAbortText(text, known) {
+function matchesAbortText(text: string, known: string) {
   if (text === known) return true;
   return text.startsWith(known) && text.slice(known.length).startsWith(CLAUDE_ABORT_NOTE_PREFIX);
 }
@@ -125,7 +125,7 @@ function matchesAbortText(text, known) {
 // stream (every real rejection there goes through canUseTool with Tether's OWN
 // deny text, so the CLI's wording can only mean an abort — the #184 incident);
 // false when replaying a terminal session, where it may be a genuine rejection.
-export function isClaudeToolAbortOutput(content, { rejectionWordingIsAbort = true } = {}) {
+export function isClaudeToolAbortOutput(content: string | Array<string | AbortTextBlock> | null | undefined, { rejectionWordingIsAbort = true }: { rejectionWordingIsAbort?: boolean } = {}) {
   let text = null;
   if (typeof content === "string") text = content;
   else if (Array.isArray(content) && content.length > 0) {
@@ -139,13 +139,13 @@ export function isClaudeToolAbortOutput(content, { rejectionWordingIsAbort = tru
 }
 
 // A user-record text that is exactly one of the CLI's interrupt markers.
-export function isClaudeInterruptMarkerText(text) {
+export function isClaudeInterruptMarkerText(text: unknown) {
   return typeof text === "string" && CLAUDE_INTERRUPT_MARKERS.has(text.trim());
 }
 
 // A Claude user record's content (string or block array) that carries NOTHING but
 // an interrupt marker — so the live adapter can drop it instead of surfacing it.
-function isClaudeInterruptMarkerContent(content) {
+function isClaudeInterruptMarkerContent(content: string | Array<AbortTextBlock | null> | null | undefined) {
   if (typeof content === "string") return isClaudeInterruptMarkerText(content);
   if (!Array.isArray(content) || content.length === 0) return false;
   return content.every((block) => block && block.type === "text" && isClaudeInterruptMarkerText(block.text));
@@ -157,6 +157,599 @@ const TURN_INTERRUPT_SOURCE_SET = new Set(TURN_INTERRUPT_SOURCES);
 // How many turn_interrupted notices a session keeps (oldest dropped) — one per
 // interrupt is unbounded over a long session otherwise.
 export const MAX_TURN_INTERRUPTED_NOTICES = 100;
+
+// The single 1.x -> 2.0 opencode tool-name table (pure data + pure functions; shared with the live adapter/renderers).
+import { canonicalOpencodeToolName, isOpencodeSubagentTool } from "../lib/opencode-tool-names.ts";
+import type { AcpContentBlock, AcpNotification, AcpPermissionOption, AcpUpdate } from "./acp-adapter.ts";
+import type {
+  AccountAuthState,
+  AgentEvent,
+  ApprovalChoice,
+  ApprovalRequestKind,
+  ApprovalRequestMetadata,
+  BackgroundCommandProjection,
+  BackgroundTaskProjection,
+  CliCommand,
+  CliInventory,
+  CliMcpServer,
+  CommandRunMeta,
+  GrantedPermissions,
+  McpHealthStatus,
+  ModelFallbackProjection,
+  ModelUsageEntry,
+  PermissionDenialProjection,
+  PermissionDenialReason,
+  PlanStepProjection,
+  PlanStepStatus,
+  ProviderId,
+  ProviderNoticeProjection,
+  RateLimitResumeState,
+  RateLimitState,
+  ReviewProjection,
+  SessionErrorProjection,
+  SessionNotice,
+  SessionProjection,
+  SessionStatus,
+  SpawnedRunMedia,
+  SpawnedRunProjection,
+  SpawnedRunSummaryFields,
+  SubagentEntry,
+  SubagentItem,
+  SubagentThread,
+  SubagentUsage,
+  TodoItemProjection,
+  TodoProjection,
+  TodoStatus,
+  TodoTaskEntry,
+  TurnBlock,
+  TurnOutcome,
+  TurnProjection,
+  TurnRun,
+} from "../lib/protocol.ts";
+
+
+// ---- local types (pure type port: erased when types are stripped) ----------
+// A stamped event: the journal adds seq/ts at append time (never this module).
+type Stamped<E> = E & { seq?: number; ts?: number };
+// `attachments` (the journaled user_message_accepted row's descriptors) is a declared field of the wire AgentEvent member since W17-TC.
+type ReducerInput = Stamped<AgentEvent>;
+// The reducer-input event narrowed to one `type`.
+type EvOf<T extends AgentEvent["type"]> = Extract<ReducerInput, { type: T }>;
+// Observed shape of a Claude tool_result / user text block as the abort/interrupt classifiers read it.
+interface AbortTextBlock {
+  type?: string;
+  text?: string;
+}
+
+// Raw / untrusted shapes the normalizers below read (every field is validated at its use).
+interface LegacyErrorRaw {
+  type?: string;
+  message?: string;
+  error?: { message?: string } | null;
+}
+interface PeerFromRaw {
+  sessionId?: unknown;
+  name?: unknown;
+}
+interface RawPermissionsFileSystem {
+  read?: unknown[];
+  write?: unknown[];
+}
+interface RawGrantedPermissions {
+  fileSystem?: RawPermissionsFileSystem | null;
+  network?: { enabled?: boolean } | null;
+}
+interface RawApprovalChoice {
+  choiceId?: unknown;
+  label?: unknown;
+  description?: unknown;
+  permissionGrant?: ApprovalChoice["permissionGrant"];
+}
+interface RawApprovalMetadata {
+  provider?: string;
+  kind?: string;
+  reason?: unknown;
+  command?: unknown;
+  cwd?: unknown;
+  paths?: unknown[];
+  network?: { host?: unknown; protocol?: unknown; port?: number } | null;
+  requestedPermissions?: RawGrantedPermissions | null;
+  permissionPatterns?: unknown[];
+  alwaysAllowPatterns?: unknown[];
+}
+interface RawPlanStep {
+  step?: unknown;
+  status?: string;
+}
+interface RawTodoItem {
+  content?: unknown;
+  activeForm?: unknown;
+  status?: string;
+}
+interface RawTaskInput {
+  subject?: unknown;
+  content?: unknown;
+  activeForm?: unknown;
+  active_form?: unknown;
+  status?: string;
+  taskId?: unknown;
+  id?: unknown;
+  task_id?: unknown;
+}
+interface TaskUpdatePatch {
+  taskId: string;
+  status?: TodoStatus | "deleted";
+  subject?: string;
+  activeForm?: string;
+}
+
+type TaskResultContent = string | Array<string | { text?: unknown } | null | undefined> | Record<string, unknown> | null | undefined;
+type SpawnedRunCountField = "inputTokens" | "cachedInputTokens" | "outputTokens" | "reasoningTokens" | "totalTokens" | "toolCalls";
+interface RawMediaRef {
+  type?: string;
+  url?: unknown;
+  mediaKind?: unknown;
+  mediaType?: unknown;
+  bytes?: unknown;
+  source?: string;
+  label?: unknown;
+}
+interface RawClaudeCommand {
+  name?: unknown;
+  description?: unknown;
+  argumentHint?: unknown;
+  aliases?: unknown[];
+}
+interface RawClaudeMcpServer {
+  name?: unknown;
+  status?: string;
+}
+interface RawCliInventory {
+  commands?: Array<string | RawClaudeCommand | null | undefined> | null;
+  tools?: unknown[] | null;
+  mcpServers?: RawClaudeMcpServer[] | null;
+}
+interface ClaudeFastRecord {
+  fast_mode_state?: string;
+  fast_mode_disabled_reason?: unknown;
+}
+
+// A membership Set whose has() narrows (type-only: the runtime value is the plain Set).
+interface GuardSet<T> {
+  has(value: unknown): value is T;
+}
+type TaskTerminalStatus = "completed" | "failed" | "stopped" | "killed";
+
+type BackgroundTaskPatch = Partial<BackgroundTaskProjection> & Pick<BackgroundTaskProjection, "status">;
+
+type SpawnRunBase = Omit<SpawnedRunProjection, "output" | "outputTruncated">;
+
+// ---- Claude stream-json / SDK observed shapes (module-private). A field read without a guard is REQUIRED. ----
+interface ClaudeUsageCounts {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  total_tokens?: number;
+  tool_uses?: number;
+  duration_ms?: number;
+}
+interface ClaudeContentBlock {
+  type: string;
+  text: string;
+  thinking?: string;
+  id: string;
+  name: string;
+  input?: RawTaskInput & { todos?: RawTodoItem[] };
+  tool_use_id: string;
+  content?: string | Array<string | AbortTextBlock> | null;
+  is_error?: boolean;
+}
+interface ClaudeMessage {
+  id?: string;
+  model?: string;
+  content?: string | ClaudeContentBlock[];
+  usage?: Record<string, unknown> | null;
+}
+interface ClaudeStreamInner {
+  type?: string;
+  index: number;
+  message?: { id?: string; model?: string };
+  content_block?: { type?: string };
+  delta?: { type?: string; text: string; thinking: string };
+  usage?: { output_tokens?: number };
+}
+interface ClaudeModelUsage {
+  canonicalModel?: string;
+  provider?: string;
+  [key: string]: unknown;
+}
+interface ClaudeRateLimitInfo {
+  status?: string;
+  rateLimitType?: string;
+  utilization?: number;
+  resetsAt?: number;
+  rateLimitGraceActive?: boolean;
+  overageStatus?: string;
+}
+interface ClaudeRecord {
+  type: string;
+  subtype?: string;
+  session_id: string;
+  parent_tool_use_id?: string | null;
+  message?: ClaudeMessage;
+  content?: string;
+  uuid?: string;
+  heartbeat?: boolean;
+  tool_use_id?: string;
+  tool_name?: string;
+  elapsed_time_seconds?: number;
+  estimated_tokens?: number;
+  capabilities?: unknown[];
+  claude_code_version?: string;
+  mcp_servers?: RawClaudeMcpServer[];
+  slash_commands?: Array<string | RawClaudeCommand>;
+  tools?: unknown[];
+  commands?: Array<string | RawClaudeCommand>;
+  fast_mode_state?: string;
+  fast_mode_disabled_reason?: unknown;
+  attempt?: number;
+  max_retries?: number;
+  retry_delay_ms?: number;
+  error_status?: number;
+  error?: string;
+  decision_reason_type?: string;
+  decision_reason?: string;
+  agent_id?: string;
+  original_model?: string;
+  fallback_model?: string;
+  trigger?: string;
+  task_id?: string;
+  task_type?: string;
+  subagent_type?: string;
+  skip_transcript?: boolean;
+  last_tool_name?: string;
+  status?: string;
+  summary?: string;
+  output_file?: string;
+  patch?: { status?: string };
+  tasks?: Array<{ task_id: string }>;
+  usage?: ClaudeUsageCounts;
+  rate_limit_info?: ClaudeRateLimitInfo;
+  event?: ClaudeStreamInner | null;
+  aborted?: boolean;
+  permission_denials?: ClaudeRecord[];
+  modelUsage?: Record<string, ClaudeModelUsage> | null;
+  total_cost_usd?: number;
+  num_turns?: number;
+  is_error?: boolean;
+  isSidechain?: boolean;
+  isMeta?: boolean;
+  origin?: { kind?: string };
+  entrypoint?: string;
+}
+interface ClaudeAdapterState {
+  turnId: string;
+  currentMessageId: string | null;
+  streamTextOrdinal: number;
+  streamTextByIndex: Record<number, number>;
+  streamThinkingOrdinal: number;
+  streamThinkingByIndex: Record<number, number>;
+  permissionDeniedToolIds: string[];
+  toolParentsById: Record<string, string | null>;
+  toolProgressMilestones: Record<string, number>;
+  servedRawModel: string | null;
+  subagentUsageByParent: Record<string, SubagentUsage>;
+  liveTokensSettled: number;
+  liveTokensCurrent: number;
+  liveThinkingSettled: number;
+  liveThinkingBlock: number;
+  liveTokensEmitted: number;
+}
+interface ClaudeStep {
+  events: AgentEvent[];
+  state: ClaudeAdapterState;
+}
+type SubagentUsageCountField = "inputTokens" | "outputTokens" | "cacheReadInputTokens" | "cacheCreationInputTokens";
+
+interface CodexItem {
+  type?: string;
+  message: string;
+  id: string;
+  text: string;
+  status?: string;
+  exit_code?: number | null;
+  command: string;
+  aggregated_output: string;
+}
+interface CodexRecord {
+  type: string;
+  thread_id: string;
+  item?: CodexItem | null;
+  usage?: { input_tokens?: number; output_tokens?: number };
+  message?: string;
+  error?: { message?: string };
+}
+interface CodexAdapterState {
+  turnId: string;
+  errorMessage: string | null;
+}
+interface CodexStep {
+  events: AgentEvent[];
+  state: CodexAdapterState;
+}
+
+// ---- Codex rollout (transcript replay) observed shapes ----
+type CodexOutputValue = string | Array<string | { text?: string } | null | undefined> | { output?: string } | number | boolean | null | undefined;
+interface CodexTokenUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cached_input_tokens?: number;
+  cache_write_input_tokens?: number;
+  total_tokens?: number;
+}
+interface CodexRolloutPayload {
+  type?: string;
+  role?: string;
+  content?: Array<{ type?: string; text?: string } | null | undefined>;
+  id?: string;
+  call_id?: string;
+  status?: string;
+  name?: string;
+  namespace?: string;
+  arguments?: string | Record<string, unknown>;
+  input?: string | Record<string, unknown>;
+  output?: CodexOutputValue;
+  message?: string;
+  info?: { total_token_usage?: CodexTokenUsage | null } | null;
+  model?: string;
+  collaboration_mode?: { settings?: { model?: string } };
+  event_id?: string;
+  agent_thread_id?: string;
+  agent_path?: string;
+  agent_nickname?: string;
+  source?: { subagent?: { thread_spawn?: { agent_nickname?: string; agent_path?: string } } };
+}
+interface CodexRolloutRecord {
+  type?: string;
+  payload?: CodexRolloutPayload | null;
+}
+interface CodexChildDescriptor {
+  records?: CodexRolloutRecord[];
+  agentNickname?: string;
+  agentPath?: string;
+}
+type CodexChildResult = CodexRolloutRecord[] | CodexChildDescriptor | null | undefined;
+type CodexReadChild = (childThreadId: string) => CodexChildResult;
+interface CodexReplayOptions {
+  turnIdPrefix?: string;
+  readChild?: CodexReadChild | null;
+  childThreadIds?: string[];
+}
+interface CodexBinding {
+  childThreadId: string;
+  childRecords: CodexRolloutRecord[];
+  title: string | null;
+}
+
+// ---- OpenCode serve-v2 / export observed shapes ----
+interface OpencodeToolState {
+  status?: string;
+  input?: unknown;
+  content?: Array<{ type?: string; text?: string } | null>;
+  error?: string | { message?: string } | null;
+  metadata?: { exit?: number; sessionID?: string; sessionId?: string } | null;
+}
+interface OpencodePart {
+  type?: string;
+  text?: string;
+  id?: string;
+  name: string;
+  state?: OpencodeToolState | null;
+}
+interface OpencodeModelRef {
+  modelID?: string;
+  id?: string;
+}
+interface OpencodeData {
+  text?: string;
+  outcome?: string;
+  error?: string | { type?: string; message?: string } | null;
+  command?: string;
+  output?: string;
+  exit?: number;
+  finish?: string;
+  content?: OpencodePart[];
+}
+interface OpencodeMessage {
+  type?: string;
+  id?: string;
+  data?: OpencodeData | null;
+}
+interface OpencodeTokens {
+  input?: number;
+  output?: number;
+  cache?: { read?: number; write?: number } | null;
+}
+interface OpencodeInfo {
+  tokens?: OpencodeTokens | null;
+  tokens_input?: number;
+  tokens_output?: number;
+  tokens_cache_read?: number;
+  tokens_cache_write?: number;
+  model?: string | OpencodeModelRef | null;
+}
+interface OpencodeExport {
+  messages?: OpencodeMessage[];
+  info?: OpencodeInfo | null;
+}
+type OpencodeReadChild = (childId: string) => OpencodeExport | null | undefined;
+interface OpencodeReplayOptions {
+  turnIdPrefix?: string;
+  readChild?: OpencodeReadChild | null;
+}
+// ---- Reasonix / Gemini transcript observed shapes ----
+interface ReasonixToolCall {
+  id?: string;
+  function?: { name?: string; arguments?: unknown } | null;
+  name?: string;
+  arguments?: unknown;
+}
+interface ReasonixMessage {
+  role?: string;
+  content?: unknown;
+  reasoning_content?: unknown;
+  tool_calls?: ReasonixToolCall[];
+  tool_call_id?: unknown;
+  name?: string;
+}
+interface GeminiToolCall {
+  id?: string;
+  name?: string;
+  result?: unknown;
+  resultDisplay?: unknown;
+  args?: unknown;
+  status?: string;
+}
+interface GeminiMessage {
+  type?: string;
+  content?: unknown;
+  thoughts?: unknown;
+  toolCalls?: GeminiToolCall[];
+}
+
+// ---- Reasonix (ACP session/update) adapter state ----
+interface ReasonixAdapterState {
+  turnId: string;
+  errorMessage: string | null;
+  seenToolIds: Set<string>;
+  subagentLauncherIds: Set<string>;
+  subagentToolParents: Map<string, string>;
+  messageSeq: number;
+  openMessageId: string | null;
+  toolCompleted: boolean;
+}
+interface ReasonixStep {
+  events: AgentEvent[];
+  state: ReasonixAdapterState;
+}
+interface ReasonixMcpServer {
+  name?: unknown;
+  status: string;
+  error?: unknown;
+}
+
+// ---- Pi RPC observed shapes ----
+interface PiContentBlock {
+  type?: string;
+  text?: string;
+  thinking?: string;
+}
+interface PiToolResult {
+  content?: string | PiContentBlock[];
+  firstKeptEntryId?: string;
+}
+interface PiMessage {
+  role?: string;
+  stopReason?: string;
+  errorMessage?: string;
+  content?: string | PiContentBlock[];
+  toolCallId?: string;
+  toolName?: string;
+  isError?: boolean;
+  command?: string;
+  output?: string;
+  exitCode?: number | null;
+}
+interface PiAssistantMessageEvent {
+  type?: string;
+  contentIndex?: number;
+  delta?: string;
+  content?: string;
+}
+interface PiEvent {
+  type?: string;
+  message?: PiMessage;
+  assistantMessageEvent?: PiAssistantMessageEvent | null;
+  toolCallId?: string;
+  toolName?: string;
+  args?: unknown;
+  partialResult?: PiToolResult;
+  result?: PiToolResult;
+  isError?: boolean;
+  attempt?: number;
+  maxAttempts?: number;
+  delayMs?: number;
+  errorMessage?: string;
+  success?: boolean;
+  finalError?: string;
+  aborted?: boolean;
+  error?: string;
+}
+interface PiAdapterState {
+  turnId: string;
+  msgIndex: number;
+  toolOutputLen: Map<string, number>;
+  liveCharsEmitted: number;
+  liveTokensEmitted: number;
+}
+interface PiStep {
+  events: AgentEvent[];
+  state: PiAdapterState;
+}
+
+// ---- dsh transcript observed shapes ----
+interface DshUsageChunk {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  reasoningTokens?: number;
+}
+interface DshBlockText {
+  type?: string;
+  text?: string;
+}
+interface DshChunk {
+  type?: string;
+  index?: number;
+  blockType?: string;
+  block?: DshBlockText | null;
+  usage?: DshUsageChunk | null;
+  text?: string;
+}
+interface DshUserContentBlock {
+  type?: string;
+  text?: string;
+}
+interface DshData {
+  id?: string;
+  source?: { kind?: string };
+  content?: string | DshUserContentBlock[];
+  chunk?: DshChunk | null;
+  toolCallId?: string;
+  seq?: number | string;
+  name?: string;
+  arguments?: string;
+  output?: string;
+  isError?: boolean;
+  error?: string;
+  reason?: { kind?: string };
+}
+interface DshRecord {
+  type?: string;
+  id?: string;
+  data?: DshData | null;
+}
+interface DshAdapterState {
+  turnId: string;
+  emittedNativeId: boolean;
+  openBlocks: Map<number, { type: string; text: string }>;
+  usageAccum: { inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number };
+}
+interface DshStep {
+  events: AgentEvent[];
+  state: DshAdapterState;
+}
 
 export const TURN_OUTCOMES = Object.freeze({
   OK: "ok",
@@ -221,16 +814,16 @@ export const MAX_DISMISSED_NOTICES = 200;
 // with a provider notice or compaction id, and scoped by turn where the family
 // repeats an id (a per-turn provider notice and a session-level one can share
 // the provider's own noticeId).
-export function backgroundNoticeDismissKey(kind, seq) {
+export function backgroundNoticeDismissKey(kind: string, seq: number | undefined) {
   return seq !== undefined ? `${kind}:${seq}` : `${kind}:unsequenced`;
 }
-export function externalAdvancementDismissKey(fromCursor, toCursor) {
+export function externalAdvancementDismissKey(fromCursor: string | number, toCursor: string | number) {
   return `external_advancement:${fromCursor}:${toCursor}`;
 }
-export function providerNoticeDismissKey(turnId, noticeId) {
+export function providerNoticeDismissKey(turnId: string | null, noticeId: string) {
   return `provider_notice:${turnId ?? "session"}:${noticeId}`;
 }
-export function compactionDismissKey(turnId, itemId) {
+export function compactionDismissKey(turnId: string | null, itemId: string) {
   return `context_compacted:${turnId}:${itemId}`;
 }
 
@@ -238,7 +831,7 @@ export function compactionDismissKey(turnId, itemId) {
 // notice-producing fold checks this BEFORE appending, so a notice folded AFTER
 // its dismissal in a replay (or a derived-not-journaled external_advancement
 // re-folded on boot) stays hidden instead of resurrecting.
-function isNoticeDismissed(state, dismissKey) {
+function isNoticeDismissed(state: Readonly<SessionProjection>, dismissKey: string | null | undefined) {
   if (!dismissKey) return false;
   return Array.isArray(state.dismissedNotices) && state.dismissedNotices.includes(dismissKey);
 }
@@ -248,7 +841,7 @@ function isNoticeDismissed(state, dismissKey) {
 // stale/forged key cannot pad the bounded dismissed set. The renderer only ever
 // offers a key that came from this same projection, so an ordinary click always
 // passes; the check is for the abuse path, not the user path.
-export function projectionHasNoticeKey(state, dismissKey) {
+export function projectionHasNoticeKey(state: Readonly<SessionProjection> | null | undefined, dismissKey: string | null | undefined) {
   if (!state || !dismissKey) return false;
   if ((state.notices ?? []).some((notice) => notice.dismissKey === dismissKey)) return true;
   if ((state.providerNotices ?? []).some((notice) => notice.dismissKey === dismissKey)) return true;
@@ -263,7 +856,7 @@ export function projectionHasNoticeKey(state, dismissKey) {
 // notice folded LATER in the same replay stays hidden) and drops every matching
 // entry from the live projection. The notice's own marker in the journal is
 // never rewritten or deleted — the dismissal is a new fact appended after it.
-function applyNoticeDismissal(state, dismissKey) {
+function applyNoticeDismissal(state: Readonly<SessionProjection>, dismissKey: string) {
   const dismissedNotices = [...(state.dismissedNotices ?? []), dismissKey].slice(-MAX_DISMISSED_NOTICES);
   const notices = state.notices.filter((notice) => notice.dismissKey !== dismissKey);
   const providerNotices = state.providerNotices.filter((notice) => notice.dismissKey !== dismissKey);
@@ -282,7 +875,7 @@ function applyNoticeDismissal(state, dismissKey) {
 // Pure session/turn reducer
 // --------------------------------------------------------------------------
 
-export function initialSessionState({ tetherSessionId, provider, cwd, nativeSessionId = null }) {
+export function initialSessionState({ tetherSessionId, provider, cwd, nativeSessionId = null }: { tetherSessionId: string; provider: ProviderId; cwd: string; nativeSessionId?: string | null }): SessionProjection {
   return {
     tetherSessionId,
     provider,
@@ -342,7 +935,17 @@ export function initialSessionState({ tetherSessionId, provider, cwd, nativeSess
     todoTasks: [],
     status: SESSION_STATUS.READY,
     lastTurnOutcome: null,
-    lastError: null, // holds a turn-less `error` event (event.turnId == null) — no turn projection could hold it
+    // Holds the latest turn-less `error` event (event.turnId == null) — no turn
+    // projection could hold it. Kept for older clients that still read it; since
+    // #256 it is CLEARED by the next accepted turn_started, so it no longer latches
+    // for the life of the session. New UI reads `sessionErrors` instead.
+    lastError: null,
+    // #256: the durable record of every turn-less `error`, oldest first, bounded
+    // to MAX_SESSION_ERRORS (newest kept). Each entry is { seq, ts, message,
+    // cause? } stamped from the journal (seq/ts are null only for a hand-built
+    // event that never went through SessionJournal.append). Never cleared: it is
+    // history for the timeline, not live state. Replay reproduces it exactly.
+    sessionErrors: [],
     // v22/T9: permission_denied records that arrived between persistent turns.
     // They are closed facts, not pending approvals, and assigning them to the
     // previous turn would invent causality.
@@ -411,7 +1014,7 @@ export function initialSessionState({ tetherSessionId, provider, cwd, nativeSess
 
 // Convenience accessor mirroring the old single-slot shape, handy in tests
 // and UI code that only cares about "the turn in progress right now".
-export function currentTurn(state) {
+export function currentTurn(state: Readonly<SessionProjection>): TurnProjection | null {
   return state.activeTurnId ? state.turnsById[state.activeTurnId] : null;
 }
 
@@ -422,9 +1025,9 @@ export function currentTurn(state) {
 // Read off the folded projection — engine-agnostic, unlike the persistent-only
 // openToolIds set. `excludeToolId` drops the call whose own tool_start is being
 // evaluated (a just-requested call has done nothing yet).
-export function runningToolIds(state, excludeToolId = null) {
+export function runningToolIds(state: Readonly<SessionProjection>, excludeToolId: string | null = null): Set<string> {
   const turn = currentTurn(state);
-  const running = new Set();
+  const running = new Set<string>();
   if (!turn) return running;
   const parked = new Set();
   for (const request of Object.values(turn.pendingApprovals ?? {})) if (request?.toolId) parked.add(request.toolId);
@@ -437,7 +1040,7 @@ export function runningToolIds(state, excludeToolId = null) {
   return running;
 }
 
-export function openToolCount(state, excludeToolId = null) {
+export function openToolCount(state: Readonly<SessionProjection>, excludeToolId: string | null = null): number {
   return runningToolIds(state, excludeToolId).size;
 }
 
@@ -449,9 +1052,9 @@ export function openToolCount(state, excludeToolId = null) {
 //     this process has seen one) wins outright;
 //   * otherwise a task whose task_started has no terminal task_completed.
 // A task launched by a call already counted as a running tool is not counted twice.
-export function liveBackgroundTaskCount(state, { levelTaskIds = null, excludeToolIds = new Set() } = {}) {
+export function liveBackgroundTaskCount(state: Readonly<SessionProjection> | null | undefined, { levelTaskIds = null, excludeToolIds = new Set<string>() }: { levelTaskIds?: Iterable<string> | null; excludeToolIds?: Set<string> } = {}): number {
   const tasks = Array.isArray(state?.backgroundTasks) ? state.backgroundTasks : [];
-  const excluded = (task) => Boolean(task?.toolUseId) && excludeToolIds.has(task.toolUseId);
+  const excluded = (task: BackgroundTaskProjection | undefined) => Boolean(task?.toolUseId) && excludeToolIds.has((task as BackgroundTaskProjection).toolUseId as string);
   if (levelTaskIds) {
     let count = 0;
     for (const taskId of levelTaskIds) {
@@ -476,13 +1079,30 @@ export function liveBackgroundTaskCount(state, { levelTaskIds = null, excludeToo
 // exactly the timestamp callers need. Returns null when no turn has ever
 // landed in this state (a brand-new session), so callers can fall back to
 // their own seed (e.g. the session's createdAt/startedAt).
-export function lastMessageActivityAt(state) {
+export function lastMessageActivityAt(state: Readonly<SessionProjection>): number | null {
   const lastTurnId = state.turnOrder.length ? state.turnOrder[state.turnOrder.length - 1] : null;
   const startedAt = lastTurnId ? state.turnsById[lastTurnId]?.startedAt : null;
   return typeof startedAt === "number" ? startedAt : null;
 }
 
-function newTurnProjection(turnId, idempotencyKey, continuation = false, startedAt = null, commandRun = null) {
+// #256: bound on SessionProjection.sessionErrors (newest kept).
+export const MAX_SESSION_ERRORS = 20;
+
+function foldSessionError(state: Readonly<SessionProjection>, event: EvOf<"error">): SessionErrorProjection[] {
+  const existing = Array.isArray(state.sessionErrors) ? state.sessionErrors : [];
+  const seq = Number.isFinite(event.seq) ? (event.seq as number) : null;
+  // Idempotent: the same stamped event folded twice (reconnect overlap) is one entry.
+  if (seq != null && existing.some((entry) => entry.seq === seq)) return existing;
+  const entry = {
+    seq,
+    ts: nonNegativeFiniteNumber(event.ts) ?? null,
+    message: event.message,
+    ...(event.cause ? { cause: event.cause } : {}),
+  };
+  return [...existing, entry].slice(-MAX_SESSION_ERRORS);
+}
+
+function newTurnProjection(turnId: string, idempotencyKey: string | null | undefined, continuation = false, startedAt: number | null = null, commandRun: TurnProjection["commandRun"] = null): TurnProjection {
   return {
     turnId,
     idempotencyKey: idempotencyKey ?? null,
@@ -546,7 +1166,7 @@ function newTurnProjection(turnId, idempotencyKey, continuation = false, started
 // journaled as unknown_event. Keep those existing journals useful on replay by
 // recognizing only the two documented terminal-error shapes. The raw record is
 // still retained in warnings for diagnostics.
-function legacyUnknownErrorMessage(raw) {
+function legacyUnknownErrorMessage(raw: LegacyErrorRaw | null | undefined): string | null {
   if (!raw || typeof raw !== "object") return null;
   if (raw.type === "error" && typeof raw.message === "string" && raw.message.trim()) return raw.message;
   if (raw.type === "turn.failed" && typeof raw.error?.message === "string" && raw.error.message.trim()) {
@@ -561,7 +1181,7 @@ function legacyUnknownErrorMessage(raw) {
 // stale "retrying…" badge frozen on it. Deliberately an allow-list: an event that
 // carries no forward progress (approval_request, rate_limit, warning, another
 // api_retry) must leave the marker standing.
-const API_RETRY_RESOLVED_BY = new Set([
+const API_RETRY_RESOLVED_BY: ReadonlySet<unknown> = new Set([
   "message_started",
   "message_delta",
   "message_completed",
@@ -600,14 +1220,14 @@ const API_RETRY_RESOLVED_BY = new Set([
 // rather than `activeTurnId` because turn_end/cancelled clear the active turn
 // before this runs. No-op (returns the same object) in the overwhelmingly common
 // case where no retry is outstanding.
-function clearResolvedApiRetry(state, event) {
+function clearResolvedApiRetry(state: Readonly<SessionProjection>, event: ReducerInput): Readonly<SessionProjection> {
   if (!API_RETRY_RESOLVED_BY.has(event.type)) return state;
-  const turn = state.turnsById[event.turnId];
+  const turn = state.turnsById[event.turnId as string];
   if (!turn || turn.apiRetry == null) return state;
-  return { ...state, turnsById: { ...state.turnsById, [event.turnId]: { ...turn, apiRetry: null } } };
+  return { ...state, turnsById: { ...state.turnsById, [event.turnId as string]: { ...turn, apiRetry: null } } };
 }
 
-function sameStringList(a, b) {
+function sameStringList(a: unknown, b: readonly string[]) {
   if (!Array.isArray(a) || a.length !== b.length) return false;
   return a.every((value, index) => value === b[index]);
 }
@@ -622,14 +1242,14 @@ export const CLI_INVENTORY_LIMITS = Object.freeze({
   argumentHintChars: 200,
 });
 
-const MCP_SERVER_STATUSES = new Set(["connected", "failed", "needs-auth", "pending", "disabled"]);
+const MCP_SERVER_STATUSES: ReadonlySet<unknown> = new Set(["connected", "failed", "needs-auth", "pending", "disabled"]);
 
 // Maps Claude's cliInventory MCP server status vocabulary (normalizeClaudeMcpServers,
 // above) onto the shared McpHealthStatus vocabulary (McpHealthStatus in lib/protocol.ts)
 // so a Claude init record can ALSO emit mcp_health_updated events, in addition to the
 // cliInventory.mcpServers list. Anything not in this table (i.e. "unknown") maps to
 // "unknown" via the `?? "unknown"` fallback at the call site.
-const CLAUDE_MCP_STATUS_TO_HEALTH = Object.freeze({
+const CLAUDE_MCP_STATUS_TO_HEALTH: Readonly<Record<string, McpHealthStatus | undefined>> = Object.freeze({
   connected: "ready",
   pending: "starting",
   failed: "failed",
@@ -637,35 +1257,47 @@ const CLAUDE_MCP_STATUS_TO_HEALTH = Object.freeze({
   disabled: "disabled",
 });
 
-function identifier(value, { stripLeadingSlash = false } = {}) {
+function identifier(value: unknown, { stripLeadingSlash = false }: { stripLeadingSlash?: boolean } = {}) {
   if (typeof value !== "string") return null;
   const normalized = stripLeadingSlash ? value.trim().replace(/^\//, "") : value.trim();
   if (!normalized || Array.from(normalized).length > CLI_INVENTORY_LIMITS.nameChars) return null;
   return normalized;
 }
 
-function boundedDisplayText(value, maxChars) {
+function boundedDisplayText(value: unknown, maxChars: number) {
   if (typeof value !== "string") return undefined;
   const chars = Array.from(value);
   return chars.length <= maxChars ? value : chars.slice(0, maxChars).join("");
 }
 
-const PROVIDER_IDS = new Set(["claude", "codex", "opencode"]);
-const APPROVAL_KINDS = new Set(["tool", "command", "file-change", "network", "permissions"]);
-const PLAN_STEP_STATUSES = new Set(["pending", "in_progress", "completed"]);
-const REVIEW_COMPLETION_STATUSES = new Set(["completed", "cancelled", "failed"]);
-const MCP_HEALTH_STATUSES = new Set(["starting", "ready", "failed", "cancelled", "needs-auth", "disabled", "unknown"]);
-const PROVIDER_NOTICE_LEVELS = new Set(["info", "warning", "error"]);
+const PROVIDER_IDS: ReadonlySet<unknown> = new Set(["claude", "codex", "opencode"]);
+const APPROVAL_KINDS: ReadonlySet<unknown> = new Set(["tool", "command", "file-change", "network", "permissions"]);
+const PLAN_STEP_STATUSES: ReadonlySet<unknown> = new Set(["pending", "in_progress", "completed"]);
+const REVIEW_COMPLETION_STATUSES: ReadonlySet<unknown> = new Set(["completed", "cancelled", "failed"]);
+const MCP_HEALTH_STATUSES: ReadonlySet<unknown> = new Set(["starting", "ready", "failed", "cancelled", "needs-auth", "disabled", "unknown"]);
+const PROVIDER_NOTICE_LEVELS: ReadonlySet<unknown> = new Set(["info", "warning", "error"]);
 
-function boundedIdentifier(value) {
+// v149 (GH #265): `from` on user_message_accepted / the user_message block, and the sender fields on a
+// queued peer row, are bounded here (display-only attribution - never an id the server trusts). The name
+// bound is a twin of PEER_NAME_MAX_CHARS in lib/peer-message.mjs (a test asserts they agree).
+const PEER_FROM_NAME_CHARS = 80;
+function peerFrom(value: PeerFromRaw | null | undefined): { sessionId: string; name: string } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const sessionId = boundedIdentifier(value.sessionId);
+  if (!sessionId) return undefined;
+  const name = boundedDisplayText(typeof value.name === "string" ? value.name : "", PEER_FROM_NAME_CHARS);
+  return { sessionId, name: name ?? "" };
+}
+
+function boundedIdentifier(value: unknown): string | null {
   if (typeof value !== "string" || value.length === 0) return null;
-  return boundedDisplayText(value, PROVIDER_PROJECTION_LIMITS.idChars);
+  return boundedDisplayText(value, PROVIDER_PROJECTION_LIMITS.idChars) as string;
 }
 
 // Choice IDs are opaque round-trip tokens, not display text. Match inbound
 // validation's string-length bound exactly and reject oversize values; trimming
 // or truncating could turn distinct upstream choices into the same identifier.
-function boundedApprovalChoiceId(value) {
+function boundedApprovalChoiceId(value: unknown): string | null {
   if (
     typeof value !== "string"
     || value.length === 0
@@ -674,13 +1306,13 @@ function boundedApprovalChoiceId(value) {
   return value;
 }
 
-function normalizeStringList(values, { limit, maxChars }) {
+function normalizeStringList(values: unknown[] | null | undefined, { limit, maxChars }: { limit: number; maxChars: number }): string[] | undefined {
   if (!Array.isArray(values)) return undefined;
-  const result = [];
+  const result: string[] = [];
   for (const value of values) {
     if (result.length >= limit) break;
     if (typeof value !== "string" || value.length === 0) continue;
-    result.push(boundedDisplayText(value, maxChars));
+    result.push(boundedDisplayText(value, maxChars) as string);
   }
   return result;
 }
@@ -693,7 +1325,7 @@ function normalizeStringList(values, { limit, maxChars }) {
  * directory, a broader grant than the provider asked for. A request that cannot
  * be shown whole is therefore never grantable (see the approval_request case).
  */
-function requestedPermissionsExceedBounds(value) {
+function requestedPermissionsExceedBounds(value: { fileSystem?: Record<string, unknown[] | undefined> | null } | null | undefined): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const fileSystem = value.fileSystem;
   if (!fileSystem || typeof fileSystem !== "object" || Array.isArray(fileSystem)) return false;
@@ -708,11 +1340,11 @@ function requestedPermissionsExceedBounds(value) {
   return false;
 }
 
-function normalizeGrantedPermissions(value) {
+function normalizeGrantedPermissions(value: RawGrantedPermissions | null | undefined): GrantedPermissions | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const result = {};
+  const result: GrantedPermissions = {};
   if (value.fileSystem && typeof value.fileSystem === "object" && !Array.isArray(value.fileSystem)) {
-    const fileSystem = {};
+    const fileSystem: NonNullable<GrantedPermissions["fileSystem"]> = {};
     const read = normalizeStringList(value.fileSystem.read, {
       limit: PROVIDER_PROJECTION_LIMITS.paths,
       maxChars: PROVIDER_PROJECTION_LIMITS.pathChars,
@@ -731,10 +1363,10 @@ function normalizeGrantedPermissions(value) {
   return result;
 }
 
-function normalizeApprovalChoices(choices) {
+function normalizeApprovalChoices(choices: Array<RawApprovalChoice | null | undefined> | null | undefined): ApprovalChoice[] | undefined {
   if (!Array.isArray(choices)) return undefined;
-  const normalized = [];
-  const seen = new Set();
+  const normalized: ApprovalChoice[] = [];
+  const seen = new Set<string>();
   for (const choice of choices) {
     if (normalized.length >= PROVIDER_PROJECTION_LIMITS.approvalChoices) break;
     const choiceId = boundedApprovalChoiceId(choice?.choiceId);
@@ -756,10 +1388,10 @@ function normalizeApprovalChoices(choices) {
   return normalized;
 }
 
-function normalizeApprovalMetadata(metadata) {
+function normalizeApprovalMetadata(metadata: RawApprovalMetadata | null | undefined): ApprovalRequestMetadata | undefined {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined;
   if (!PROVIDER_IDS.has(metadata.provider) || !APPROVAL_KINDS.has(metadata.kind)) return undefined;
-  const normalized = { provider: metadata.provider, kind: metadata.kind };
+  const normalized: ApprovalRequestMetadata = { provider: metadata.provider as ProviderId, kind: metadata.kind as ApprovalRequestKind };
   const reason = boundedDisplayText(metadata.reason, PROVIDER_PROJECTION_LIMITS.proseChars);
   const command = boundedDisplayText(metadata.command, PROVIDER_PROJECTION_LIMITS.commandChars);
   const cwd = boundedDisplayText(metadata.cwd, PROVIDER_PROJECTION_LIMITS.pathChars);
@@ -777,8 +1409,8 @@ function normalizeApprovalMetadata(metadata) {
       normalized.network = { host };
       const protocol = boundedDisplayText(metadata.network.protocol, PROVIDER_PROJECTION_LIMITS.labelChars);
       if (protocol !== undefined) normalized.network.protocol = protocol;
-      if (Number.isInteger(metadata.network.port) && metadata.network.port >= 0 && metadata.network.port <= 65_535) {
-        normalized.network.port = metadata.network.port;
+      if (Number.isInteger(metadata.network.port) && (metadata.network.port as number) >= 0 && (metadata.network.port as number) <= 65_535) {
+        normalized.network.port = metadata.network.port as number;
       }
     }
   }
@@ -803,14 +1435,14 @@ function normalizeApprovalMetadata(metadata) {
   return normalized;
 }
 
-function normalizePlanSteps(steps) {
+function normalizePlanSteps(steps: RawPlanStep[] | null | undefined): PlanStepProjection[] {
   if (!Array.isArray(steps)) return [];
-  const normalized = [];
+  const normalized: PlanStepProjection[] = [];
   for (const item of steps) {
     if (normalized.length >= PROVIDER_PROJECTION_LIMITS.planSteps) break;
     const step = boundedDisplayText(item?.step, PROVIDER_PROJECTION_LIMITS.proseChars);
     if (!step || !PLAN_STEP_STATUSES.has(item?.status)) continue;
-    normalized.push({ step, status: item.status });
+    normalized.push({ step, status: item.status as PlanStepStatus });
   }
   return normalized;
 }
@@ -832,10 +1464,10 @@ export const TODO_LIMITS = Object.freeze({
 // today: they come from different providers on different events, and sharing the set
 // would quietly couple a future divergence in one to the other (same reasoning as
 // TodoStatus vs PlanStepStatus in lib/protocol.ts).
-const TODO_STATUSES = new Set(["pending", "in_progress", "completed"]);
+const TODO_STATUSES: ReadonlySet<unknown> = new Set(["pending", "in_progress", "completed"]);
 
 // "Nothing a human could read": a non-string, an empty string, or whitespace only.
-function isBlank(value) {
+function isBlank(value: unknown): boolean {
   return typeof value !== "string" || value.trim() === "";
 }
 
@@ -846,12 +1478,12 @@ function isBlank(value) {
 // never asserts progress the provider did not state. `activeForm` is optional on
 // older CLI builds and normalizes to "" — the fallback to `content` happens once, in
 // todoProjection, so every surface agrees on it.
-function normalizeTodoItems(items) {
+function normalizeTodoItems(items: RawTodoItem[] | null | undefined): TodoItemProjection[] {
   if (!Array.isArray(items)) return [];
-  const normalized = [];
+  const normalized: TodoItemProjection[] = [];
   for (const item of items) {
     if (normalized.length >= TODO_LIMITS.items) break;
-    const content = boundedDisplayText(item?.content, TODO_LIMITS.textChars);
+    const content = boundedDisplayText(item?.content, TODO_LIMITS.textChars) as string;
     if (isBlank(content) || !TODO_STATUSES.has(item?.status)) continue;
     // A blank/absent activeForm normalizes to the SAME value ("") whichever way the
     // provider expressed it, so the fallback below has one condition to test rather
@@ -859,8 +1491,8 @@ function normalizeTodoItems(items) {
     const activeForm = boundedDisplayText(item?.activeForm, TODO_LIMITS.textChars);
     normalized.push({
       content,
-      activeForm: isBlank(activeForm) ? "" : activeForm,
-      status: item.status,
+      activeForm: isBlank(activeForm) ? "" : (activeForm as string),
+      status: item.status as TodoStatus,
     });
   }
   return normalized;
@@ -871,7 +1503,7 @@ function normalizeTodoItems(items) {
 // "which todo is active" must have exactly one definition — falling back to that
 // item's `content` when the provider sent no usable activeForm, and null when nothing
 // is in progress.
-function todoProjection(items) {
+function todoProjection(items: TodoItemProjection[]): TodoProjection {
   const active = items.find((item) => item.status === "in_progress");
   return {
     items,
@@ -881,7 +1513,7 @@ function todoProjection(items) {
   };
 }
 
-function sameTodo(a, b) {
+function sameTodo(a: TodoProjection | null, b: TodoProjection | null): boolean {
   if (a === null || b === null) return a === b;
   if (a.total !== b.total || a.completed !== b.completed || a.activeForm !== b.activeForm) return false;
   return a.items.every((item, index) => (
@@ -903,29 +1535,29 @@ function sameTodo(a, b) {
 // (claudeTaskEvents), an unrelated concept, and reusing it would silently entangle the
 // two. Normalizers never throw: an unreadable field yields fewer items, never an error
 // or an invented value, exactly like normalizeTodoItems.
-function normalizeTaskCreate(input) {
+function normalizeTaskCreate(input: RawTaskInput | null | undefined): { subject: string; activeForm: string; status: TodoStatus } | null {
   if (!input || typeof input !== "object") return null;
-  const subject = boundedDisplayText(input.subject ?? input.content, TODO_LIMITS.textChars);
+  const subject = boundedDisplayText(input.subject ?? input.content, TODO_LIMITS.textChars) as string;
   if (isBlank(subject)) return null;
   const activeForm = boundedDisplayText(input.activeForm ?? input.active_form, TODO_LIMITS.textChars);
-  const status = TODO_STATUSES.has(input.status) ? input.status : "pending";
-  return { subject, activeForm: isBlank(activeForm) ? "" : activeForm, status };
+  const status = (TODO_STATUSES.has(input.status) ? input.status : "pending") as TodoStatus;
+  return { subject, activeForm: isBlank(activeForm) ? "" : (activeForm as string), status };
 }
 
 // A TaskUpdate patch, or null when it carries nothing usable. Reads the id
 // defensively (taskId | id | task_id): the streamed tool_use input is the raw shape
 // the model emitted, and Claude Code's key repair (id/task_id -> taskId) is not
 // reflected in the stream. "deleted" is a real status here — it removes the item.
-function normalizeTaskUpdate(input) {
+function normalizeTaskUpdate(input: RawTaskInput | null | undefined): TaskUpdatePatch | null {
   if (!input || typeof input !== "object") return null;
   const taskId = boundedIdentifier(input.taskId ?? input.id ?? input.task_id);
   if (!taskId) return null;
-  const patch = { taskId };
-  if (input.status === "deleted" || TODO_STATUSES.has(input.status)) patch.status = input.status;
+  const patch: TaskUpdatePatch = { taskId };
+  if (input.status === "deleted" || TODO_STATUSES.has(input.status)) patch.status = input.status as TodoStatus | "deleted";
   const subject = boundedDisplayText(input.subject ?? input.content, TODO_LIMITS.textChars);
-  if (!isBlank(subject)) patch.subject = subject;
+  if (!isBlank(subject)) patch.subject = subject as string;
   const activeForm = boundedDisplayText(input.activeForm ?? input.active_form, TODO_LIMITS.textChars);
-  if (!isBlank(activeForm)) patch.activeForm = activeForm;
+  if (!isBlank(activeForm)) patch.activeForm = activeForm as string;
   // A bare id with nothing to change carries no information.
   if (patch.status === undefined && patch.subject === undefined && patch.activeForm === undefined) return null;
   return patch;
@@ -936,7 +1568,7 @@ function normalizeTaskUpdate(input) {
 // string, or an array of text blocks, so coerce defensively. Never throws; returns
 // null when no id is readable — the create then stays keyed by its tool_use id until a
 // later TaskUpdate links it (the reducer's implicit-create fallback).
-function taskAssignmentId(content) {
+function taskAssignmentId(content: TaskResultContent): string | null {
   const text = coerceTaskResultText(content);
   if (!text) return null;
   // The SHIPPED CLI (2.1.x) returns prose, not the documented `{ task: { id } }` JSON:
@@ -949,7 +1581,7 @@ function taskAssignmentId(content) {
   const created = text.match(/\btask #(\d+) created\b/i);
   if (created) return boundedIdentifier(created[1]);
   try {
-    const obj = JSON.parse(text);
+    const obj = JSON.parse(text) as { task?: { id?: unknown }; taskId?: unknown; task_id?: unknown } | null;
     if (obj && typeof obj === "object") return boundedIdentifier(obj.task?.id ?? obj.taskId ?? obj.task_id);
   } catch {
     // not JSON — no id to recover
@@ -960,7 +1592,7 @@ function taskAssignmentId(content) {
 // A tool_result's content as a single string, or null. Handles the three shapes the SDK
 // delivers: a raw string, an array of text blocks, or an already-structured object
 // (stringified so the JSON path above can read it). Bounded so a huge result is skipped.
-function coerceTaskResultText(content) {
+function coerceTaskResultText(content: TaskResultContent): string | null {
   if (typeof content === "string") return content.length && content.length <= 100_000 ? content : null;
   if (Array.isArray(content)) {
     const text = content.map((block) => (typeof block === "string" ? block : typeof block?.text === "string" ? block.text : "")).join("");
@@ -982,7 +1614,7 @@ function coerceTaskResultText(content) {
 // or the journal. An empty list (every item deleted) projects to null — the bar hides —
 // which is correct because deletion here is EXPLICIT, unlike the "unreadable list"
 // fail-safe the todo_updated fold guards against.
-function foldTodoTasks(state, todoTasks) {
+function foldTodoTasks(state: Readonly<SessionProjection>, todoTasks: TodoTaskEntry[]): SessionProjection {
   const items = normalizeTodoItems(
     todoTasks.map((task) => ({ content: task.subject, activeForm: task.activeForm, status: task.status })),
   );
@@ -995,9 +1627,9 @@ function foldTodoTasks(state, todoTasks) {
 // v54: `!` command-mode normalizers. Bounds mirror the provider projection caps so a
 // hand-written or replayed journal line can never inflate a projection.
 export const MAX_BACKGROUND_COMMANDS = 100;
-const BACKGROUND_COMMAND_STATUSES = new Set(["running", "finished", "stopped", "error", "interrupted"]);
+const BACKGROUND_COMMAND_STATUSES: ReadonlySet<unknown> = new Set(["running", "finished", "stopped", "error", "interrupted"]);
 
-function normalizeCommandRunMeta(meta) {
+function normalizeCommandRunMeta(meta: { command?: unknown; cwd?: unknown; logFile?: unknown } | null | undefined): CommandRunMeta | null {
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
   const command = boundedDisplayText(meta.command, PROVIDER_PROJECTION_LIMITS.commandChars);
   const cwd = boundedDisplayText(meta.cwd, PROVIDER_PROJECTION_LIMITS.pathChars);
@@ -1006,7 +1638,7 @@ function normalizeCommandRunMeta(meta) {
   return { command, cwd, logFile };
 }
 
-function normalizeBackgroundCommand(event) {
+function normalizeBackgroundCommand(event: EvOf<"background_command_updated">): BackgroundCommandProjection | null {
   const commandId = boundedIdentifier(event.commandId);
   const command = boundedDisplayText(event.command, PROVIDER_PROJECTION_LIMITS.commandChars);
   const cwd = boundedDisplayText(event.cwd, PROVIDER_PROJECTION_LIMITS.pathChars);
@@ -1019,7 +1651,7 @@ function normalizeBackgroundCommand(event) {
     cwd,
     logFile,
     status: event.status,
-    exitCode: Number.isInteger(event.exitCode) ? event.exitCode : null,
+    exitCode: Number.isInteger(event.exitCode) ? (event.exitCode as number) : null,
     signal: typeof event.signal === "string" ? (boundedDisplayText(event.signal, PROVIDER_PROJECTION_LIMITS.labelChars) ?? null) : null,
     startedAt: nonNegativeFiniteNumber(event.startedAt) ?? 0,
     endedAt: nonNegativeFiniteNumber(event.endedAt) ?? null,
@@ -1037,23 +1669,60 @@ export const MAX_SPAWNED_RUNS = 50;
 export const MAX_REMOVED_QUEUE_IDS = 50;
 export const MAX_SPAWNED_RUN_KEYS = 2000;
 export const SPAWNED_RUN_OUTPUT_CAP_CHARS = 64 * 1024;
-const SPAWNED_RUN_STATUSES = new Set(["running", "finished", "error", "stopped", "interrupted"]);
-const SPAWNED_RUN_ORIGINS = new Set(["spawned", "discovered"]);
-const SPAWNED_RUN_MODES = new Set(["review", "build"]);
+const SPAWNED_RUN_STATUSES: ReadonlySet<unknown> = new Set(["running", "finished", "error", "stopped", "interrupted"]);
+const SPAWNED_RUN_ORIGINS: ReadonlySet<unknown> = new Set(["spawned", "discovered"]);
+const SPAWNED_RUN_MODES: ReadonlySet<unknown> = new Set(["review", "build"]);
+// Issue #257: the bounded reading of a CLI child's own result — token counts, the
+// tool-call count and its final message. Display metadata only (#173 D3): nothing
+// in the manager, the authz modules or the approval path may read these. Each is
+// present on a run only when a source measured it (never a defaulted 0).
+export const SPAWNED_RUN_SUMMARY_MESSAGE_CAP_CHARS = 8_000;
+const SPAWNED_RUN_COUNT_FIELDS: SpawnedRunCountField[] = ["inputTokens", "cachedInputTokens", "outputTokens", "reasoningTokens", "totalTokens", "toolCalls"];
+const SPAWNED_RUN_SUMMARY_FIELDS: Array<keyof SpawnedRunSummaryFields> = [...SPAWNED_RUN_COUNT_FIELDS, "toolCallsPartial", "finalMessage", "finalMessageTruncated"];
 
-function normalizeSpawnedRun(event) {
+function normalizeSpawnedRunSummary(event: SpawnedRunSummaryFields): SpawnedRunSummaryFields {
+  const out: SpawnedRunSummaryFields = {};
+  for (const field of SPAWNED_RUN_COUNT_FIELDS) {
+    const value = event[field];
+    if (Number.isSafeInteger(value) && (value as number) >= 0) out[field] = value as number;
+  }
+  if (out.toolCalls !== undefined && event.toolCallsPartial === true) out.toolCallsPartial = true;
+  if (typeof event.finalMessage === "string" && event.finalMessage) {
+    out.finalMessage = boundedDisplayText(event.finalMessage, SPAWNED_RUN_SUMMARY_MESSAGE_CAP_CHARS);
+    if (event.finalMessageTruncated === true) out.finalMessageTruncated = true;
+  }
+  return out;
+}
+
+// A later lifecycle update (the finishing one, a spawn's native-id follow-up) that
+// carries no reading must not wipe the one already folded — the same rule `output`
+// follows. A field it DOES carry wins; the partial flag travels with the count.
+function carrySpawnedRunSummary(existing: SpawnedRunSummaryFields, next: SpawnRunBase): SpawnRunBase {
+  const carried = { ...next };
+  for (const field of SPAWNED_RUN_COUNT_FIELDS) {
+    if (carried[field] === undefined && existing[field] !== undefined) carried[field] = existing[field];
+  }
+  if (next.toolCalls === undefined && existing.toolCallsPartial === true) carried.toolCallsPartial = true;
+  if (carried.finalMessage === undefined && existing.finalMessage !== undefined) {
+    carried.finalMessage = existing.finalMessage;
+    if (existing.finalMessageTruncated === true) carried.finalMessageTruncated = true;
+  }
+  return carried;
+}
+
+function normalizeSpawnedRun(event: EvOf<"spawned_run_updated">): SpawnRunBase | null {
   const runId = boundedIdentifier(event.runId);
   const provider = boundedIdentifier(event.provider);
   if (!runId || !provider) return null;
   if (!SPAWNED_RUN_STATUSES.has(event.status) || !SPAWNED_RUN_ORIGINS.has(event.origin)) return null;
-  const optionalText = (value, max) => (typeof value === "string" && value ? boundedDisplayText(value, max) : null);
+  const optionalText = (value: unknown, max: number): string | null => (typeof value === "string" && value ? (boundedDisplayText(value, max) as string) : null);
   return {
     runId,
     origin: event.origin,
     provider,
     title: optionalText(event.title, PROVIDER_PROJECTION_LIMITS.labelChars),
     prompt: optionalText(event.prompt, PROVIDER_PROJECTION_LIMITS.commandChars),
-    mode: SPAWNED_RUN_MODES.has(event.mode) ? event.mode : null,
+    mode: SPAWNED_RUN_MODES.has(event.mode) ? (event.mode as "review" | "build") : null,
     model: optionalText(event.model, PROVIDER_PROJECTION_LIMITS.labelChars),
     cwd: optionalText(event.cwd, PROVIDER_PROJECTION_LIMITS.pathChars),
     logFile: optionalText(event.logFile, PROVIDER_PROJECTION_LIMITS.pathChars),
@@ -1061,19 +1730,21 @@ function normalizeSpawnedRun(event) {
     parentTurnId: typeof event.parentTurnId === "string" ? boundedIdentifier(event.parentTurnId) : null,
     toolId: typeof event.toolId === "string" ? boundedIdentifier(event.toolId) : null,
     status: event.status,
-    exitCode: Number.isInteger(event.exitCode) ? event.exitCode : null,
+    exitCode: Number.isInteger(event.exitCode) ? (event.exitCode as number) : null,
     signal: typeof event.signal === "string" ? (boundedDisplayText(event.signal, PROVIDER_PROJECTION_LIMITS.labelChars) ?? null) : null,
     startedAt: nonNegativeFiniteNumber(event.startedAt) ?? 0,
     endedAt: nonNegativeFiniteNumber(event.endedAt) ?? null,
+    ...normalizeSpawnedRunSummary(event),
   };
 }
 
-const SPAWNED_RUN_COMPARED_FIELDS = [
+const SPAWNED_RUN_COMPARED_FIELDS: Array<keyof SpawnRunBase> = [
   "origin", "provider", "title", "prompt", "mode", "model", "cwd", "logFile", "nativeId",
   "parentTurnId", "toolId", "status", "exitCode", "signal", "startedAt", "endedAt",
+  ...SPAWNED_RUN_SUMMARY_FIELDS,
 ];
 
-function sameSpawnedRun(a, b) {
+function sameSpawnedRun(a: SpawnRunBase, b: SpawnRunBase): boolean {
   return SPAWNED_RUN_COMPARED_FIELDS.every((field) => a[field] === b[field]);
 }
 
@@ -1082,9 +1753,9 @@ function sameSpawnedRun(a, b) {
 // browser at an arbitrary URL or inflate the projection.
 export const MAX_SPAWNED_RUN_MEDIA = 48;
 const SPAWNED_RUN_MEDIA_URL = /^\/api\/tool-media\/[0-9a-f]{64}\.(?:png|jpg|jpeg|gif|webp|mp4)$/;
-const SPAWNED_RUN_MEDIA_SOURCES = new Set(["input", "viewed"]);
+const SPAWNED_RUN_MEDIA_SOURCES: ReadonlySet<unknown> = new Set(["input", "viewed"]);
 
-function normalizeSpawnedRunMedia(item) {
+function normalizeSpawnedRunMedia(item: RawMediaRef | null | undefined): SpawnedRunMedia | null {
   if (!item || typeof item !== "object" || item.type !== "media_ref") return null;
   if (typeof item.url !== "string" || !SPAWNED_RUN_MEDIA_URL.test(item.url)) return null;
   const mediaKind = item.mediaKind === "video" ? "video" : item.mediaKind === "image" ? "image" : null;
@@ -1095,16 +1766,16 @@ function normalizeSpawnedRunMedia(item) {
     mediaType: item.mediaType.slice(0, 40),
     url: item.url,
     bytes: nonNegativeFiniteNumber(item.bytes) ?? 0,
-    source: SPAWNED_RUN_MEDIA_SOURCES.has(item.source) ? item.source : "viewed",
+    source: SPAWNED_RUN_MEDIA_SOURCES.has(item.source) ? (item.source as "input" | "viewed") : "viewed",
     label: typeof item.label === "string" && item.label ? (boundedDisplayText(item.label, PROVIDER_PROJECTION_LIMITS.labelChars) ?? null) : null,
   };
 }
 
 // Append the run's identities to the bounded seen-key list (returns the SAME
 // array when nothing is new, so an unchanged fold stays referentially equal).
-function withSpawnedRunKeys(keys, run) {
+function withSpawnedRunKeys(keys: string[] | null | undefined, run: { runId: string; nativeId: string | null }): string[] {
   const list = Array.isArray(keys) ? keys : [];
-  const fresh = [run.runId, run.nativeId].filter((key) => typeof key === "string" && key && !list.includes(key));
+  const fresh = [run.runId, run.nativeId].filter((key) => typeof key === "string" && key && !list.includes(key)) as string[];
   if (fresh.length === 0) return list;
   return [...list, ...fresh].slice(-MAX_SPAWNED_RUN_KEYS);
 }
@@ -1112,12 +1783,12 @@ function withSpawnedRunKeys(keys, run) {
 // Drop one row to make room: the oldest row that is NOT running (a live child's
 // row must keep receiving its output and stay addressable by spawn_status), or
 // the oldest row outright when every row is running.
-function evictSpawnedRun(runs) {
+function evictSpawnedRun(runs: SpawnedRunProjection[]): SpawnedRunProjection[] {
   const index = runs.findIndex((run) => run.status !== "running");
   return runs.filter((_, i) => i !== (index === -1 ? 0 : index));
 }
 
-function sameBackgroundCommand(a, b) {
+function sameBackgroundCommand(a: BackgroundCommandProjection, b: BackgroundCommandProjection): boolean {
   return a.commandId === b.commandId
     && a.status === b.status
     && a.exitCode === b.exitCode
@@ -1128,7 +1799,7 @@ function sameBackgroundCommand(a, b) {
     && a.logFile === b.logFile;
 }
 
-function upsertReview(reviews, review) {
+function upsertReview(reviews: ReviewProjection[], review: ReviewProjection): ReviewProjection[] {
   const existingIndex = reviews.findIndex((item) => item.reviewId === review.reviewId);
   const next = existingIndex === -1
     ? [...reviews, review]
@@ -1136,7 +1807,19 @@ function upsertReview(reviews, review) {
   return next.slice(-PROVIDER_PROJECTION_LIMITS.reviews);
 }
 
-function appendProviderNotice(notices, notice) {
+// tth-npv: the ONE session-level notice a Pi session keeps for dialogs cancelled for
+// want of an open turn. Unlike every other notice (first-wins by noticeId) this id is
+// REPLACED in place by its latest instance, so a chatty extension keeps one row (the
+// engine carries a running count in the text) instead of evicting other notices from
+// the capped list. Exported: the session manager also reads it (such a notice is not
+// "activity" and must not defeat idle eviction).
+export const PI_DIALOG_CANCELLED_NOTICE_ID = "pi-dialog-cancelled";
+
+function appendProviderNotice(notices: ProviderNoticeProjection[], notice: ProviderNoticeProjection): ProviderNoticeProjection[] {
+  if (notice.noticeId === PI_DIALOG_CANCELLED_NOTICE_ID) {
+    const at = notices.findIndex((item) => item.noticeId === notice.noticeId);
+    if (at !== -1) return notices.map((item, index) => (index === at ? notice : item));
+  }
   if (notices.some((item) => item.noticeId === notice.noticeId)) return notices;
   return [...notices, notice].slice(-PROVIDER_PROJECTION_LIMITS.providerNotices);
 }
@@ -1147,23 +1830,23 @@ function appendProviderNotice(notices, notice) {
  * than truncated into a different command. Display prose is capped. Counts are
  * finite, duplicates are first-wins, and unknown fields never cross.
  */
-export function normalizeClaudeCommands(commands) {
+export function normalizeClaudeCommands(commands: Array<string | RawClaudeCommand | null | undefined> | null | undefined): CliCommand[] {
   if (!Array.isArray(commands)) return [];
-  const normalized = [];
-  const seen = new Set();
+  const normalized: CliCommand[] = [];
+  const seen = new Set<string>();
   for (const raw of commands) {
     if (normalized.length >= CLI_INVENTORY_LIMITS.commands) break;
     const source = typeof raw === "string" ? { name: raw } : raw;
     const name = identifier(source?.name, { stripLeadingSlash: true });
     if (!name || seen.has(name)) continue;
     seen.add(name);
-    const command = { name };
+    const command: CliCommand = { name };
     const description = boundedDisplayText(source?.description, CLI_INVENTORY_LIMITS.descriptionChars);
     const argumentHint = boundedDisplayText(source?.argumentHint, CLI_INVENTORY_LIMITS.argumentHintChars);
     if (description !== undefined) command.description = description;
     if (argumentHint !== undefined) command.argumentHint = argumentHint;
     if (Array.isArray(source?.aliases)) {
-      const aliases = [];
+      const aliases: string[] = [];
       const aliasSeen = new Set([name]);
       for (const rawAlias of source.aliases) {
         if (aliases.length >= CLI_INVENTORY_LIMITS.aliasesPerCommand) break;
@@ -1179,10 +1862,10 @@ export function normalizeClaudeCommands(commands) {
   return normalized;
 }
 
-export function normalizeClaudeTools(tools) {
+export function normalizeClaudeTools(tools: unknown[] | null | undefined): string[] {
   if (!Array.isArray(tools)) return [];
-  const normalized = [];
-  const seen = new Set();
+  const normalized: string[] = [];
+  const seen = new Set<string>();
   for (const raw of tools) {
     if (normalized.length >= CLI_INVENTORY_LIMITS.tools) break;
     const name = identifier(raw);
@@ -1193,10 +1876,10 @@ export function normalizeClaudeTools(tools) {
   return normalized;
 }
 
-export function normalizeClaudeMcpServers(servers) {
+export function normalizeClaudeMcpServers(servers: RawClaudeMcpServer[] | null | undefined): CliMcpServer[] {
   if (!Array.isArray(servers)) return [];
-  const normalized = [];
-  const seen = new Set();
+  const normalized: CliMcpServer[] = [];
+  const seen = new Set<string>();
   for (const raw of servers) {
     if (normalized.length >= CLI_INVENTORY_LIMITS.mcpServers) break;
     const name = identifier(raw?.name);
@@ -1204,13 +1887,13 @@ export function normalizeClaudeMcpServers(servers) {
     seen.add(name);
     normalized.push({
       name,
-      status: MCP_SERVER_STATUSES.has(raw?.status) ? raw.status : "unknown",
+      status: MCP_SERVER_STATUSES.has(raw?.status) ? (raw.status as CliMcpServer["status"]) : "unknown",
     });
   }
   return normalized;
 }
 
-function sameCliCommand(a, b) {
+function sameCliCommand(a: CliCommand | undefined, b: CliCommand | undefined): boolean {
   return (
     a?.name === b?.name &&
     a?.description === b?.description &&
@@ -1219,7 +1902,7 @@ function sameCliCommand(a, b) {
   );
 }
 
-function sameCliInventory(a, b) {
+function sameCliInventory(a: CliInventory | null, b: CliInventory | null): boolean {
   if (a === null || b === null) return a === b;
   if (
     a.commands.length !== b.commands.length ||
@@ -1236,18 +1919,18 @@ function sameCliInventory(a, b) {
   );
 }
 
-function normalizeProjectedCliCommands(commands) {
+function normalizeProjectedCliCommands(commands: Array<string | RawClaudeCommand | null | undefined> | null | undefined): CliCommand[] | null {
   return Array.isArray(commands) ? normalizeClaudeCommands(commands) : null;
 }
 
-function normalizeProjectedCliInventory(inventory, previous) {
+function normalizeProjectedCliInventory(inventory: RawCliInventory | null | undefined, previous: CliInventory | null | undefined): CliInventory | null {
   if (!inventory || typeof inventory !== "object" || Array.isArray(inventory)) return null;
   const commands = normalizeClaudeCommands(inventory.commands);
   // Init carries command names only. Preserve richer metadata learned from a
   // commands_changed push for names that remain in this same process snapshot.
   // cli_inventory_reset clears `previous` before a new process starts, so this
   // cannot leak metadata across CLI processes.
-  const previousCommands = new Map((previous?.commands ?? []).map((command) => [command.name, command]));
+  const previousCommands = new Map((previous?.commands ?? []).map((command): [string, CliCommand] => [command.name, command]));
   const mergedCommands = commands.map((command) => {
     const prior = previousCommands.get(command.name);
     return prior && command.description === undefined && command.argumentHint === undefined && command.aliases === undefined
@@ -1261,18 +1944,18 @@ function normalizeProjectedCliInventory(inventory, previous) {
   };
 }
 
-const RATE_LIMIT_STATUSES = new Set(["allowed", "allowed_warning", "rejected"]);
+const RATE_LIMIT_STATUSES: ReadonlySet<unknown> = new Set(["allowed", "allowed_warning", "rejected"]);
 
 // v127 (issue #195): Claude's Wrap-Up Allowance, as the adapter derives it from
 // SDKRateLimitInfo's @internal `rateLimitGraceActive` (+ `overageStatus`).
-const RATE_LIMIT_GRACE = new Set(["wrap_up", "wrap_up_then_credits"]);
+const RATE_LIMIT_GRACE: ReadonlySet<unknown> = new Set(["wrap_up", "wrap_up_then_credits"]);
 
 // Drop the wrap-up fact at a turn boundary. The CLI keeps `rateLimitGraceActive`
 // set while requests are refused, so without this a turn started AFTER the wall
 // (which the allowance does not cover — "a new message sent after the wall is
 // handled as usual") would inherit the previous turn's grace flag. Returns the
 // same object when there is nothing to clear, so turn folds stay churn-free.
-function clearRateLimitGrace(state) {
+function clearRateLimitGrace(state: Readonly<SessionProjection>): SessionProjection {
   if (!state.rateLimit || state.rateLimit.grace === undefined) return state;
   const rateLimit = { ...state.rateLimit };
   delete rateLimit.grace;
@@ -1280,16 +1963,16 @@ function clearRateLimitGrace(state) {
 }
 
 // SDK FastModeState (sdk.d.ts): 'off' | 'cooldown' | 'on'.
-const FAST_MODE_STATES = new Set(["off", "cooldown", "on"]);
+const FAST_MODE_STATES: ReadonlySet<unknown> = new Set(["off", "cooldown", "on"]);
 
 // Build a `fast_mode` AgentEvent from a raw SDK record's `fast_mode_state` /
 // `fast_mode_disabled_reason` fields (system/init or result), or null when the
 // record carries no recognizable state — an absent/malformed field must never
 // be read as "off", since that would be an assumption this module's own rule
 // forbids.
-function claudeFastModeEvent(record, turnId) {
+function claudeFastModeEvent(record: ClaudeFastRecord, turnId: string | null): Extract<AgentEvent, { type: "fast_mode" }> | null {
   if (!FAST_MODE_STATES.has(record.fast_mode_state)) return null;
-  const event = { type: "fast_mode", turnId, state: record.fast_mode_state };
+  const event: Extract<AgentEvent, { type: "fast_mode" }> = { type: "fast_mode", turnId, state: record.fast_mode_state as "off" | "cooldown" | "on" };
   if (typeof record.fast_mode_disabled_reason === "string" && record.fast_mode_disabled_reason) {
     event.disabledReason = record.fast_mode_disabled_reason;
   }
@@ -1304,8 +1987,8 @@ function claudeFastModeEvent(record, turnId) {
 // direct unit-test event with no `ts` therefore makes no offer, which is
 // correct: every real event is stamped by SessionJournal.append before it is
 // ever reduced.
-function eventTs(event) {
-  return Number.isFinite(event?.ts) ? event.ts : null;
+function eventTs(event: { ts?: number } | null | undefined): number | null {
+  return Number.isFinite(event?.ts) ? (event as { ts: number }).ts : null;
 }
 
 // Whether a rejected/reset-limit fact warrants the durable resume offer, and
@@ -1320,7 +2003,7 @@ function eventTs(event) {
 // not qualify, or an identical window is already prompting (dedupe by
 // resetsAt, which is what keeps a duplicate push from re-prompting after a
 // dismiss/fire).
-function offerRateLimitResume(state, { resetsAt, limitType, stampedNow }) {
+function offerRateLimitResume(state: Readonly<SessionProjection>, { resetsAt, limitType, stampedNow }: { resetsAt: number; limitType?: string | null; stampedNow: number | null }): RateLimitResumeState | null {
   if (stampedNow === null || !Number.isFinite(resetsAt) || resetsAt <= 0) return null;
   const horizon = resetsAt - stampedNow;
   if (!(horizon > 0 && horizon <= RATE_LIMIT_RESUME_MAX_HORIZON_MS)) return null;
@@ -1333,17 +2016,17 @@ function offerRateLimitResume(state, { resetsAt, limitType, stampedNow }) {
   };
 }
 
-function isOpenCurrentTurn(state, turnId) {
+function isOpenCurrentTurn(state: Readonly<SessionProjection>, turnId: string): boolean {
   return state.activeTurnId === turnId && state.turnsById[turnId]?.status !== "done";
 }
 
-function updateTurn(state, updater) {
+function updateTurn(state: Readonly<SessionProjection>, updater: (turn: TurnProjection) => TurnProjection): SessionProjection {
   if (!state.activeTurnId) return state;
   const turnId = state.activeTurnId;
   return { ...state, turnsById: { ...state.turnsById, [turnId]: updater(state.turnsById[turnId]) } };
 }
 
-function updateTurnById(state, turnId, updater) {
+function updateTurnById(state: Readonly<SessionProjection>, turnId: string, updater: (turn: TurnProjection) => TurnProjection): SessionProjection {
   const turn = state.turnsById[turnId];
   if (!turn) return state;
   const updated = updater(turn);
@@ -1355,7 +2038,7 @@ function updateTurnById(state, turnId, updater) {
   return { ...state, turnsById: { ...state.turnsById, [turnId]: updated } };
 }
 
-function samePermissionDenial(a, b) {
+function samePermissionDenial(a: PermissionDenialProjection, b: PermissionDenialProjection): boolean {
   return a.toolId === b.toolId
     && a.name === b.name
     && a.reason === b.reason
@@ -1367,11 +2050,11 @@ function samePermissionDenial(a, b) {
 // Dedupe by tool_use_id. A later standalone SDKPermissionDeniedMessage may
 // enrich an aggregate-only `unknown` entry with a reason/subagent bit, while a
 // byte-identical replay remains a true no-op. Never carries provider prose.
-function upsertPermissionDenial(denials, denial) {
+function upsertPermissionDenial(denials: PermissionDenialProjection[], denial: PermissionDenialProjection): PermissionDenialProjection[] {
   const index = denials.findIndex((item) => item.toolId === denial.toolId);
   if (index === -1) return [...denials, denial];
   const existing = denials[index];
-  const enriched = {
+  const enriched: PermissionDenialProjection = {
     ...existing,
     name: denial.name || existing.name,
     reason: existing.reason === "unknown" ? denial.reason : existing.reason,
@@ -1397,7 +2080,7 @@ function upsertPermissionDenial(denials, denial) {
 // decision_reason PROSE must never ride on a denial.
 const PERMISSION_DENIAL_REASON_CODE = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
 
-function permissionDenialReasonCode(value) {
+function permissionDenialReasonCode(value: unknown): string | null {
   return typeof value === "string" && PERMISSION_DENIAL_REASON_CODE.test(value) ? value : null;
 }
 
@@ -1424,7 +2107,7 @@ const PERMISSION_DENIAL_REASON_VALUES = new Set([
 // which event type introduces the block first (message_started/tool_start,
 // but also a message_completed/tool_end that arrives with no prior "started"
 // event). `build` receives the existing block (undefined if new).
-function upsertBlock(turn, blockId, build) {
+function upsertBlock(turn: TurnProjection, blockId: string, build: (existing: TurnBlock | undefined) => TurnBlock): TurnProjection {
   const existing = turn.blocksById[blockId];
   const next = build(existing);
   if (existing !== undefined) {
@@ -1447,7 +2130,7 @@ function upsertBlock(turn, blockId, build) {
 // Do this at turn_end rather than message_completed: only the terminal boundary
 // proves that the full late-tool tail has arrived. The projection is the durable
 // ordering source, so journal compaction also preserves the corrected order.
-function putCodexFinalReportLast(turn) {
+function putCodexFinalReportLast(turn: TurnProjection): TurnProjection {
   let reportIndex = -1;
   for (let index = turn.blocks.length - 1; index >= 0; index -= 1) {
     if (turn.blocksById[turn.blocks[index]]?.kind === "message") {
@@ -1475,16 +2158,16 @@ function putCodexFinalReportLast(turn) {
 // (sets output/isError/done) — so a subagent tool call and its result render as
 // one entry, exactly like the top-level tool cards.
 // Pure and immutable: returns a new thread, never mutates `existing`.
-function clearElapsedProgress(tool) {
+function clearElapsedProgress<T extends { elapsedSeconds?: number }>(tool: T): T {
   if (!Object.hasOwn(tool, "elapsedSeconds")) return tool;
   const next = { ...tool };
   delete next.elapsedSeconds;
   return next;
 }
 
-function foldSubagentItems(existing, items, usage) {
+function foldSubagentItems(existing: SubagentThread | undefined, items: SubagentItem[], usage: SubagentUsage | undefined): SubagentThread {
   const order = existing ? [...existing.order] : [];
-  const entries = existing ? { ...existing.entries } : {};
+  const entries: Record<string, SubagentEntry> = existing ? { ...existing.entries } : {};
   for (const item of items) {
     const prev = entries[item.key];
     if (prev === undefined) order.push(item.key);
@@ -1495,7 +2178,7 @@ function foldSubagentItems(existing, items, usage) {
     } else if (item.kind === "tool") {
       entries[item.key] = { ...(prev ?? {}), key: item.key, kind: "tool", name: item.name, input: item.input, done: prev?.done ?? false };
     } else if (item.kind === "tool_result") {
-      const withoutProgress = clearElapsedProgress(prev ?? { key: item.key, kind: "tool" });
+      const withoutProgress = clearElapsedProgress<SubagentEntry>(prev ?? { key: item.key, kind: "tool" });
       entries[item.key] = {
         ...withoutProgress,
         output: item.output,
@@ -1514,7 +2197,7 @@ function foldSubagentItems(existing, items, usage) {
   return { order, entries, ...(carried ? { usage: carried } : {}) };
 }
 
-function deriveSessionStatus(turn) {
+function deriveSessionStatus(turn: TurnProjection | null | undefined): SessionStatus {
   if (!turn || turn.status === "done") return SESSION_STATUS.READY;
   if (Object.keys(turn.pendingApprovals).length > 0) return SESSION_STATUS.WAITING;
   if (Object.keys(turn.pendingQuestions).length > 0) return SESSION_STATUS.WAITING;
@@ -1540,7 +2223,7 @@ function deriveSessionStatus(turn) {
  * for the one currently open, if any) — this is what "exact UI replay" of a
  * whole multi-turn conversation needs, not just the latest turn.
  */
-export function reduce(state, event) {
+export function reduce(state: Readonly<SessionProjection>, event: ReducerInput): SessionProjection {
   // Three passes, all pure: fold the event, expire the transient api_retry marker
   // if this event proved the provider moved on (v17/T4), then open or close the
   // current RUN (v38). Kept out of the switch so every content case doesn't have to
@@ -1559,7 +2242,7 @@ export function reduce(state, event) {
 // operator?) rather than of any one event. That means approval_request,
 // question_request, their resolutions, expiry, cancellation and turn_end all get
 // correct boundaries without six separate call sites agreeing with each other.
-function turnIsWorking(turn) {
+function turnIsWorking(turn: TurnProjection | null | undefined): boolean {
   if (!turn) return false;
   // "cancelling" still counts: the engine is tearing the turn down, which is work
   // the operator is waiting on and wants a clock for.
@@ -1569,7 +2252,7 @@ function turnIsWorking(turn) {
   return true;
 }
 
-function syncTurnRun(state, event) {
+function syncTurnRun(state: Readonly<SessionProjection>, event: ReducerInput): SessionProjection {
   const turnId = event.turnId ?? state.activeTurnId;
   if (turnId == null) return state;
   const turn = state.turnsById[turnId];
@@ -1602,7 +2285,7 @@ function syncTurnRun(state, event) {
   // Closing: bank the elapsed so the session total stays right across any number of
   // runs. max(0) because a clock that stepped backwards between two journal stamps
   // must not subtract from the total.
-  const elapsed = Math.max(0, ts - turn.run.startedAt);
+  const elapsed = Math.max(0, ts - (turn.run as TurnRun).startedAt);
   return {
     ...state,
     turnsById: { ...state.turnsById, [turnId]: { ...turn, run: null, activeMs: turn.activeMs + elapsed } },
@@ -1624,27 +2307,27 @@ export const BACKGROUND_TASK_LIMITS = Object.freeze({
 // A task record's status is either a terminal outcome or non-terminal (running).
 // `task_progress`'s pending/paused/running all read as running: none of them is a
 // completion, and the derivation must never tick a run it cannot prove finished.
-function normalizeTaskStatus(value) {
+function normalizeTaskStatus(value: unknown): BackgroundTaskProjection["status"] | null {
   if (TASK_TERMINAL_STATUSES.has(value)) return value;
   if (TASK_PROGRESS_STATUSES.has(value)) return "running";
   return null;
 }
 
-function taskIdentifier(value) {
+function taskIdentifier(value: unknown): string | null {
   if (typeof value !== "string" || value.length === 0) return null;
-  return boundedDisplayText(value, BACKGROUND_TASK_LIMITS.idChars);
+  return boundedDisplayText(value, BACKGROUND_TASK_LIMITS.idChars) as string;
 }
 
 // Upsert one task by taskId (the SDK's durable correlation key). A terminal status
 // is STICKY: the SDK explicitly allows the authoritative level to precede either
 // edge, and whole-journal replay can reorder nothing but a late duplicate must
 // still not reopen a task that already reported completed/failed/stopped/killed.
-function foldBackgroundTask(state, taskId, patch) {
+function foldBackgroundTask(state: Readonly<SessionProjection>, taskId: string, patch: Partial<BackgroundTaskProjection>): SessionProjection {
   const tasks = state.backgroundTasks;
   const index = tasks.findIndex((task) => task.taskId === taskId);
   const existing = index === -1 ? undefined : tasks[index];
-  const base = existing ?? { taskId, toolUseId: null, status: "running", live: false };
-  const next = { ...base, ...patch, taskId };
+  const base: BackgroundTaskProjection = existing ?? { taskId, toolUseId: null, status: "running", live: false };
+  const next: BackgroundTaskProjection & Record<string, unknown> = { ...base, ...patch, taskId };
   for (const key of Object.keys(next)) {
     if (next[key] === undefined) delete next[key];
   }
@@ -1659,13 +2342,23 @@ function foldBackgroundTask(state, taskId, patch) {
   return { ...state, backgroundTasks: list };
 }
 
+// A terminal record reopened by a later task_started for the same id (a resumed
+// background agent). The launcher join (toolUseId) survives unless the start names a new
+// one; everything the finished run reported (summary, output file, usage) is dropped, so a
+// stale completion can never decorate a run that is working again. `live` waits for the
+// level signal, exactly like a fresh start.
+function reopenBackgroundTask(state: Readonly<SessionProjection>, existing: BackgroundTaskProjection, patch: BackgroundTaskPatch): SessionProjection {
+  const fresh = { taskId: existing.taskId, toolUseId: existing.toolUseId ?? null, live: false, ...patch };
+  return { ...state, backgroundTasks: state.backgroundTasks.map((task) => (task === existing ? fresh : task)) };
+}
+
 // Replace the live set wholesale (the SDK's level signal). A terminal task is
 // never marked live; a level id we have never seen an edge for still gets a home
 // so a later task_started can attach its toolUseId without losing the live fact.
-function applyBackgroundTaskLevel(state, taskIds) {
+function applyBackgroundTaskLevel(state: Readonly<SessionProjection>, taskIds: string[]): SessionProjection {
   const live = new Set(taskIds);
-  const seen = new Set();
-  const next = [];
+  const seen = new Set<string>();
+  const next: BackgroundTaskProjection[] = [];
   let changed = false;
   for (const task of state.backgroundTasks) {
     seen.add(task.taskId);
@@ -1686,7 +2379,7 @@ function applyBackgroundTaskLevel(state, taskIds) {
   return { ...state, backgroundTasks: next.slice(-BACKGROUND_TASK_LIMITS.tasks) };
 }
 
-function reduceEvent(state, event) {
+function reduceEvent(state: Readonly<SessionProjection>, event: ReducerInput): SessionProjection {
   switch (event.type) {
     case "native_session_id": {
       // v17/T1: the same event now optionally carries the serving CLI's advertised
@@ -1745,7 +2438,7 @@ function reduceEvent(state, event) {
     case "rate_limit": {
       // v17/T4: session-level, last-write-wins. Deduped so a repeated identical
       // push doesn't churn the projection (and therefore the client re-render).
-      const next = {
+      const next: RateLimitState = {
         status: event.status,
         limitType: event.limitType ?? null,
         utilization: event.utilization ?? null,
@@ -1766,7 +2459,7 @@ function reduceEvent(state, event) {
       // usage-limit prose parsed at its engine boundary, Claude's per-session
       // limit via the issue #102 `limit_hit` event).
       const offered = next.status === "rejected"
-        ? offerRateLimitResume(state, { resetsAt: next.resetsAt, limitType: next.limitType, stampedNow: eventTs(event) })
+        ? offerRateLimitResume(state, { resetsAt: next.resetsAt as number, limitType: next.limitType, stampedNow: eventTs(event) })
         : null;
       if (offered) rateLimitResume = offered;
       if (unchanged && rateLimitResume === state.rateLimitResume) return state;
@@ -1864,14 +2557,14 @@ function reduceEvent(state, event) {
       // swaps in the real task id. Bounded like the TodoWrite list so a runaway or
       // hostile stream cannot inflate the projection or the journal.
       if (state.todoTasks.length >= TODO_LIMITS.items) return state;
-      const subject = boundedDisplayText(event.subject, TODO_LIMITS.textChars);
+      const subject = boundedDisplayText(event.subject, TODO_LIMITS.textChars) as string;
       if (isBlank(subject) || typeof event.toolId !== "string" || !event.toolId) return state;
       const activeForm = boundedDisplayText(event.activeForm, TODO_LIMITS.textChars);
-      const entry = {
+      const entry: TodoTaskEntry = {
         id: event.toolId,
         subject,
-        activeForm: isBlank(activeForm) ? "" : activeForm,
-        status: TODO_STATUSES.has(event.status) ? event.status : "pending",
+        activeForm: isBlank(activeForm) ? "" : (activeForm as string),
+        status: TODO_STATUSES.has(event.status) ? (event.status as TodoStatus) : "pending",
       };
       return foldTodoTasks(state, [...state.todoTasks, entry]);
     }
@@ -1904,7 +2597,7 @@ function reduceEvent(state, event) {
         if (task.id !== taskId) return [task];
         found = true;
         if (event.status === "deleted") return [];
-        const subject = boundedDisplayText(event.subject, TODO_LIMITS.textChars);
+        const subject = boundedDisplayText(event.subject, TODO_LIMITS.textChars) as string;
         const activeForm = boundedDisplayText(event.activeForm, TODO_LIMITS.textChars);
         return [{
           ...task,
@@ -1914,14 +2607,14 @@ function reduceEvent(state, event) {
         }];
       });
       if (found) return foldTodoTasks(state, next);
-      const subject = boundedDisplayText(event.subject, TODO_LIMITS.textChars);
+      const subject = boundedDisplayText(event.subject, TODO_LIMITS.textChars) as string;
       if (event.status === "deleted" || isBlank(subject) || state.todoTasks.length >= TODO_LIMITS.items) return state;
       const activeForm = boundedDisplayText(event.activeForm, TODO_LIMITS.textChars);
       return foldTodoTasks(state, [...state.todoTasks, {
         id: taskId,
         subject,
-        activeForm: isBlank(activeForm) ? "" : activeForm,
-        status: TODO_STATUSES.has(event.status) ? event.status : "pending",
+        activeForm: isBlank(activeForm) ? "" : (activeForm as string),
+        status: TODO_STATUSES.has(event.status) ? (event.status as TodoStatus) : "pending",
       }]);
     }
 
@@ -1940,7 +2633,7 @@ function reduceEvent(state, event) {
 
     case "diff_updated": {
       if (!isOpenCurrentTurn(state, event.turnId) || typeof event.unifiedDiff !== "string") return state;
-      const unifiedDiff = boundedDisplayText(event.unifiedDiff, PROVIDER_PROJECTION_LIMITS.diffChars);
+      const unifiedDiff = boundedDisplayText(event.unifiedDiff, PROVIDER_PROJECTION_LIMITS.diffChars) as string;
       return updateTurn(state, (turn) => ({ ...turn, diff: { unifiedDiff } }));
     }
 
@@ -1981,8 +2674,8 @@ function reduceEvent(state, event) {
         ...(trigger ? { trigger } : {}),
       };
       const turnScoped = event.turnId != null;
-      if (turnScoped && !isOpenCurrentTurn(state, event.turnId)) return state;
-      const existing = turnScoped ? (state.turnsById[event.turnId].modelFallbacks ?? []) : [];
+      if (turnScoped && !isOpenCurrentTurn(state, event.turnId as string)) return state;
+      const existing: ModelFallbackProjection[] = turnScoped ? (state.turnsById[event.turnId as string].modelFallbacks ?? []) : [];
       if (fallbackId && existing.some((item) => item.fallbackId === fallbackId)) return state;
       // Deterministic identity: the CLI's uuid when present, else the ordinal of
       // this fallback within its turn — a replay folds the same events in the
@@ -1991,7 +2684,7 @@ function reduceEvent(state, event) {
       // is defensive and a uuid-less repeat collapses onto one notice.)
       const noticeId = `model_fallback:${fallbackId ?? (turnScoped ? existing.length : "session")}`;
       const dismissKey = providerNoticeDismissKey(event.turnId, noticeId);
-      const notice = { noticeId, level: "warning", code: modelFallbackLeadIn(trigger), message, dismissKey };
+      const notice: ProviderNoticeProjection = { noticeId, level: "warning", code: modelFallbackLeadIn(trigger), message, dismissKey };
       const dismissed = isNoticeDismissed(state, dismissKey);
       const next = { ...state, lastModelFallback: { turnId: event.turnId ?? null, ...fallback } };
       if (!turnScoped) {
@@ -2010,7 +2703,7 @@ function reduceEvent(state, event) {
       const reviewId = boundedIdentifier(event.reviewId);
       if (!reviewId) return state;
       const target = boundedDisplayText(event.target, PROVIDER_PROJECTION_LIMITS.proseChars);
-      const review = { reviewId, status: "started", ...(target === undefined ? {} : { target }) };
+      const review: ReviewProjection = { reviewId, status: "started", ...(target === undefined ? {} : { target }) };
       return updateTurn(state, (turn) => ({ ...turn, reviews: upsertReview(turn.reviews, review) }));
     }
 
@@ -2019,7 +2712,7 @@ function reduceEvent(state, event) {
       const reviewId = boundedIdentifier(event.reviewId);
       if (!reviewId || !REVIEW_COMPLETION_STATUSES.has(event.status)) return state;
       const result = boundedDisplayText(event.result, PROVIDER_PROJECTION_LIMITS.proseChars);
-      const review = { reviewId, status: event.status, ...(result === undefined ? {} : { result }) };
+      const review: ReviewProjection = { reviewId, status: event.status, ...(result === undefined ? {} : { result }) };
       return updateTurn(state, (turn) => ({ ...turn, reviews: upsertReview(turn.reviews, review) }));
     }
 
@@ -2069,12 +2762,23 @@ function reduceEvent(state, event) {
       const toolUseId = boundedIdentifier(event.toolUseId);
       const taskType = boundedDisplayText(event.taskType, BACKGROUND_TASK_LIMITS.labelChars);
       const subagentType = boundedDisplayText(event.subagentType, BACKGROUND_TASK_LIMITS.labelChars);
-      return foldBackgroundTask(state, taskId, {
+      const patch: BackgroundTaskPatch = {
         status: "running",
         ...(toolUseId ? { toolUseId } : {}),
         ...(taskType === undefined ? {} : { taskType }),
         ...(subagentType === undefined ? {} : { subagentType }),
-      });
+      };
+      // GH #264(d) F1 (reused task id): Claude reuses a task id when a background agent is
+      // resumed (SendMessage), so a task_started that follows a terminal record for the SAME
+      // id is a genuinely later run, not a duplicate - reopen it. Only the START edge reopens:
+      // a late progress / level / duplicate completion stays sticky (see foldBackgroundTask),
+      // so main's out-of-order protection is unchanged. Pure: order in the folded stream is
+      // the only signal used (a replayed completion always precedes a live start).
+      const existing = state.backgroundTasks.find((task) => task.taskId === taskId);
+      if (existing && TASK_TERMINAL_STATUSES.has(existing.status)) {
+        return reopenBackgroundTask(state, existing, patch);
+      }
+      return foldBackgroundTask(state, taskId, patch);
     }
 
     case "task_progress": {
@@ -2104,9 +2808,32 @@ function reduceEvent(state, event) {
       const totalTokens = nonNegativeFiniteNumber(event.totalTokens);
       const toolUses = nonNegativeFiniteNumber(event.toolUses);
       const durationMs = nonNegativeFiniteNumber(event.durationMs);
+      // v148 (#264(d)): the only free text a task record may carry; re-bounded here so
+      // journal replay can never inflate a projection (same as taskType above).
+      const summary = boundedDisplayText(event.summary, PROVIDER_PROJECTION_LIMITS.proseChars);
+      const outputFile = boundedDisplayText(event.outputFile, PROVIDER_PROJECTION_LIMITS.pathChars);
+      // A completion that lands on an ALREADY-terminal record is a duplicate or a replay of a
+      // run the projection holds: a conflicting status is ignored outright (status and summary
+      // must never disagree), and a matching one may only FILL IN what the record lacks.
+      const held = state.backgroundTasks.find((task) => task.taskId === taskId);
+      if (held && TASK_TERMINAL_STATUSES.has(held.status)) {
+        if (held.status !== status) return state;
+        return foldBackgroundTask(state, taskId, {
+          status,
+          live: false,
+          ...(summary && held.summary === undefined ? { summary } : {}),
+          ...(outputFile && held.outputFile === undefined ? { outputFile } : {}),
+          ...(toolUseId && !held.toolUseId ? { toolUseId } : {}),
+          ...(totalTokens === undefined ? {} : { totalTokens }),
+          ...(toolUses === undefined ? {} : { toolUses }),
+          ...(durationMs === undefined ? {} : { durationMs }),
+        });
+      }
       return foldBackgroundTask(state, taskId, {
         status,
         live: false,
+        ...(summary ? { summary } : {}),
+        ...(outputFile ? { outputFile } : {}),
         ...(toolUseId ? { toolUseId } : {}),
         ...(totalTokens === undefined ? {} : { totalTokens }),
         ...(toolUses === undefined ? {} : { toolUses }),
@@ -2128,7 +2855,7 @@ function reduceEvent(state, event) {
       const noticeId = boundedIdentifier(event.noticeId);
       const message = boundedDisplayText(event.message, PROVIDER_PROJECTION_LIMITS.proseChars);
       if (!noticeId || !message) return state;
-      const notice = {
+      const notice: Pick<ProviderNoticeProjection, "noticeId" | "level" | "message"> & Partial<ProviderNoticeProjection> = {
         noticeId,
         level: PROVIDER_NOTICE_LEVELS.has(event.level) ? event.level : "warning",
         message,
@@ -2139,12 +2866,12 @@ function reduceEvent(state, event) {
       notice.dismissKey = dismissKey;
       if (isNoticeDismissed(state, dismissKey)) return state;
       if (event.turnId == null) {
-        const providerNotices = appendProviderNotice(state.providerNotices, notice);
+        const providerNotices = appendProviderNotice(state.providerNotices, notice as ProviderNoticeProjection);
         return providerNotices === state.providerNotices ? state : { ...state, providerNotices };
       }
       if (!isOpenCurrentTurn(state, event.turnId)) return state;
       return updateTurn(state, (turn) => {
-        const providerNotices = appendProviderNotice(turn.providerNotices, notice);
+        const providerNotices = appendProviderNotice(turn.providerNotices, notice as ProviderNoticeProjection);
         return providerNotices === turn.providerNotices ? turn : { ...turn, providerNotices };
       });
     }
@@ -2154,7 +2881,7 @@ function reduceEvent(state, event) {
       // issue #52: `error` is the abort denial's bounded rejection text. The
       // reducer re-applies the prose cap so journal replay can never inflate it.
       const error = boundedDisplayText(event.error, PROVIDER_PROJECTION_LIMITS.proseChars);
-      const denial = {
+      const denial: PermissionDenialProjection = {
         toolId: event.toolId,
         name: event.name,
         reason: PERMISSION_DENIAL_REASON_VALUES.has(event.reason) ? event.reason : "unknown",
@@ -2208,6 +2935,9 @@ function reduceEvent(state, event) {
         activeTurnId: event.turnId,
         turnOrder: [...state.turnOrder, event.turnId],
         turnsById: { ...state.turnsById, [event.turnId]: turn },
+        // #256: a new turn supersedes the previous turn-less error as the "current"
+        // one; the durable record stays in `sessionErrors`.
+        lastError: null,
       };
     }
 
@@ -2218,12 +2948,15 @@ function reduceEvent(state, event) {
       // delegate mention rewrites the instruction the same way). Bounded like a
       // command payload — a brief is prose, but an operator can paste a long one.
       const engineText = boundedDisplayText(event.engineText, PROVIDER_PROJECTION_LIMITS.commandChars);
+      const from = peerFrom(event.from);
       return updateTurn(state, (turn) =>
         upsertBlock(turn, `user:${event.turnId}`, () => ({
           blockId: `user:${event.turnId}`,
           kind: "user_message",
           text: event.text,
           ...(engineText !== undefined && engineText !== event.text ? { engineText } : {}),
+          // v149 (GH #265): another Tether session sent this (message_session), not the operator.
+          ...(from ? { from } : {}),
           // #89: journal-stamped send-time for the small bubble label.
           ...blockEventTs(event),
           // v15: attachment descriptors (name + mediaType), when the operator
@@ -2293,7 +3026,7 @@ function reduceEvent(state, event) {
       const stream = event.stream === "stderr" ? "stderr" : "stdout";
       return updateTurn(state, (turn) =>
         upsertBlock(turn, event.blockId, (existing) => {
-          const base = existing ?? { blockId: event.blockId, kind: "command_output", segments: [], done: false };
+          const base: TurnBlock = existing ?? { blockId: event.blockId, kind: "command_output", segments: [], done: false };
           const segments = base.segments ? [...base.segments] : [];
           const last = segments[segments.length - 1];
           // Coalesce consecutive same-stream chunks so the array stays small (the
@@ -2385,9 +3118,10 @@ function reduceEvent(state, event) {
         return { ...state, spawnedRunKeys, spawnedRuns: [...base, { ...next, output: "", outputTruncated: false }] };
       }
       const existing = runs[index];
-      if (sameSpawnedRun(existing, next)) return spawnedRunKeys === state.spawnedRunKeys ? state : { ...state, spawnedRunKeys };
+      const carried = carrySpawnedRunSummary(existing, next);
+      if (sameSpawnedRun(existing, carried)) return spawnedRunKeys === state.spawnedRunKeys ? state : { ...state, spawnedRunKeys };
       const merged = {
-        ...next,
+        ...carried,
         output: existing.output ?? "",
         outputTruncated: existing.outputTruncated === true,
         ...(Array.isArray(existing.media) ? { media: existing.media } : {}),
@@ -2474,9 +3208,9 @@ function reduceEvent(state, event) {
       // create a block, so an empty thinking with no prior streaming (e.g. a
       // reasoning-less turn) leaves nothing behind.
       if (!isOpenCurrentTurn(state, event.turnId)) return state;
-      if (!state.turnsById[state.activeTurnId]?.blocksById[event.blockId]) return state;
+      if (!state.turnsById[state.activeTurnId as string]?.blocksById[event.blockId]) return state;
       return updateTurn(state, (turn) =>
-        upsertBlock(turn, event.blockId, (existing) => ({ ...existing, done: true })),
+        upsertBlock(turn, event.blockId, (existing) => ({ ...(existing as TurnBlock), done: true })),
       );
     }
 
@@ -2527,12 +3261,12 @@ function reduceEvent(state, event) {
             ...turn,
             blocksById: {
               ...turn.blocksById,
-              [event.parentToolUseId]: {
+              [event.parentToolUseId as string]: {
                 ...parent,
                 subagent: {
-                  ...parent.subagent,
+                  ...(parent.subagent as SubagentThread),
                   entries: {
-                    ...parent.subagent.entries,
+                    ...(parent.subagent as SubagentThread).entries,
                     [event.toolId]: { ...child, elapsedSeconds: event.elapsedSeconds },
                   },
                 },
@@ -2559,7 +3293,7 @@ function reduceEvent(state, event) {
       if (!isOpenCurrentTurn(state, event.turnId)) return state;
       return updateTurn(state, (turn) =>
         upsertBlock(turn, event.toolId, (existing) => {
-          const withoutProgress = clearElapsedProgress(existing ?? { blockId: event.toolId, kind: "tool" });
+          const withoutProgress = clearElapsedProgress<TurnBlock>(existing ?? { blockId: event.toolId, kind: "tool" });
           return {
             ...withoutProgress,
             output: event.output,
@@ -2783,14 +3517,14 @@ function reduceEvent(state, event) {
       // keeps the full raw record regardless of this cap.
       if (!isOpenCurrentTurn(state, event.turnId)) return state;
       const MAX_WARNINGS = 50;
-      const legacyError = event.type === "unknown_event" ? legacyUnknownErrorMessage(event.raw) : null;
+      const legacyError = event.type === "unknown_event" ? legacyUnknownErrorMessage(event.raw as LegacyErrorRaw) : null;
       return updateTurn(state, (turn) => ({
         ...turn,
         // Preserve the first/root error. Engines may append a generic
         // "ended without completing" backstop after a provider-specific error;
         // that fallback must not erase the actionable reason.
         error: turn.error ?? legacyError ?? undefined,
-        warnings: [...turn.warnings, { type: event.type, message: event.message, raw: event.raw }].slice(-MAX_WARNINGS),
+        warnings: [...turn.warnings, { type: event.type, message: (event as EvOf<"warning">).message, raw: event.raw }].slice(-MAX_WARNINGS),
       }));
     }
 
@@ -2804,16 +3538,20 @@ function reduceEvent(state, event) {
       // analogous session-level latch here; its account-level fact rides the
       // separate `rate_limit` event instead (lib/codex-usage-limit.mjs).
       const authExpired = event.cause === "auth_expired";
-      const accountAuth = authExpired && state.accountAuth?.status !== "expired"
+      const accountAuth: AccountAuthState | null = authExpired && state.accountAuth?.status !== "expired"
         ? { status: "expired", turnId: event.turnId ?? null }
         : state.accountAuth;
-      if (event.turnId == null) return { ...state, lastError: event.message, accountAuth };
+      if (event.turnId == null) return { ...state, lastError: event.message, sessionErrors: foldSessionError(state, event), accountAuth };
       if (!isOpenCurrentTurn(state, event.turnId)) {
         return accountAuth === state.accountAuth ? state : { ...state, accountAuth };
       }
       const next = updateTurn(state, (turn) => ({
         ...turn,
         error: turn.error ?? event.message,
+        // #256: journal-stamped time of the first error (same first-wins rule), so
+        // the outcome strip can show when it happened. Key only when stamped.
+        ...(turn.error == null && turn.errorAt == null && nonNegativeFiniteNumber(event.ts) != null
+          ? { errorAt: nonNegativeFiniteNumber(event.ts) } : {}),
         // First-wins, exactly like `error` — the reason that ENDED the turn is the
         // first one surfaced, and compaction re-emits this pair together. Added as
         // a KEY only when there is a cause, so an unclassified turn's projection is
@@ -2826,10 +3564,12 @@ function reduceEvent(state, event) {
     case "turn_end": {
       if (!isOpenCurrentTurn(state, event.turnId)) return state;
       const next = updateTurn(state, (turn) => {
-        const completed = {
+        const completed: TurnProjection = {
           ...turn,
           status: "done",
           outcome: event.outcome,
+          // #256: journal-stamped end time, for the outcome strip. Key only when stamped.
+          ...(nonNegativeFiniteNumber(event.ts) != null ? { endedAt: nonNegativeFiniteNumber(event.ts) } : {}),
           // v91 (issue #106): the persistent engine's settle-on-close path carries
           // the classified cause on turn_end and emits NO separate `error` for that
           // turn, so the turn projection has to pick it up here too (this is also
@@ -2846,7 +3586,7 @@ function reduceEvent(state, event) {
       // (the UNKNOWN-outcome settle path has no `error` event of its own). Scoped
       // to THIS session's open turn by the isOpenCurrentTurn guard above, so another
       // session's turn_end can never clear this one's latch.
-      const accountAuth = event.outcome === TURN_OUTCOMES.OK
+      const accountAuth: AccountAuthState | null = event.outcome === TURN_OUTCOMES.OK
         ? null
         : event.cause === "auth_expired" && state.accountAuth?.status !== "expired"
           ? { status: "expired", turnId: event.turnId }
@@ -2878,8 +3618,8 @@ function reduceEvent(state, event) {
       // `reason` (background_abandoned only) tells the UI whether the warm session
       // was idle-recycled or its agent child crashed/was terminated. Omitted from
       // the notice when absent so pre-reason markers stay byte-identical.
-      const notice = { kind: event.type, outstanding: event.outstanding ?? 0, seq, dismissKey };
-      if (event.reason !== undefined) notice.reason = event.reason;
+      const notice: SessionNotice = { kind: event.type, outstanding: event.outstanding ?? 0, seq, dismissKey };
+      if ((event as EvOf<"background_abandoned">).reason !== undefined) notice.reason = (event as EvOf<"background_abandoned">).reason;
       return {
         ...state,
         notices: [...state.notices, notice],
@@ -2900,8 +3640,8 @@ function reduceEvent(state, event) {
       if (!interruptedTurnId) return state;
       const dismissKey = backgroundNoticeDismissKey("turn_interrupted", seq);
       if (isNoticeDismissed(state, dismissKey)) return state;
-      const count = (value) => (Number.isInteger(value) && value > 0 ? value : 0);
-      const notice = {
+      const count = (value: number) => (Number.isInteger(value) && value > 0 ? value : 0);
+      const notice: SessionNotice = {
         kind: "turn_interrupted",
         by: event.by,
         interruptedTurnId,
@@ -2971,6 +3711,7 @@ function reduceEvent(state, event) {
       // so a replayed marker (reconnect/restart) is idempotent. Appended (flush
       // order = oldest first), never mutated in place, so the fold stays pure.
       if (state.queuedMessages.some((m) => m.queueId === event.queueId)) return state;
+      const peerSender = event.noticeKind === "peer" || event.noticeKind === "handover" ? peerFrom({ sessionId: event.fromSessionId, name: event.fromSessionName }) : undefined;
       return {
         ...state,
         queuedMessages: [
@@ -2978,6 +3719,8 @@ function reduceEvent(state, event) {
           { queueId: event.queueId, text: event.text, ...(event.flushMode ? { flushMode: event.flushMode } : {}),
             ...(event.origin ? { origin: event.origin } : {}),
             ...(event.noticeKind ? { noticeKind: event.noticeKind } : {}),
+            // v149 (GH #265): the sending session of a "peer" row, bounded like `from`.
+            ...(peerSender ? { fromSessionId: peerSender.sessionId, fromSessionName: peerSender.name } : {}),
             // v136 (issue #229): for a deferred ("next-call") message, the
             // journal-stamped `ts` of the add — never a clock read — so "waited
             // 14m" is identical on every device and after a reload. A KEY only for
@@ -2992,9 +3735,18 @@ function reduceEvent(state, event) {
       // Edit a still-pending queued message's text. A no-op if it already flushed
       // (queueId gone) — never resurrects a removed message. Preserves flushMode.
       if (!state.queuedMessages.some((m) => m.queueId === event.queueId)) return state;
+      // v147 (tth-6lw): an optional `held: true` marks a prompt that must NEVER be auto-delivered (it sat
+      // behind a session open that failed, or that the process died in); an explicit `held: false` clears
+      // it. Absent leaves the flag as it is, so every pre-v147 edit row folds exactly as before.
       return {
         ...state,
-        queuedMessages: state.queuedMessages.map((m) => (m.queueId === event.queueId ? { ...m, text: event.text } : m)),
+        queuedMessages: state.queuedMessages.map((m) => {
+          if (m.queueId !== event.queueId) return m;
+          const next = { ...m, text: event.text };
+          if (event.held === true) next.held = true;
+          else if (event.held === false) delete next.held;
+          return next;
+        }),
       };
     }
 
@@ -3005,6 +3757,22 @@ function reduceEvent(state, event) {
       // v130 (S13.1-C): remember the id (bounded, deduped, newest last) so a
       // snapshot proves it was accepted even after it left the queue. `?? []`: a
       // projection folded before v130 has no list yet.
+      // #249: an optional `reason` says WHY it left. "withdrawn" is the operator's
+      // own removal — it is NOT an acceptance, so it goes to `withdrawnQueueIds`
+      // (settled, never re-sent, but never proof of delivery) instead of
+      // `removedQueueIds`. "flushed" and a row with no reason (every pre-#249
+      // journal) keep today's behaviour exactly.
+      if (event.reason === "withdrawn") {
+        const withdrawn = (state.withdrawnQueueIds ?? []).filter((id) => id !== event.queueId);
+        withdrawn.push(event.queueId);
+        return {
+          ...state,
+          queuedMessages: state.queuedMessages.filter((m) => m.queueId !== event.queueId),
+          // A flushed-then-requeued id that is now withdrawn was never delivered.
+          ...(state.removedQueueIds?.includes(event.queueId) ? { removedQueueIds: state.removedQueueIds.filter((id) => id !== event.queueId) } : {}),
+          withdrawnQueueIds: withdrawn.length > MAX_REMOVED_QUEUE_IDS ? withdrawn.slice(-MAX_REMOVED_QUEUE_IDS) : withdrawn,
+        };
+      }
       const removed = (state.removedQueueIds ?? []).filter((id) => id !== event.queueId);
       removed.push(event.queueId);
       return {
@@ -3027,7 +3795,7 @@ function reduceEvent(state, event) {
 // Claude adapter (Agent SDK / CLI stream-json records -> AgentEvent[])
 // --------------------------------------------------------------------------
 
-export function createClaudeAdapterState(turnId) {
+export function createClaudeAdapterState(turnId: string): ClaudeAdapterState {
   // streamTextOrdinal / streamTextByIndex track TEXT blocks within the current
   // streaming message so a streamed text block and its final counterpart share
   // a blockId (see claudeContentEvents). streamThinkingOrdinal / streamThinking-
@@ -3107,7 +3875,7 @@ export function createClaudeAdapterState(turnId) {
 // ~10% growth plus a floor — which costs ~50 rows for a 20k-token turn and puts the
 // fine resolution where it is legible (the first few hundred tokens) rather than
 // where the rendered "12.4k" cannot show it anyway.
-export function nextTokenProgressThreshold(emitted) {
+export function nextTokenProgressThreshold(emitted: number): number {
   if (!(emitted > 0)) return 1;
   return Math.ceil(emitted * 1.1) + 24;
 }
@@ -3121,7 +3889,7 @@ export function nextTokenProgressThreshold(emitted) {
 //
 // `thinkingBlock`, when given, is the current thinking block's own running total;
 // it is recorded separately so the block can be banked when the next one starts.
-function claudeTokenProgress(state, observed, thinkingBlock) {
+function claudeTokenProgress(state: ClaudeAdapterState, observed: unknown, thinkingBlock?: number): ClaudeStep {
   const tokens = nonNegativeFiniteNumber(observed);
   if (tokens == null) return { events: [], state };
   const current = Math.max(state.liveTokensCurrent, tokens);
@@ -3144,14 +3912,14 @@ export const TOOL_PROGRESS_MILESTONES_SECONDS = Object.freeze([
   0, 1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600, 7200,
 ]);
 
-function toolProgressMilestoneIndex(elapsedSeconds) {
+function toolProgressMilestoneIndex(elapsedSeconds: number): number {
   for (let index = TOOL_PROGRESS_MILESTONES_SECONDS.length - 1; index >= 0; index -= 1) {
     if (elapsedSeconds >= TOOL_PROGRESS_MILESTONES_SECONDS[index]) return index;
   }
   return -1;
 }
 
-function withKnownClaudeTools(state, content, parentToolUseId) {
+function withKnownClaudeTools(state: ClaudeAdapterState, content: string | ClaudeContentBlock[] | undefined, parentToolUseId: string | null): ClaudeAdapterState {
   if (!Array.isArray(content)) return state;
   const tools = content.filter(
     (block) => block?.type === "tool_use" && typeof block.id === "string" && block.id,
@@ -3162,15 +3930,36 @@ function withKnownClaudeTools(state, content, parentToolUseId) {
   return { ...state, toolParentsById };
 }
 
-function claudeToolProgress(record, state) {
-  const toolId = typeof record.tool_use_id === "string" && record.tool_use_id
-    ? record.tool_use_id
-    : null;
-  const parentToolUseId = record.parent_tool_use_id === null
-    ? null
-    : typeof record.parent_tool_use_id === "string" && record.parent_tool_use_id
-      ? record.parent_tool_use_id
-      : undefined;
+// A live CLI (2.1.291, captured) emits its 30 s foreground-tool heartbeat under
+// a SYNTHETIC id: tool_use_id `<realToolId>-heartbeat-<n>` with
+// parent_tool_use_id = the REAL tool (not a subagent parent) and heartbeat:true.
+// Returns the real tool id for exactly that shape, else null — so a real
+// subagent parent (no heartbeat suffix) and the env-gated bash_progress frames
+// (real id, parent null) keep their existing attribution. Pure.
+export function claudeHeartbeatToolId(record: ClaudeRecord | null | undefined): string | null {
+  if (record?.heartbeat !== true) return null;
+  const parent = record.parent_tool_use_id;
+  const id = record.tool_use_id;
+  if (typeof parent !== "string" || !parent || typeof id !== "string") return null;
+  return /^-heartbeat-\d+$/.test(id.slice(parent.length)) && id.startsWith(parent) ? parent : null;
+}
+
+function claudeToolProgress(record: ClaudeRecord, state: ClaudeAdapterState): ClaudeStep {
+  const heartbeatToolId = claudeHeartbeatToolId(record);
+  const toolId = heartbeatToolId !== null
+    ? heartbeatToolId
+    : typeof record.tool_use_id === "string" && record.tool_use_id
+      ? record.tool_use_id
+      : null;
+  const parentToolUseId = heartbeatToolId !== null
+    ? (Object.hasOwn(state.toolParentsById, heartbeatToolId)
+      ? state.toolParentsById[heartbeatToolId]
+      : undefined)
+    : record.parent_tool_use_id === null
+      ? null
+      : typeof record.parent_tool_use_id === "string" && record.parent_tool_use_id
+        ? record.parent_tool_use_id
+        : undefined;
   const elapsedSeconds = nonNegativeFiniteNumber(record.elapsed_time_seconds);
   if (
     toolId === null ||
@@ -3207,20 +3996,20 @@ function claudeToolProgress(record, state) {
   };
 }
 
-function nonNegativeFiniteNumber(value) {
+function nonNegativeFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 // #89: journal-stamped wall-clock ts of the creating event, for the small
 // send-time on user/agent bubbles. Absent on hand-built events (tests) and
 // pre-v38 journal lines — callers fall back to the turn's startedAt.
-function blockEventTs(event) {
+function blockEventTs(event: { ts?: number } | null | undefined): { ts?: number } {
   const ts = nonNegativeFiniteNumber(event?.ts);
   return ts == null ? {} : { ts };
 }
 
 // v40: raw Claude usage key -> SubagentUsage key, for a subagent's own records.
-const SUBAGENT_USAGE_FIELDS = [
+const SUBAGENT_USAGE_FIELDS: Array<[SubagentUsageCountField, string]> = [
   ["inputTokens", "input_tokens"],
   ["outputTokens", "output_tokens"],
   ["cacheReadInputTokens", "cache_read_input_tokens"],
@@ -3244,12 +4033,12 @@ const SUBAGENT_USAGE_FIELDS = [
  * once each, deduped by uuid upstream in the persistent engine, so they do not have
  * that hazard.)
  */
-function accumulateSubagentUsage(previous, record) {
+function accumulateSubagentUsage(previous: SubagentUsage | undefined, record: ClaudeRecord): SubagentUsage | undefined {
   const model = typeof record.message?.model === "string" && record.message.model ? record.message.model : null;
   const usage = record.message?.usage;
   const counted = usage && typeof usage === "object" && !Array.isArray(usage);
   if (!model && !counted) return previous;
-  const next = { ...(previous ?? {}) };
+  const next: SubagentUsage = { ...(previous ?? {}) };
   // Last served model wins: a run that somehow switched reports where it ended
   // up rather than inventing a blend it never actually ran on.
   if (model) next.model = model;
@@ -3263,11 +4052,11 @@ function accumulateSubagentUsage(previous, record) {
   return next;
 }
 
-function normalizedClaudeModelUsages(modelUsage) {
+function normalizedClaudeModelUsages(modelUsage: Record<string, ClaudeModelUsage> | null | undefined): ModelUsageEntry[] {
   if (!modelUsage || typeof modelUsage !== "object" || Array.isArray(modelUsage)) return [];
-  return Object.entries(modelUsage).flatMap(([model, usage]) => {
+  return Object.entries(modelUsage).flatMap(([model, usage]): ModelUsageEntry[] => {
     if (!model || !usage || typeof usage !== "object" || Array.isArray(usage)) return [];
-    const entry = { model };
+    const entry: ModelUsageEntry = { model };
     if (typeof usage.canonicalModel === "string" && usage.canonicalModel) entry.canonicalModel = usage.canonicalModel;
     if (typeof usage.provider === "string" && usage.provider) entry.provider = usage.provider;
     for (const key of [
@@ -3279,7 +4068,7 @@ function normalizedClaudeModelUsages(modelUsage) {
       "costUSD",
       "contextWindow",
       "maxOutputTokens",
-    ]) {
+    ] as const) {
       const value = nonNegativeFiniteNumber(usage[key]);
       if (value !== undefined) entry[key] = value;
     }
@@ -3287,7 +4076,7 @@ function normalizedClaudeModelUsages(modelUsage) {
   });
 }
 
-function mainClaudeModelUsage(modelUsages, servedRawModel) {
+function mainClaudeModelUsage(modelUsages: ModelUsageEntry[], servedRawModel: string | null): ModelUsageEntry | null {
   if (typeof servedRawModel === "string" && servedRawModel) {
     const rawExact = modelUsages.find((entry) => entry.model === servedRawModel);
     if (rawExact) return rawExact;
@@ -3326,8 +4115,8 @@ function mainClaudeModelUsage(modelUsages, servedRawModel) {
 // a non-empty thinking block emits a self-contained `thinking_completed`
 // (text + done). Either way the block is keyed identically, so if both a
 // streamed build AND a full final record occur they collapse into one block.
-function claudeContentEvents(turnId, messageId, content, aborted = false) {
-  const events = [];
+function claudeContentEvents(turnId: string, messageId: string, content: ClaudeContentBlock[], aborted = false): AgentEvent[] {
+  const events: AgentEvent[] = [];
   let textOrdinal = 0;
   let thinkingOrdinal = 0;
   const textCount = content.filter((block) => block?.type === "text").length;
@@ -3411,11 +4200,11 @@ function claudeContentEvents(turnId, messageId, content, aborted = false) {
 // become independently-keyed items (same ordinal namespaces as the main path);
 // tool_use blocks become `tool` items keyed by the tool_use id. These are
 // complete-message blocks only: stream_event deltas have no parent attribution.
-function claudeSubagentItemsFromAssistant(record) {
+function claudeSubagentItemsFromAssistant(record: ClaudeRecord): SubagentItem[] {
   const content = record.message?.content;
   if (!Array.isArray(content)) return [];
   const messageId = typeof record.message?.id === "string" ? record.message.id : "sub";
-  const items = [];
+  const items: SubagentItem[] = [];
   let textOrdinal = 0;
   let thinkingOrdinal = 0;
   for (const block of content) {
@@ -3436,12 +4225,12 @@ function claudeSubagentItemsFromAssistant(record) {
 // Normalizes ONE subagent-tagged user record (its tool_result blocks) into
 // `tool_result` items keyed by tool_use id, which merge into the matching tool
 // item in the reducer (see foldSubagentItems).
-function claudeSubagentItemsFromUser(record, permissionDeniedToolIds = []) {
+function claudeSubagentItemsFromUser(record: ClaudeRecord, permissionDeniedToolIds: string[] = []): SubagentItem[] {
   const content = record.message?.content;
   if (!Array.isArray(content)) return [];
   return content
     .filter((item) => item.type === "tool_result")
-    .map((item) => ({
+    .map((item): SubagentItem => ({
       kind: "tool_result",
       key: item.tool_use_id,
       // When the structured denial advisory preceded this result, do not copy
@@ -3455,8 +4244,8 @@ function claudeSubagentItemsFromUser(record, permissionDeniedToolIds = []) {
     }));
 }
 
-const TASK_TERMINAL_STATUSES = new Set(["completed", "failed", "stopped", "killed"]);
-const TASK_PROGRESS_STATUSES = new Set(["pending", "running", "paused"]);
+const TASK_TERMINAL_STATUSES: GuardSet<TaskTerminalStatus> = new Set(["completed", "failed", "stopped", "killed"]) as never;
+const TASK_PROGRESS_STATUSES: GuardSet<"pending" | "running" | "paused"> = new Set(["pending", "running", "paused"]) as never;
 // SDK decision_reason_type -> wire reason. Full vocabulary as of sdk 0.3.219
 // (sdk.d.ts: 'rule' | 'mode' | 'subcommandResults' | 'permissionPromptTool' |
 // 'hook' | 'asyncAgent' | 'sandboxOverride' | 'workingDir' | 'safetyCheck' |
@@ -3465,7 +4254,7 @@ const TASK_PROGRESS_STATUSES = new Set(["pending", "running", "paused"]);
 // around a nested safetyCheck, so it shares that bucket — the exact token survives
 // in `reasonCode`. An unmapped/absent value stays "unknown", and `reasonCode` then
 // names the token to add here.
-const PERMISSION_DENIAL_REASONS = new Map([
+const PERMISSION_DENIAL_REASONS: ReadonlyMap<unknown, PermissionDenialReason> = new Map<string, PermissionDenialReason>([
   ["classifier", "classifier"],
   ["safetyCheck", "safety_check"],
   ["subcommandResults", "safety_check"],
@@ -3479,7 +4268,7 @@ const PERMISSION_DENIAL_REASONS = new Map([
   ["other", "other"],
 ]);
 
-function claudePermissionDeniedEvent(record, turnId) {
+function claudePermissionDeniedEvent(record: ClaudeRecord | null | undefined, turnId: string | null): Extract<AgentEvent, { type: "permission_denied" }> | null {
   if (
     typeof record?.tool_name !== "string" ||
     record.tool_name.length === 0 ||
@@ -3540,14 +4329,14 @@ export const MODEL_FALLBACK_TRIGGER_CLASSES = Object.freeze({
   last_resort: "error",
 });
 
-export function modelFallbackClass(trigger) {
+export function modelFallbackClass(trigger: unknown): "capacity" | "unavailable" | "error" | null {
   return typeof trigger === "string" && Object.hasOwn(MODEL_FALLBACK_TRIGGER_CLASSES, trigger)
-    ? MODEL_FALLBACK_TRIGGER_CLASSES[trigger]
+    ? MODEL_FALLBACK_TRIGGER_CLASSES[trigger as keyof typeof MODEL_FALLBACK_TRIGGER_CLASSES]
     : null;
 }
 
 // The short, class-aware lead-in rendered before the CLI's own verbatim text.
-export function modelFallbackLeadIn(trigger) {
+export function modelFallbackLeadIn(trigger: unknown): string {
   switch (modelFallbackClass(trigger)) {
     case "capacity": return "Model switched · capacity";
     case "unavailable": return "Model switched · not available";
@@ -3556,7 +4345,7 @@ export function modelFallbackLeadIn(trigger) {
   }
 }
 
-function claudeModelFallbackEvent(record, turnId) {
+function claudeModelFallbackEvent(record: ClaudeRecord, turnId: string | null): Extract<AgentEvent, { type: "model_fallback" }> {
   const fromModel = boundedIdentifier(record.original_model);
   const toModel = boundedIdentifier(record.fallback_model);
   const trigger = boundedDisplayText(record.trigger, PROVIDER_PROJECTION_LIMITS.labelChars);
@@ -3586,7 +4375,7 @@ function claudeModelFallbackEvent(record, turnId) {
 // anything this Tether build can already explain. `message`/`decision_reason`
 // are the operator's OWN transcript prose, bounded to display length — this
 // capture never crosses to any client.
-export function unmappedDenialCapture(record) {
+export function unmappedDenialCapture(record: ClaudeRecord | null | undefined) {
   if (record?.type !== "system" || record?.subtype !== "permission_denied") return null;
   if (typeof record.decision_reason_type === "string" && PERMISSION_DENIAL_REASONS.has(record.decision_reason_type)) {
     return null;
@@ -3600,7 +4389,7 @@ export function unmappedDenialCapture(record) {
   };
 }
 
-function addTaskUsage(event, usage) {
+function addTaskUsage<T extends { totalTokens?: number; toolUses?: number; durationMs?: number }>(event: T, usage: ClaudeUsageCounts | null | undefined): T {
   if (!usage || typeof usage !== "object") return event;
   if (typeof usage.total_tokens === "number") event.totalTokens = usage.total_tokens;
   if (typeof usage.tool_uses === "number") event.toolUses = usage.tool_uses;
@@ -3611,10 +4400,24 @@ function addTaskUsage(event, usage) {
 // Normalize SDK task telemetry into a deliberately small, session-level wire
 // surface. These records can arrive between logical turns, so turnId is always
 // null: taskId is the durable correlation key and whole-turn compaction must
-// never erase lifecycle facts. Prompt/description/summary/output_file/error are
-// intentionally omitted — the task lifecycle needs metadata, not copied user
-// prompts or provider output paths/content.
-function claudeTaskEvents(record) {
+// never erase lifecycle facts. Prompt/description/error are intentionally
+// omitted — the task lifecycle needs metadata, not copied user prompts or
+// provider output content. EXCEPTION (owner, GH #264(d), PROTOCOL v148): a
+// TERMINAL record's `summary` and `output_file` DO cross the wire as the optional
+// `summary` / `outputFile` of task_completed, bounded here and re-bounded by the
+// reducer. This overrides the older "deliberately excludes summary/output paths"
+// design note for these two fields ONLY. Reach: they now also appear in Control
+// API snapshots and in other agents' session read tools. An empty string is
+// absent; an ambient (skip_transcript) task keeps the old, metadata-only shape.
+function taskTerminalText<T extends { summary?: string; outputFile?: string }>(event: T, summary: unknown, outputFile: unknown): T {
+  const prose = boundedDisplayText(summary, PROVIDER_PROJECTION_LIMITS.proseChars);
+  if (prose) event.summary = prose;
+  const path = boundedDisplayText(outputFile, PROVIDER_PROJECTION_LIMITS.pathChars);
+  if (path) event.outputFile = path;
+  return event;
+}
+
+function claudeTaskEvents(record: ClaudeRecord): AgentEvent[] {
   if (record.subtype === "background_tasks_changed") {
     // Fail safe on a malformed level payload: treating "unreadable" as empty
     // could evict a process that still has real work. A valid empty ARRAY is the
@@ -3631,7 +4434,7 @@ function claudeTaskEvents(record) {
   const base = { turnId: null, taskId: record.task_id };
 
   if (record.subtype === "task_started") {
-    const event = { type: "task_started", ...base };
+    const event: Extract<AgentEvent, { type: "task_started" }> = { type: "task_started", ...base };
     if (typeof record.tool_use_id === "string" && record.tool_use_id) event.toolUseId = record.tool_use_id;
     if (typeof record.task_type === "string" && record.task_type) event.taskType = record.task_type;
     if (typeof record.subagent_type === "string" && record.subagent_type) event.subagentType = record.subagent_type;
@@ -3640,16 +4443,17 @@ function claudeTaskEvents(record) {
   }
 
   if (record.subtype === "task_progress") {
-    const event = addTaskUsage({ type: "task_progress", ...base }, record.usage);
+    const event = addTaskUsage<Extract<AgentEvent, { type: "task_progress" }>>({ type: "task_progress", ...base }, record.usage);
     if (typeof record.tool_use_id === "string" && record.tool_use_id) event.toolUseId = record.tool_use_id;
     if (typeof record.last_tool_name === "string" && record.last_tool_name) event.lastToolName = record.last_tool_name;
     return [event];
   }
 
   if (record.subtype === "task_notification" && TASK_TERMINAL_STATUSES.has(record.status)) {
-    const event = addTaskUsage({ type: "task_completed", ...base, status: record.status }, record.usage);
+    const event = addTaskUsage<Extract<AgentEvent, { type: "task_completed" }>>({ type: "task_completed", ...base, status: record.status as TaskTerminalStatus }, record.usage);
     if (typeof record.tool_use_id === "string" && record.tool_use_id) event.toolUseId = record.tool_use_id;
     if (typeof record.skip_transcript === "boolean") event.ambient = record.skip_transcript;
+    if (record.skip_transcript !== true) taskTerminalText(event, record.summary, record.output_file);
     return [event];
   }
 
@@ -3675,7 +4479,7 @@ function claudeTaskEvents(record) {
  * reducer state above. Pure: identical (record, state) always yields
  * identical (events, nextState).
  */
-export function claudeToEvents(record, state) {
+export function claudeToEvents(record: ClaudeRecord, state: ClaudeAdapterState): ClaudeStep {
   const turnId = state.turnId;
 
   switch (record.type) {
@@ -3712,7 +4516,7 @@ export function claudeToEvents(record, state) {
         //   mcp_servers    -> inspector health
         // The rest is either already sourced elsewhere (model, permissionMode) or
         // deliberately suppressed; see SDK_SURFACE_PLAN §5.5/session 11.
-        const event = { type: "native_session_id", turnId, nativeSessionId: record.session_id };
+        const event: Extract<AgentEvent, { type: "native_session_id" }> = { type: "native_session_id", turnId, nativeSessionId: record.session_id };
         // Open set: unknown strings pass through untouched (the CLI's own contract)
         // and non-strings are dropped. A LIVE init always carries the normalized
         // field, including [] when an older CLI omitted it: that is the explicit
@@ -3720,7 +4524,7 @@ export function claudeToEvents(record, state) {
         // process. Journal compaction's synthetic native_session_id omits the field,
         // which is how the reducer distinguishes replay from a fresh init.
         const capabilities = Array.isArray(record.capabilities) ? record.capabilities.filter((c) => typeof c === "string" && c.length > 0) : [];
-        event.cliCapabilities = capabilities;
+        event.cliCapabilities = capabilities as string[];
         if (typeof record.claude_code_version === "string" && record.claude_code_version) event.cliVersion = record.claude_code_version;
         const normalizedMcpServers = normalizeClaudeMcpServers(record.mcp_servers);
         event.cliInventory = {
@@ -3740,7 +4544,7 @@ export function claudeToEvents(record, state) {
         // opencode, rather than only appearing as inert text in cliInventory.
         // Reuse normalizedMcpServers (rather than re-parsing record.mcp_servers)
         // so the two representations can never disagree.
-        const mcpHealthEvents = normalizedMcpServers.map((server) => ({
+        const mcpHealthEvents = normalizedMcpServers.map((server): Extract<AgentEvent, { type: "mcp_health_updated" }> => ({
           type: "mcp_health_updated",
           turnId: null,
           name: server.name,
@@ -3767,7 +4571,7 @@ export function claudeToEvents(record, state) {
         // indistinguishable from a hung one. It is NOT turn retry: nothing here
         // resends a turn, and nothing downstream may (CLAUDE.md invariant).
         if (typeof record.attempt !== "number") return { events: [{ type: "unknown_event", turnId, raw: record }], state };
-        const event = { type: "api_retry", turnId, attempt: record.attempt };
+        const event: Extract<AgentEvent, { type: "api_retry" }> = { type: "api_retry", turnId, attempt: record.attempt };
         if (typeof record.max_retries === "number") event.maxRetries = record.max_retries;
         if (typeof record.retry_delay_ms === "number") event.delayMs = record.retry_delay_ms;
         if (typeof record.error_status === "number") event.errorStatus = record.error_status;
@@ -3855,7 +4659,7 @@ export function claudeToEvents(record, state) {
       // a restart/rebuild. turnId:null keeps it out of any turn's compaction group.
       // The reducer ignores the field entirely (rate_limit folds to session state),
       // so null costs nothing.
-      const event = { type: "rate_limit", turnId: null, status: info.status };
+      const event: Extract<AgentEvent, { type: "rate_limit" }> = { type: "rate_limit", turnId: null, status: info.status as "allowed" | "allowed_warning" | "rejected" };
       if (typeof info.rateLimitType === "string") event.limitType = info.rateLimitType;
       if (typeof info.utilization === "number") event.utilization = info.utilization;
       // SDKRateLimitInfo.resetsAt is Unix seconds (the CLI derives it directly
@@ -4037,7 +4841,7 @@ export function claudeToEvents(record, state) {
         const usage = accumulateSubagentUsage(previousUsage, record);
         const nextState = usage === previousUsage
           ? state
-          : { ...state, subagentUsageByParent: { ...byParent, [parentToolUseId]: usage } };
+          : { ...state, subagentUsageByParent: { ...byParent, [parentToolUseId]: usage as SubagentUsage } };
         // Emit on usage alone as well as on items. A record carrying tokens but
         // nothing renderable would otherwise never reach the projection if no
         // further child record followed it, silently under-reporting the run.
@@ -4083,7 +4887,7 @@ export function claudeToEvents(record, state) {
       // a harness artifact, never the operator's words — drop it (either shape).
       if (isClaudeInterruptMarkerContent(content)) return { events: [], state };
       if (!Array.isArray(content)) return { events: [{ type: "unknown_event", turnId, raw: record }], state };
-      const events = [];
+      const events: AgentEvent[] = [];
       for (const item of content) {
         if (item.type !== "tool_result") continue;
         const denied = state.permissionDeniedToolIds.includes(item.tool_use_id);
@@ -4113,7 +4917,7 @@ export function claudeToEvents(record, state) {
 
     case "result": {
       const permissionDeniedToolIds = [...state.permissionDeniedToolIds];
-      const denialEvents = [];
+      const denialEvents: Array<Extract<AgentEvent, { type: "permission_denied" }>> = [];
       if (Array.isArray(record.permission_denials)) {
         for (const denial of record.permission_denials) {
           const event = claudePermissionDeniedEvent(denial, turnId);
@@ -4143,7 +4947,7 @@ export function claudeToEvents(record, state) {
           + (nonNegativeFiniteNumber(record.usage?.output_tokens) ?? 0)
           + (nonNegativeFiniteNumber(record.usage?.cache_read_input_tokens) ?? 0)
           + (nonNegativeFiniteNumber(record.usage?.cache_creation_input_tokens) ?? 0);
-      const events = [
+      const events: AgentEvent[] = [
         ...denialEvents,
         {
           type: "usage",
@@ -4206,20 +5010,20 @@ export function claudeToEvents(record, state) {
 // (e.g. "<div> won't center") (edge #6). issue #184: the CLI's exact
 // `[Request interrupted by user…]` markers are harness artifacts too — never a
 // user bubble, never a turn opener.
-function isCommandEcho(text) {
+function isCommandEcho(text: string): boolean {
   return /^\s*<\/?(command-|local-command|bash-|task-notification)/.test(text) || isClaudeInterruptMarkerText(text);
 }
 
 // A user string is real prompt text unless it is a command-echo wrapper. Returns
 // trimmed text, or null to skip.
-function replayUserText(content) {
+function replayUserText(content: unknown): string | null {
   if (typeof content !== "string") return null;
   const text = content.trim();
   if (!text || isCommandEcho(text)) return null;
   return text;
 }
 
-function replayUserArrayText(content) {
+function replayUserArrayText(content: ClaudeContentBlock[]): string | null {
   const text = content
     .filter((block) => block && block.type === "text" && typeof block.text === "string")
     .map((block) => block.text)
@@ -4231,6 +5035,89 @@ function replayUserArrayText(content) {
   return text;
 }
 
+// GH #264(d) (PROTOCOL v148): Claude Code writes a background task's completion as
+// a plain user record whose text is `<task-notification>` markup:
+//   <task-id>…</task-id><tool-use-id>…</tool-use-id><output-file>…</output-file>
+//   <status>…</status><summary>…</summary> then optionally <note>, <result> (up to
+//   ~20k chars of agent output) and <usage>.
+// We read ONLY the leading run of the five known top-level tags, strictly in
+// sequence, and STOP at the first tag that is not one of them (note/result/usage
+// or anything unknown). Nothing after that point is ever scanned, so `</summary>`
+// or `<status>` text inside <result> cannot be mistaken for a field, and note /
+// result / usage are never copied. Each tag value ends at its OWN first closing
+// tag. Pure — no I/O.
+const TASK_NOTIFICATION_HEAD_TAGS: ReadonlySet<unknown> = new Set(["task-id", "tool-use-id", "output-file", "status", "summary"]);
+
+// Anything that may legitimately FOLLOW the head (or open another structure). A head value
+// that contains one of these never closed its own tag - the "close" we found belongs to a
+// later tag (F1: `<summary>abc\n<result>SECRET</summary></result>`) - so it is rejected, and
+// parsing stops there with what was read so far.
+const TASK_NOTIFICATION_STOP_TAG = /<\/?(?:note|result|usage|task-notification|task-id|tool-use-id|output-file|status|summary)\b/;
+
+// The ONE harness preamble some CLI/sdk-ts builds prepend to a notice (12 of 650 real
+// records). Exactly this literal line (plus whitespace) is accepted; any other leading
+// text leaves the record an ordinary user prompt, as before.
+const TASK_NOTIFICATION_PREAMBLE = "[SYSTEM NOTIFICATION - NOT USER INPUT]";
+
+// The notice markup of a record's raw text, with the accepted preamble removed, or null
+// when the text is not a task notification.
+function taskNotificationMarkup(text: unknown): string | null {
+  if (typeof text !== "string") return null;
+  let rest = text.trimStart();
+  if (rest.startsWith(TASK_NOTIFICATION_PREAMBLE)) rest = rest.slice(TASK_NOTIFICATION_PREAMBLE.length).trimStart();
+  return /^<task-notification[\s>]/.test(rest) ? rest : null;
+}
+
+function parseTaskNotificationHead(text: string): Record<string, string> | null {
+  const fields: Record<string, string> = {};
+  let rest = text.trimStart();
+  const open = /^<task-notification[^>]*>/.exec(rest);
+  if (!open) return null;
+  rest = rest.slice(open[0].length);
+  for (;;) {
+    const match = /^\s*<([a-z-]+)>/.exec(rest);
+    if (!match || !TASK_NOTIFICATION_HEAD_TAGS.has(match[1])) break;
+    const tag = match[1];
+    const bodyStart = match[0].length;
+    const close = rest.indexOf(`</${tag}>`, bodyStart);
+    if (close === -1) break; // unterminated: stop, keep what was read so far
+    const body = rest.slice(bodyStart, close);
+    if (TASK_NOTIFICATION_STOP_TAG.test(body)) break; // spilled past its own close tag
+    if (!Object.hasOwn(fields, tag)) fields[tag] = body.trim();
+    rest = rest.slice(close + tag.length + 3);
+  }
+  return fields;
+}
+
+// A task-notification user record -> one session-level `task_completed`, or null
+// when it names no task / no terminal status (a task_completed without a taskId is
+// dropped by the reducer anyway; a non-terminal status is not a completion).
+// Never a user message and never a turn event.
+function taskNotificationToEvent(text: unknown): Extract<AgentEvent, { type: "task_completed" }> | null {
+  if (typeof text !== "string") return null;
+  const markup = taskNotificationMarkup(text);
+  const fields = markup === null ? null : parseTaskNotificationHead(markup);
+  if (!fields) return null;
+  const taskId = boundedIdentifier(fields["task-id"]);
+  if (!taskId) return null;
+  if (!TASK_TERMINAL_STATUSES.has(fields.status)) return null;
+  const event: Extract<AgentEvent, { type: "task_completed" }> = { type: "task_completed", turnId: null, taskId, status: fields.status as TaskTerminalStatus };
+  const toolUseId = boundedIdentifier(fields["tool-use-id"]);
+  if (toolUseId) event.toolUseId = toolUseId;
+  return taskTerminalText(event, fields.summary, fields["output-file"]);
+}
+
+// The raw text of a user record's content (string, or the joined text blocks of an
+// array form), WITHOUT the command-echo filter replayUserText applies.
+function userRecordRawText(content: string | ClaudeContentBlock[] | undefined): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((block) => block && block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n");
+}
+
 // `turnIdPrefix` namespaces the synthetic turnIds this fold mints ("<prefix>-N",
 // numbered from 1 with no global offset). Callers that fold DISJOINT record ranges
 // of the SAME transcript into ONE projection (pre-adoption replay [0..through] +
@@ -4238,18 +5125,18 @@ function replayUserArrayText(content) {
 // "replay-1" collides with the replay's "replay-1" and reduce()'s existing-turn
 // no-op guard silently drops the whole external turn. Default "replay" keeps every
 // existing caller (pre-adoption replay) byte-for-byte unchanged.
-export function claudeTranscriptToEvents(records, { turnIdPrefix = "replay" } = {}) {
-  const events = [];
+export function claudeTranscriptToEvents(records: ClaudeRecord[], { turnIdPrefix = "replay" }: { turnIdPrefix?: string } = {}): AgentEvent[] {
+  const events: AgentEvent[] = [];
   let turnCount = 0;
-  let turnId = null; // the currently-open replay turn, or null between turns
+  let turnId: string = null as never; // the currently-open replay turn, or null between turns
 
   const closeTurn = () => {
     if (turnId) {
       events.push({ type: "turn_end", turnId, outcome: TURN_OUTCOMES.OK });
-      turnId = null;
+      turnId = null as never;
     }
   };
-  const startTurn = (userText) => {
+  const startTurn = (userText: string | null) => {
     closeTurn();
     turnCount += 1;
     turnId = `${turnIdPrefix}-${turnCount}`;
@@ -4265,10 +5152,32 @@ export function claudeTranscriptToEvents(records, { turnIdPrefix = "replay" } = 
     // false, so the guard above misses them). They carry an authoritative
     // `origin.kind` — skip on that so they never render as a user bubble. The
     // isCommandEcho tag match is a fallback for any that lack the origin field.
-    if (record.origin?.kind === "task-notification") continue;
+    // v148 (#264(d)): such a record still never renders as a user bubble and never
+    // opens a turn, but it now yields a session-level `task_completed` carrying the
+    // parsed head fields (see taskNotificationToEvent).
+    if (record.origin?.kind === "task-notification") {
+      if (record.type === "user") {
+        const event = taskNotificationToEvent(userRecordRawText(record.message?.content));
+        if (event) events.push(event);
+      }
+      continue;
+    }
 
     if (record.type === "user") {
       const content = record.message?.content;
+      // The origin-less orphan (isCommandEcho's `task-notification` match, or the one
+      // accepted preamble + the tag): a task_completed, never a bubble, never a turn.
+      // A STRING or text-only record is consumed whole; a MIXED record (tool_result
+      // blocks + the notice text) keeps every event it had on main and only ADDS the
+      // task_completed (F2) - its notice text never becomes a prompt either way.
+      const rawText = userRecordRawText(content);
+      const isNotice = taskNotificationMarkup(rawText) !== null;
+      const hasToolResults = Array.isArray(content) && content.some((item) => item && item.type === "tool_result");
+      if (isNotice && !hasToolResults) {
+        const event = taskNotificationToEvent(rawText);
+        if (event) events.push(event);
+        continue;
+      }
       if (typeof content === "string") {
         const text = replayUserText(content);
         if (text != null) startTurn(text);
@@ -4310,6 +5219,11 @@ export function claudeTranscriptToEvents(records, { turnIdPrefix = "replay" } = 
         // A user record can carry BOTH tool_result blocks AND new prompt text —
         // the results close the in-flight turn's tools, then the text opens the
         // next turn. Surface that text instead of dropping it (edge #6).
+        if (isNotice) {
+          const event = taskNotificationToEvent(rawText);
+          if (event) events.push(event);
+          continue;
+        }
         const extra = replayUserArrayText(content);
         if (extra != null) startTurn(extra);
         continue;
@@ -4361,7 +5275,7 @@ export function claudeTranscriptToEvents(records, { turnIdPrefix = "replay" } = 
 // drops it (the boot-vs-live / live-vs-live axis of the f948884 CRITICAL). The
 // manager passes a per-session monotonic index, mirroring the durable-range
 // `xr<index>-` scheme. `ext<index>-N` stays disjoint from `replay-*` and `xr*-*`.
-export function claudeExternalTailToEvents(records, index = 0) {
+export function claudeExternalTailToEvents(records: ClaudeRecord[], index = 0): AgentEvent[] {
   return claudeTranscriptToEvents(records, { turnIdPrefix: `ext${index}` });
 }
 
@@ -4379,8 +5293,8 @@ export function claudeExternalTailToEvents(records, index = 0) {
 // assistant response a second time under the "advanced outside Tether" divider.
 // Positional arithmetic cannot tell that tail apart from genuine outside work;
 // message identity can. Pure (no I/O) — safe for the shared browser import.
-export function projectedMessageIds(state) {
-  const ids = new Set();
+export function projectedMessageIds(state: Readonly<SessionProjection> | null | undefined): Set<string> {
+  const ids = new Set<string>();
   for (const turn of Object.values(state?.turnsById ?? {})) {
     for (const blockId of Object.keys(turn?.blocksById ?? {})) {
       const cut = String(blockId).lastIndexOf(":");
@@ -4401,10 +5315,10 @@ export function projectedMessageIds(state) {
 // Conservative by construction: an empty/absent id set is a pass-through, and a
 // genuinely-external turn always carries message ids Tether has never projected,
 // so real outside work is never suppressed. Pure — no I/O, no mutation of input.
-export function dropJournalOwnedRecords(records, knownMessageIds) {
+export function dropJournalOwnedRecords(records: Array<ClaudeRecord & { parentUuid?: string }>, knownMessageIds: ReadonlySet<string> | null | undefined): Array<ClaudeRecord & { parentUuid?: string }> {
   if (!knownMessageIds || knownMessageIds.size === 0) return records;
-  const droppedUuids = new Set();
-  const kept = [];
+  const droppedUuids = new Set<string>();
+  const kept: Array<ClaudeRecord & { parentUuid?: string }> = [];
   for (const record of records) {
     const messageId = record?.message?.id;
     if (record?.type === "assistant" && messageId && knownMessageIds.has(messageId)) {
@@ -4428,17 +5342,43 @@ export function dropJournalOwnedRecords(records, knownMessageIds) {
 // range, or reduce()'s turn_started existing-turn no-op silently drops the second
 // range (claudeTranscriptToEvents restarts its counter at 1 per call). The range's
 // list index makes the prefix unique: "xr0-1", "xr1-1", … Locked by a unit test.
-export function claudeSurfacedRangeToEvents(records, index) {
+export function claudeSurfacedRangeToEvents(records: ClaudeRecord[], index: number): AgentEvent[] {
   return claudeTranscriptToEvents(records, { turnIdPrefix: `xr${index}` });
 }
 
-const RENDERABLE_REPLAY_EVENTS = new Set([
+const RENDERABLE_REPLAY_EVENTS: ReadonlySet<unknown> = new Set([
   "user_message_accepted", "message_started", "message_completed", "tool_start", "tool_end",
 ]);
 
-function dropEmptyReplayTurns(events) {
-  const kept = [];
-  let turnBuffer = null; // events of the currently-open turn, or null between turns
+// GH #264(d) B1: does a replayed event list hold anything that is real outside
+// WORK? Session-level task telemetry (a replayed task-notification -> task_completed)
+// is a lifecycle fact, not outside work: a tail made only of it is a cursor-only
+// advance, never a divider. Deliberately defined by exclusion (anything that is not
+// task telemetry counts), so another provider's tail shape is never reclassified.
+// Pure.
+const TASK_TELEMETRY_EVENT_TYPES: ReadonlySet<unknown> = new Set(["task_started", "task_progress", "task_completed", "background_tasks_changed"]);
+export function hasExternalWorkEvents(events: AgentEvent[] | null | undefined): boolean {
+  return Array.isArray(events) && events.some((event) => !TASK_TELEMETRY_EVENT_TYPES.has(event?.type));
+}
+
+// GH #264(d) B1: drop task telemetry whose taskId the projection already holds (the
+// live journal saw that task), so folding a replayed tail/range can never re-fold a
+// completion Tether already owns. Non-task events pass through untouched. Returns
+// the SAME array when nothing is dropped. Pure — does not mutate its arguments.
+export function dropHeldTaskEvents(events: AgentEvent[], state: Readonly<SessionProjection> | null | undefined): AgentEvent[] {
+  if (!Array.isArray(events)) return events;
+  const held = new Set((state?.backgroundTasks ?? []).map((task) => task.taskId));
+  if (held.size === 0) return events;
+  const kept = events.filter((event) => !(
+    (event?.type === "task_started" || event?.type === "task_progress" || event?.type === "task_completed")
+    && held.has(event.taskId)
+  ));
+  return kept.length === events.length ? events : kept;
+}
+
+function dropEmptyReplayTurns(events: AgentEvent[]): AgentEvent[] {
+  const kept: AgentEvent[] = [];
+  let turnBuffer: AgentEvent[] | null = null; // events of the currently-open turn, or null between turns
   for (const event of events) {
     if (event.type === "turn_started") {
       turnBuffer = [event];
@@ -4479,11 +5419,11 @@ function dropEmptyReplayTurns(events) {
 // item.completed instead — a card can never be orphaned, at the cost of no live
 // "running" indicator (tool output arrives whole anyway, as it does for Claude).
 
-export function createCodexAdapterState(turnId) {
+export function createCodexAdapterState(turnId: string): CodexAdapterState {
   return { turnId, errorMessage: null };
 }
 
-export function codexToEvents(record, state) {
+export function codexToEvents(record: CodexRecord, state: CodexAdapterState): CodexStep {
   const turnId = state.turnId;
 
   switch (record.type) {
@@ -4538,7 +5478,7 @@ export function codexToEvents(record, state) {
     }
 
     case "turn.completed": {
-      const events = [
+      const events: AgentEvent[] = [
         {
           type: "usage",
           turnId,
@@ -4571,7 +5511,7 @@ export function codexToEvents(record, state) {
       }
       return {
         events: [
-          ...(message === state.errorMessage ? [] : [{ type: "error", turnId, message }]),
+          ...(message === state.errorMessage ? [] : [{ type: "error", turnId, message } as const]),
           { type: "turn_end", turnId, outcome: TURN_OUTCOMES.ERROR },
         ],
         state: { ...state, errorMessage: message },
@@ -4621,7 +5561,7 @@ export function codexToEvents(record, state) {
 // Normalize a Codex tool output (function_call_output.output is a plain string;
 // custom_tool_call_output.output is either a string or an array of {type,text}
 // parts; some shapes wrap {output, metadata}) into a single display string.
-function codexOutputToText(output) {
+function codexOutputToText(output: CodexOutputValue): string {
   if (output == null) return "";
   if (typeof output === "string") return output;
   if (Array.isArray(output)) {
@@ -4634,7 +5574,7 @@ function codexOutputToText(output) {
 // Build the tool card's input. A function_call carries `arguments` as a JSON
 // string; parse it (fall back to the raw string). A custom_tool_call carries a
 // raw string `input` (a shell snippet / patch body).
-function codexCallInput(payload) {
+function codexCallInput(payload: CodexRolloutPayload): unknown {
   if (payload.type === "function_call") {
     if (typeof payload.arguments === "string") {
       try {
@@ -4648,10 +5588,10 @@ function codexCallInput(payload) {
   return typeof payload.input === "string" ? { input: payload.input } : payload.input ?? {};
 }
 
-function codexReplayToolName(payload) {
+function codexReplayToolName(payload: CodexRolloutPayload | null | undefined): string {
   const name = typeof payload?.name === "string" && payload.name ? payload.name : "tool";
   if (payload?.namespace !== "collaboration") return name;
-  const camelName = name.replace(/_([a-z])/g, (_match, letter) => letter.toUpperCase());
+  const camelName = name.replace(/_([a-z])/g, (_match: string, letter: string) => letter.toUpperCase());
   return `collaboration:${camelName}`;
 }
 
@@ -4661,9 +5601,9 @@ const CODEX_REPLAY_SUBAGENT_LIMITS = Object.freeze({
   toolOutputChars: 256_000,
 });
 
-function codexReplayChildItems(records) {
-  const items = [];
-  const failedCalls = new Set();
+function codexReplayChildItems(records: CodexRolloutRecord[] | null | undefined): SubagentItem[] {
+  const items: SubagentItem[] = [];
+  const failedCalls = new Set<string>();
   for (const record of records ?? []) {
     const payload = record?.payload;
     if (record?.type !== "response_item" || !payload || typeof payload !== "object") continue;
@@ -4705,9 +5645,9 @@ function codexReplayChildItems(records) {
   return items;
 }
 
-function codexReplayChildUsage(records) {
-  let usage = null;
-  let model = null;
+function codexReplayChildUsage(records: CodexRolloutRecord[] | null | undefined): SubagentUsage | null {
+  let usage: CodexTokenUsage | null = null;
+  let model: string | null = null;
   for (const record of records ?? []) {
     const payload = record?.payload;
     if (record?.type === "event_msg" && payload?.type === "token_count"
@@ -4738,10 +5678,10 @@ function codexReplayChildUsage(records) {
   };
 }
 
-function codexReplayChildMetadata(records, activity = null, descriptor = null) {
+function codexReplayChildMetadata(records: CodexRolloutRecord[] | null | undefined, activity: CodexRolloutPayload | null = null, descriptor: CodexChildDescriptor | null = null): { agentNickname: string | null; agentPath: string | null } {
   const metadata = records?.find((record) => record?.type === "session_meta")?.payload;
   const spawn = metadata?.source?.subagent?.thread_spawn;
-  const firstText = (...values) => {
+  const firstText = (...values: unknown[]): string | null => {
     for (const value of values) {
       if (typeof value === "string" && value.trim()) return value.trim();
     }
@@ -4761,10 +5701,10 @@ function codexReplayChildMetadata(records, activity = null, descriptor = null) {
   return { agentNickname, agentPath };
 }
 
-function codexReplaySubagentBindings(records, readChild, childThreadIds) {
-  if (typeof readChild !== "function") return new Map();
-  const spawnCallIds = [];
-  const activities = new Map();
+function codexReplaySubagentBindings(records: CodexRolloutRecord[] | null | undefined, readChild: CodexReadChild | null | undefined, childThreadIds: string[] | undefined): Map<string, CodexBinding> {
+  if (typeof readChild !== "function") return new Map<string, CodexBinding>();
+  const spawnCallIds: string[] = [];
+  const activities = new Map<string, CodexRolloutPayload>();
   for (const record of records ?? []) {
     const payload = record?.payload;
     if (record?.type === "response_item"
@@ -4777,14 +5717,14 @@ function codexReplaySubagentBindings(records, readChild, childThreadIds) {
       activities.set(payload.event_id, payload);
     }
   }
-  const bindings = new Map();
-  const boundChildIds = new Set();
-  const loadBinding = (childThreadId, activity = null) => {
-    let child;
+  const bindings = new Map<string, CodexBinding>();
+  const boundChildIds = new Set<string>();
+  const loadBinding = (childThreadId: string, activity: CodexRolloutPayload | null = null): CodexBinding | null => {
+    let child: CodexChildResult;
     try { child = readChild(childThreadId); } catch { return null; }
     const childRecords = Array.isArray(child) ? child : child?.records;
     if (!Array.isArray(childRecords)) return null;
-    const { agentNickname, agentPath } = codexReplayChildMetadata(childRecords, activity, child);
+    const { agentNickname, agentPath } = codexReplayChildMetadata(childRecords, activity, child as CodexChildDescriptor);
     return {
       childThreadId,
       childRecords,
@@ -4794,7 +5734,7 @@ function codexReplaySubagentBindings(records, readChild, childThreadIds) {
   for (const callId of spawnCallIds) {
     const activity = activities.get(callId);
     if (!activity) continue;
-    const binding = loadBinding(activity.agent_thread_id, activity);
+    const binding = loadBinding(activity.agent_thread_id as string, activity);
     if (!binding) continue;
     bindings.set(callId, binding);
     boundChildIds.add(binding.childThreadId);
@@ -4812,14 +5752,14 @@ function codexReplaySubagentBindings(records, readChild, childThreadIds) {
   return bindings;
 }
 
-export function codexTranscriptToEvents(records, { turnIdPrefix = "replay" } = {}) {
+export function codexTranscriptToEvents(records: CodexRolloutRecord[], { turnIdPrefix = "replay" }: { turnIdPrefix?: string } = {}): AgentEvent[] {
   return codexTranscriptToEventsInternal(records, { turnIdPrefix });
 }
 
 export function codexTranscriptWithSubagentsToEvents(
-  records,
-  { turnIdPrefix = "replay", readChild = () => null, childThreadIds = [] } = {},
-) {
+  records: CodexRolloutRecord[],
+  { turnIdPrefix = "replay", readChild = () => null, childThreadIds = [] }: CodexReplayOptions = {},
+): AgentEvent[] {
   return codexTranscriptToEventsInternal(records, { turnIdPrefix, readChild, childThreadIds });
 }
 
@@ -4837,28 +5777,28 @@ export function codexTranscriptWithSubagentsToEvents(
  * the parent run's progress. The pre-adoption replay still folds them
  * (`codexTranscriptWithSubagentsToEvents`).
  */
-export function codexExternalTailToEvents(records, index = 0) {
+export function codexExternalTailToEvents(records: CodexRolloutRecord[], index = 0): AgentEvent[] {
   return codexTranscriptToEvents(records, { turnIdPrefix: `ext${index}` });
 }
 
 function codexTranscriptToEventsInternal(
-  records,
-  { turnIdPrefix = "replay", readChild = null, childThreadIds = [] } = {},
-) {
-  const events = [];
+  records: CodexRolloutRecord[],
+  { turnIdPrefix = "replay", readChild = null, childThreadIds = [] }: CodexReplayOptions = {},
+): AgentEvent[] {
+  const events: AgentEvent[] = [];
   let turnCount = 0;
-  let turnId = null; // the currently-open replay turn, or null between turns
+  let turnId: string = null as never; // the currently-open replay turn, or null between turns
   let messageSeq = 0; // globally-unique blockId source for assistant message blocks
-  const failedCalls = new Set(); // call_ids whose tool call reported status "failed"
+  const failedCalls = new Set<string>(); // call_ids whose tool call reported status "failed"
   const subagentBindings = codexReplaySubagentBindings(records, readChild, childThreadIds);
 
   const closeTurn = () => {
     if (turnId) {
       events.push({ type: "turn_end", turnId, outcome: TURN_OUTCOMES.OK });
-      turnId = null;
+      turnId = null as never;
     }
   };
-  const startTurn = (userText) => {
+  const startTurn = (userText: string | null) => {
     closeTurn();
     turnCount += 1;
     turnId = `${turnIdPrefix}-${turnCount}`;
@@ -4946,212 +5886,121 @@ function codexTranscriptToEventsInternal(
 }
 
 // --------------------------------------------------------------------------
-// OpenCode (opencode-ai CLI) adapter
+// OpenCode 2.0 transcript replay (shared opencode.db document -> AgentEvent[])
 // --------------------------------------------------------------------------
 //
-// `opencode run --format json` emits one JSON object per line on stdout. Each
-// record carries { type, timestamp, sessionID, part }. The record types seen
-// during a turn (verified live against opencode-ai 1.18.x):
-//   - step_start:  a model step begins (one per assistant message / tool round).
-//                  part.type === "step-start".
-//   - text:        a final assistant text chunk (part.type === "text",
-//                  part.text). opencode does NOT stream deltas — the whole text
-//                  arrives in one record per step.
-//   - tool_use:    a tool call. part.type === "tool", part.tool is the tool
-//                  name, part.callID is the stable id, part.state holds status
-//                  ("completed" | "error" | "running"), input, output, and
-//                  metadata. A single record carries the COMPLETED tool (the
-//                  CLI emits it once the tool has finished), so it maps to a
-//                  tool_start+tool_end pair (the reducer opens the card then
-//                  immediately closes it — same shape as the codex
-//                  item.completed/command_execution path).
-//   - step_finish: a step ended. part.reason === "stop" means the turn is over;
-//                  "tool-calls" means more steps follow. part.tokens carries the
-//                  cumulative token usage for the whole turn so far.
+// The document is lib/opencode-db.mjs `selectOpencodeTranscript`'s shape — the 2.0 `session_v2`
+// row plus its `session_message` rows, `seq` ordered:
 //
-// There is no separate turn.started/turn.completed envelope. The turn is the
-// full `opencode run` invocation: it starts when the first step_start arrives
-// (or the first record of any kind, since sessionID is known up front) and
-// ends on the first step_finish with reason "stop" (or the process exiting
-// without one — recovered as outcome_unknown by the engine).
+//   { info: <session_v2 row>, messages: [{ id, type, seq, time, data }] }
 //
-// sessionID is stable for the whole `opencode run` (and stable across resume
-// via `--session <id>`), so it is the native session id; the adapter emits it
-// once as native_session_id the first time it sees any record.
+// `type` is `user` (data.text), `assistant` (data.content: text | reasoning | tool parts, plus
+// finish/error), `idle` (the turn boundary: data.outcome succeeded | failed | interrupted, with
+// data.error), `shell` (a user-run command), and message kinds that carry no conversation
+// (`synthetic`, `system`, `skill`, `compaction`, `agent-selected`, `model-switched`,
+// `location-switched`) which replay skips. A tool part is
+// `{ type:"tool", id, name, state:{ status: streaming|running|completed|error, input, content[],
+// error?, metadata? } }`; a launched subagent names its child session in
+// `state.metadata.sessionID`.
 //
-// There are no interactive per-tool approvals in the `run` subcommand: with
-// `--auto` every tool runs; without it, a tool that needs permission is
-// auto-rejected and reported with state.status "error". The engine therefore
-// advertises interactiveApprovals: false (like codex).
-
-export function createOpencodeAdapterState(turnId) {
-  return { turnId, emittedNativeId: false, errorMessage: null };
-}
-
-function opencodeToolName(part) {
-  return typeof part?.tool === "string" && part.tool ? part.tool : "tool";
-}
-
-function opencodeToolOutput(state) {
-  // state.output is a plain string for most tools; some tools embed the output
-  // under state.metadata.output. Prefer the top-level output, then metadata.
-  if (typeof state?.output === "string") return state.output;
-  if (state?.metadata && typeof state.metadata.output === "string") return state.metadata.output;
-  if (state?.error && typeof state.error === "string") return state.error;
-  return "";
-}
-
-export function opencodeToEvents(record, state) {
-  const turnId = state.turnId;
-
-  // Every record carries sessionID; emit native_session_id once (the engine
-  // also reads it off the first record, but emitting here keeps the adapter
-  // self-sufficient and mirrors how the codex adapter surfaces thread.started).
-  if (!state.emittedNativeId && typeof record.sessionID === "string" && record.sessionID) {
-    const events = [{ type: "native_session_id", turnId, nativeSessionId: record.sessionID }];
-    state = { ...state, emittedNativeId: true };
-    const rest = opencodeToEventsByType(record, state, turnId);
-    return { events: [...events, ...rest.events], state: rest.state };
-  }
-  return opencodeToEventsByType(record, state, turnId);
-}
-
-function opencodeToEventsByType(record, state, turnId) {
-  switch (record.type) {
-    case "step_start":
-      return { events: [], state };
-
-    case "text": {
-      const text = typeof record.part?.text === "string" ? record.part.text : "";
-      if (!text) return { events: [], state };
-      const blockId = `opencode:${record.part?.id ?? record.timestamp ?? turnId}`;
-      return {
-        events: [
-          { type: "message_started", turnId, blockId },
-          { type: "message_completed", turnId, blockId, text },
-        ],
-        state,
-      };
-    }
-
-    case "tool_use": {
-      const part = record.part ?? {};
-      const toolId = typeof part.callID === "string" && part.callID ? part.callID : `opencode-tool-${record.timestamp ?? turnId}`;
-      const name = opencodeToolName(part);
-      const input = part.state?.input ?? {};
-      const toolState = part.state ?? {};
-      const isError = toolState.status === "error";
-      const output = opencodeToolOutput(toolState);
-      return {
-        events: [
-          { type: "tool_start", turnId, toolId, name, input },
-          { type: "tool_end", turnId, toolId, output, isError },
-        ],
-        state,
-      };
-    }
-
-    case "step_finish": {
-      const part = record.part ?? {};
-      const tokens = part.tokens ?? {};
-      const perTurnTokens =
-        (typeof tokens.input === "number" ? tokens.input : 0) +
-        (typeof tokens.output === "number" ? tokens.output : 0);
-      const events = [
-        {
-          type: "usage",
-          turnId,
-          model: undefined,
-          perTurnTokens,
-          cumulativeTokens: undefined,
-          contextWindow: undefined,
-        },
-      ];
-      // "stop" ends the turn; anything else (tool-calls, length, content-filter,
-      // …) means more steps follow — only the process exiting without a "stop"
-      // is treated as outcome_unknown by the engine.
-      if (part.reason === "stop") {
-        events.push({ type: "turn_end", turnId, outcome: TURN_OUTCOMES.OK });
-      }
-      return { events, state };
-    }
-
-    case "error": {
-      // opencode emits error records in two shapes:
-      //   1. { type: "error", message: "..." }                      (string)
-      //   2. { type: "error", error: { name, data: { message } } }  (object, e.g. ProviderAuthError)
-      // Extract a human-readable message from whichever shape arrived.
-      const message = typeof record.message === "string" && record.message.trim()
-        ? record.message
-        : typeof record.error === "string" && record.error.trim()
-          ? record.error
-          : record.error && typeof record.error === "object"
-            ? (typeof record.error.data?.message === "string" && record.error.data.message.trim()
-                ? `${record.error.name ?? "error"}: ${record.error.data.message}`
-                : typeof record.error.name === "string" && record.error.name.trim()
-                  ? record.error.name
-                  : null)
-            : null;
-      if (!message) return { events: [{ type: "unknown_event", turnId, raw: record }], state };
-      if (message === state.errorMessage) return { events: [], state };
-      return {
-        events: [{ type: "error", turnId, message }],
-        state: { ...state, errorMessage: message },
-      };
-    }
-
-    default:
-      return { events: [{ type: "unknown_event", turnId, raw: record }], state };
-  }
-}
-
-// --------------------------------------------------------------------------
-// OpenCode transcript replay (on-disk session export -> AgentEvent[])
-// --------------------------------------------------------------------------
+// A user message opens a turn; the `idle` message (or the next user message / the end of the
+// document) closes it. Pure: (document) -> AgentEvent[]; the caller stamps seq/ts and folds
+// through `reduce` exactly like live events. Tool names go through lib/opencode-tool-names.ts
+// (bash->shell, task->subagent), so a session recorded under either vocabulary replays under the
+// 2.0 names the live adapter and renderers use.
 //
-// `opencode export <sessionID>` emits a JSON document with an `info` and a
-// `messages` array. Each message has { info: { role, time, ... }, parts: [...] }.
-// A user message opens a turn (info.role === "user"); assistant text and tool
-// parts fill it until the next user message. Pure: (records) -> AgentEvent[];
-// the caller stamps seq/ts and folds through `reduce` exactly like live events.
-//
-// This is a best-effort replay for the resume picker. The authoritative native
-// transcript is opencode's own SQLite store; this adapter reads only the
-// exported JSON shape so a resumed chat opens showing prior conversation.
-export function opencodeTranscriptToEvents(exported, { turnIdPrefix = "replay" } = {}) {
+// This is a best-effort replay for the resume picker. The authoritative native transcript is
+// opencode's own SQLite store; this adapter only reads the shape the reader hands it.
+export function opencodeTranscriptToEvents(exported: OpencodeExport | null | undefined, { turnIdPrefix = "replay" }: { turnIdPrefix?: string } = {}): AgentEvent[] {
   return opencodeTranscriptToEventsInternal(exported, { turnIdPrefix });
 }
 
-// opencodeTranscriptToEvents + child-session folding. opencode's `task` tool
-// runs its sub-agent in a SEPARATE native session (a sibling row in the SQLite
-// store whose `parent_id` names this session). The live serve-v2 adapter folds
-// that child's records into the parent task block as a nested subagent thread
-// (issue #20); this replay variant does the same for DISCOVERED sessions, whose
-// parent transcript carries the child id on the task part's
-// `state.metadata.sessionId`. `readChild(id)` is injected (the SQLite reader
-// lives server-side — this module is browser-shared and strictly pure); a child
-// that is missing/unreadable is skipped, never fabricated. The folded thread
-// renders as the same subagent TAB the live path uses, so a terminal-run
-// opencode session's sub-agent shows up inside the chat exactly like Claude's.
-export function opencodeTranscriptWithSubagentsToEvents(exported, { turnIdPrefix = "replay", readChild = () => null } = {}) {
+// opencodeTranscriptToEvents + child-session folding. opencode runs a subagent in a SEPARATE
+// native session (a sibling `session_v2` row whose `parent_id` names this session). The live
+// serve adapter folds that child's records into the parent subagent block as a nested thread
+// (issue #20); this replay variant does the same for DISCOVERED sessions, whose parent transcript
+// carries the child id on the launcher tool part's `state.metadata.sessionID`. `readChild(id)` is
+// injected (the SQLite reader lives server-side — this module is browser-shared and strictly
+// pure); a child that is missing/unreadable is skipped, never fabricated. The folded thread
+// renders as the same subagent TAB the live path uses.
+export function opencodeTranscriptWithSubagentsToEvents(exported: OpencodeExport | null | undefined, { turnIdPrefix = "replay", readChild = () => null }: OpencodeReplayOptions = {}): AgentEvent[] {
   return opencodeTranscriptToEventsInternal(exported, { turnIdPrefix, readChild });
 }
 
-function opencodeTranscriptToEventsInternal(exported, { turnIdPrefix = "replay", readChild = null } = {}) {
-  const events = [];
+function opencodeV2Data(message: OpencodeMessage | null | undefined): OpencodeData | null {
+  return message?.data && typeof message.data === "object" && !Array.isArray(message.data) ? message.data : null;
+}
+
+// A 2.0 tool result's text: the `content` blocks (type "text") joined, else the error message.
+function opencodeV2ToolOutput(state: OpencodeToolState | null | undefined): string {
+  const blocks = Array.isArray(state?.content) ? state.content : [];
+  const text = blocks
+    .map((block) => (block?.type === "text" && typeof block.text === "string" ? block.text : ""))
+    .filter(Boolean)
+    .join("\n");
+  if (text) return text;
+  if (typeof (state?.error as { message?: string } | null | undefined)?.message === "string") return ((state as OpencodeToolState).error as { message: string }).message;
+  if (typeof state?.error === "string") return state.error;
+  return "";
+}
+
+// A tool that was still in flight when its turn ended (status running/streaming, or no status): the call
+// never finished, so replay marks it `interrupted` (the same `tool_end.interrupted` the Claude adapter uses
+// for a CLI abort) rather than inventing a failure. "unknown" is not a tool state.
+function opencodeV2ToolInterrupted(state: OpencodeToolState | null | undefined): boolean {
+  return state?.status !== "completed" && state?.status !== "error";
+}
+
+function opencodeV2ToolFailed(state: OpencodeToolState | null | undefined): boolean {
+  if (state?.status === "error") return true;
+  // A tool that never completed did not succeed either (callers that can label it interrupted do, see above).
+  if (state?.status !== "completed") return true;
+  const exit = state?.metadata?.exit;
+  return Number.isInteger(exit) && exit !== 0;
+}
+
+function opencodeV2ErrorMessage(error: string | { message?: string } | null | undefined): string | null {
+  if (typeof error === "string") return error;
+  return typeof error?.message === "string" && error.message ? error.message : null;
+}
+
+function opencodeTranscriptToEventsInternal(exported: OpencodeExport | null | undefined, { turnIdPrefix = "replay", readChild = null }: OpencodeReplayOptions = {}): AgentEvent[] {
+  const events: AgentEvent[] = [];
   if (!exported || typeof exported !== "object") return events;
   const messages = Array.isArray(exported.messages) ? exported.messages : [];
   let turnCount = 0;
-  let turnId = null;
+  let turnId: string = null as never;
   let messageSeq = 0;
+  // The last assistant step's failure in the open turn, for a turn that ends without an `idle`.
+  let openTurnError: OpencodeData["error"] = null;
 
-  const closeTurn = () => {
-    if (turnId) {
-      events.push({ type: "turn_end", turnId, outcome: TURN_OUTCOMES.OK });
-      turnId = null;
+  const closeTurn = (idle: OpencodeData | null = null) => {
+    if (!turnId) return;
+    let outcome: TurnOutcome = TURN_OUTCOMES.OK;
+    let errorMessage: string | null = null;
+    if (idle) {
+      if (idle.outcome === "failed") {
+        outcome = TURN_OUTCOMES.ERROR;
+        errorMessage = opencodeV2ErrorMessage(idle.error) ?? "OpenCode turn failed";
+      } else if (idle.outcome === "interrupted") {
+        outcome = TURN_OUTCOMES.CANCELLED;
+      }
+    } else if (openTurnError) {
+      // No idle row (a rejected permission/dismissed question ends the step without one): an
+      // `aborted` step is a cancellation, anything else a failure.
+      if ((openTurnError as { type?: string }).type === "aborted") {
+        outcome = TURN_OUTCOMES.CANCELLED;
+      } else {
+        outcome = TURN_OUTCOMES.ERROR;
+        errorMessage = opencodeV2ErrorMessage(openTurnError) ?? "OpenCode turn failed";
+      }
     }
+    if (errorMessage) events.push({ type: "error", turnId, message: errorMessage });
+    events.push({ type: "turn_end", turnId, outcome });
+    turnId = null as never;
+    openTurnError = null;
   };
-  const startTurn = (userText) => {
+  const startTurn = (userText: string | null) => {
     closeTurn();
     turnCount += 1;
     turnId = `${turnIdPrefix}-${turnCount}`;
@@ -5163,38 +6012,62 @@ function opencodeTranscriptToEventsInternal(exported, { turnIdPrefix = "replay",
   };
 
   for (const message of messages) {
-    const role = message?.info?.role;
-    const parts = Array.isArray(message?.parts) ? message.parts : [];
-    if (role === "user") {
-      // Reconstruct the user prompt from text parts.
-      const text = parts
-        .map((part) => (part?.type === "text" && typeof part.text === "string" ? part.text : ""))
-        .join("")
-        .trim();
+    const data = opencodeV2Data(message);
+    if (!data) continue;
+    if (message.type === "user") {
+      const text = typeof data.text === "string" ? data.text.trim() : "";
       if (text) startTurn(text);
       continue;
     }
-    if (role === "assistant") {
-      for (const part of parts) {
-        if (part?.type === "text" && typeof part.text === "string" && part.text.trim()) {
-          ensureTurn();
-          messageSeq += 1;
-          const blockId = `opencode-msg-${messageSeq}`;
-          events.push({ type: "message_started", turnId, blockId });
-          events.push({ type: "message_completed", turnId, blockId, text: part.text });
-        } else if (part?.type === "tool" && typeof part.tool === "string") {
-          ensureTurn();
-          const toolId = typeof part.callID === "string" && part.callID ? part.callID : `opencode-tool-${messageSeq}`;
-          const input = part.state?.input ?? {};
-          const isError = part.state?.status === "error";
-          const output = opencodeToolOutput(part.state ?? {});
-          events.push({ type: "tool_start", turnId, toolId, name: part.tool, input });
-          events.push({ type: "tool_end", turnId, toolId, output, isError });
-          // Only opencode's `task` tool launches a sub-agent (issue #20); a
-          // coincidental metadata.sessionId on another tool is not a child
-          // binding.
-          if (readChild && part.tool === "task") appendReplayChildThread(events, part, toolId, turnId, readChild);
-        }
+    if (message.type === "idle") {
+      closeTurn(data);
+      continue;
+    }
+    if (message.type === "shell") {
+      // A user-run command (`!cmd`): rendered as one shell tool call. Best effort — the
+      // output shape is not pinned by a captured fixture.
+      if (typeof data.command === "string" && data.command) {
+        ensureTurn();
+        const toolId = typeof message.id === "string" && message.id ? message.id : `opencode-shell-${messageSeq}`;
+        events.push({ type: "tool_start", turnId, toolId, name: "shell", input: { command: data.command } });
+        events.push({
+          type: "tool_end",
+          turnId,
+          toolId,
+          output: typeof data.output === "string" ? data.output : "",
+          isError: Number.isInteger(data.exit) && data.exit !== 0,
+        });
+      }
+      continue;
+    }
+    if (message.type !== "assistant") continue;
+    if (data.finish === "error" && data.error && typeof data.error === "object") openTurnError = data.error;
+    for (const part of Array.isArray(data.content) ? data.content : []) {
+      if (part?.type === "text" && typeof part.text === "string" && part.text.trim()) {
+        ensureTurn();
+        messageSeq += 1;
+        const blockId = `opencode-msg-${messageSeq}`;
+        events.push({ type: "message_started", turnId, blockId });
+        events.push({ type: "message_completed", turnId, blockId, text: part.text });
+      } else if (part?.type === "tool" && typeof part.name === "string" && part.name) {
+        ensureTurn();
+        const toolId = typeof part.id === "string" && part.id ? part.id : `opencode-tool-${messageSeq}`;
+        const state: OpencodeToolState = part.state && typeof part.state === "object" ? part.state : {};
+        const name = canonicalOpencodeToolName(part.name) as string;
+        events.push({ type: "tool_start", turnId, toolId, name, input: state.input ?? {} });
+        const interrupted = opencodeV2ToolInterrupted(state);
+        events.push({
+          type: "tool_end",
+          turnId,
+          toolId,
+          output: opencodeV2ToolOutput(state),
+          // An in-flight tool replays as interrupted, NOT as an error (O2D-b F1).
+          isError: interrupted ? false : opencodeV2ToolFailed(state),
+          ...(interrupted ? { interrupted: true } : {}),
+        });
+        // Only the subagent launcher starts a child session (issue #20); a coincidental
+        // metadata.sessionID on another tool is not a child binding.
+        if (readChild && isOpencodeSubagentTool(part.name)) appendReplayChildThread(events, part, toolId, turnId, readChild);
       }
     }
   }
@@ -5202,72 +6075,60 @@ function opencodeTranscriptToEventsInternal(exported, { turnIdPrefix = "replay",
   return dropEmptyReplayTurns(events);
 }
 
-// Bound the folded child thread the same way the live serve-v2 adapter bounds
-// its nested items (OPENCODE_SERVE_ADAPTER_LIMITS). Keeping the replay limits in
-// lockstep means a session's subagent tab truncates identically whether it was
-// streamed live or rebuilt from discovery.
+// Bound the folded child thread the same way the live serve adapter bounds its nested items
+// (OPENCODE_SERVE_ADAPTER_LIMITS). Keeping the replay limits in lockstep means a session's
+// subagent tab truncates identically whether it was streamed live or rebuilt from discovery.
 const OPENCODE_REPLAY_SUBAGENT_LIMITS = Object.freeze({
   items: 512,
   messageChars: 256_000,
   toolOutputChars: 256_000,
 });
 
-function replayChildDocToItems(doc) {
-  // `doc` is the readOpencodeTranscript shape: { info, messages }, where each
-  // message is { id, info: { role }, parts: [ { type, text?, tool?, callID?,
-  // id?, state? } ] }. Stateless mapping of the child's FINAL parts — replay
-  // has no deltas, and each part's stored state is already cumulative.
-  const items = [];
-  const childUserMessageIds = new Set();
+function replayChildDocToItems(doc: OpencodeExport | null | undefined): SubagentItem[] {
+  // `doc` is the reader's `{ info, messages }` shape. Stateless mapping of the child's FINAL
+  // content — replay has no deltas, and each tool part's stored state is already cumulative.
+  // The child's own user message is the launcher's prompt echoed back; the run panel already
+  // shows it from the launcher's input.prompt, so only assistant content is folded.
+  const items: SubagentItem[] = [];
   for (const message of doc?.messages ?? []) {
-    const role = message?.info?.role;
-    if (role === "user") {
-      // The child's user message is the task prompt echoed back; the run panel
-      // already shows it from the launcher's own input.prompt.
-      if (typeof message?.id === "string" && message.id) childUserMessageIds.add(message.id);
-      continue;
-    }
-    if (role !== "assistant") continue;
+    if (message?.type !== "assistant") continue;
+    const data = opencodeV2Data(message);
     const messageId = typeof message?.id === "string" && message.id ? message.id : "msg";
     let partIndex = 0;
-    for (const part of message?.parts ?? []) {
+    for (const part of Array.isArray(data?.content) ? data.content : []) {
       partIndex += 1;
       const partType = part?.type;
-      const partID = typeof part?.id === "string" && part.id ? part.id : null;
-      if (partID && childUserMessageIds.has(partID)) continue;
       if (partType === "text" || partType === "reasoning") {
         const text = typeof part?.text === "string" ? part.text : "";
         if (!text) continue;
         if (items.length >= OPENCODE_REPLAY_SUBAGENT_LIMITS.items) return items;
         items.push({
           kind: partType === "text" ? "message" : "thinking",
-          // The SQLite store does not retain the part's public id on
-          // text/reasoning parts (only `type`/`text`/`time`), so key on
-          // message id + position — stable across replays, and the reducer
-          // merges by key so the fullest text still wins.
-          key: partID ?? `${messageId}:${partIndex}`,
+          // Text/reasoning parts carry no public id of their own, so key on message id +
+          // position — stable across replays, and the reducer merges by key so the fullest
+          // text still wins.
+          key: `${messageId}:${partIndex}`,
           text: replayBoundedText(text, OPENCODE_REPLAY_SUBAGENT_LIMITS.messageChars),
         });
       } else if (partType === "tool") {
-        const callID = typeof part?.callID === "string" && part.callID ? part.callID : null;
+        const callID = typeof part?.id === "string" && part.id ? part.id : null;
         if (!callID) continue;
-        const toolState = part?.state && typeof part.state === "object" ? part.state : {};
+        const toolState: OpencodeToolState = part?.state && typeof part.state === "object" ? part.state : {};
         const status = typeof toolState.status === "string" ? toolState.status : null;
         if (status !== "completed" && status !== "error") continue;
         if (items.length >= OPENCODE_REPLAY_SUBAGENT_LIMITS.items) return items;
         items.push({
           kind: "tool",
           key: callID,
-          name: opencodeToolName(part),
+          name: canonicalOpencodeToolName(part.name) ?? "tool",
           input: replayBoundedValue(toolState.input ?? {}),
         });
         if (items.length >= OPENCODE_REPLAY_SUBAGENT_LIMITS.items) return items;
-        const exit = Number.isInteger(toolState.metadata?.exit) ? toolState.metadata.exit : null;
         items.push({
           kind: "tool_result",
           key: callID,
-          output: replayBoundedText(opencodeToolOutput(toolState), OPENCODE_REPLAY_SUBAGENT_LIMITS.toolOutputChars),
-          isError: status === "error" || (exit !== null && exit !== 0),
+          output: replayBoundedText(opencodeV2ToolOutput(toolState), OPENCODE_REPLAY_SUBAGENT_LIMITS.toolOutputChars),
+          isError: opencodeV2ToolFailed(toolState),
         });
       }
     }
@@ -5275,13 +6136,11 @@ function replayChildDocToItems(doc) {
   return items;
 }
 
-function replayChildUsage(doc) {
-  // The child's cumulative token totals and last served model. `info` is the
-  // RAW SQLite session row readOpencodeTranscript returns: tokens live in flat
-  // `tokens_*` columns and `model` is a JSON string — but the serve API shape
-  // ({ tokens, model }) is also accepted so fixtures and future readers match
-  // either source. All-zero readings are skipped so an unstarted child keeps
-  // "uncaptured is null, never 0".
+function replayChildUsage(doc: OpencodeExport | null | undefined): SubagentUsage | null {
+  // The child's cumulative token totals and last served model. `info` is the RAW `session_v2`
+  // row: tokens live in flat `tokens_*` columns and `model` is a JSON string — but the serve API
+  // shape ({ tokens, model }) is also accepted so fixtures and future readers match either
+  // source. All-zero readings are skipped so an unstarted child keeps "uncaptured is null, never 0".
   const info = doc?.info;
   const tokens = info?.tokens && typeof info.tokens === "object" && !Array.isArray(info.tokens)
     ? info.tokens
@@ -5298,9 +6157,9 @@ function replayChildUsage(doc) {
   const cacheCreationInputTokens = Number(cache.write) || 0;
   if (inputTokens + outputTokens + cacheReadInputTokens + cacheCreationInputTokens === 0) return null;
   const rawModel = info?.model;
-  let model = null;
+  let model: string | OpencodeModelRef | null = null;
   if (typeof rawModel === "string") {
-    try { model = JSON.parse(rawModel); } catch { model = null; }
+    try { model = JSON.parse(rawModel) as string | OpencodeModelRef | null; } catch { model = null; }
   } else if (rawModel && typeof rawModel === "object") {
     model = rawModel;
   }
@@ -5320,13 +6179,13 @@ function replayChildUsage(doc) {
   };
 }
 
-function appendReplayChildThread(events, part, parentToolUseId, turnId, readChild) {
+function appendReplayChildThread(events: AgentEvent[], part: OpencodePart | null | undefined, parentToolUseId: string, turnId: string, readChild: OpencodeReadChild): void {
   const metadata = part?.state?.metadata;
-  const childId = metadata && typeof metadata.sessionId === "string" && metadata.sessionId
-    ? metadata.sessionId
-    : null;
+  // 2.0 names the child `sessionID`; the 1.x spelling `sessionId` is accepted for old journals.
+  const rawChild = metadata && typeof metadata === "object" ? (metadata.sessionID ?? metadata.sessionId) : null;
+  const childId = typeof rawChild === "string" && rawChild ? rawChild : null;
   if (!childId) return;
-  let child;
+  let child: OpencodeExport | null | undefined;
   try {
     child = readChild(childId);
   } catch {
@@ -5336,7 +6195,7 @@ function appendReplayChildThread(events, part, parentToolUseId, turnId, readChil
   const items = replayChildDocToItems(child);
   const usage = replayChildUsage(child);
   if (items.length === 0 && usage === null) return;
-  const folded = {
+  const folded: Extract<AgentEvent, { type: "subagent_message" }> = {
     type: "subagent_message",
     turnId,
     parentToolUseId,
@@ -5346,12 +6205,12 @@ function appendReplayChildThread(events, part, parentToolUseId, turnId, readChil
   events.push(folded);
 }
 
-function replayBoundedText(value, maxChars) {
+function replayBoundedText(value: unknown, maxChars: number): string {
   if (typeof value !== "string") return "";
   return value.length <= maxChars ? value : value.slice(0, maxChars);
 }
 
-function replayBoundedValue(value, depth = 0) {
+function replayBoundedValue(value: unknown, depth = 0): unknown {
   if (value == null || typeof value === "boolean") return value;
   if (typeof value === "string") return replayBoundedText(value, PROVIDER_PROJECTION_LIMITS.proseChars);
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -5360,7 +6219,7 @@ function replayBoundedValue(value, depth = 0) {
     return value.slice(0, 64).map((item) => replayBoundedValue(item, depth + 1));
   }
   if (typeof value === "object") {
-    const out = {};
+    const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value).slice(0, 64)) {
       out[String(key).slice(0, PROVIDER_PROJECTION_LIMITS.labelChars)] = replayBoundedValue(item, depth + 1);
     }
@@ -5372,19 +6231,19 @@ function replayBoundedValue(value, depth = 0) {
 // Reasonix's durable store keeps an OpenAI-shaped message list. This adapter is
 // intentionally replay-only: it reconstructs readable user/assistant/tool turns
 // without attempting to reproduce live ACP status notifications.
-export function reasonixTranscriptToEvents(messages, { turnIdPrefix = "replay" } = {}) {
-  const events = [];
-  let turnId = null;
+export function reasonixTranscriptToEvents(messages: ReasonixMessage[] | null | undefined, { turnIdPrefix = "replay" }: { turnIdPrefix?: string } = {}): AgentEvent[] {
+  const events: AgentEvent[] = [];
+  let turnId: string = null as never;
   let turnCount = 0;
   let blockSeq = 0;
-  const openTools = new Map();
+  const openTools = new Map<string, string>();
   const closeTurn = () => {
     if (!turnId) return;
     events.push({ type: "turn_end", turnId, outcome: TURN_OUTCOMES.OK });
-    turnId = null;
+    turnId = null as never;
     openTools.clear();
   };
-  const startTurn = (text) => {
+  const startTurn = (text: string) => {
     closeTurn();
     turnCount += 1;
     turnId = `${turnIdPrefix}-${turnCount}`;
@@ -5415,7 +6274,7 @@ export function reasonixTranscriptToEvents(messages, { turnIdPrefix = "replay" }
         const fn = call?.function && typeof call.function === "object" ? call.function : call;
         const toolId = typeof call?.id === "string" && call.id ? call.id : `reasonix-tool-${++blockSeq}`;
         const name = typeof fn?.name === "string" && fn.name ? fn.name : "tool";
-        let input = fn?.arguments ?? {};
+        let input: unknown = fn?.arguments ?? {};
         if (typeof input === "string") {
           try { input = JSON.parse(input); } catch { input = { arguments: input }; }
         }
@@ -5439,16 +6298,16 @@ export function reasonixTranscriptToEvents(messages, { turnIdPrefix = "replay" }
 
 // Gemini CLI JSON/JSONL transcripts use `type:user|gemini` messages. Like the
 // other replay adapters, this projects only durable conversational content.
-export function geminiTranscriptToEvents(document, { turnIdPrefix = "replay" } = {}) {
-  const events = [];
+export function geminiTranscriptToEvents(document: { messages?: GeminiMessage[] } | null | undefined, { turnIdPrefix = "replay" }: { turnIdPrefix?: string } = {}): AgentEvent[] {
+  const events: AgentEvent[] = [];
   const messages = Array.isArray(document?.messages) ? document.messages : [];
-  let turnId = null;
+  let turnId: string = null as never;
   let turnCount = 0;
   let blockSeq = 0;
   const closeTurn = () => {
     if (!turnId) return;
     events.push({ type: "turn_end", turnId, outcome: TURN_OUTCOMES.OK });
-    turnId = null;
+    turnId = null as never;
   };
   for (const message of messages) {
     if (message?.type === "user") {
@@ -5535,13 +6394,13 @@ export function geminiTranscriptToEvents(document, { turnIdPrefix = "replay" } =
 // same relationship in its stable namespaced id (`<launcher>/<child>`), which is
 // enough to emit the existing provider-neutral `subagent_message` event.
 
-export function createReasonixAdapterState(turnId) {
+export function createReasonixAdapterState(turnId: string): ReasonixAdapterState {
   return {
     turnId,
     errorMessage: null,
-    seenToolIds: new Set(),
-    subagentLauncherIds: new Set(),
-    subagentToolParents: new Map(),
+    seenToolIds: new Set<string>(),
+    subagentLauncherIds: new Set<string>(),
+    subagentToolParents: new Map<string, string>(),
     // Reasonix's ACP implementation NEVER sends ACP messageIds (verified against
     // the v1.19.7 wire contract: its messageChunk carries only sessionUpdate +
     // content + optional metadata), so the adapter synthesizes one per logical
@@ -5568,7 +6427,7 @@ export function createReasonixAdapterState(turnId) {
 // to its message (like Claude), never as a sibling bubble. Synthesized ids are
 // turn-scoped by construction (the adapter state is per turn), and the reducer
 // namespaces blocksById per turn, so `msg1` in two turns cannot collide.
-function reasonixChunkMessageId(state, update) {
+function reasonixChunkMessageId(state: ReasonixAdapterState, update: AcpUpdate | null | undefined): { messageId: string; state: ReasonixAdapterState } {
   const supplied = typeof update?.messageId === "string" && update.messageId ? update.messageId : null;
   if (supplied) {
     return {
@@ -5595,14 +6454,14 @@ function reasonixChunkMessageId(state, update) {
 // (read/edit/delete/move/search/execute/think/fetch/switch_mode/other), not tool
 // names; Reasonix sends them on tool_call/tool_call_update. The Tether reducer
 // shows the tool card's `name`, so keep the kind when no better title exists.
-export function reasonixToolName(update) {
+export function reasonixToolName(update: AcpUpdate | null | undefined): string {
   if (typeof update?.title === "string" && update.title.trim()) return update.title.trim();
   if (typeof update?.kind === "string" && update.kind) return update.kind;
   return "tool";
 }
 
 // Extract the input object for a tool card from a tool_call / tool_call_update.
-export function reasonixToolInput(update) {
+export function reasonixToolInput(update: AcpUpdate | null | undefined): object {
   const input = update?.rawInput;
   if (input && typeof input === "object") return input;
   return {};
@@ -5611,10 +6470,10 @@ export function reasonixToolInput(update) {
 // Extract the output text for a tool card from a tool_call_update's content
 // array (ToolCallContent[] — {type:"content",content:{type:"text",text}} and
 // {type:"diff",path,oldText,newText}). Returns "" when nothing readable.
-export function reasonixToolOutput(update) {
+export function reasonixToolOutput(update: AcpUpdate | null | undefined): string {
   const content = update?.content;
   if (!Array.isArray(content)) return "";
-  const parts = [];
+  const parts: string[] = [];
   for (const item of content) {
     if (item?.type === "content" && item.content?.type === "text" && typeof item.content.text === "string") {
       parts.push(item.content.text);
@@ -5629,11 +6488,11 @@ export function reasonixToolOutput(update) {
 // launchers (`fleet` and `parallel_tasks`) deliberately stay out: the provider
 // emits one namespaced `task` dispatch per group child, so classifying the group
 // too would add a duplicate summary tab alongside the real per-child tabs.
-const REASONIX_SUBAGENT_LAUNCHERS = new Set(["task", "read_only_task"]);
+const REASONIX_SUBAGENT_LAUNCHERS: ReadonlySet<unknown> = new Set(["task", "read_only_task"]);
 
-function reasonixSubagentParent(state, toolId) {
+function reasonixSubagentParent(state: ReasonixAdapterState, toolId: unknown): string | null {
   if (typeof toolId !== "string" || !toolId) return null;
-  let parent = null;
+  let parent: string | null = null;
   for (const launcherId of state.subagentLauncherIds) {
     if (toolId.startsWith(`${launcherId}/`) && (parent === null || launcherId.length > parent.length)) {
       parent = launcherId;
@@ -5642,7 +6501,7 @@ function reasonixSubagentParent(state, toolId) {
   return parent;
 }
 
-function reasonixToolState(state, toolId, { launcher = false, parent = null } = {}) {
+function reasonixToolState(state: ReasonixAdapterState, toolId: string, { launcher = false, parent = null }: { launcher?: boolean; parent?: string | null } = {}): ReasonixAdapterState {
   const seenToolIds = new Set(state.seenToolIds).add(toolId);
   const subagentLauncherIds = launcher
     ? new Set(state.subagentLauncherIds).add(toolId)
@@ -5655,7 +6514,7 @@ function reasonixToolState(state, toolId, { launcher = false, parent = null } = 
 
 // ACP session/update -> AgentEvent[]. `notification` is the full decoded
 // notification object ({ method: "session/update", params: { sessionId, update } }).
-export function reasonixToEvents(notification, state) {
+export function reasonixToEvents(notification: AcpNotification | null | undefined, state: ReasonixAdapterState): ReasonixStep {
   const turnId = state.turnId;
   const params = notification?.params;
   const update = params?.update;
@@ -5664,7 +6523,7 @@ export function reasonixToEvents(notification, state) {
 
   switch (sessionUpdate) {
     case "agent_message_chunk": {
-      const content = update.content;
+      const content = update.content as AcpContentBlock | undefined;
       if (!content || typeof content !== "object") return { events: [], state };
       const text = typeof content.text === "string" ? content.text : "";
       if (!text) return { events: [], state };
@@ -5688,7 +6547,7 @@ export function reasonixToEvents(notification, state) {
     // itself is the SAME synthesized message id as the response's text, so each
     // response's reasoning renders right above its own message (like Claude).
     case "agent_thought_chunk": {
-      const content = update.content;
+      const content = update.content as AcpContentBlock | undefined;
       if (!content || typeof content !== "object") return { events: [], state };
       const text = typeof content.text === "string" ? content.text : "";
       if (!text) return { events: [], state };
@@ -5724,10 +6583,10 @@ export function reasonixToEvents(notification, state) {
       const status = update.status;
       const known = state.seenToolIds.has(toolId);
       const parentToolUseId = state.subagentToolParents.get(toolId) ?? reasonixSubagentParent(state, toolId);
-      const events = [];
+      const events: AgentEvent[] = [];
       const finished = status === "completed" || status === "failed";
       if (parentToolUseId) {
-        const items = [];
+        const items: SubagentItem[] = [];
         if (!known) {
           // A nested tool we never opened (e.g. attachment began mid-call).
           items.push({ kind: "tool", key: toolId, name: reasonixToolName(update), input: reasonixToolInput(update) });
@@ -5775,18 +6634,18 @@ export function reasonixToEvents(notification, state) {
 
     case "plan": {
       // Complete plan replacement (ACP: "The Client MUST replace the current
-      // plan completely"). Map entries -> plan_updated steps.
+      // plan completely"). Map entries -> plan_updated steps in the shape the
+      // reducer consumes (PlanStepProjection: { step, status }).
       const entries = Array.isArray(update.entries) ? update.entries : [];
       const steps = entries
-        .map((entry, index) => {
-          if (!entry || typeof entry.content !== "string") return null;
+        .map((entry): PlanStepProjection | null => {
+          if (!entry || typeof entry.content !== "string" || !entry.content) return null;
           return {
-            stepNumber: index + 1,
+            step: entry.content,
             status: entry.status === "completed" ? "completed" : entry.status === "in_progress" ? "in_progress" : "pending",
-            content: entry.content,
           };
         })
-        .filter((step) => step !== null);
+        .filter((step): step is PlanStepProjection => step !== null);
       if (steps.length === 0) return { events: [], state };
       return { events: [{ type: "plan_updated", turnId, steps }], state };
     }
@@ -5814,7 +6673,7 @@ export function reasonixToEvents(notification, state) {
     case "available_commands_update": {
       const commands = Array.isArray(update.availableCommands) ? update.availableCommands : [];
       const normalized = commands
-        .map((command) => {
+        .map((command): CliCommand | null => {
           if (!command || typeof command.name !== "string" || !command.name) return null;
           return {
             name: command.name,
@@ -5846,13 +6705,61 @@ export function reasonixToEvents(notification, state) {
   }
 }
 
+// Reasonix per-server MCP health (issue #123). The upstream status vocabulary of
+// `_reasonix.io/session/mcpStatus[_update]` (schemaVersion 1, reasonix >= 2.28.0)
+// folded onto the shared McpHealthStatus. `pending` is "authorization required"
+// (including a revoked launch approval), NOT a failure; `standby` is "cached tools
+// callable, server not connected" which has no closer shared status than
+// `starting`; `idle` and any status this build does not know map to `unknown`
+// (never dropped, never thrown on). The upstream `tools` count has no field in
+// McpHealthProjection and is deliberately dropped.
+const REASONIX_MCP_STATUS_TO_HEALTH: Readonly<Record<string, McpHealthStatus>> = Object.freeze({
+  ready: "ready",
+  connecting: "starting",
+  failed: "failed",
+  pending: "needs-auth",
+  disabled: "disabled",
+  standby: "starting",
+  idle: "unknown",
+});
+
+// `payload` is the notification `params` or the request result (the same
+// snapshot shape): { schemaVersion, sessionId, servers: [{ name, status, tools,
+// error?, httpStatus? }] }. Pure; a malformed payload yields no events.
+export function reasonixMcpStatusToEvents(payload: { servers?: ReasonixMcpServer[] } | null | undefined): AgentEvent[] {
+  const servers = payload?.servers;
+  if (!Array.isArray(servers)) return [];
+  const events: AgentEvent[] = [];
+  for (const server of servers.slice(0, PROVIDER_PROJECTION_LIMITS.mcpServers)) {
+    if (!server || typeof server !== "object") continue;
+    const name = boundedIdentifier(server.name);
+    if (!name) continue;
+    const status = Object.hasOwn(REASONIX_MCP_STATUS_TO_HEALTH, server.status)
+      ? REASONIX_MCP_STATUS_TO_HEALTH[server.status]
+      : "unknown";
+    // The upstream error is already sanitized (no response body); carry it
+    // verbatim, bounded, on a failed server only.
+    const error = status === "failed"
+      ? boundedDisplayText(server.error, PROVIDER_PROJECTION_LIMITS.proseChars)
+      : undefined;
+    events.push({
+      type: "mcp_health_updated",
+      turnId: null,
+      name,
+      status,
+      ...(error ? { error } : {}),
+    });
+  }
+  return events;
+}
+
 // ACP permission options -> Tether ApprovalChoice[] (for the engine to attach
 // to approval_request). ACP kinds: allow_once/allow_always/reject_once/
 // reject_always. Tether's ApprovalChoice carries only allow/deny semantics
 // (choiceId + label); "always" variants are folded into the label.
-export function reasonixApprovalChoices(options) {
+export function reasonixApprovalChoices(options: AcpPermissionOption[] | null | undefined): ApprovalChoice[] | undefined {
   if (!Array.isArray(options)) return undefined;
-  const choices = [];
+  const choices: ApprovalChoice[] = [];
   for (const option of options) {
     if (!option || typeof option.optionId !== "string" || !option.optionId) continue;
     const kind = typeof option.kind === "string" ? option.kind : "";
@@ -5871,7 +6778,7 @@ export function reasonixApprovalChoices(options) {
 // --------------------------------------------------------------------------
 //
 // The provider-neutral ACP v1 session/update adapter lives in
-// engines/acp-adapter.mjs (the P2 generalization of reasonixToEvents) and is
+// engines/acp-adapter.ts (the P2 generalization of reasonixToEvents) and is
 // re-exported here so both the server and the browser import every provider
 // adapter from this one shared module, exactly like reasonixToEvents. The
 // module is pure (no I/O, no Date.now, no node builtins), so the browser bundle
@@ -5886,7 +6793,7 @@ export {
   acpApprovalChoices,
   computeAcpCapabilities,
   acpResumeMethod,
-} from "./acp-adapter.mjs";
+} from "./acp-adapter.ts";
 
 // --------------------------------------------------------------------------
 // Pi adapter (`pi --mode rpc` JSONL events -> AgentEvent[])
@@ -5927,7 +6834,26 @@ export {
 // engine at message_end / turn settle. This is a deliberate, documented
 // approximation — PI_PARITY_PLAN.md §3 is annotated with the same note.
 
-export function createPiAdapterState(turnId) {
+// tth-f9u: plain pi shows an auto-retry failure and an extension error to the
+// user, so they surface as turn-scoped provider notices (rendered by chat-view)
+// rather than `warning` events (the reducer keeps those in turn.warnings, which
+// nothing renders). The reducer dedupes a notice by noticeId within a turn, so
+// the id carries a short pure FNV-1a hash of the message: the same text twice
+// in a turn is one notice, two different failures are two. Pure, no I/O.
+function piNoticeId(prefix: string, message: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < message.length; i += 1) {
+    h ^= message.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${prefix}:${h.toString(16).padStart(8, "0")}`;
+}
+
+function piNotice(turnId: string | null, prefix: string, level: "info" | "warning" | "error", message: string): Extract<AgentEvent, { type: "provider_notice" }> {
+  return { type: "provider_notice", turnId, noticeId: piNoticeId(prefix, message), level, message };
+}
+
+export function createPiAdapterState(turnId: string): PiAdapterState {
   return {
     turnId,
     // Bumped on every assistant `message_start`; content blocks within that
@@ -5938,7 +6864,7 @@ export function createPiAdapterState(turnId) {
     // "contains the accumulated output so far, not just the delta") can be
     // turned into the incremental `tool_output_delta.chunk` the reducer
     // expects, instead of re-appending the whole snapshot every update.
-    toolOutputLen: new Map(),
+    toolOutputLen: new Map<string, number>(),
     // Approximate live token counter (see the module-level note above).
     liveCharsEmitted: 0,
     liveTokensEmitted: 0,
@@ -5948,7 +6874,7 @@ export function createPiAdapterState(turnId) {
 // ~4 chars/token is the standard rough English-text estimate (OpenAI's own
 // guidance). Never used for billing or the authoritative per-turn/session
 // usage — only to keep a live counter moving between real usage snapshots.
-function piApproxTokenProgress(state, turnId, addedChars) {
+function piApproxTokenProgress(state: PiAdapterState, turnId: string, addedChars: number): PiStep {
   if (!(addedChars > 0)) return { events: [], state };
   const liveCharsEmitted = state.liveCharsEmitted + addedChars;
   const approxTokens = Math.floor(liveCharsEmitted / 4);
@@ -5965,10 +6891,10 @@ function piApproxTokenProgress(state, turnId, addedChars) {
 // (`[{type:"text",text}]` per docs/rpc.md's ToolResultMessage / BashResult
 // shapes). Non-text content (e.g. a future image result) is skipped rather
 // than guessed at.
-export function piToolOutputText(result) {
+export function piToolOutputText(result: PiToolResult | null | undefined): string {
   const content = result?.content;
   if (!Array.isArray(content)) return "";
-  const parts = [];
+  const parts: string[] = [];
   for (const item of content) {
     if (item?.type === "text" && typeof item.text === "string") parts.push(item.text);
   }
@@ -5977,7 +6903,7 @@ export function piToolOutputText(result) {
 
 // One `message_update.assistantMessageEvent` -> AgentEvent[]. Split out of
 // piToEvents for readability; still pure, still returns { events, state }.
-function piAssistantMessageEvent(ame, state) {
+function piAssistantMessageEvent(ame: PiAssistantMessageEvent | null | undefined, state: PiAdapterState): PiStep {
   const turnId = state.turnId;
   if (!ame || typeof ame.type !== "string" || typeof ame.contentIndex !== "number") {
     return { events: [{ type: "unknown_event", turnId, raw: ame }], state };
@@ -6021,11 +6947,11 @@ function piAssistantMessageEvent(ame, state) {
 // `event` is the already-JSON.parsed line; `state` is this turn's adapter
 // state (from createPiAdapterState). Control-plane frames the engine handles
 // itself before ever reaching this pure function — `extension_ui_request`
-// (gatekeeper approvals/questions, P2), `agent_settled`/`agent_end`/turn
+// (ask_user questions and relayed extension dialogs), `agent_settled`/`agent_end`/turn
 // bookkeeping (the engine owns turn_end emission, like every persistent
 // engine in this file) — are NOT switched on here; the engine intercepts them
 // upstream. Anything else unrecognized falls through to `unknown_event`.
-export function piToEvents(event, state) {
+export function piToEvents(event: PiEvent | null | undefined, state: PiAdapterState): PiStep {
   const turnId = state.turnId;
   if (!event || typeof event.type !== "string") return { events: [{ type: "unknown_event", turnId, raw: event }], state };
 
@@ -6093,7 +7019,7 @@ export function piToEvents(event, state) {
           delayMs: typeof event.delayMs === "number" ? event.delayMs : null,
           errorStatus: null,
           error: typeof event.errorMessage === "string" ? event.errorMessage : null,
-        }],
+        }] as never,
         state,
       };
 
@@ -6103,7 +7029,8 @@ export function piToEvents(event, state) {
       // A final failure surfaces as its own warning so it isn't silently lost
       // if no further content streams before turn_end.
       if (event.success === false) {
-        return { events: [{ type: "warning", turnId, message: typeof event.finalError === "string" ? event.finalError : "Pi auto-retry failed.", raw: event }], state };
+        const message = typeof event.finalError === "string" && event.finalError ? event.finalError : "Pi auto-retry failed.";
+        return { events: [piNotice(turnId, "pi-auto-retry-failed", "error", message)], state };
       }
       return { events: [], state };
 
@@ -6115,11 +7042,10 @@ export function piToEvents(event, state) {
       return { events: [{ type: "context_compacted", turnId, itemId }], state };
     }
 
-    case "extension_error":
-      return {
-        events: [{ type: "warning", turnId, message: typeof event.error === "string" ? event.error : "Pi extension error.", raw: event }],
-        state,
-      };
+    case "extension_error": {
+      const message = typeof event.error === "string" && event.error ? event.error : "Pi extension error.";
+      return { events: [piNotice(turnId, "pi-extension-error", "warning", message)], state };
+    }
 
     // Control-plane / bookkeeping frames the ENGINE consumes directly and
     // never forwards here: agent_start, agent_end, agent_settled, turn_start,
@@ -6136,10 +7062,10 @@ export function piToEvents(event, state) {
 // array of pi AgentMessage objects (session-format.md: UserMessage /
 // AssistantMessage / ToolResultMessage / BashExecutionMessage), already in
 // append order on the active branch.
-export function piTranscriptToEvents(messages, { turnIdPrefix = "replay" } = {}) {
-  const events = [];
+export function piTranscriptToEvents(messages: PiMessage[] | null | undefined, { turnIdPrefix = "replay" }: { turnIdPrefix?: string } = {}): AgentEvent[] {
+  const events: AgentEvent[] = [];
   let turnIndex = 0;
-  let turnId = null;
+  let turnId: string | null = null;
   let blockSeq = 0;
 
   const list = Array.isArray(messages) ? messages : [];
@@ -6248,18 +7174,18 @@ export function piTranscriptToEvents(messages, { turnIdPrefix = "replay" } = {})
 // type is SKIPPED silently, never thrown, so a renamed record can only cost a
 // little fidelity, never wedge a turn.
 
-const DSH_TURN_OUTCOME_BY_REASON = Object.freeze({
+const DSH_TURN_OUTCOME_BY_REASON: Readonly<Record<string, TurnOutcome | undefined>> = Object.freeze({
   completed: TURN_OUTCOMES.OK,
   cancelled: TURN_OUTCOMES.CANCELLED,
   error: TURN_OUTCOMES.ERROR,
 });
 
-export function createDshAdapterState(turnId) {
+export function createDshAdapterState(turnId: string): DshAdapterState {
   return {
     turnId,
     emittedNativeId: false,
     // open blocks by chunk index: index -> { type, text }
-    openBlocks: new Map(),
+    openBlocks: new Map<number, { type: string; text: string }>(),
     // Accumulated usage across all steps in this turn. dsh emits one `usage`
     // chunk per step (each carrying that step's own counts), but the reducer
     // SETs turn.usage (v40: never accumulated) — so the adapter must maintain
@@ -6269,7 +7195,7 @@ export function createDshAdapterState(turnId) {
   };
 }
 
-function dshChunkText(block) {
+function dshChunkText(block: DshBlockText | null | undefined): string {
   return typeof block?.text === "string" ? block.text : "";
 }
 
@@ -6279,7 +7205,7 @@ function dshChunkText(block) {
  * index and completed (message_completed / thinking_completed) when the
  * block-end arrives — the same shape the replay adapter produces.
  */
-export function dshTranscriptToEvents(record, state) {
+export function dshTranscriptToEvents(record: DshRecord, state: DshAdapterState): DshStep {
   const turnId = state.turnId;
   const type = typeof record?.type === "string" ? record.type : "";
   const data = record?.data && typeof record.data === "object" ? record.data : {};
@@ -6296,7 +7222,7 @@ export function dshTranscriptToEvents(record, state) {
   return dshRecordToEvents(record, state);
 }
 
-function dshRecordToEvents(record, state) {
+function dshRecordToEvents(record: DshRecord | null | undefined, state: DshAdapterState): DshStep {
   const turnId = state.turnId;
   const type = typeof record?.type === "string" ? record.type : "";
   const data = record?.data && typeof record.data === "object" ? record.data : {};
@@ -6340,7 +7266,7 @@ function dshRecordToEvents(record, state) {
       let input = {};
       if (typeof data.arguments === "string" && data.arguments) {
         try {
-          const parsed = JSON.parse(data.arguments);
+          const parsed = JSON.parse(data.arguments) as unknown;
           if (parsed && typeof parsed === "object") input = parsed;
         } catch {
           input = { raw: data.arguments };
@@ -6366,7 +7292,7 @@ function dshRecordToEvents(record, state) {
 
     case "turn/end": {
       const kind = data?.reason?.kind;
-      const outcome = DSH_TURN_OUTCOME_BY_REASON[kind] ?? TURN_OUTCOMES.UNKNOWN;
+      const outcome = DSH_TURN_OUTCOME_BY_REASON[kind as string] ?? TURN_OUTCOMES.UNKNOWN;
       return { events: [{ type: "turn_end", turnId, outcome }], state };
     }
 
@@ -6376,18 +7302,18 @@ function dshRecordToEvents(record, state) {
   }
 }
 
-function dshChunkToEvents(chunk, state) {
+function dshChunkToEvents(chunk: DshChunk | null | undefined, state: DshAdapterState): DshStep {
   const turnId = state.turnId;
   if (!chunk || typeof chunk !== "object") return { events: [], state };
   const kind = typeof chunk.type === "string" ? chunk.type : "";
-  const index = Number.isInteger(chunk.index) ? chunk.index : -1;
+  const index = Number.isInteger(chunk.index) ? (chunk.index as number) : -1;
 
   switch (kind) {
     case "block-start": {
       const blockType = chunk.blockType === "reasoning" || chunk.blockType === "tool-call" ? chunk.blockType : "text";
       const openBlocks = new Map(state.openBlocks);
       openBlocks.set(index, { type: blockType, text: "" });
-      const events = blockType === "text"
+      const events: AgentEvent[] = blockType === "text"
         ? [{ type: "message_started", turnId, blockId: `dsh-${index}` }]
         : [];
       return { events, state: { ...state, openBlocks } };
@@ -6426,7 +7352,7 @@ function dshChunkToEvents(chunk, state) {
       const started = current !== undefined;
       return {
         events: [
-          ...(started ? [] : [{ type: "message_started", turnId, blockId: `dsh-${index}` }]),
+          ...(started ? [] : [{ type: "message_started", turnId, blockId: `dsh-${index}` } as const]),
           { type: "message_completed", turnId, blockId: `dsh-${index}`, text },
         ],
         state: { ...state, openBlocks },
@@ -6466,7 +7392,7 @@ function dshChunkToEvents(chunk, state) {
   }
 }
 
-function dshUserText(content) {
+function dshUserText(content: string | DshUserContentBlock[] | undefined): string {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
   return content
@@ -6481,8 +7407,8 @@ function dshUserText(content) {
  * array into AgentEvent[], one turn per real user message. Mirrors the pi
  * replay adapter's shape; the live adapter is the per-record form.
  */
-export function dshTranscriptReplay(records, { turnIdPrefix = "replay" } = {}) {
-  const events = [];
+export function dshTranscriptReplay(records: DshRecord[] | null | undefined, { turnIdPrefix = "replay" }: { turnIdPrefix?: string } = {}): AgentEvent[] {
+  const events: AgentEvent[] = [];
   const list = Array.isArray(records) ? records : [];
   let adapterState = createDshAdapterState(turnIdPrefix);
   for (const record of list) {

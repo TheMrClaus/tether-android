@@ -105,6 +105,8 @@ fun initialSessionState(args: JsObj): JsObj = JsObj.of(
     "status" to js(Limits.SESSION_STATUS.READY),
     "lastTurnOutcome" to JsNull,
     "lastError" to JsNull,
+    // events.ts:948 (#256): the durable record of every turn-less `error`, oldest first, bounded.
+    "sessionErrors" to JsArr.EMPTY,
     "unattributedPermissionDenials" to JsArr.EMPTY,
     "providerNotices" to JsArr.EMPTY,
     "lastModelFallback" to JsNull,
