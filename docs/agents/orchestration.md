@@ -83,10 +83,6 @@ prompt may name a retired role or model.
    own verdict and log rows — **enforced** for file edits by the fleet gate (inside a checkout they
    can write Markdown only); their Bash stays open for inspection, and there the rule is still their
    word.
-9. **Jev advises; instruments and named agents decide.** Use it for triage, evidence filtering and
-   the tool-call net. Never as the design critic, never as a verdict, never to choose who does the
-   work.
-
 ## Cost discipline
 
 Delegation is not automatically cheaper, and the bill is dominated by **steps × context**, not by
@@ -159,7 +155,7 @@ Rules — binding in every brief:
 10. **Keep the lead's context lean — it sets the handover clock** (owner 2026-10-15). Measured on
    realms13/14: an xhigh lead grows ~150–165k tokens an hour — ~40% its own reasoning (the price of
    xhigh, kept), ~30% inbound text (lane reports of 6–8k, whole receipts, its own analysis output),
-   ~20% its own briefs. Four rules, each with its guard; none touches effort, the judges or rule 9:
+   ~20% its own briefs. Four rules, each with its guard; none touches effort or the judges:
    - **Hand-backs are pointers.** A lane's or judge's final message is at most ~1.5k chars: the
      verdict line and the receipt/verdict path. *Guard:* every caveat, doubt or "only if…" goes under
      the receipt's `## Open items`, which the lead always reads — a caveat buried elsewhere is a
@@ -229,45 +225,6 @@ store carries a Dolt schema version and an older binary refuses a newer store.
   read-only snapshot until that tracker hands over — never keep the same rows current in both places.
 
 Setup, seeding and the full command map: `~/wiki/wiki/concepts/beads-tracking.md`.
-
-## Jev (TypeSafe) — advisory decision model
-
-Vendor: TypeSafe's Jev via **OpenRouter** (`typesafe/jev-1.13`, `POST /api/v1/systemone`; the
-provider serves a **dated snapshot**, so log `response.model` and treat the date as part of the
-version). Two independent implementations, each with its **own question set**: the leaf gate
-(`~/bin/jev-gate.py` — a Claude Code + Codex hook) and the orchestrator-side judge
-(`~/.hermes/profiles/games/plugins/jev-judge`, `pre_tool_call`, shadow). **A question fix must be applied twice.**
-
-- **What it is for:** cheap (≈$0.00002), fast (≈0.35 s) typed answers — triage between waves,
-  evidence filtering *before* a critic sees it, a net over destructive/exfiltration-shaped calls.
-- **What it is not:** not a design critic (text-only), **not a verdict** (critics, audit and
-  `design-director` decide), not routing (the lead routes), not a substitute for reading an
-  instrument's own output line. **Its answer is a number, not a citation.**
-- **How the gate decides** (`~/.config/jev-gate/config.json`, current mode: **enforce**,
-  `auto_allow: false`, `model_asks: false`). The shell text is parsed (quotes, heredocs, `$(…)`,
-  `bash -c`, `cd`, variables…), so a commit message or PR body that *mentions* a command is not that
-  command. Rules first, model second:
-  - **DENY rules block**: force-push/delete of `main`, `rm -r` of `~`, a home or state dir, a repo
-    root, `.git` or a system tree, disk/power commands, SQL DROP through a db client.
-  - **FLAG rules ask**: the policy's own hard rules (`git add -A`/`.`, `commit -a`, discarding
-    uncommitted work in a shared checkout, `stash drop`), secrets paths, `sudo`, `reset --hard`,
-    unresolved `rm -r` targets, file edits to secrets/`.git`/harness settings/the gate, and — for
-    `wave-check`/`design-director` — any non-Markdown edit in a repo (that one is a DENY).
-  - **Jev** judges what the rules leave (Bash only; a file edit shows a path, not intent, so it is
-    never sent). A verdict over threshold that no rule backs is a **hunch**: hunches are **written
-    down, not asked** (`model_asks: false`) — `jev-gate.py --hunches [days]` lists them for review.
-  - **Jev may only make a result stricter, never looser.** It can hold, ask or stop; it can never
-    authorise. A Jev "allow" alone never green-lights a side effect, an advance, or a completion.
-- **What an `ask` does depends on the harness:** interactive or Tether session → an approval
-  prompt/chip, **the turn waits for the owner**; headless `claude -p` with no prompt tool → the call
-  is **denied**. A **`bypassPermissions`** session would approve an ask unseen, so there the gate
-  **denies** every rule-backed ask instead and says why.
-- **Coverage:** Claude Code `PreToolUse` + `PermissionRequest` in `~/.claude/settings.json` and every
-  Tether account; Codex `PreToolUse` in `~/.codex/hooks.json`. The role rule rides on the same hook.
-- **Health:** `jev-gate.py --health` (errors / fail-opens, last 24 h). A broken gate fails open and
-  says so in a `systemMessage`; a command it cannot judge within 3 s is asked, not waved through.
-- Never route a secret through it: payloads are capped and key-, JWT-, password- and
-  URL-credential-shaped strings are masked, but the question still leaves the box.
 
 ## Environment rules
 

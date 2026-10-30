@@ -100,8 +100,7 @@ A wave **ends** when all of this is true:
 2. every bead is closed with its evidence and verified by a different actor; the human tracker
    (GitHub issues) and the journal are updated, the lead has rewritten STATUS, **and the markdown
    tracker/digest is under 40k chars with no line over 2k** (`~/bin/gauntlet-tracker check
-   <tracker…>`; over either, demote first — `~/gauntlet/tools/jev_triage.py done --tracker <digest>` holds on an
-   oversize one, and no wave report is posted on one);
+   <tracker…>`; over either, demote first — no wave report is posted on an oversize digest);
 3. anything user-visible is **deployed and the served artifact verified**;
 4. the models line and the `FINDINGS:` line are recorded (`game-orchestration models --fleet app
    <session-id>`, routing rule 6; `game-orchestration findings <ledger>`) — and once the run is over budget, or the owner asks, the wave report carries the per-role

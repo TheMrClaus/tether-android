@@ -54,7 +54,6 @@ Read `docs/agents/orchestration.md` and follow it: orchestrate, don't implement 
 non-run session may make one small single-file, non-design, non-core edit); dispatch the repo roster
 in `.claude/agents/` by name with no model/effort override; all design work goes to `design`; every
 raster asset goes to the Codex image lane (`astra`, High) the design lane drives; no 3D in this
-fleet; no agent grades its own work. Commit by explicit path, never `git add -A`. Jev (TypeSafe) is
-advisory only — never the design critic, never a verdict.
+fleet; no agent grades its own work. Commit by explicit path, never `git add -A`.
 <!-- app-orchestration:end -->
 

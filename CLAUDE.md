@@ -71,8 +71,6 @@ single-file, non-design, non-core edit itself (policy rule 3).
   rest are notes; the lead triages before dispatch (gauntlet-core › Findings). UI claims are verified with a real-browser capture at the run doc's viewports.
 - The lead keeps the build gates, the shared dev instance (single-instance: wait, never kill), the
   pushes and the deploys — and verifies a deploy against the served artifact.
-- Jev (TypeSafe) is **advisory**: triage, evidence filtering and the tool-call gate — never the
-  design critic, never a verdict, never who does the work.
 - **Hand over at 300k — every session, overnight or not:** check `tether_context` at each clean
   point; at ≥300k reach a clean point (no lane in flight, nothing half-integrated or unpushed), then
   ONE `tether_handover` with the mandate verbatim + full state + the chain, and end the turn
