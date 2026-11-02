@@ -98,6 +98,17 @@ class SupervisorDownTest {
     }
 
     @Test
+    fun aDifferentNonNullCodeNamingOurKeyLeavesThePendingRecordAlone() {
+        val ws = connected()
+        h.client.send("s1", "still pending")
+        val sent = key(h.expectFrame("send"), "idempotencyKey")
+        ws.send("""{"type":"error","message":"nope","code":"some_other_code","idempotencyKey":"$sent"}""")
+        h.serverBarrier(ws)
+        assertTrue(h.client.failedSends.value.isEmpty())
+        assertEquals(listOf("still pending"), h.client.pendingSends.value.map { it.text })
+    }
+
+    @Test
     fun supervisorStatusDownShowsTheRestartingStateUpClearsItAndASocketEndClearsIt() {
         val ws = connected()
         assertFalse(h.client.supervisorDown.value)

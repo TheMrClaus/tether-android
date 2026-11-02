@@ -2,6 +2,10 @@ package com.tether.app.ui.chat
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -122,6 +126,16 @@ class SendBubblesBehaviourTest {
     }
 
     @Test
+    fun aSupervisorDownFailureSaysTheAgentsWereRestarting() {
+        val down = FailedSendReason.SupervisorDown
+        assertEquals("Not sent — the agents were restarting. Send it again.", failedSendLabel(SendFixtures.failed("a", "x", reason = down)))
+        assertEquals(
+            "Not sent — the agents were restarting. Send it again. (2 images · 3.0 MB)",
+            failedSendLabel(SendFixtures.failed("a", "x", 2, 2, SendFixtures.THREE_MB, down)),
+        )
+    }
+
+    @Test
     fun theComposerRowCountsAndWaitingWins() {
         assertNull(sendRowLabel(emptyList()))
         assertEquals("Sending 1 message…", sendRowLabel(listOf(SendFixtures.pending("a", "x"))))
@@ -211,5 +225,27 @@ class SendBubblesBehaviourTest {
         rule.onNodeWithText("Hello there.").assertIsDisplayed()
         rule.onNodeWithText("Not delivered").assertIsDisplayed()
         rule.onAllNodesWithText("Sending…").assertCountEquals(1)
+    }
+
+    // --- the supervisor row (v154) -------------------------------------------------------------
+
+    private fun supervisorRow(down: Boolean) {
+        rule.setContent { TetherTheme(choiceFor(TetherSkin.StudioDark)) { ComposerSupervisorRow(down) } }
+        rule.waitForIdle()
+    }
+
+    @Test
+    fun theSupervisorRowIsABannerInAPoliteLiveRegionWhileDown() {
+        supervisorRow(down = true)
+        rule.onNodeWithTag(SUPERVISOR_ROW_TAG).assertIsDisplayed()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        rule.onNodeWithText("Agents are restarting — try again in a moment").assertIsDisplayed()
+    }
+
+    @Test
+    fun theSupervisorRowDrawsNothingWhileUp() {
+        supervisorRow(down = false)
+        rule.onAllNodesWithTag(SUPERVISOR_ROW_TAG).assertCountEquals(0)
+        rule.onAllNodesWithText("Agents are restarting — try again in a moment").assertCountEquals(0)
     }
 }
