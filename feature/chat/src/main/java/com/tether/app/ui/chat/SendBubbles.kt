@@ -181,6 +181,9 @@ fun failedSendLabel(row: FailedSend): String {
         }
     }
     val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
+    if (row.reason == FailedSendReason.SupervisorDown) {
+        return if (summary.isNotEmpty()) "${com.tether.app.client.SUPERVISOR_DOWN_NOT_SENT} · $summary" else com.tether.app.client.SUPERVISOR_DOWN_NOT_SENT
+    }
     return if (row.reason == FailedSendReason.Link) {
         if (summary.isNotEmpty()) "Not sent — the link was down ($summary)" else "Not sent — the link was down"
     } else {
@@ -208,6 +211,7 @@ const val PENDING_SEND_TAG = "pending-send"
 const val FAILED_SEND_TAG = "failed-send"
 const val SEND_ROW_TAG = "composer-send-row"
 const val SEND_AGAIN_TAG = "failed-send-again"
+const val SUPERVISOR_ROW_TAG = "composer-supervisor-row"
 
 private val DISMISS_TARGET = 44.dp
 
@@ -411,5 +415,29 @@ internal fun UploadProgressBar(percent: Int, style: TextStyle, ink: Color, modif
         }
         // The bar's range info is the one place the value is exposed; the printed number is not read a second time.
         Text("$shown%", style = style, color = ink, modifier = Modifier.clearAndSetSemantics {})
+    }
+}
+
+/**
+ * v154: the "Agents are restarting" row above the composer while `supervisor_status` is down — the same
+ * `.chat-send-row` look as the waiting state (violet + the alert icon + words, never colour alone),
+ * a polite live region. Nothing is drawn while the supervisor is up.
+ */
+@Composable
+internal fun ComposerSupervisorRow(down: Boolean, modifier: Modifier = Modifier) {
+    if (!down) return
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Row(
+        modifier.padding(horizontal = 4.dp).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }.testTag(SUPERVISOR_ROW_TAG),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    ) {
+        Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
+        Text(
+            com.tether.app.client.SUPERVISOR_DOWN_BANNER,
+            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = (0.8f * TetherTypography.SP_PER_REM).sp, fontWeight = FontWeight(620)),
+            color = t.violet,
+        )
     }
 }
