@@ -8,6 +8,8 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
@@ -144,6 +146,16 @@ class SendBubblesBehaviourTest {
         assertEquals(
             "Not sent — the link was down (1 file · 216 KB)",
             failedSendLabel(SendFixtures.failed("a", "x", 1, 0, SendFixtures.KB_216, FailedSendReason.Link)),
+        )
+    }
+
+    @Test
+    fun aSupervisorDownFailureSaysTheAgentsWereRestarting() {
+        val down = FailedSendReason.SupervisorDown
+        assertEquals("Not sent — the agents were restarting. Send it again.", failedSendLabel(SendFixtures.failed("a", "x", reason = down)))
+        assertEquals(
+            "Not sent — the agents were restarting. Send it again. · 2 images · 3.0 MB",
+            failedSendLabel(SendFixtures.failed("a", "x", 2, 2, SendFixtures.THREE_MB, down)),
         )
     }
 
@@ -485,5 +497,27 @@ class SendBubblesBehaviourTest {
         val refusal = SendFixtures.failed("r", "x", 2, 2, 6.0 * 1024 * 1024, FailedSendReason.Upload).copy(detail = "An attachment is limited to 9 MiB.")
         assertEquals("Not sent — the upload failed. An attachment is limited to 9 MiB. · 2 images · 6.0 MB", failedSendLabel(refusal))
         assertEquals("Not sent — the link was down (2 images · 6.0 MB)", failedSendLabel(SendFixtures.failed("m", "x", 2, 2, 6.0 * 1024 * 1024, FailedSendReason.Link)))
+}
+
+    // --- the supervisor row (v154) -------------------------------------------------------------
+
+    private fun supervisorRow(down: Boolean) {
+        rule.setContent { TetherTheme(choiceFor(TetherSkin.StudioDark)) { ComposerSupervisorRow(down) } }
+        rule.waitForIdle()
+    }
+
+    @Test
+    fun theSupervisorRowIsABannerInAPoliteLiveRegionWhileDown() {
+        supervisorRow(down = true)
+        rule.onNodeWithTag(SUPERVISOR_ROW_TAG).assertIsDisplayed()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        rule.onNodeWithText("$SUPERVISOR_HOLD_LEAD $SUPERVISOR_HOLD_BODY").assertIsDisplayed()
+    }
+
+    @Test
+    fun theSupervisorRowDrawsNothingWhileUp() {
+        supervisorRow(down = false)
+        rule.onAllNodesWithTag(SUPERVISOR_ROW_TAG).assertCountEquals(0)
+        rule.onAllNodesWithText("$SUPERVISOR_HOLD_LEAD $SUPERVISOR_HOLD_BODY").assertCountEquals(0)
     }
 }

@@ -36,7 +36,10 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -212,6 +215,10 @@ const val FAILED_SEND_TAG = "failed-send"
 const val SEND_ROW_TAG = "composer-send-row"
 const val SEND_AGAIN_TAG = "failed-send-again"
 const val SUPERVISOR_ROW_TAG = "composer-supervisor-row"
+
+/** Approved D1 strings (S4D.3 #3 + #4): the hold panel's lead and body, word for word. */
+const val SUPERVISOR_HOLD_LEAD = "Agents are restarting."
+const val SUPERVISOR_HOLD_BODY = "Sending is paused — your draft stays here. Send it when they’re back."
 
 private val DISMISS_TARGET = 44.dp
 
@@ -435,7 +442,10 @@ internal fun ComposerSupervisorRow(down: Boolean, modifier: Modifier = Modifier)
     ) {
         Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
         Text(
-            com.tether.app.client.SUPERVISOR_DOWN_BANNER,
+            buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(SUPERVISOR_HOLD_LEAD) }
+                append(' ').append(SUPERVISOR_HOLD_BODY)
+            },
             style = TextStyle(fontFamily = type.body.fontFamily, fontSize = (0.8f * TetherTypography.SP_PER_REM).sp, fontWeight = FontWeight(620)),
             color = t.violet,
         )
