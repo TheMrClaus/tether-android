@@ -300,6 +300,12 @@ interface TetherClient {
      */
     val failedSends: StateFlow<List<FailedSend>> get() = NoFailedSends
 
+    /**
+     * v154 `supervisor_status`: true between `{state:"down"}` and `{state:"up"}` (or the end of the socket that
+     * said it). While true the composer holds: the draft stays and the "Agents are restarting" row shows.
+     */
+    val supervisorDown: StateFlow<Boolean> get() = NoSupervisorDown
+
     /** ta-coik.19 (use-tether.ts 90fbb9f :473-478): drop one failed bubble. Local only; nothing is sent. */
     fun dismissFailedSend(key: String) {}
 
@@ -1556,6 +1562,7 @@ private val NoFailedInterrupts: StateFlow<Map<String, String>> = MutableStateFlo
 /** ta-coik.19: [TetherClient.pendingSends] / [TetherClient.failedSends] of a client that has none. */
 private val NoPendingSends: StateFlow<List<PendingSendRow>> = MutableStateFlow(emptyList())
 private val NoFailedSends: StateFlow<List<FailedSend>> = MutableStateFlow(emptyList())
+private val NoSupervisorDown: StateFlow<Boolean> = MutableStateFlow(false)
 
 /** T6.7: [TetherClient.serverErrors] of a client that has none. */
 private val NoServerErrors: SharedFlow<ServerErrorText> = kotlinx.coroutines.flow.MutableSharedFlow()

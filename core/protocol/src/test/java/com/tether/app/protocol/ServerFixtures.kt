@@ -100,7 +100,11 @@ object ServerFixtures {
          "message":"That isn't the current password. Nothing was changed."}
     """
 
+    /** v154: the agent supervisor's status (hand-authored: newer than the corpus). */
+    const val SUPERVISOR_STATUS = """{"type":"supervisor_status","state":"down"}"""
+
     val HAND_AUTHORED: Map<String, String> = mapOf(
+        "supervisor_status" to SUPERVISOR_STATUS,
         "server-settings-result" to SERVER_SETTINGS_RESULT,
         "approval" to APPROVAL,
         "approval_resolved" to APPROVAL_RESOLVED,

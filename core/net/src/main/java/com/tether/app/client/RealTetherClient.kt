@@ -599,6 +599,10 @@ class RealTetherClient(
     // switch and sign-out; a failed bubble computed under an older value is never published.
     private var failedGeneration = 0L
 
+    // v154: the supervisor's own down/up. Per socket: a new connection starts "up" (the server says "down" again).
+    private val supervisorDownState = MutableStateFlow(false)
+    override val supervisorDown: StateFlow<Boolean> = supervisorDownState
+
     // Every store change republishes [pendingSends] (use-tether.ts 90fbb9f :409-424 syncPendingState,
     // called after every mutation of pendingRef). A multi-step change computes its store first and
     // assigns it once, so no half-done state is ever shown.
@@ -2985,6 +2989,7 @@ class RealTetherClient(
         socketOrigin = null
         socketOpen = false
         handshakeDone = false
+        supervisorDownState.value = false
         // R3: a re-attach still waiting belongs to this socket; the next one re-attaches on its ready.
         deferredAttach?.timer?.cancel()
         deferredAttach = null
@@ -3591,7 +3596,16 @@ class RealTetherClient(
             is ServerMessage.Event -> onEvent(webSocket, message)
             is ServerMessage.TurnsDetail -> onTurnsDetail(webSocket, message)
             is ServerMessage.InterruptResult -> onInterruptResult(webSocket, message)
+            is ServerMessage.SupervisorStatus -> ifCurrent(webSocket) {
+                when (message.state) {
+                    "down" -> supervisorDownState.value = true
+                    "up" -> supervisorDownState.value = false
+                }
+            }
             is ServerMessage.ErrorFrame -> {
+                // v154: `supervisor_down` naming a pending send / queue-add is FINAL for it: failed at once, text
+                // kept, never redelivered (the record leaves the store and its key is tombstoned).
+                if (message.code == ERROR_CODE_SUPERVISOR_DOWN) refuseSupervisorDown(webSocket, message.recordKey)
                 // Every error of the live link is shown, as the web does (use-tether.ts setError),
                 // T6.7: cleaned and attributed to the server; one that echoes a node request's
                 // requestId also ends that request.
@@ -4609,6 +4623,21 @@ class RealTetherClient(
             if (givenUp.generation != failedGeneration) return
             failedSendsState.update { PendingInput.recordFailed(it, givenUp.records, reason) }
         }
+    }
+
+    /** v154: the pending record [key] is refused as `supervisor_down` on [webSocket]: failed now, never redelivered. */
+    private fun refuseSupervisorDown(webSocket: WebSocket, key: String?) {
+        if (key == null) return
+        var refused = GivenUp.NONE
+        ifCurrent(webSocket) {
+            val record = pendingStore.records.firstOrNull { it.key == key } ?: return@ifCurrent
+            pendingStore = PendingInput.discardKey(pendingStore, key).store
+            forgetLocked(listOf(key))
+            refused = givenUpLocked(listOf(record))
+        }
+        if (refused.records.isEmpty()) return
+        recordFailed(refused, FailedSendReason.SupervisorDown)
+        persistPending()
     }
 
     /**

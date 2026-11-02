@@ -375,7 +375,23 @@ sealed interface ServerMessage {
         val requestId: String? = null,
     ) : ServerMessage
 
-    data class ErrorFrame(val message: String, val requestId: String? = null) : ServerMessage
+    /**
+     * [code] / [idempotencyKey] / [queueId] (v154, additive; absent from an older server): a refusal decided
+     * before anything was sent names the pending send or queue-add it refuses. `supervisor_down` is FINAL for it.
+     */
+    data class ErrorFrame(
+        val message: String,
+        val requestId: String? = null,
+        val code: String? = null,
+        val idempotencyKey: String? = null,
+        val queueId: String? = null,
+    ) : ServerMessage {
+        /** The pending record's key this refusal names (a send's idempotencyKey, else a queue-add's queueId). */
+        val recordKey: String? get() = idempotencyKey ?: queueId
+    }
+
+    /** v154 `supervisor_status`: the agent supervisor is [state] "down" or "up" (any other value is carried, acted on by none). */
+    data class SupervisorStatus(val state: String) : ServerMessage
 
     // ---- v131 Overview feed (opt-in; see model/Overview.kt) ---------------------------
 
@@ -969,7 +985,16 @@ private object ServerDecoders {
                 requestId = r.o.str("requestId"),
             )
         },
-        "error" to { r -> ServerMessage.ErrorFrame(r.str("message"), r.o.str("requestId")) },
+        "error" to { r ->
+            ServerMessage.ErrorFrame(
+                r.str("message"),
+                r.o.str("requestId"),
+                code = r.o.str("code"),
+                idempotencyKey = r.o.str("idempotencyKey"),
+                queueId = r.o.str("queueId"),
+            )
+        },
+        "supervisor_status" to { r -> ServerMessage.SupervisorStatus(r.str("state")) },
         "overview-snapshot" to { r ->
             ServerMessage.OverviewSnapshot(
                 feedId = r.str("feedId"),
