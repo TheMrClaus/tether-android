@@ -87,7 +87,7 @@ class TopbarWorkspaceTest {
 
     private fun bounds(tag: String): Rect = rule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
 
-    @Test fun everyRequiredViewportKeepsA48DpBarAndTheFullWorkspaceOverviewName() {
+    @Test fun everyRequiredViewportKeepsA44DpBarAndTheFullWorkspaceOverviewName() {
         show()
         val cases = listOf(
             Case("tether-android", 412, false, 1f),
@@ -101,9 +101,19 @@ class TopbarWorkspaceTest {
             val bar = bounds(ShellTags.Topbar)
             val brand = bounds(ShellTags.Brand)
             val cap = if (next.wide) 180f else 136f
-            assertEquals("${next.width}dp @${next.fontScale} topbar", 48f, bar.height, 0.5f)
+            assertEquals("${next.width}dp @${next.fontScale} topbar", 44f, bar.height, 0.5f)
             assertTrue("workspace control ${brand.width} in [44, $cap]", brand.width >= 43.5f && brand.width <= cap + 0.5f)
             assertTrue("workspace control is inside the bar", brand.left >= bar.left && brand.right <= bar.right)
+            val actionable = buildList {
+                add(ShellTags.Brand)
+                if (!next.wide) add(ShellTags.MenuKey)
+                add(ShellTags.SettingsKey)
+                add(ShellTags.ToolsMenuKey)
+            }
+            actionable.forEach { tag ->
+                val touch = rule.onNodeWithTag(tag).fetchSemanticsNode().touchBoundsInRoot
+                assertTrue("$tag touch target >= 44dp: ${touch.width} x ${touch.height}", touch.width >= 43.5f && touch.height >= 43.5f)
+            }
             rule.onNodeWithTag(ShellTags.Brand)
                 .assertContentDescriptionEquals("${next.label} workspace — Overview")
             rule.onNodeWithText(next.label, useUnmergedTree = true).assertExists()

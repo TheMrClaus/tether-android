@@ -89,10 +89,10 @@ import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.text.proseDirection
 
 /** Compact phone bar row, excluding the status-bar inset and including the bottom rule. */
-val TopbarHeight: Dp = 48.dp
+val TopbarHeight: Dp = 44.dp
 
 /** Compact expanded bar row, excluding the status-bar inset and including the bottom rule. */
-val WideTopbarHeight: Dp = 48.dp
+val WideTopbarHeight: Dp = 44.dp
 
 /** The topbar's link readout (`.connection-state`, topbar.tsx:36-39): its word and whether it spins. */
 enum class LinkReadout(val word: String) {
@@ -229,7 +229,6 @@ fun TetherTopbar(
             Modifier
                 .fillMaxWidth()
                 .height(if (wide) WideTopbarHeight else TopbarHeight)
-                .padding(bottom = 1.dp) // the border-bottom
                 // `padding-inline: 1.5rem`; narrow `0.625rem`.
                 .padding(horizontal = if (wide) 24.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,

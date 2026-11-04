@@ -185,8 +185,8 @@ data class WorkspaceHeaderActions(
  * pin key returns with its word and End session prints its legend (globals.css 4019-4021,
  * 4117-4121, 11882). The title is 1.05rem / 720 / -0.022em (11157 + 11859); the bar keeps
  * `space-sm space-lg` (11858 outranks 11156 by source order) and adds the nameplate's soft shade
- * into the bay (11142-11145; the phone override 11720 drops it). The ta-diaq compact geometry
- * keeps 2dp vertical padding around the 44dp action row, plus the 1dp bottom rule.
+ * into the bay (11142-11145; the phone override 11720 drops it). The ta-4l2e compact geometry
+ * paints the bottom rule inside the 44dp action row, with no generic vertical padding.
  *
  * Material: flat `--graphite`, `1px --line`, `padding: space-sm space-md` (studio.css 351, 450).
  */
@@ -219,7 +219,6 @@ fun WorkspaceHeader(
         expanded -> 28.dp
         else -> t.css.spaceMd
     }
-    val padV = 2.dp
     val freshness = LocalShellFreshness.current
     val sync = freshness.syncStates[session.id]
     Column(
@@ -228,10 +227,8 @@ fun WorkspaceHeader(
             .zIndex(1f) // `position: relative; z-index: 1` — the shade paints over the stage
             .cssSurface(RectangleShape, t.graphite, shadows = shadows)
             .drawBehind { drawRect(edge, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx())) }
-            .padding(bottom = 1.dp)
             // The side padding is the row's own (below): the action cluster may run over it, as on the web,
             // and a touch there must still reach the cluster.
-            .padding(vertical = padV)
             .testTag(ShellTags.WorkspaceHeader),
     ) {
     // `.workspace-header` is a flex COLUMN: under Studio's 5rem min-height the row sits at the top.
@@ -297,17 +294,21 @@ fun WorkspaceHeader(
                 // prints "End session" at 0.66rem (4117-4121, 11196). ta-coik.22: only that, as on the web
                 // (workspace-header.tsx 90fbb9f :133): live on a saved or catching-up copy too.
                 val endable = session.status != "exited"
+                val endLabel = if (expanded && step < HeaderFit.STEP_END_WORDLESS) "End session" else null
                 TetherKey(
                     onClick = { if (endable) actions.onEndSession() },
                     classes = KeyClasses.EndSession,
-                    label = if (expanded && step < HeaderFit.STEP_END_WORDLESS) "End session" else null,
+                    label = endLabel,
                     icon = TetherIcons.CircleStop,
-                    iconSize = 16.dp,
-                    fontSize = if (expanded && step < HeaderFit.STEP_END_WORDLESS) 10.56.sp else TextUnit.Unspecified,
+                    iconSize = 14.dp,
+                    fontSize = if (endLabel != null) 10.56.sp else TextUnit.Unspecified,
                     contentDescription = "End session",
                     enabled = endable,
-                    minHeight = 44.dp,
-                    modifier = Modifier.testTag(ShellTags.EndSessionKey),
+                    minHeight = 28.dp,
+                    contentPadding = if (endLabel != null) 10.dp else 0.dp,
+                    contentArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                    modifier = (if (endLabel == null) Modifier.width(36.dp) else Modifier)
+                        .testTag(ShellTags.EndSessionKey),
                 )
             }
         },

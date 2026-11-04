@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -19,6 +22,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -26,10 +31,12 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.tether.app.protocol.model.AgentSession
+import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
 import org.junit.Assert.assertEquals
@@ -68,6 +75,7 @@ class WorkspaceHeaderRowTest(
 
     private val events = mutableListOf<String>()
     private val session: AgentSession = ExpandedFixtures.idle.copy(name = "Approval fixture", status = status)
+    private var dialOpaqueInsetPx = Float.NaN
 
     @Composable
     private fun Harness(width: Int, tag: String, withBadge: Boolean) {
@@ -103,6 +111,9 @@ class WorkspaceHeaderRowTest(
         rule.setContent {
             TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
+                    dialOpaqueInsetPx = with(LocalDensity.current) {
+                        (LocalTetherTokens.current.radiusKey - 2.dp).toPx()
+                    }
                     LiveUnlessProvided(session) {
                         Box(Modifier.fillMaxSize()) {
                             Column(Modifier.align(Alignment.TopStart)) {
@@ -149,8 +160,8 @@ class WorkspaceHeaderRowTest(
         val dialLeft = here(ShellTags.Dial).left
         assertEquals("cluster left = the web's max(316, contentR - clusterW)", expectedClusterLeft(), dialLeft, 0.5f)
         if (fontScale == 1.0f) {
-            val web = mapOf(768 to 327f, 772 to 331f, 780 to 339f, 800 to 359f).getValue(w)
-            assertEquals("L_web at 1.0x", web, dialLeft, 0.5f)
+            val compactClusterLeft = mapOf(768 to 343f, 772 to 347f, 780 to 355f, 800 to 375f).getValue(w)
+            assertEquals("compact cluster left at 1.0x", compactClusterLeft, dialLeft, 0.5f)
         }
         val strip = dialLeft - key.left
         assertTrue("visible strip $strip >= 9.5", strip >= 9.5f)
@@ -202,22 +213,38 @@ class WorkspaceHeaderRowTest(
     @Test fun theDialsPlateCoversThePencilWhereTheyOverlap() {
         show()
         val key = here(ShellTags.RenameKey)
-        val dialLeft = here(ShellTags.Dial).left
+        val dial = here(ShellTags.Dial)
+        val dialLeft = dial.left
         if (dialLeft >= key.right - 2f) return // no overlap at this width/scale
         val a = rule.onAllNodesWithTag("harness")[0].captureToImage().toPixelMap()
         val b = rule.onAllNodesWithTag("reference")[0].captureToImage().toPixelMap()
         // The cluster has the same width and height in both headers, so the dial's pixels sit at the same offset
-        // from the cluster's left: where the pencil overlaps them, they must be the reference's (plate only).
-        val x0 = (dialLeft + 1f).toInt()
-        val x1 = (key.right - 1f).toInt()
+        // from the cluster's left: where the pencil overlaps the rounded plate's guaranteed opaque interior,
+        // they must be the reference's (plate only). The inset is the production shape's actual theme radius.
+        val opaqueDial = Rect(
+            left = dial.left + dialOpaqueInsetPx,
+            top = dial.top + dialOpaqueInsetPx,
+            right = dial.right - dialOpaqueInsetPx,
+            bottom = dial.bottom - dialOpaqueInsetPx,
+        )
+        val overlap = key.intersect(opaqueDial)
+        val x0 = kotlin.math.ceil(overlap.left).toInt()
+        val x1 = kotlin.math.floor(overlap.right).toInt()
+        val y0 = kotlin.math.ceil(overlap.top).toInt()
+        val y1 = kotlin.math.floor(overlap.bottom).toInt()
+        assertTrue(
+            "opaque dial interior must retain pixel coverage: key=$key dial=$dial inset=$dialOpaqueInsetPx overlap=$overlap",
+            x0 < x1 && y0 < y1,
+        )
         val refDialLeft = ref(ShellTags.Dial).left
-        val y0 = key.top.toInt()
-        val y1 = key.bottom.toInt()
         var differing = 0
-        for (x in x0..x1) for (y in y0..y1) {
+        var compared = 0
+        for (x in x0 until x1) for (y in y0 until y1) {
+            compared++
             if (a[x, y] != b[(x - dialLeft + refDialLeft).toInt(), y]) differing++
         }
-        assertEquals("pixels where the pencil shows through the dial", 0, differing)
+        assertTrue("opaque dial comparison must sample pixels", compared > 0)
+        assertEquals("pixels where the pencil shows through the opaque dial interior", 0, differing)
     }
 
     companion object {
@@ -265,7 +292,7 @@ class WorkspaceHeaderFoldableRowTest {
     }
 }
 
-/** ta-diaq: the compact base row is 44dp controls + 2dp above + 2dp below + the 1dp rule. */
+/** ta-4l2e: the compact base row is exactly the 44dp action floor, with its 1dp rule painted inside. */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w1400dp-h900dp-mdpi")
 class WorkspaceHeaderCompactGeometryTest(
@@ -276,8 +303,9 @@ class WorkspaceHeaderCompactGeometryTest(
 ) {
     @get:Rule val rule = createComposeRule()
 
-    @Test fun ordinaryHeaderBaseIs49DpWithoutClippingItsIdentity() {
-        val session = ExpandedFixtures.idle.copy(name = "Approval fixture", status = "waiting")
+    @Test fun ordinaryHeaderBaseIs44DpWithACompactEndSessionFaceAndNoClippedIdentity() {
+        var session by mutableStateOf(ExpandedFixtures.idle.copy(name = "Approval fixture", status = "waiting"))
+        var endSessionClicks = 0
         rule.setContent {
             TetherTheme(choiceFor(TetherSkin.StudioDark)) {
                 CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
@@ -295,7 +323,16 @@ class WorkspaceHeaderCompactGeometryTest(
                                     linksOpen = false,
                                     onToggleTelemetry = {},
                                     onToggleLinks = {},
-                                    actions = WorkspaceHeaderActions({}, {}, {}, {}, {}),
+                                    actions = WorkspaceHeaderActions(
+                                        onRename = {},
+                                        onEndSession = {
+                                            endSessionClicks += 1
+                                            session = session.copy(status = "exited")
+                                        },
+                                        onTogglePinned = {},
+                                        onCopyPath = {},
+                                        onCopyTetherId = {},
+                                    ),
                                     gauge = expandedSlots().gauge,
                                     expanded = expanded,
                                     gaugeIsHandle = true,
@@ -311,9 +348,33 @@ class WorkspaceHeaderCompactGeometryTest(
         val header = rule.onNodeWithTag("workspace-header-outer-geometry").fetchSemanticsNode().boundsInRoot
         val title = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)).fetchSemanticsNodes().single().boundsInRoot
         val pill = rule.onAllNodesWithTag(ShellTags.StatusPill)[0].fetchSemanticsNode().boundsInRoot
-        assertEquals("$viewport dp @${fontScale}x header", 49f, header.height, 0.5f)
+        val end = rule.onNodeWithTag(ShellTags.EndSessionKey)
+            .assertExists()
+            .assertContentDescriptionEquals("End session")
+        val endNode = end.fetchSemanticsNode()
+        val endFace = endNode.boundsInRoot
+        assertEquals("$viewport dp @${fontScale}x header", 44f, header.height, 0.5f)
+        assertEquals("End session painted height", 28f, endFace.height, 0.5f)
+        if (expanded) {
+            assertTrue("labelled End session keeps intrinsic width: ${endFace.width}", endFace.width > 36f)
+        } else {
+            assertEquals("icon-only End session painted width", 36f, endFace.width, 0.5f)
+        }
+        assertTrue(
+            "End session touch remains at least 44dp: ${endNode.touchBoundsInRoot}",
+            endNode.touchBoundsInRoot.width >= 43.5f && endNode.touchBoundsInRoot.height >= 43.5f,
+        )
         assertTrue("title stays vertically inside $header: $title", title.top >= header.top && title.bottom <= header.bottom)
         assertTrue("status stays vertically inside $header: $pill", pill.top >= header.top && pill.bottom <= header.bottom)
+
+        end.performClick()
+        rule.waitForIdle()
+        assertEquals("one End session click invokes the callback once", 1, endSessionClicks)
+        val exitedEnd = rule.onNodeWithTag(ShellTags.EndSessionKey)
+            .assertExists()
+            .assertContentDescriptionEquals("End session")
+            .assertIsNotEnabled()
+        assertEquals("exited End session painted height", 28f, exitedEnd.fetchSemanticsNode().boundsInRoot.height, 0.5f)
     }
 
     companion object {
