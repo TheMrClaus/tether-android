@@ -239,7 +239,8 @@ class PhoneShellBehaviourTest {
 
     @Test fun talkBackNamesAndStatesNeverRelyOnColour() {
         show(PhoneShellState(), warnings = 3)
-        rule.onNodeWithContentDescription("Tether — Overview").assertExists()
+        rule.onNodeWithContentDescription("Workspace workspace — Overview").performClick()
+        assertEquals(listOf("nav:overview"), events)
         // The warning count is in the trigger's name, never only in its red badge.
         rule.onNodeWithContentDescription("Menu: navigation and tools, 3 unseen warnings").performClick()
         val log = rule.onNodeWithTag(ShellTags.LogKey).fetchSemanticsNode()

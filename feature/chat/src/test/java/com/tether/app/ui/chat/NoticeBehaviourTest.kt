@@ -1,16 +1,27 @@
 package com.tether.app.ui.chat
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertWidthIsEqualTo
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -18,6 +29,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasSetTextAction
@@ -27,6 +39,7 @@ import com.tether.app.client.NoticeResult
 import com.tether.app.client.SessionControl
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.ui.theme.TetherSkin
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -98,6 +111,39 @@ class NoticeBehaviourTest {
             .performClick()
         settle()
         assertEquals(listOf("ext-1", "ext-1"), rec.dismissed)
+    }
+
+    @Test
+    fun the48DpDismissTargetOwnsItsCentreAndEveryCornerWithoutReachingItsNeighbour() {
+        var adjacentTaps = 0
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) {
+                CompositionLocalProvider(LocalNoticeActions provides actions) {
+                    Row {
+                        NoticeDismissButton("ext-1", "Dismiss external-advancement notice")
+                        Box(Modifier.size(48.dp).clickable { adjacentTaps++ }.testTag("adjacent-action"))
+                    }
+                }
+            }
+        }
+        val dismiss = rule.onNodeWithTag("notice-dismiss")
+            .assertWidthIsEqualTo(48.dp)
+            .assertHeightIsEqualTo(48.dp)
+        val size = dismiss.fetchSemanticsNode().size
+        val points = listOf(
+            Offset(size.width / 2f, size.height / 2f),
+            Offset(1f, 1f),
+            Offset(size.width - 1f, 1f),
+            Offset(1f, size.height - 1f),
+            Offset(size.width - 1f, size.height - 1f),
+        )
+        points.forEachIndexed { index, point ->
+            dismiss.performTouchInput { click(point) }
+            rule.waitForIdle()
+            assertEquals("tap ${index + 1} dismisses exactly once", index + 1, rec.dismissed.size)
+            assertEquals(List(index + 1) { "ext-1" }, rec.dismissed)
+            assertEquals("dismiss target never activates the adjacent action", 0, adjacentTaps)
+        }
     }
 
     @Test

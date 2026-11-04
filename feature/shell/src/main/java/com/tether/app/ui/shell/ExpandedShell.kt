@@ -87,6 +87,8 @@ fun ExpandedShell(
     slots: PhoneShellSlots,
     modifier: Modifier = Modifier,
     link: LinkReadout = LinkReadout.Connected,
+    /** The sidebar-resolved workspace name shown by the Overview action. */
+    workspaceLabel: String = "Workspace",
     unseenWarnings: Int = 0,
     copiedPath: Boolean = false,
     copiedTetherId: Boolean = false,
@@ -131,6 +133,7 @@ fun ExpandedShell(
             current = current,
             link = link,
             wide = true,
+            workspaceLabel = workspaceLabel,
             drawerKey = false,
             menuOpen = state.menuOpen,
             viewportWidth = viewport,

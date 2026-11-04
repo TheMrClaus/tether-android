@@ -128,7 +128,7 @@ class PhoneShellSlots(
  * column, the session list as an off-canvas drawer, and — once a session is open — the workspace
  * header, the collapsible telemetry panel and the chat stage stacked in that column.
  *
- * `.dashboard-shell` rows: `calc(3.5rem + safe-top) minmax(0, 1fr)`; `.workspace` is `--mineral`
+ * The compact shell rows are the 48dp topbar plus safe-top, then `minmax(0, 1fr)`; `.workspace` is `--mineral`
  * on a phone (globals.css 11721; Studio `--graphite`, studio.css 350). While the telemetry panel
  * is open the chat stage stays composed (its scroll and composer state survive, like the web's
  * `display: none` stage) but is neither placed, drawn, touchable nor announced.
@@ -155,6 +155,8 @@ fun PhoneShell(
     current: TopBarDestination? = TopBarDestination.Sessions,
     /** T15.4: the link state the bar prints (on every width since the redesign). */
     link: LinkReadout = LinkReadout.Connected,
+    /** The sidebar-resolved workspace name shown by the Overview action. */
+    workspaceLabel: String = "Workspace",
     /** T15.4: the Sessions rail exists (dashboard.tsx `showRail`): false on the Overview, so no drawer. */
     showRail: Boolean = true,
 ) {
@@ -174,6 +176,7 @@ fun PhoneShell(
         current = current,
         link = link,
         wide = false,
+        workspaceLabel = workspaceLabel,
         drawerKey = showRail,
         menuOpen = state.menuOpen,
         viewportWidth = windowWidth,

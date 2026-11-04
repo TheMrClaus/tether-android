@@ -29,9 +29,9 @@ import kotlin.math.roundToInt
  * Overview with three unseen warnings and no session (Files unavailable, with its reason), the
  * link reconnecting. Scheduled, Usage and Accounts are shown unavailable (T9.3 / T9.2).
  */
-enum class TopbarShot(val id: String, val current: TopBarDestination, val menuOpen: Boolean, val link: LinkReadout, val warnings: Int, val session: Boolean) {
-    Bar("bar", TopBarDestination.Sessions, false, LinkReadout.Connected, 0, true),
-    Menu("menu", TopBarDestination.Overview, true, LinkReadout.Reconnecting, 3, false),
+enum class TopbarShot(val id: String, val current: TopBarDestination, val menuOpen: Boolean, val link: LinkReadout, val warnings: Int, val session: Boolean, val workspace: String) {
+    Bar("bar", TopBarDestination.Sessions, false, LinkReadout.Connected, 0, true, "tether-android"),
+    Menu("menu", TopBarDestination.Overview, true, LinkReadout.Reconnecting, 3, false, "an-extremely-long-workspace-name"),
 }
 
 private val StudioSkins = listOf(TetherSkin.Studio, TetherSkin.StudioDark)
@@ -49,6 +49,7 @@ fun ComposeContentTestRule.snapTopbar(shot: TopbarShot, skin: TetherSkin, wide: 
                         current = shot.current,
                         link = shot.link,
                         wide = wide,
+                        workspaceLabel = shot.workspace,
                         drawerKey = !wide && shot.current == TopBarDestination.Sessions,
                         menuOpen = shot.menuOpen,
                         viewportWidth = maxWidth.value.roundToInt(),

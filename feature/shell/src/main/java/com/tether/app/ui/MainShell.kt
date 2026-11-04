@@ -93,6 +93,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import com.tether.app.protocol.model.SessionView
 import com.tether.app.protocol.model.TextOnlyDelta
+import com.tether.app.protocol.helpers.Format
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.ui.util.rememberLatched
 import com.tether.app.ui.components.ProvideWindowWidthDp
@@ -157,6 +158,15 @@ internal fun overviewChoiceOf(filters: com.tether.app.ui.prefs.OverviewFilters) 
 internal fun overviewFiltersOf(choice: com.tether.app.ui.overview.OverviewChoice) =
     com.tether.app.ui.prefs.OverviewFilters(choice.workspace, choice.provider, choice.status.key)
 
+/** The topbar follows the sidebar's exact current-workspace precedence, then shows its project name. */
+internal fun resolvedWorkspaceLabel(
+    picked: String?,
+    preferences: com.tether.app.ui.prefs.TetherPreferences,
+    workspaceRoot: String?,
+): String = com.tether.app.ui.sidebar.SidebarController.resolveCurrentWorkspace(picked, preferences, workspaceRoot)
+    ?.let(Format::projectName)
+    ?: "Workspace"
+
 /** How long a copy control reads "Copied" (dashboard.tsx:1202, 1221, 1233). */
 private const val CopiedFeedbackMs = 1_500L
 
@@ -214,6 +224,10 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     val activeId by vm.activeId.collectAsStateWithLifecycle()
     val pendingSessionId by vm.pendingSessionId.collectAsStateWithLifecycle()
     val workspaceRoot by vm.client.workspaceRoot.collectAsStateWithLifecycle()
+    val pickedWorkspace by vm.currentWorkspace.collectAsStateWithLifecycle()
+    val workspacePreferences by remember(prefs, vm.client) { prefs.preferencesFor(vm.client.serverUrl) }
+        .collectAsStateWithLifecycle(initialValue = com.tether.app.ui.prefs.TetherPreferences.Default)
+    val workspaceLabel = resolvedWorkspaceLabel(pickedWorkspace, workspacePreferences, workspaceRoot)
     val toast by vm.toast.collectAsStateWithLifecycle()
     val unseenWarnings by vm.unseenWarnings.collectAsStateWithLifecycle()
     // ta-abm (dashboard.tsx:345): Send pressed, the create in flight — the sheet gives way to the
@@ -797,6 +811,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                 header = headerActions,
                 slots = slots,
                 link = link,
+                workspaceLabel = workspaceLabel,
                 unseenWarnings = unseenWarnings,
                 copiedPath = copiedPath,
                 copiedTetherId = copiedTetherId,
@@ -821,6 +836,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                 slots = slots,
                 current = current,
                 link = link,
+                workspaceLabel = workspaceLabel,
                 showRail = showRail,
             )
         }

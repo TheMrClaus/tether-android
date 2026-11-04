@@ -332,3 +332,44 @@ class HeaderYieldRailTest {
         rule.block()
     }
 }
+
+/** ta-diaq: the compact phone row keeps identity and every original action reachable at 1.0x/1.3x. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w1400dp-h900dp-mdpi")
+@OptIn(ExperimentalTestApi::class)
+class HeaderPhoneCompactReachTest(private val fontScale: Float) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun identityAndActionsRemainSeparateAndReachable() {
+        val session = ExpandedFixtures.idle.copy(name = "Approval fixture", status = "waiting")
+        val host = ReachHost(session, 412, 0f, expanded = false)
+        rule.mount(fontScale, session, host, ReachHost(session, 412, 0f, expanded = false))
+
+        val gauge = rule.onAllNodes(gaugeMatcher).fetchSemanticsNodes().first { !inReference(it) }
+        val clusterLeft = gauge.boundsInRoot.left
+        val title = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)).fetchSemanticsNodes().first { !inReference(it) }.boundsInRoot
+        val pill = rule.boundsOf(ShellTags.StatusPill)
+        assertTrue("title remains visible at ${fontScale}x: $title", title.width > 0f)
+        assertTrue("title does not overlap actions: $title vs $clusterLeft", title.right <= clusterLeft + 0.5f)
+        assertTrue("status does not overlap actions: $pill vs $clusterLeft", pill.right <= clusterLeft + 0.5f)
+
+        val targets = listOf(gauge, rule.nodes(ShellTags.RenameKey).first(), rule.nodes(ShellTags.LinksKey).first(), rule.nodes(ShellTags.EndSessionKey).first())
+        targets.forEach { node ->
+            val touch = node.touchBoundsInRoot
+            assertTrue("target >= 44dp: ${touch.width} x ${touch.height}", touch.width >= 43.5f && touch.height >= 43.5f)
+        }
+
+        rule.tapCentre(gauge.boundsInRoot)
+        rule.tapCentre(rule.boundsOf(ShellTags.RenameKey))
+        rule.tapCentre(rule.boundsOf(ShellTags.EndSessionKey))
+        rule.tapCentre(rule.boundsOf(ShellTags.LinksKey))
+        val pin = rule.onAllNodesWithContentDescription("Pin session").fetchSemanticsNodes().first { !inReference(it) }
+        rule.tapCentre(pin.boundsInRoot)
+        assertEquals(listOf("telemetry", "rename", "end", "links", "pin"), host.events)
+    }
+
+    companion object {
+        @JvmStatic @ParameterizedRobolectricTestRunner.Parameters(name = "x{0}")
+        fun params(): List<Array<Any>> = listOf(arrayOf(1f), arrayOf(1.3f))
+    }
+}

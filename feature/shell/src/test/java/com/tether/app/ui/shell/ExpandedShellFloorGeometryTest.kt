@@ -11,8 +11,8 @@ import org.robolectric.annotation.Config
 
 /**
  * ta-09ca (W20): the Expanded shell at the web's 48rem floor, 768 x 1024, against the web at tether 29537e0 (CSS px, 1 dp
- * each; the numbers are the L1 spec section 2 captures of 768x1024): topbar 64, the rail 272 static, its resize handle 16
- * wide centred on the rail edge (x 264-280), the chat column 496, the workspace header 80; collapsed, the column is the
+ * each; compact-header spec ta-diaq): topbar 48, the rail 272 static, its resize handle 16
+ * wide centred on the rail edge (x 264-280), the chat column 496, the workspace header 49; collapsed, the column is the
  * whole 768 and the dock is 44x44, 12 from the left and the bottom. The composer (207.58, pill row 36) and the timeline
  * rail on the right are the chat module's, in MidBandComposerRowsTest and MidBandEdgesTest at 768.
  */
@@ -25,9 +25,9 @@ class ExpandedShellFloorGeometryTest : ExpandedBehaviourBase() {
     @Test fun at768TheShellIsTheDesktopGridWithTheWebsColumns() {
         assertEquals(TetherLayoutClass.Expanded, shellLayoutFor(768))
         show()
-        assertEquals("topbar", 64f, bounds(ShellTags.Topbar).height, 1f)
+        assertEquals("topbar", 48f, bounds(ShellTags.Topbar).height, 1f)
         // The header's tag sits inside its own padding, so its height is measured by where the stage below it begins.
-        assertEquals("workspace header (stage top - topbar)", 80f, bounds(ShellTags.Stage).top - bounds(ShellTags.Topbar).height, 1f)
+        assertEquals("workspace header (stage top - topbar)", 49f, bounds(ShellTags.Stage).top - bounds(ShellTags.Topbar).height, 1f)
         assertEquals("rail", 272f, widthDp(ShellTags.Sidebar), 1f)
         assertEquals("chat column (768 - 272)", 496f, widthDp(ShellTags.Workspace), 1f)
         val handle = bounds(ShellTags.RailHandle)

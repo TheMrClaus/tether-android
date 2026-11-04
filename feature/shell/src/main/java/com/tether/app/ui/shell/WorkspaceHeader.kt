@@ -185,8 +185,8 @@ data class WorkspaceHeaderActions(
  * pin key returns with its word and End session prints its legend (globals.css 4019-4021,
  * 4117-4121, 11882). The title is 1.05rem / 720 / -0.022em (11157 + 11859); the bar keeps
  * `space-sm space-lg` (11858 outranks 11156 by source order) and adds the nameplate's soft shade
- * into the bay (11142-11145; the phone override 11720 drops it). Studio: 1rem × 1.75rem padding,
- * 5rem tall, 1.12rem / 740 title (studio.css 351-352).
+ * into the bay (11142-11145; the phone override 11720 drops it). The ta-diaq compact geometry
+ * keeps 2dp vertical padding around the 44dp action row, plus the 1dp bottom rule.
  *
  * Material: flat `--graphite`, `1px --line`, `padding: space-sm space-md` (studio.css 351, 450).
  */
@@ -219,14 +219,13 @@ fun WorkspaceHeader(
         expanded -> 28.dp
         else -> t.css.spaceMd
     }
-    val padV = if (expanded) 16.dp else t.css.spaceSm
+    val padV = 2.dp
     val freshness = LocalShellFreshness.current
     val sync = freshness.syncStates[session.id]
     Column(
         modifier
             .fillMaxWidth()
             .zIndex(1f) // `position: relative; z-index: 1` — the shade paints over the stage
-            .then(if (expanded) Modifier.heightIn(min = 80.dp) else Modifier)
             .cssSurface(RectangleShape, t.graphite, shadows = shadows)
             .drawBehind { drawRect(edge, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx())) }
             .padding(bottom = 1.dp)

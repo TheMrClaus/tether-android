@@ -157,8 +157,8 @@ internal fun limitClockTime(epochMs: Long, locale: Locale = Locale.getDefault(),
 }
 
 /**
- * `NoticeDismissButton` (`.chat-continuation-cancel.notice-dismiss`): the 13px X in a 44dp square
- * (the coarse-pointer hit area), `title` + `aria-label` = [label]. One tap sends one dismissal; as on
+ * `NoticeDismissButton` (`.chat-continuation-cancel.notice-dismiss`): the 16dp X in a 48dp square
+ * touch target, `title` + `aria-label` = [label]. One tap sends one dismissal; as on
  * the web (notice-dismiss-button.tsx 90fbb9f :12-20, ta-coik.22) there is no latch: the X stays live
  * until the notice folds away, and another tap sends again.
  */
@@ -185,7 +185,7 @@ private fun NoticeDismissButtonBody(dismissKey: String, label: String, modifier:
         Box(
             modifier
                 .then(guard)
-                .size(TetherDimens.touchTargetDp)
+                .size(48.dp)
                 .clickable(role = Role.Button, onClickLabel = label, onClick = tap)
                 .semantics(mergeDescendants = true) {
                     contentDescription = label
@@ -194,7 +194,7 @@ private fun NoticeDismissButtonBody(dismissKey: String, label: String, modifier:
                 .testTag("notice-dismiss"),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp))
         }
     }
 }
@@ -271,7 +271,7 @@ internal fun CompactionRow(view: CompactionView, modifier: Modifier = Modifier) 
 
 /**
  * `.notice`: a row on `--mineral-deep`, 1px [edge], `--radius-sm`, padded `space-sm space-md`,
- * `--chat-card-width` (100% on a phone). The X row sits at the top right; its 44dp square is
+ * `--chat-card-width` (100% on a phone). The X row sits at the top right; its 48dp square is
  * pulled into the padding so the box keeps the web's height.
  */
 @Composable

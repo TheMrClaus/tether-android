@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -70,6 +69,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -86,12 +86,13 @@ import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherTokens
+import com.tether.app.ui.text.proseDirection
 
-/** topbar.module.css `.bar` below 48rem: `min-height: 3.5rem` (the status-bar inset on top). */
-val TopbarHeight: Dp = 56.dp
+/** Compact phone bar row, excluding the status-bar inset and including the bottom rule. */
+val TopbarHeight: Dp = 48.dp
 
-/** topbar.module.css `.bar`: `min-height: 4rem` from 48rem (the expanded layout). */
-val WideTopbarHeight: Dp = 64.dp
+/** Compact expanded bar row, excluding the status-bar inset and including the bottom rule. */
+val WideTopbarHeight: Dp = 48.dp
 
 /** The topbar's link readout (`.connection-state`, topbar.tsx:36-39): its word and whether it spins. */
 enum class LinkReadout(val word: String) {
@@ -154,6 +155,7 @@ data class TopbarState(
     val current: TopBarDestination?,
     val link: LinkReadout,
     val wide: Boolean,
+    val workspaceLabel: String = "Workspace",
     val drawerKey: Boolean = !wide,
     val menuOpen: Boolean = false,
     val viewportWidth: Int = if (wide) 1280 else 412,
@@ -235,7 +237,11 @@ fun TetherTopbar(
             horizontalArrangement = Arrangement.spacedBy(if (wide) 16.dp else 6.4.dp),
         ) {
             // `.drawerButton { margin-right: -0.25rem }`: it sits 0.15rem from the brand.
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.4.dp)) {
+            Row(
+                modifier = if (wide) Modifier else Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.4.dp),
+            ) {
                 if (state.drawerKey) {
                     TopbarIconKey(
                         onClick = actions.onOpenDrawer,
@@ -247,6 +253,7 @@ fun TetherTopbar(
                 }
                 BrandLink(
                     wide = wide,
+                    workspaceLabel = state.workspaceLabel,
                     onClick = actions.onNavigate?.let { navigate -> { navigate(DashboardView.Overview) } },
                     // `.brand { margin-right: 2.5rem }` (1rem at ≤ 74rem, 0 narrow); the Row's gap is added.
                     modifier = Modifier.padding(end = if (!wide) 0.dp else if (tight) 16.dp else 40.dp),
@@ -276,8 +283,6 @@ fun TetherTopbar(
                         modifier = if (probe) Modifier.clearAndSetSemantics { } else Modifier.testTag(tag),
                     )
                 }
-            } else {
-                Spacer(Modifier.weight(1f))
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -435,27 +440,39 @@ fun TopbarMenu(
 // ── Bar parts ────────────────────────────────────────────────────────────────
 
 /**
- * `.brand` as the Overview link (aria-label "Tether — Overview"): the Studio mark and lowercase
- * wordmark at 1.24rem (1.1rem with a 1.6rem mark narrow), `--white`, a 2.75rem target.
+ * The workspace label as the Overview link. It keeps the incumbent wordmark typography and focus
+ * treatment, but replaces the mark and wordmark with the resolved workspace name.
  */
 @Composable
-private fun BrandLink(wide: Boolean, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
+private fun BrandLink(wide: Boolean, workspaceLabel: String, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     Box(
         modifier
             .heightIn(min = 44.dp)
+            .widthIn(min = 44.dp, max = if (wide) 180.dp else 136.dp)
             .testTag(ShellTags.Brand)
             .clickable(interaction, indication = null, enabled = onClick != null, role = Role.Button) { onClick?.invoke() }
             .clearAndSetSemantics {
-                contentDescription = "Tether — Overview"
+                contentDescription = "$workspaceLabel workspace — Overview"
                 role = Role.Button
             }
             .focusRing(focused, RoundedCornerShape(t.radiusSm), t.violet),
         contentAlignment = Alignment.Center,
     ) {
-        TopbarBrand(studioDesktop = wide)
+        Text(
+            workspaceLabel,
+            color = t.white,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            style = when {
+                wide -> cssText(type.ui, 1.24f, 770, trackingEm = -0.04f)
+                else -> cssText(type.ui, 1.1f, 770, trackingEm = -0.04f)
+            }.copy(textDirection = proseDirection),
+        )
     }
 }
 

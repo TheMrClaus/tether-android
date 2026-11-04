@@ -24,6 +24,7 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Density
@@ -261,5 +262,67 @@ class WorkspaceHeaderFoldableRowTest {
         val dial = rule.onAllNodesWithTag(ShellTags.Dial)[0].fetchSemanticsNode().boundsInRoot
         assertTrue("pill ${pill.right} whole, left of the dial ${dial.left}", pill.right <= dial.left)
         println("W21-RECORD w=900 title=${title.width} pill=${pill.left}-${pill.right} dial=${dial.left}")
+    }
+}
+
+/** ta-diaq: the compact base row is 44dp controls + 2dp above + 2dp below + the 1dp rule. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w1400dp-h900dp-mdpi")
+class WorkspaceHeaderCompactGeometryTest(
+    private val viewport: Int,
+    private val rail: Int,
+    private val expanded: Boolean,
+    private val fontScale: Float,
+) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun ordinaryHeaderBaseIs49DpWithoutClippingItsIdentity() {
+        val session = ExpandedFixtures.idle.copy(name = "Approval fixture", status = "waiting")
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.StudioDark)) {
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
+                    LiveUnlessProvided(session) {
+                        Row(Modifier.requiredSize(viewport.dp, 120.dp)) {
+                            if (rail > 0) Spacer(Modifier.width(rail.dp))
+                            Box(
+                                Modifier
+                                    .width((viewport - rail).dp)
+                                    .testTag("workspace-header-outer-geometry"),
+                            ) {
+                                WorkspaceHeader(
+                                    session = session,
+                                    telemetryOpen = false,
+                                    linksOpen = false,
+                                    onToggleTelemetry = {},
+                                    onToggleLinks = {},
+                                    actions = WorkspaceHeaderActions({}, {}, {}, {}, {}),
+                                    gauge = expandedSlots().gauge,
+                                    expanded = expanded,
+                                    gaugeIsHandle = true,
+                                    dial = if (expanded) expandedSlots().dial else null,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val header = rule.onNodeWithTag("workspace-header-outer-geometry").fetchSemanticsNode().boundsInRoot
+        val title = rule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)).fetchSemanticsNodes().single().boundsInRoot
+        val pill = rule.onAllNodesWithTag(ShellTags.StatusPill)[0].fetchSemanticsNode().boundsInRoot
+        assertEquals("$viewport dp @${fontScale}x header", 49f, header.height, 0.5f)
+        assertTrue("title stays vertically inside $header: $title", title.top >= header.top && title.bottom <= header.bottom)
+        assertTrue("status stays vertically inside $header: $pill", pill.top >= header.top && pill.bottom <= header.bottom)
+    }
+
+    companion object {
+        @JvmStatic @ParameterizedRobolectricTestRunner.Parameters(name = "w{0} rail{1} expanded={2} x{3}")
+        fun params(): List<Array<Any>> = listOf(
+            arrayOf(412, 0, false, 1f),
+            arrayOf(412, 0, false, 1.3f),
+            arrayOf(780, 272, true, 1f),
+            arrayOf(1280, 272, true, 1f),
+        )
     }
 }
