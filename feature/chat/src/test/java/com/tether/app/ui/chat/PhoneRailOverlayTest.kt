@@ -5,9 +5,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import com.tether.app.client.ConsentResult
@@ -59,6 +61,47 @@ class PhoneRailOverlayTest {
     private fun card() = rule.onNodeWithTag("approval-card").fetchSemanticsNode().boundsInRoot
     private fun rail() = rule.onNodeWithTag(TIMELINE_TAG).fetchSemanticsNode().boundsInRoot
 
+    private data class NoticeGeometry(
+        val well: androidx.compose.ui.geometry.Rect,
+        val card: androidx.compose.ui.geometry.Rect,
+        val dismiss: androidx.compose.ui.geometry.Rect,
+        val rail: androidx.compose.ui.geometry.Rect,
+    )
+
+    private fun showNoticeGeometry(): NoticeGeometry {
+        val state = LazyListState()
+        val recorder = NoticeFixtures.Recorder()
+        val fixture = NoticeDismissTimelineRegressionFixtures.stackedNotices
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark, wellHeight = 900.dp) {
+                ChatTranscript(
+                    projection = fixture.projection,
+                    tree = fixture.tree,
+                    showThinking = false,
+                    onFetchTurns = { _, _ -> },
+                    zone = ChatFixtures.zone,
+                    richCodex = true,
+                    notices = recorder.actions(),
+                    listState = state,
+                )
+            }
+        }
+        rule.waitForIdle()
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
+        rule.waitForIdle()
+        val last = rule.runOnIdle { state.layoutInfo.totalItemsCount - 1 }
+        rule.onNodeWithTag("chat-transcript").performScrollToIndex(last)
+        rule.waitForIdle()
+        val cards = rule.onAllNodesWithTag("provider-notice").fetchSemanticsNodes()
+        val dismisses = rule.onAllNodesWithContentDescription("Dismiss notice").fetchSemanticsNodes()
+        return NoticeGeometry(
+            well = well(),
+            card = cards.maxBy { it.boundsInRoot.top }.boundsInRoot,
+            dismiss = dismisses.maxBy { it.boundsInRoot.top }.boundsInRoot,
+            rail = rail(),
+        )
+    }
+
     /** Tap at [x] (root px) on the first read row's centre line. */
     private fun tapRow(x: Float) {
         val row = rule.onAllNodesWithTag("grant-read")[0].fetchSemanticsNode().boundsInRoot
@@ -90,6 +133,32 @@ class PhoneRailOverlayTest {
         // Left of the rail it is the row's own.
         tapRow(r.left - 20 * one)
         rule.onAllNodesWithTag("grant-read")[0].assertIsOff()
+    }
+
+    @Test fun noticeOutlineStillReachesTheRightPaddingWhileItsDismissTargetClearsTheRail() {
+        val g = showNoticeGeometry()
+        assertEquals(16f, dp(g.card.left - g.well.left), 0.5f)
+        assertEquals(dp(g.well.width) - 16f, dp(g.card.right - g.well.left), 0.5f)
+        assertEquals(53.6f, dp(g.rail.width), 0.5f)
+        assertEquals(4f + 38f, dp(g.card.right - g.dismiss.right), 0.75f)
+        assert(g.dismiss.right <= g.rail.left + 1f) { "notice dismiss ${g.dismiss} must end before rail ${g.rail}" }
+    }
+
+    @Test
+    @Config(qualifiers = "w800dp-h800dp-mdpi")
+    fun theMidBandUsesOnlyThe22DpRightDockClearance() {
+        val g = showNoticeGeometry()
+        assertEquals(53.6f, dp(g.rail.width), 0.5f)
+        assertEquals(4f + 22f, dp(g.card.right - g.dismiss.right), 0.75f)
+        assert(g.dismiss.right <= g.rail.left + 1f)
+    }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-mdpi")
+    fun aLeftDockedRailAddsNoNoticeActionClearance() {
+        val g = showNoticeGeometry()
+        assertEquals(44.8f, dp(g.rail.width), 0.5f)
+        assertEquals(4f, dp(g.card.right - g.dismiss.right), 0.75f)
     }
 
     @Test

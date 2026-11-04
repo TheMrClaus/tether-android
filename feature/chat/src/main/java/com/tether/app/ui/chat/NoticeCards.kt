@@ -23,6 +23,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -41,6 +43,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -124,6 +127,13 @@ class NoticeActions(
 val LocalNoticeActions = compositionLocalOf { NoticeActions.Unavailable }
 
 /**
+ * Extra non-interactive room reserved after a transcript notice action. The transcript supplies a
+ * value only when its right-docked timeline would otherwise own part of the action; every isolated
+ * caller and every timeline-off/left-docked/RTL row keeps its existing zero-clearance geometry.
+ */
+internal val LocalNoticeTrailingActionClearance = staticCompositionLocalOf { 0.dp }
+
+/**
  * ta-coik.23 r2: the client's NotLive now means only "drawn for another server"; the app's words for
  * that elsewhere (settings' NOT_SENT / NOT_SENT_OTHER).
  */
@@ -163,9 +173,22 @@ internal fun limitClockTime(epochMs: Long, locale: Locale = Locale.getDefault(),
  * until the notice folds away, and another tap sends again.
  */
 @Composable
+private fun TrailingActionSlot(targetSize: Dp, content: @Composable () -> Unit) {
+    val clearance = LocalNoticeTrailingActionClearance.current
+    Box(
+        Modifier.size(width = targetSize + clearance, height = targetSize),
+        contentAlignment = AbsoluteAlignment.CenterLeft,
+    ) {
+        content()
+    }
+}
+
+@Composable
 internal fun NoticeDismissButton(dismissKey: String, label: String, modifier: Modifier = Modifier) {
     // T6.7 r2: never part of a text selection, wherever it is drawn.
-    androidx.compose.foundation.text.selection.DisableSelection { NoticeDismissButtonBody(dismissKey, label, modifier) }
+    androidx.compose.foundation.text.selection.DisableSelection {
+        TrailingActionSlot(48.dp) { NoticeDismissButtonBody(dismissKey, label, modifier) }
+    }
 }
 
 @Composable
@@ -517,19 +540,21 @@ internal fun ScheduledResumeRow(view: RateLimitPromptView, modifier: Modifier = 
             color = t.muted,
             modifier = Modifier.alpha(0.8f).weight(1f, fill = false).semantics { liveRegion = LiveRegionMode.Polite },
         )
-        StaleTapGuard(identity) { guard ->
-            Box(
-                guard
-                    .size(TetherDimens.touchTargetDp)
-                    .clickable(role = Role.Button, onClickLabel = label, onClick = tap)
-                    .semantics(mergeDescendants = true) {
-                        contentDescription = label
-                        role = Role.Button
-                    }
-                    .testTag("rate-limit-cancel"),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+        TrailingActionSlot(TetherDimens.touchTargetDp) {
+            StaleTapGuard(identity) { guard ->
+                Box(
+                    guard
+                        .size(TetherDimens.touchTargetDp)
+                        .clickable(role = Role.Button, onClickLabel = label, onClick = tap)
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = label
+                            role = Role.Button
+                        }
+                        .testTag("rate-limit-cancel"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(13.dp))
+                }
             }
         }
     }

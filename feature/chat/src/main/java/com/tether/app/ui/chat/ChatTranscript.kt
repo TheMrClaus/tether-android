@@ -53,6 +53,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
@@ -402,6 +403,14 @@ private fun ChatTranscriptBody(
         top = spacing.padding.calculateTopPadding(),
         bottom = spacing.padding.calculateBottomPadding(),
     )
+    val layoutDirection = LocalLayoutDirection.current
+    val noticeTrailingActionClearance = if (
+        hasTimeline && timelineSide == TimelineSide.Right && layoutDirection == LayoutDirection.Ltr
+    ) {
+        (timelineColumnWidth(timelineSide) - layoutPadding.calculateRightPadding(layoutDirection)).coerceAtLeast(0.dp)
+    } else {
+        0.dp
+    }
 
     // The space above a row (a card's later segments sit flush: the card paints its own seams).
     val gapAt: (Int, HostRow) -> androidx.compose.ui.unit.Dp = { index, r ->
@@ -492,17 +501,19 @@ private fun ChatTranscriptBody(
                 } else {
                     null
                 }
-                ChatRow(
-                    item = item,
-                    onFetchTurns = onFetchTurns,
-                    modifier = Modifier.padding(top = gap),
-                    find = marks,
-                    toolRender = toolRender,
-                    onToggleGroup = onToggleGroup,
-                    onOpenCommand = onOpenCommand,
-                    zone = zone,
-                    segment = r.segment,
-                )
+                CompositionLocalProvider(LocalNoticeTrailingActionClearance provides noticeTrailingActionClearance) {
+                    ChatRow(
+                        item = item,
+                        onFetchTurns = onFetchTurns,
+                        modifier = Modifier.padding(top = gap),
+                        find = marks,
+                        toolRender = toolRender,
+                        onToggleGroup = onToggleGroup,
+                        onOpenCommand = onOpenCommand,
+                        zone = zone,
+                        segment = r.segment,
+                    )
+                }
             }
             // chat-view.tsx 90fbb9f :3730-3737 (issue #135): unresolved and abandoned sends at the foot of
             // the transcript, so a send is never invisible while in flight, reconnecting, or lost.

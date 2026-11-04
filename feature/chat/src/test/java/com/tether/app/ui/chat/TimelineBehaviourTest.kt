@@ -167,6 +167,39 @@ class TimelineBehaviourTest {
         assertTrue(jumpToLatestShown())
     }
 
+    @Test fun theUnchanged536DpRailNavigatesTheNoticeCollisionFixtureWithoutDismissing() {
+        val fixture = NoticeDismissTimelineRegressionFixtures.scrollableStackedNotices
+        val recorder = NoticeFixtures.Recorder()
+        shown = LazyListState()
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) {
+                ChatTranscript(
+                    projection = fixture.projection,
+                    tree = fixture.tree,
+                    showThinking = false,
+                    onFetchTurns = { _, _ -> },
+                    zone = ChatFixtures.zone,
+                    listState = shown,
+                    richCodex = true,
+                    notices = recorder.actions(),
+                )
+            }
+        }
+        rule.waitForIdle()
+        assertEquals(53.6f, rail().fetchSemanticsNode().boundsInRoot.width / rule.density.density, 0.5f)
+        val before = rule.runOnIdle { shown.firstVisibleItemIndex to shown.firstVisibleItemScrollOffset }
+        mark(NoticeDismissTimelineRegressionFixtures.NAVIGATION_MARK_INDEX)
+            .performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        assertTrue(
+            "collision mark did not produce a real scroll transition",
+            before != rule.runOnIdle { shown.firstVisibleItemIndex to shown.firstVisibleItemScrollOffset },
+        )
+        assertOnJumpLine(NoticeDismissTimelineRegressionFixtures.PROMPT)
+        assertTrue("rail navigation dismissed a notice: ${recorder.dismissed}", recorder.dismissed.isEmpty())
+        assertTrue("rail navigation fired scheduled control: ${recorder.controls}", recorder.controls.isEmpty())
+    }
+
     @Test fun aSmoothJumpLandsOnTheSameLine() {
         shown = rule.showTimeline(TimelineFixtures.many(12), reducedMotion = false)
         // A row on screen above the line, then one scrolled out above (both under 2 viewports away).

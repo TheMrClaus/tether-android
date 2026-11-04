@@ -1,8 +1,10 @@
 package com.tether.app.ui.chat
 
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Dp
 import com.github.takahirom.roborazzi.RoborazziOptions
@@ -92,5 +94,46 @@ class TimelineFontScaleScreenshotTest(private val shot: TimelineShot, private va
         fun params(): List<Array<Any>> = listOf(TimelineShot.Scrub, TimelineShot.Saved).flatMap { s ->
             listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
+    }
+}
+
+/** The affected timeline-on notice row moves inside an otherwise unchanged card and rail. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class TimelineNoticeCollisionScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun noticeCollision() {
+        val fixture = NoticeDismissTimelineRegressionFixtures.stackedNotices
+        val state = LazyListState()
+        rule.setContent {
+            ChatHost(skin, WellHeightPhone) {
+                ChatTranscript(
+                    projection = fixture.projection,
+                    tree = fixture.tree,
+                    showThinking = false,
+                    onFetchTurns = { _, _ -> },
+                    zone = ChatFixtures.zone,
+                    listState = state,
+                    richCodex = true,
+                    notices = NoticeFixtures.live,
+                )
+            }
+        }
+        rule.waitForIdle()
+        val last = rule.runOnIdle { state.layoutInfo.totalItemsCount - 1 }
+        rule.onNodeWithTag("chat-transcript").performScrollToIndex(last)
+        rule.waitForIdle()
+        rule.onNodeWithTag(WellTag).captureRoboImage(
+            "src/test/screenshots/timeline-notice-collision/${skin.id}-phone.png",
+            roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),
+        )
+    }
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
     }
 }
