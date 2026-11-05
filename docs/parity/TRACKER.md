@@ -19,21 +19,20 @@
 | Program status | IN PROGRESS |
 | Current phase | Phases 0-3 CLOSED; Phase 4+ shipped through the 1.5.x releases; see `bd` for live rows |
 | PARITY_BASE (tether SHA) | Protocol corpora at `19c56e25` (PROTOCOL 152, floor 129); tokens and web screenshots at `887c222`; Parity Matrix re-baselined at `29537e0` (PROTOCOL 143, T14.4). Detail: `parity-corpus/VENDORED.md`, archive L13 |
-| App version | Published: **1.5.6 (code 61)** at `0fc21a72`; this branch prepares **1.5.7 (code 62)**. The archived resume point predates these releases. |
+| App version | Published: **1.5.7 (code 62)** at `1ee6bb4f` on 2026-11-05. The archived resume point predates this release. |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches -> PR); S* work only in standalone clones/worktrees under `~/git/tether-wt/`, never the production checkout |
 | Digest condensed | 2026-11-05 (previous tracker header: last updated 2026-10-17 by claude-main) |
 
 ## ▶ RESUME HERE
 
-**Current work (2026-11-05): ta-y3dw (new-session sheet, branch `parity/ta-y3dw-new-session`) — IN PROGRESS, pending gates. NOT DONE.**
-
-- Current implementation and screenshot baselines: `13308ea5`; full release gate running on that commit.
-- Focused draft tests: **23/0/0** on `15a7cb60`, including pre-IME dispatch through the dialog host.
-- Native key checks: PASS (10 checks).
-- Pending: the full gate and the release.
-- Server docs PR #285 merged as `3913483e`.
-- Live state: `bd show ta-y3dw`. This digest carried no ta-y3dw row before 2026-11-05.
+**Current request: ta-y3dw — SHIPPED (2026-11-05).**
+- [v1.5.7 / code 62](https://github.com/TheMrClaus/tether-android/releases/tag/v1.5.7), tag and gated code `1ee6bb4f`, merged to `main`.
+- New session opens without a keyboard; header is 29.3dp versus 77.3dp (62.1% smaller). Workspace, isolation, GH issues and PR share a phone row; the GitHub mark follows the theme. Soft Return and Shift+Enter insert newlines in both composers; hardware Enter sends.
+- Full gate **9332/0/5**, no diagnostic exclusions; code review PASS and design director APPROVE. Signed APK version/certificate, public download bytes, and real install/login/multiline/send/receive smoke verified against an isolated fake server. No production service touched.
+- Human-readable release-note rules in both agent files of both repos. Server docs [PR #285](https://github.com/TheMrClaus/tether/pull/285) merged as `3913483e`; Android publication requires curated notes.
+- Own branch, baseline worktree, test clones, disposable emulator and service cleaned up. Other agents' worktrees and existing `.tether-uploads/` preserved.
+- Evidence: `/home/marcelloc/ta-runs/ta-y3dw/release-proof.md`; gate: `/home/marcelloc/ta-runs/gates/ta-y3dw-final-1ee6bb4f.md`. Live completion/verification state: `bd show ta-y3dw`.
 
 **Last full resume point in the archive (2026-10-18 morning, v1.5.4; kept verbatim; later releases are in `bd`/git):**
 
