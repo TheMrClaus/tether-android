@@ -95,8 +95,10 @@ internal fun RuntimePreferencesPanel(
 }
 
 @Composable
-internal fun RuntimeAccessDevicesPanel(narrow: Boolean, devices: DevicesBinding) {
-    key(devices.controller?.origin) { DevicesSecuritySections(devices, narrow) }
+internal fun RuntimeAccessDevicesPanel(narrow: Boolean, devices: DevicesBinding, active: Boolean) {
+    Column {
+        key(devices.controller?.origin) { DevicesSecuritySections(devices, narrow, active) }
+    }
 }
 
 @Composable

@@ -556,7 +556,11 @@ private fun RuntimeDeskDetail(input: RuntimeDeskDetailInputs) {
             }
             if (RuntimeDeskDestinations.AccessDevices in mountedDestinations) {
                 Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.AccessDevices)) {
-                    RuntimeAccessDevicesPanel(input.narrow, input.devices)
+                    RuntimeAccessDevicesPanel(
+                        input.narrow,
+                        input.devices,
+                        active = route.destination == RuntimeDeskDestinations.AccessDevices,
+                    )
                 }
             }
             if (RuntimeDeskDestinations.HostsNodes in mountedDestinations) {

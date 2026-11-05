@@ -115,13 +115,13 @@ sealed interface DevicesConfirm {
  * opens for this server. Signed out: the headings only.
  */
 @Composable
-internal fun DevicesSecuritySections(binding: DevicesBinding, narrow: Boolean) {
+internal fun DevicesSecuritySections(binding: DevicesBinding, narrow: Boolean, active: Boolean = true) {
     val controller = binding.controller?.takeIf { it.origin != null }
     LaunchedEffect(controller) { controller?.open() }
     var confirm by remember(controller) { mutableStateOf<DevicesConfirm?>(null) }
     PasskeysSection(controller, binding, narrow, onConfirm = { confirm = it })
     SessionsSection(controller, binding, narrow, onConfirm = { confirm = it })
-    PairedDevicesSection(controller, binding, narrow, onConfirm = { confirm = it })
+    PairedDevicesSection(controller, binding, narrow, active, onConfirm = { confirm = it })
     val pending = confirm
     if (controller != null && pending != null) {
         DevicesConfirmDialog(
@@ -421,7 +421,7 @@ private fun SessionRow(session: SecuritySession, now: Long, narrow: Boolean, bus
 // ---- Paired devices -----------------------------------------------------------------------------
 
 @Composable
-private fun PairedDevicesSection(controller: DevicesController?, binding: DevicesBinding, narrow: Boolean, onConfirm: (DevicesConfirm) -> Unit) {
+private fun PairedDevicesSection(controller: DevicesController?, binding: DevicesBinding, narrow: Boolean, active: Boolean, onConfirm: (DevicesConfirm) -> Unit) {
     SettingsSection(DevicesCopy.DEVICES_TITLE, AnnotatedString(DevicesCopy.DEVICES_CAPTION), narrow, modifier = Modifier.testTag(DevicesTags.Paired), last = true) {
         val c = controller ?: return@SettingsSection
         if (c.signedOut) {
@@ -432,8 +432,13 @@ private fun PairedDevicesSection(controller: DevicesController?, binding: Device
         if (ownerNeeded) OwnerNeeded(c, DevicesArea.Devices)
         c.devicesLine?.takeIf { it.error }?.let { LineView(it, DevicesTags.line(DevicesArea.Devices)) }
         // The code card's own clock (the web's `now`): read on the hand-driven clock in the goldens.
-        var now by remember { mutableLongStateOf(binding.now()) }
-        c.shown?.let { shown -> key(shown.serial) { PairingCodeCard(c, shown, now, readNow = binding.now, onTick = { now = it }) } }
+        val activationNow = remember(active) { if (active) binding.now() else null }
+        var now by remember { mutableLongStateOf(activationNow ?: binding.now()) }
+        val renderedNow = activationNow?.let { maxOf(now, it) } ?: now
+        LaunchedEffect(active, activationNow) {
+            if (active && activationNow != null) now = maxOf(now, activationNow)
+        }
+        c.shown?.let { shown -> key(shown.serial) { PairingCodeCard(c, shown, renderedNow, readNow = binding.now, onTick = { now = it }) } }
         val devices = c.devices
         val busy = c.devicesBusy != null || ownerNeeded
         devices?.forEach { device ->
@@ -453,7 +458,7 @@ private fun PairedDevicesSection(controller: DevicesController?, binding: Device
                 enabled = !busy,
                 modifier = Modifier.then(if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth() else Modifier).testTag(DevicesTags.Pair),
             )
-            val others = DevicesRules.otherPairings(c.pairings, now, c.shown?.expiresAt)
+            val others = DevicesRules.otherPairings(c.pairings, renderedNow, c.shown?.expiresAt)
             MutedLine(DevicesCopy.pairHint(others), DevicesTags.PairHint, rule = false, small = true)
         }
     }
