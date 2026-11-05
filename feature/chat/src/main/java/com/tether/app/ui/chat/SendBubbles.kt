@@ -168,7 +168,9 @@ internal fun FailedSendBubble(row: FailedSend, onDismiss: () -> Unit, modifier: 
         style = base.style,
     )
     BubbleBox(look, alignEnd = true, modifier.testTag(FAILED_SEND_TAG)) {
-        if (row.text.isNotEmpty()) Text(proseText(row.text), style = look.style, color = look.ink)
+        // The operator's own words stay recoverable: selectable and copyable like every transcript row
+        // (the Dismiss key below stays outside the selection, as the notice keys do).
+        if (row.text.isNotEmpty()) SelectableRow { Text(proseText(row.text), style = look.style, color = look.ink) }
         SendStatusLine(failedSendLabel(row), look.style, t.brick, spinning = false)
         // The web's 1.9rem key at the content edge; here a 44dp target (the app's minimum), shifted so
         // its X sits where the web's does: centred 0.95rem in from the edge.

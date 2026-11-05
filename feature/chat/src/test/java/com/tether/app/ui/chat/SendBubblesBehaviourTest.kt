@@ -11,6 +11,10 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.performTouchInput
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.test.core.app.ApplicationProvider
 import com.tether.app.client.FailedSend
@@ -25,6 +29,7 @@ import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -216,4 +221,65 @@ class SendBubblesBehaviourTest {
         rule.onNodeWithText("Not delivered").assertIsDisplayed()
         rule.onAllNodesWithText("Sending…").assertCountEquals(1)
     }
+
+    /** The text toolbar, spied (as ActivitySelectionTest): the test presses "Select all" and "Copy" as the operator would. */
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    private class MenuSpy : androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProvider {
+        @Volatile var shown: androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider? = null
+
+        override suspend fun showTextContextMenu(dataProvider: androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider) {
+            shown = dataProvider
+            try {
+                kotlinx.coroutines.awaitCancellation()
+            } finally {
+                if (shown === dataProvider) shown = null
+            }
+        }
+
+        fun press(key: Any) {
+            val menu = checkNotNull(shown) { "no text toolbar is open" }
+            val item = menu.data().components.filterIsInstance<androidx.compose.foundation.text.contextmenu.data.TextContextMenuItem>().first { it.key == key }
+            item.onClick(object : androidx.compose.foundation.text.contextmenu.data.TextContextMenuSession { override fun close() = Unit })
+        }
+    }
+
+    private fun clip(): String? =
+        ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.text?.toString()
+
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    private fun copiesTheFailedWords(reason: FailedSendReason) {
+        val words = "Long words to keep: " + "alpha beta gamma delta ".repeat(12).trim()
+        val menu = MenuSpy()
+        val c = client()
+        c.failedRows.value = listOf(SendFixtures.failed("k7", words, reason = reason))
+        val vm = TetherViewModel(c)
+        val prefs = UiPrefs(ApplicationProvider.getApplicationContext())
+        rule.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides menu,
+                LocalChatDerivationDispatcher provides kotlinx.coroutines.Dispatchers.Unconfined,
+            ) {
+                TetherTheme(choiceFor(TetherSkin.StudioDark)) {
+                    val projections by c.projections.collectAsStateWithLifecycle()
+                    ChatScreen(vm = vm, session = session, projection = projections[session.id], workspaceRoot = "/w", prefs = prefs, showWorkspaceHeader = false)
+                }
+            }
+        }
+        settle()
+        rule.onNodeWithText(words, substring = true).performTouchInput { longClick(center) }
+        rule.waitUntil(20_000) { menu.shown != null }
+        menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.SelectAllKey)
+        rule.waitForIdle()
+        menu.press(androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys.CopyKey)
+        rule.waitForIdle()
+        val copied = checkNotNull(clip()) { "nothing was copied" }
+        assertEquals("the failed bubble's exact words", words, copied)
+        assertFalse("the status line stays out of the selection: $copied", copied.contains("Photo could not") || copied.contains("Not delivered"))
+    }
+
+    @Test fun aPhotoLostBubblesWordsAreSelectableAndCopyExactly() = copiesTheFailedWords(FailedSendReason.PhotoLost)
+
+    @Test fun anExpiredBubblesWordsAreSelectableAndCopyExactly() = copiesTheFailedWords(FailedSendReason.Expired)
+
+    @Test fun aLinkBubblesWordsAreSelectableAndCopyExactly() = copiesTheFailedWords(FailedSendReason.Link)
 }
