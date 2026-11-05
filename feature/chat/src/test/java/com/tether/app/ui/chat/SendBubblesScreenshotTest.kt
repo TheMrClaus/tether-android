@@ -158,3 +158,24 @@ class SendRowScreenshotTest(private val skin: TetherSkin) {
         fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
     }
 }
+
+/** v154: the "Agents are restarting" row above the composer (violet + alert icon + words), one golden per skin. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class SupervisorRowScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun down() {
+        rule.mainClock.autoAdvance = false
+        rule.setContent { ComposerHost(skin) { ComposerSupervisorRow(down = true) } }
+        rule.mainClock.advanceTimeBy(700)
+        rule.waitForIdle()
+        rule.onNodeWithTag(ComposerTag).captureRoboImage("src/test/screenshots/composer-supervisor-row/${skin.id}-phone.png", roborazziOptions = exact)
+    }
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
+    }
+}

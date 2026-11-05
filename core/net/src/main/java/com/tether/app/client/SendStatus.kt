@@ -45,7 +45,22 @@ data class FailedSend(
 )
 
 /** use-tether.ts :54 `reason: "expired" | "link"`: which copy the failed bubble shows. */
-enum class FailedSendReason { Expired, Link }
+enum class FailedSendReason {
+    Expired,
+    Link,
+
+    /** v154: the server refused it with `error` code `supervisor_down` (agents restarting): final, never redelivered. */
+    SupervisorDown,
+}
+
+/** The `error.code` the server sends for a command refused while the agent supervisor is down. */
+const val ERROR_CODE_SUPERVISOR_DOWN = "supervisor_down"
+
+/** The banner / refusal words the web shows while the supervisor is down. */
+const val SUPERVISOR_DOWN_BANNER = "Agents are restarting — try again in a moment"
+
+/** The failed bubble's line for a send the server refused as `supervisor_down` (the server's own text). */
+const val SUPERVISOR_DOWN_NOT_SENT = "Not sent — the agents were restarting. Send it again."
 
 /** use-tether.ts :58 MAX_FAILED_SENDS: retained failed sends, oldest falling off first. */
 const val MAX_FAILED_SENDS = 30
