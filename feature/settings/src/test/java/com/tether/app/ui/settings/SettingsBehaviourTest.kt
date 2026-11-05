@@ -161,7 +161,7 @@ class SettingsBehaviourTest {
         compose.onNodeWithTag(SettingsDialogTags.Cancel).performClick()
         assertEquals(0, closes)
         toggle(GeneralToggle.ConfirmBeforeEnd).assertIsOn()
-        compose.onNodeWithContentDescription("Close settings").performClick()
+        compose.onNodeWithContentDescription("Return to workspace").performClick()
         waitClosed(1)
         assertEquals(emptyMap<String, Any>(), store.stored())
     }

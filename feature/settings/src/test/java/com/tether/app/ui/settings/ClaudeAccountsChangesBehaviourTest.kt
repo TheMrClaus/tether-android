@@ -631,7 +631,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         tag(ClaudeAccountsTags.SyncNow).assertIsEnabled()
         tap(ClaudeAccountsTags.SyncNow)
         waitForCall(actions, "runSync")
-        tag(ClaudeAccountsTags.OwnerNeeded).assertDoesNotExist()
+        compose.onNodeWithTag(ClaudeAccountsTags.OwnerNeeded).assertDoesNotExist()
         actions.answer("runSync", SecurityResult.OwnerSignInNeeded(ORIGIN))
         compose.waitUntil(5_000) { exists(ClaudeAccountsTags.OwnerNeeded) }
     }
