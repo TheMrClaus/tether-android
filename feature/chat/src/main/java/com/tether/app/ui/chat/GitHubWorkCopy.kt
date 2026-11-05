@@ -12,6 +12,9 @@ object GitHubWorkCopy {
     // github-work-dialog.tsx :171-193, the two composer buttons (aria-label, title).
     const val ISSUES_BUTTON = "GitHub issues"
     const val PULL_REQUESTS_BUTTON = "Pull requests"
+    /** ta-y3dw: the compact visible labels of the draft's project row; the full names above stay the accessible names. */
+    const val ISSUES_BUTTON_SHORT = "GH issues"
+    const val PULL_REQUESTS_BUTTON_SHORT = "PR"
     const val ISSUES_BUTTON_HINT = "Open issues for this workspace's GitHub repository"
     const val PULL_REQUESTS_BUTTON_HINT = "Open pull requests for this workspace's GitHub repository"
 

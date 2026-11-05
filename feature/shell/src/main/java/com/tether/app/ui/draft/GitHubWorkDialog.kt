@@ -62,6 +62,8 @@ import com.tether.app.ui.components.TetherDialogSurface
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.dialogScrim
+import androidx.compose.foundation.layout.widthIn
+import com.tether.app.ui.icons.BrandMarks
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.codeLabel
 import com.tether.app.ui.text.putOnClipboard
@@ -100,26 +102,37 @@ object GitHubWorkTags {
 @Composable
 internal fun GitHubWorkButtons(cwd: String, creating: Boolean, onOpen: (GitHubWorkTab) -> Unit) {
     val enabled = !creating && cwd.isNotEmpty()
-    ControlPill(
-        label = GitHubWorkCopy.ISSUES_BUTTON,
-        enabled = enabled,
-        contentDescription = GitHubWorkCopy.ISSUES_BUTTON,
-        onClick = { onOpen(GitHubWorkTab.Issues) },
-        icon = TetherIcons.CircleDot,
-        chevron = false,
-        role = Role.Button,
-        testTag = GitHubWorkTags.IssuesButton,
-    )
-    ControlPill(
-        label = GitHubWorkCopy.PULL_REQUESTS_BUTTON,
-        enabled = enabled,
-        contentDescription = GitHubWorkCopy.PULL_REQUESTS_BUTTON,
-        onClick = { onOpen(GitHubWorkTab.PullRequests) },
-        icon = TetherIcons.GitPullRequest,
-        chevron = false,
-        role = Role.Button,
-        testTag = GitHubWorkTags.PullRequestsButton,
-    )
+    // ta-y3dw: one group (both open the same dialog, on different tabs): short visible labels, the full names
+    // stay the accessible names; the GitHub mark is white on a dark skin, black on a light one.
+    val mark = if (LocalTetherTokens.current.skin.isDark) Color.White else Color.Black
+    Row(horizontalArrangement = Arrangement.spacedBy(LocalTetherTokens.current.css.spaceXs), verticalAlignment = Alignment.CenterVertically) {
+        ControlPill(
+            label = GitHubWorkCopy.ISSUES_BUTTON_SHORT,
+            enabled = enabled,
+            contentDescription = GitHubWorkCopy.ISSUES_BUTTON,
+            onClick = { onOpen(GitHubWorkTab.Issues) },
+            icon = BrandMarks.GitHub,
+            iconTint = mark,
+            labelInName = true,
+            clickLabel = GitHubWorkCopy.ISSUES_BUTTON,
+            chevron = false,
+            role = Role.Button,
+            testTag = GitHubWorkTags.IssuesButton,
+        )
+        ControlPill(
+            label = GitHubWorkCopy.PULL_REQUESTS_BUTTON_SHORT,
+            enabled = enabled,
+            contentDescription = GitHubWorkCopy.PULL_REQUESTS_BUTTON,
+            onClick = { onOpen(GitHubWorkTab.PullRequests) },
+            icon = TetherIcons.GitPullRequest,
+            labelInName = true,
+            clickLabel = GitHubWorkCopy.PULL_REQUESTS_BUTTON,
+            chevron = false,
+            role = Role.Button,
+            modifier = Modifier.widthIn(min = 48.dp),
+            testTag = GitHubWorkTags.PullRequestsButton,
+        )
+    }
 }
 
 /** The modal dialog (`.folder-dialog`, `showModal()`): Back, the scrim, × and Close close it. */

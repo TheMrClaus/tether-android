@@ -17,6 +17,11 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performKeyPress
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.unit.IntSize
@@ -217,13 +222,91 @@ class DraftComposerSheetBehaviourTest {
         until("the drawer closed") { drawerOpen() == false }
     }
 
-    /** r2 (F3): dashboard.tsx starts the operator in the message box. */
+    private fun inputFocused() =
+        rule.onAllNodesWithTag(DraftComposerTags.Input).fetchSemanticsNodes().firstOrNull()?.config?.getOrNull(SemanticsProperties.Focused) == true
+
+    /** ta-y3dw (owner): the sheet opens without focus, so no keyboard rises; a tap on the box focuses it. */
     @Test
-    fun openingTheSheetPutsTheCaretInTheMessageBox() {
+    fun openingTheSheetDoesNotFocusTheMessageBox() {
         openSheet()
-        until("the message box has focus") {
-            rule.onAllNodesWithTag(DraftComposerTags.Input).fetchSemanticsNodes().firstOrNull()?.config?.getOrNull(SemanticsProperties.Focused) == true
+        awaitTag(DraftComposerTags.Input)
+        rule.waitForIdle()
+        assertFalse("the message box must not take focus on open", inputFocused())
+        rule.onNodeWithTag(DraftComposerTags.Input).performClick()
+        until("a tap focuses the message box") { inputFocused() }
+    }
+
+    private fun focusInput() {
+        awaitTag(DraftComposerTags.Input)
+        rule.onNodeWithTag(DraftComposerTags.Input).performSemanticsAction(SemanticsActions.RequestFocus)
+        until("the message box has focus") { inputFocused() }
+    }
+
+    /** ta-y3dw: a hardware Enter sends exactly once. */
+    @Test
+    fun hardwareEnterSendsOnce() {
+        openSheet()
+        compose("work", "ship it")
+        focusInput()
+        rule.onNodeWithTag(DraftComposerTags.Input).performKeyInput { pressKey(Key.Enter) }
+        until("one create") { client.creates.size == 1 }
+        rule.waitForIdle()
+        assertEquals(1, client.creates.size)
+    }
+
+    /** ta-y3dw: Shift+Enter inserts one newline at the caret and sends nothing. */
+    @Test
+    fun shiftEnterInsertsANewlineAndDoesNotSend() {
+        openSheet()
+        compose("work", "ab")
+        focusInput()
+        rule.onNodeWithTag(DraftComposerTags.Input).performKeyInput {
+            keyDown(Key.ShiftLeft)
+            pressKey(Key.Enter)
+            keyUp(Key.ShiftLeft)
         }
+        until("the draft gained the newline") { composer.state.value.text == "ab\n" }
+        rule.waitForIdle()
+        assertTrue(client.creates.isEmpty())
+    }
+
+    /** ta-y3dw: an Enter key event from the soft keyboard (FLAG_SOFT_KEYBOARD) is a newline, never a send. */
+    @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class)
+    @Test
+    fun aSoftKeyboardEnterKeyEventIsANewline() {
+        openSheet()
+        compose("work", "ab")
+        focusInput()
+        val soft = androidx.compose.ui.input.key.KeyEvent(
+            android.view.KeyEvent(0, 0, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER, 0, 0, 0, 0, android.view.KeyEvent.FLAG_SOFT_KEYBOARD),
+        )
+        rule.onNodeWithTag(DraftComposerTags.Input).performKeyPress(soft)
+        until("the draft gained the newline") { composer.state.value.text == "ab\n" }
+        assertTrue(client.creates.isEmpty())
+    }
+
+    /** ta-y3dw: the soft keyboard's return key is the multi-line newline, so the field offers no Send IME action; the Send key sends once. */
+    @Test
+    fun theSoftKeyboardHasNoSendActionAndTheSendKeySendsOnce() {
+        openSheet()
+        compose("work", "go")
+        val action = rule.onNodeWithTag(DraftComposerTags.Input).fetchSemanticsNode().config.getOrNull(SemanticsProperties.ImeAction)
+        assertEquals(androidx.compose.ui.text.input.ImeAction.Default, action)
+        tap(DraftComposerTags.Send)
+        until("one create") { client.creates.size == 1 }
+        rule.waitForIdle()
+        assertEquals(1, client.creates.size)
+    }
+
+    /** ta-y3dw: the hint states the rule that is true for the keyboard in use. */
+    @Test
+    fun theHintFollowsTheKeyboard() {
+        val touch = android.content.res.Configuration().apply { keyboard = android.content.res.Configuration.KEYBOARD_NOKEYS; hardKeyboardHidden = android.content.res.Configuration.HARDKEYBOARDHIDDEN_YES }
+        val physical = android.content.res.Configuration().apply { keyboard = android.content.res.Configuration.KEYBOARD_QWERTY; hardKeyboardHidden = android.content.res.Configuration.HARDKEYBOARDHIDDEN_NO }
+        val hiddenPhysical = android.content.res.Configuration().apply { keyboard = android.content.res.Configuration.KEYBOARD_QWERTY; hardKeyboardHidden = android.content.res.Configuration.HARDKEYBOARDHIDDEN_YES }
+        assertEquals("Enter new line", draftHintFor(touch))
+        assertEquals("Enter send · Shift Enter new line", draftHintFor(physical))
+        assertEquals("Enter new line", draftHintFor(hiddenPhysical))
     }
 
     @Test

@@ -20,7 +20,6 @@ import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -121,13 +120,34 @@ class ComposerBehaviourTest {
     }
 
     @Test
-    fun theSoftKeyboardSendActionSends() {
+    fun theSoftKeyboardEnterIsANewlineAndTheSendKeySends() {
         show(ComposerFixtures.idle)
         input().performTextInput("from the soft keyboard")
-        input().performImeAction()
+        // ta-y3dw: the field is multi-line with the default IME action: Gboard's return key is a newline, never Send.
+        val action = input().fetchSemanticsNode().config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ImeAction)
+        assertEquals(androidx.compose.ui.text.input.ImeAction.Default, action)
+        rule.onNodeWithContentDescription("Send message").performClick()
         rule.waitForIdle()
         assertEquals(listOf("from the soft keyboard"), sends)
         assertEquals("", inputText())
+    }
+
+    @Test
+    fun theKeyboardModelNewlineSendsAndHeldEnter() {
+        val soft = KeyEvent(android.view.KeyEvent(0, 0, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER, 0, 0, 0, 0, android.view.KeyEvent.FLAG_SOFT_KEYBOARD))
+        val held = KeyEvent(android.view.KeyEvent(0, 0, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER, 1))
+        val shifted = KeyEvent(android.view.KeyEvent(0, 0, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER, 0, android.view.KeyEvent.META_SHIFT_ON))
+        val plain = KeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
+        val v = TextFieldValue("abcd", TextRange(1, 3))
+        assertEquals(ComposerEnter.Newline, composerEnter(soft, v))
+        assertEquals(ComposerEnter.Newline, composerEnter(shifted, v))
+        assertEquals(ComposerEnter.Swallow, composerEnter(held, v))
+        assertEquals(ComposerEnter.Submit, composerEnter(plain, v))
+        assertEquals(ComposerEnter.Ignore, composerEnter(soft, v.copy(composition = TextRange(0, 2))))
+        // the selection is replaced and the caret lands after the break
+        val next = v.insertNewline()
+        assertEquals("a\nd", next.text)
+        assertEquals(TextRange(2), next.selection)
     }
 
     @Test
@@ -136,7 +156,6 @@ class ComposerBehaviourTest {
         rule.onNodeWithContentDescription("Send message").assertIsNotEnabled()
         input().performTextInput("   ")
         input().performKeyInput { pressKey(Key.Enter) }
-        input().performImeAction()
         rule.waitForIdle()
         assertEquals(emptyList<String>(), sends)
         rule.onNodeWithContentDescription("Send message").assertIsNotEnabled()

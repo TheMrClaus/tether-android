@@ -870,11 +870,21 @@ fun Composer(
                 }
             }
         }
-        if (isSubmitKey(event, field)) {
-            submit()
-            return true
+        // ta-y3dw: the shared keyboard model: hardware Enter sends once, Shift+Enter (and a soft Enter key event) breaks the line.
+        return when (composerEnter(event, field)) {
+            ComposerEnter.Submit -> {
+                submit()
+                true
+            }
+            ComposerEnter.Newline -> {
+                if (menuDismissed) menuDismissed = false
+                if (atDismissed) atDismissed = false
+                field = field.insertNewline()
+                true
+            }
+            ComposerEnter.Swallow -> true
+            ComposerEnter.Ignore -> false
         }
-        return false
     }
 
     val context = LocalContext.current
@@ -1115,15 +1125,6 @@ fun Composer(
                         enabled = session != null,
                         metrics = metrics,
                         onKey = ::onComposerKey,
-                        onImeSend = {
-                            val menu = liveMenu()
-                            val at = liveAtMenu()
-                            when {
-                                menu != null -> menu.firstOrNull()?.let(::acceptCommand)
-                                at != null -> pickAtRow(at.firstOrNull())
-                                else -> submit()
-                            }
-                        },
                         interactionSource = inputInteraction,
                         command = commandMode,
                     )

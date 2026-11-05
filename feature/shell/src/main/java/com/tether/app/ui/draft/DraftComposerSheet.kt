@@ -92,6 +92,19 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.zIndex
+import com.tether.app.ui.components.focusRing
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.semantics.disabled
@@ -110,7 +123,10 @@ import com.tether.app.protocol.tree.JsStr
 import com.tether.app.ui.FolderPickerDialog
 import com.tether.app.ui.TetherViewModel
 import com.tether.app.ui.chat.AttachSheet
+import com.tether.app.ui.chat.ComposerEnter
 import com.tether.app.ui.chat.ControlPill
+import com.tether.app.ui.chat.composerEnter
+import com.tether.app.ui.chat.insertNewline
 import com.tether.app.ui.chat.DraftAttachmentStager
 import com.tether.app.ui.chat.StagedAttachmentChip
 import com.tether.app.ui.chat.UserBubble
@@ -177,6 +193,9 @@ import kotlinx.coroutines.launch
 object DraftComposerTags {
     const val Sheet = "draft-sheet"
     const val Close = "draft-close"
+    /** ta-y3dw: the header (the bar and its hairline) and, on the centred card, the subtitle that moved into the body. */
+    const val Header = "draft-header"
+    const val Subtitle = "draft-subtitle"
     const val WorkspaceChip = "draft-workspace-chip"
     const val WorkspacePopover = "draft-workspace-popover"
     const val Browse = "draft-workspace-browse"
@@ -219,6 +238,30 @@ internal const val DRAFT_SUBTITLE = "Pick a provider and model, choose the folde
 /** draft-composer.tsx textarea: placeholder and accessible name. */
 internal const val DRAFT_PLACEHOLDER = "Message the new session…"
 internal const val DRAFT_INPUT_LABEL = "Message the new session"
+
+/** ta-y3dw: the hint under the field says the rule that is true for the keyboard in use. */
+internal const val DRAFT_HINT_HARDWARE = "Enter send · Shift Enter new line"
+internal const val DRAFT_HINT_TOUCH = "Enter new line"
+
+/** ta-y3dw: the hint for the keyboard in use: a physical, exposed QWERTY keyboard sends on Enter; a touch keyboard does not. */
+internal fun draftHintFor(config: android.content.res.Configuration): String =
+    if (config.keyboard == android.content.res.Configuration.KEYBOARD_QWERTY && config.hardKeyboardHidden == android.content.res.Configuration.HARDKEYBOARDHIDDEN_NO) {
+        DRAFT_HINT_HARDWARE
+    } else {
+        DRAFT_HINT_TOUCH
+    }
+
+/** ta-y3dw: the header bar and its Close key (the 48dp touch target overflows the 20dp slot, never the bar's height). */
+private val DRAFT_BAR = 28.dp
+private val DRAFT_CLOSE_KEY = 20.dp
+private val DRAFT_CLOSE_GLYPH = 16.dp
+private val DRAFT_CLOSE_TARGET = 48.dp
+
+/** ta-y3dw: the project row's width rules (DraftProjectRow). */
+private val ROW_WS_MAX = 208.dp
+private val ROW_ISO_MAX = 144.dp
+private val ROW_ISO_MIN = 88.dp
+private val ROW_WS_TARGET = 120.dp
 
 /** How long an attachment flash stays (draft-composer.tsx flash: 6000 ms). */
 internal const val DRAFT_NOTICE_MS = 6_000L
@@ -441,7 +484,8 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHu
     Dialog(onDismissRequest = vm::closeDraft, properties = DraftDialogProperties) {
         val view = LocalView.current
         SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
-        DraftComposerFrame(inputs, actions, focusOnOpen = true, wideRow = wideRow)
+        // ta-y3dw: the sheet opens without focus and without the keyboard; a tap on the box raises it.
+        DraftComposerFrame(inputs, actions, wideRow = wideRow)
     }
     // model-browser.tsx handleSelect / draft-composer.tsx handleModelSelect: a pick on another row is
     // one atomic provider + model pick; on the same row, a model pick.
@@ -563,8 +607,6 @@ fun DraftComposerFrame(
     actions: DraftSheetActions,
     modifier: Modifier = Modifier,
     layout: TetherLayoutClass = currentLayoutClass(),
-    /** r2 (F3): put the caret in the message box when the sheet opens (dashboard.tsx 381-384); off in goldens. */
-    focusOnOpen: Boolean = false,
     /** ta-xki: the live row (from 64rem) or, below, the settings sheet's trigger row. */
     wideRow: Boolean = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= LIVE_ROW_MIN_WIDTH_DP,
     /**
@@ -603,8 +645,13 @@ fun DraftComposerFrame(
         }
         // `.draft-dialog-head p` is hidden from 40rem down, 640 included (globals.css:8884-8906).
         val subtitle = !sheet
+        // ta-y3dw: the Close target's rectangle (window coordinates) and the sheet's own origin: a tap on the part of
+        // the 48dp target that lies outside the header bar's bounds is answered here (see DraftCloseButton).
+        var closeTarget by remember { mutableStateOf<Rect?>(null) }
+        var sheetOrigin by remember { mutableStateOf(Offset.Zero) }
         Column(
             case
+                .onGloballyPositioned { sheetOrigin = it.positionInRoot() }
                 .testTag(DraftComposerTags.Sheet)
                 .semantics { paneTitle = inputs.draft.handover?.let { com.tether.app.client.Handover.modeTitle("\u2068" + com.tether.app.client.LabelText.label(it.sourceName) + "\u2069") } ?: DRAFT_TITLE }
                 // Phone: `border-width: 1px 0 0` (a top edge only); desktop: the 1px case.
@@ -613,9 +660,11 @@ fun DraftComposerFrame(
                 .clip(shape)
                 // The card swallows taps (only the scrim, Close and Back close it); a gesture sink,
                 // not a clickable, so its text is never merged into one node.
-                .pointerInput(Unit) { detectTapGestures { } },
+                .pointerInput(Unit) {
+                    detectTapGestures { tap -> if (closeTarget?.contains(tap + sheetOrigin) == true) actions.onClose() }
+                },
         ) {
-            DraftHeader(narrow, subtitle, actions.onClose, inputs.draft.handover, sheet)
+            DraftHeader(narrow, actions.onClose, { closeTarget = it }, inputs.draft.handover)
             val side = if (narrow) t.css.spaceMd else t.css.spaceXl
             // The options scroll; the message well stays put at the sheet's foot (r2, F1), so Send is
             // always on screen, above the keyboard, whatever the rows above it hold.
@@ -626,7 +675,7 @@ fun DraftComposerFrame(
                     .verticalScroll(rememberScrollState())
                     .padding(start = side, end = side, top = if (narrow) t.css.spaceMd else t.css.spaceLg),
             ) {
-                DraftComposerOptions(inputs, actions, narrow, wideRow)
+                DraftComposerOptions(inputs, actions, narrow, wideRow, subtitle)
             }
             // `.draft-dialog .chat-composer` (Studio) bottom: phone max(space-md, safe-area-bottom),
             // space-sm over the keyboard (the sheet already sits on it); desktop space-xl.
@@ -638,7 +687,7 @@ fun DraftComposerFrame(
                 else -> t.css.spaceMd
             }
             Column(Modifier.fillMaxWidth().padding(start = side, end = side, bottom = bottom).testTag(DraftComposerTags.Composer)) {
-                DraftComposerFoot(inputs, actions, narrow, keyboardOpen = sheet && keyboard > 0.dp, focusOnOpen = focusOnOpen)
+                DraftComposerFoot(inputs, actions, narrow, keyboardOpen = sheet && keyboard > 0.dp)
             }
         }
     }
@@ -646,58 +695,96 @@ fun DraftComposerFrame(
 
 /** `.draft-dialog-head` (Studio): the title over its subtitle, and Close. */
 @Composable
-private fun DraftHeader(narrow: Boolean, subtitle: Boolean, onClose: () -> Unit, handover: HandoverDraftState? = null, sheet: Boolean = false) {
+private fun DraftHeader(narrow: Boolean, onClose: () -> Unit, onCloseTarget: (Rect) -> Unit, handover: HandoverDraftState? = null) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     // W34 (hu:32): `Hand over “{source name}”`, the name bidi-isolated; it wraps anywhere and clamps to 2 lines on the sheet.
     val title = if (handover != null) com.tether.app.client.Handover.modeTitle("\u2068" + com.tether.app.client.LabelText.label(handover.sourceName) + "\u2069") else DRAFT_TITLE
-    val subtitleText = if (handover != null) com.tether.app.client.Handover.MODE_SUBTITLE else DRAFT_SUBTITLE
-    Column {
+    // ta-y3dw: a 28dp bar (+ the 1dp hairline = 29dp, down from 77). zIndex keeps the Close target above the options.
+    Column(Modifier.zIndex(1f).testTag(DraftComposerTags.Header)) {
         Row(
-            Modifier.fillMaxWidth().padding(if (narrow) t.css.spaceLg else t.css.spaceXl),
-            verticalAlignment = Alignment.Top,
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = DRAFT_BAR)
+                .padding(start = if (narrow) 16.dp else 24.dp, end = if (narrow) 14.dp else 22.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    maxLines = if (handover != null && sheet) 2 else Int.MAX_VALUE,
-                    overflow = TextOverflow.Ellipsis,
-                    color = t.white,
-                    // `:root .draft-dialog-head h2`: 1.3rem / 700.
-                    style = androidx.compose.ui.text.TextStyle(fontFamily = type.ui, fontSize = 20.8.sp, fontWeight = androidx.compose.ui.text.font.FontWeight(700), letterSpacing = (-0.02).em),
-                    modifier = Modifier.semantics { heading() },
-                )
-                if (subtitle) {
-                    Text(
-                        subtitleText,
-                        color = t.muted,
-                        style = type.body.copy(fontSize = 12.48.sp, lineHeight = 1.6.em),
-                        modifier = Modifier.padding(top = 6.4.dp),
-                    )
-                }
-            }
-            TetherKey(
-                onClick = onClose,
-                classes = KeyClasses.IconButton,
-                icon = TetherIcons.X,
-                iconSize = 17.dp,
-                contentDescription = if (handover != null) com.tether.app.client.Handover.MODE_CLOSE_LABEL else "Close new session",
-                modifier = Modifier.testTag(DraftComposerTags.Close),
+            Text(
+                title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = t.white,
+                style = androidx.compose.ui.text.TextStyle(
+                    fontFamily = type.ui,
+                    fontSize = 16.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight(700),
+                    letterSpacing = (-0.02).em,
+                ),
+                modifier = Modifier.weight(1f).semantics { heading() },
             )
+            Box(Modifier.size(DRAFT_CLOSE_KEY)) {
+                DraftCloseButton(onClose, if (handover != null) com.tether.app.client.Handover.MODE_CLOSE_LABEL else "Close new session", onCloseTarget)
+            }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+    }
+}
+
+/**
+ * ta-y3dw: Close as a 20dp key with a 16dp X whose touch target is [DRAFT_CLOSE_TARGET] square: it overflows its
+ * 20dp slot (the bar stays 28dp). Compose hit-tests a child only inside its parent's bounds, so the target is also
+ * reported through [onTarget] and the sheet's own tap handler answers the part that lies below the bar.
+ */
+@Composable
+private fun DraftCloseButton(onClose: () -> Unit, description: String, onTarget: (Rect) -> Unit) {
+    val t = LocalTetherTokens.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val lit = pressed || hovered || focused
+    val shape = RoundedCornerShape(t.radiusSm)
+    Box(
+        Modifier
+            .requiredSize(DRAFT_CLOSE_TARGET)
+            .onGloballyPositioned { onTarget(it.boundsInRoot()) }
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClose)
+            .semantics { contentDescription = description }
+            .testTag(DraftComposerTags.Close),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(DRAFT_CLOSE_KEY)
+                .focusRing(focused, shape, t.violet)
+                .clip(shape)
+                .background(if (pressed || hovered) t.graphiteRaised else Color.Transparent),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(TetherIcons.X, contentDescription = null, tint = if (lit) t.white else t.muted, modifier = Modifier.size(DRAFT_CLOSE_GLYPH))
+        }
     }
 }
 
 /** draft-composer.tsx's composer, in its order. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, wideRow: Boolean) {
+private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, wideRow: Boolean, subtitle: Boolean) {
     val t = LocalTetherTokens.current
     val draft = inputs.draft
     val handover = draft.handover
     val pending = handover?.pending == true
+    // ta-y3dw: the centred card's subtitle (web copy kept) moved out of the 28dp bar into the body's first line.
+    if (subtitle) {
+        Text(
+            if (handover != null) com.tether.app.client.Handover.MODE_SUBTITLE else DRAFT_SUBTITLE,
+            color = t.muted,
+            style = LocalTetherTypography.current.body.copy(fontSize = 12.48.sp, lineHeight = 1.6.em),
+            modifier = Modifier.padding(bottom = t.css.spaceMd).testTag(DraftComposerTags.Subtitle),
+        )
+    }
     // W34 (dc:390): the Session name is the FIRST row, above the project, in both widths (v151 only; handover mode is v151).
     if (inputs.v151 || handover != null) {
         SessionNameRow(draft, narrow, handover, actions.onName)
@@ -712,18 +799,22 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
             .drawBehind { drawRect(t.line, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx())) }
             .padding(bottom = if (narrow) t.css.spaceMd else t.css.spaceLg),
     ) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
-            verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
-        ) {
-            Box(Modifier.pendingDim(pending)) { WorkspaceSelector(draft.cwd(), inputs.quickPicks, inputs.workspaceRoot, actions.onPickFolder, actions.onBrowse) }
-            if (handover != null) {
+        if (handover != null) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+                verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+            ) {
+                Box(Modifier.pendingDim(pending)) { WorkspaceSelector(draft.cwd(), inputs.quickPicks, inputs.workspaceRoot, actions.onPickFolder, actions.onBrowse) }
                 // dc:426-452: no worktree select, GitHub buttons or details; isolation is always off in this mode.
                 IsolationNote()
-            } else {
-                WorktreeSelect(draft.form, actions.onSelectIsolation)
-                GitHubWorkButtons(draft.cwd(), draft.creating, actions.onGitHub)
             }
+        } else {
+            // ta-y3dw: workspace, isolation and the GitHub pair on one line where they fit (see DraftProjectRow).
+            DraftProjectRow(
+                workspace = { WorkspaceSelector(draft.cwd(), inputs.quickPicks, inputs.workspaceRoot, actions.onPickFolder, actions.onBrowse) },
+                isolation = { WorktreeSelect(draft.form, actions.onSelectIsolation, maxWidth = ROW_ISO_MAX) },
+                github = { GitHubWorkButtons(draft.cwd(), draft.creating, actions.onGitHub) },
+            )
         }
     }
     Box(Modifier.height(if (narrow) t.css.spaceMd else t.css.spaceLg))
@@ -767,7 +858,7 @@ private fun DraftComposerOptions(inputs: DraftSheetInputs, actions: DraftSheetAc
 
 /** The sheet's foot: the message well with the paperclip and Send, and why Send is disabled. */
 @Composable
-private fun DraftComposerFoot(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, keyboardOpen: Boolean, focusOnOpen: Boolean) {
+private fun DraftComposerFoot(inputs: DraftSheetInputs, actions: DraftSheetActions, narrow: Boolean, keyboardOpen: Boolean) {
     val t = LocalTetherTokens.current
     val draft = inputs.draft
     val handover = draft.handover
@@ -776,7 +867,7 @@ private fun DraftComposerFoot(inputs: DraftSheetInputs, actions: DraftSheetActio
         HandoverWell(handover, (draft.form["provider"] as? JsStr)?.value.orEmpty().ifEmpty { inputs.options.provider }, narrow, actions.onSubmitHandover)
         return
     }
-    MessageWell(draft, inputs.readiness, narrow, keyboardOpen, actions, focusOnOpen)
+    MessageWell(draft, inputs.readiness, narrow, keyboardOpen, actions)
     // App addition: the web only disables Send; the reason it is disabled is said in words here.
     if (draft.error.isEmpty() && inputs.readiness.isNotEmpty()) {
         Text(
@@ -828,18 +919,17 @@ private fun StatusLine(icon: androidx.compose.ui.graphics.vector.ImageVector, te
 /**
  * `.draft-message-well` (Studio): one well holding the text box across the top and, on its lower
  * deck, the paperclip, the key hint and Send. The text box is 6rem tall on a phone (2.75rem while the
- * keyboard is up), 8rem on a desktop, growing to 30% of the screen. A hardware Enter sends and
- * Shift+Enter breaks the line; the soft keyboard's action key is Send (the web's Enter on a phone).
+ * keyboard is up), 8rem on a desktop, growing to 30% of the screen. ta-y3dw: the keyboard model is
+ * [composerEnter]'s: a hardware Enter sends and Shift+Enter breaks the line; the soft keyboard's return
+ * key is a newline and the Send key sends. The sheet opens without focus (a tap raises the keyboard).
  */
 @Composable
-private fun MessageWell(draft: DraftComposerState, readiness: String, narrow: Boolean, keyboardOpen: Boolean, actions: DraftSheetActions, focusOnOpen: Boolean) {
+private fun MessageWell(draft: DraftComposerState, readiness: String, narrow: Boolean, keyboardOpen: Boolean, actions: DraftSheetActions) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    // r2 (F3): dashboard.tsx starts the operator in the message box, not on Close.
-    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-    if (focusOnOpen) LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val hint = draftHintFor(androidx.compose.ui.platform.LocalConfiguration.current)
     // The engine owns the text; the field keeps its own selection while the two agree.
     var field by remember { mutableStateOf(TextFieldValue(draft.text, TextRange(draft.text.length))) }
     if (field.text != draft.text) field = TextFieldValue(draft.text, TextRange(draft.text.length))
@@ -869,19 +959,27 @@ private fun MessageWell(draft: DraftComposerState, readiness: String, narrow: Bo
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = minInput, max = maxInput)
-                .focusRequester(focus)
                 .onPreviewKeyEvent { event ->
-                    val enter = event.type == KeyEventType.KeyDown && (event.key == Key.Enter || event.key == Key.NumPadEnter) &&
-                        !event.isShiftPressed && field.composition == null
-                    if (enter) submit()
-                    enter
+                    when (composerEnter(event, field)) {
+                        ComposerEnter.Submit -> {
+                            submit()
+                            true
+                        }
+                        ComposerEnter.Newline -> {
+                            field = field.insertNewline()
+                            actions.onText(field.text)
+                            true
+                        }
+                        ComposerEnter.Swallow -> true
+                        ComposerEnter.Ignore -> false
+                    }
                 }
                 .semantics { contentDescription = DRAFT_INPUT_LABEL }
                 .testTag(DraftComposerTags.Input),
             textStyle = style.copy(color = t.ink),
             cursorBrush = SolidColor(t.violet),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { submit() }),
+            // ta-y3dw: a multi-line field's native return key (a newline); the Send key beside it sends.
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
             interactionSource = interaction,
             decorationBox = { inner ->
                 Box(Modifier.padding(t.css.spaceSm)) {
@@ -900,9 +998,9 @@ private fun MessageWell(draft: DraftComposerState, readiness: String, narrow: Bo
                 modifier = Modifier.size(44.dp).testTag(DraftComposerTags.Attach),
                 contentPadding = 0.dp,
             )
-            // `.draft-message-hint`: Enter send · Shift Enter new line (clears its own semantics: it is a hint).
+            // `.draft-message-hint` (clears its own semantics: it is a hint): the rule that is true for the keyboard in use.
             Text(
-                "Enter send · Shift Enter new line",
+                hint,
                 color = t.muted,
                 style = type.body.copy(fontSize = if (narrow) 10.08.sp else 10.88.sp),
                 modifier = Modifier.weight(1f).clearAndSetSemantics { },
@@ -939,7 +1037,9 @@ private fun WorkspaceSelector(cwd: String, quickPicks: List<WorkspaceQuickPick>,
             onClick = { open = !open },
             icon = TetherIcons.Folder,
             active = open,
-            maxWidth = 208.dp,
+            maxWidth = ROW_WS_MAX,
+            // ta-y3dw: a squeezed path keeps its leaf folder (the end), as the compacted path reads.
+            labelOverflow = TextOverflow.StartEllipsis,
             stateDescription = if (open) "Expanded" else "Collapsed",
             testTag = DraftComposerTags.WorkspaceChip,
         )
@@ -963,6 +1063,81 @@ private fun WorkspaceSelector(cwd: String, quickPicks: List<WorkspaceQuickPick>,
                         onBrowse()
                     },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * ta-y3dw: the project row, workspace then isolation then the GitHub pair, in that order at every tier.
+ * Tier 1: one line (the folder label shrinks first, then the isolation label, never below
+ * [ROW_ISO_MIN] / a readable folder). Tier 2: workspace and isolation on line 1, the GitHub pair on line 2.
+ * Tier 3: each on its own line. Children are measured once; the GitHub labels are never truncated.
+ */
+@Composable
+private fun DraftProjectRow(workspace: @Composable () -> Unit, isolation: @Composable () -> Unit, github: @Composable () -> Unit, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val gap = with(LocalDensity.current) { t.css.spaceSm.roundToPx() }
+    val lineGap = with(LocalDensity.current) { t.css.spaceXs.roundToPx() }
+    Layout(content = { workspace(); isolation(); github() }, modifier = modifier.fillMaxWidth()) { measurables, constraints ->
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE / 4
+        val wsMax = minOf(measurables[0].maxIntrinsicWidth(Int.MAX_VALUE), ROW_WS_MAX.roundToPx())
+        val isoMax = minOf(measurables[1].maxIntrinsicWidth(Int.MAX_VALUE), ROW_ISO_MAX.roundToPx())
+        val pair = measurables[2].maxIntrinsicWidth(Int.MAX_VALUE).coerceAtMost(width)
+        val isoMin = ROW_ISO_MIN.roundToPx()
+        val wsTarget = ROW_WS_TARGET.roundToPx()
+        // The folder is readable down to its chrome (pill padding, glyph, gaps) plus about five characters.
+        val wsReadable = minOf(wsMax, 50.dp.roundToPx() + 30.sp.roundToPx())
+        // Shrink the folder first (to its target), then the isolation label (to its floor), then the folder again.
+        fun splitIso(room: Int) = minOf(isoMax, maxOf(isoMin, room - minOf(wsMax, wsTarget))).coerceAtLeast(0)
+        fun fit(room: Int): Pair<Int, Int>? {
+            val i = splitIso(room)
+            val w = minOf(wsMax, room - gap - i)
+            return if (w >= wsReadable) w to i else null
+        }
+        val one = fit(width - pair - gap)
+        val two = if (one == null) fit(width) else null
+        val tier1 = one != null
+        val tier2 = two != null
+        val split = one ?: two
+        val ws: Placeable
+        val iso: Placeable
+        if (split != null) {
+            ws = measurables[0].measure(Constraints(maxWidth = split.first))
+            iso = measurables[1].measure(Constraints(maxWidth = split.second))
+        } else {
+            ws = measurables[0].measure(Constraints(maxWidth = minOf(wsMax, width)))
+            iso = measurables[1].measure(Constraints(maxWidth = minOf(isoMax, width)))
+        }
+        val gh = measurables[2].measure(Constraints(maxWidth = width))
+        val line1 = if (tier1) maxOf(ws.height, iso.height, gh.height) else if (tier2) maxOf(ws.height, iso.height) else ws.height
+        val height = when {
+            tier1 -> line1
+            tier2 -> line1 + lineGap + gh.height
+            else -> ws.height + lineGap + iso.height + lineGap + gh.height
+        }
+        val used = when {
+            tier1 -> ws.width + gap + iso.width + gap + gh.width
+            tier2 -> maxOf(ws.width + gap + iso.width, gh.width)
+            else -> maxOf(ws.width, iso.width, gh.width)
+        }
+        layout(if (constraints.hasBoundedWidth) constraints.maxWidth else used, height) {
+            when {
+                tier1 -> {
+                    ws.placeRelative(0, (line1 - ws.height) / 2)
+                    iso.placeRelative(ws.width + gap, (line1 - iso.height) / 2)
+                    gh.placeRelative(ws.width + gap + iso.width + gap, (line1 - gh.height) / 2)
+                }
+                tier2 -> {
+                    ws.placeRelative(0, (line1 - ws.height) / 2)
+                    iso.placeRelative(ws.width + gap, (line1 - iso.height) / 2)
+                    gh.placeRelative(0, line1 + lineGap)
+                }
+                else -> {
+                    ws.placeRelative(0, 0)
+                    iso.placeRelative(0, ws.height + lineGap)
+                    gh.placeRelative(0, ws.height + lineGap + iso.height + lineGap)
+                }
             }
         }
     }

@@ -20,7 +20,6 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
@@ -148,10 +147,11 @@ class CommandComposerBehaviourTest {
     }
 
     @Test
-    fun theSoftKeyboardSendRunsTheCommandToo() {
+    fun theHardwareEnterRunsTheCommandToo() {
+        // ta-y3dw: the soft keyboard's return key is a newline now; the Enter key (hardware) and the Send key run it.
         show()
         input().performTextInput("!ls -la")
-        input().performImeAction()
+        input().performKeyInput { pressKey(Key.Enter) }
         rule.waitForIdle()
         assertEquals(listOf("ls -la" to false), rec.runs)
     }

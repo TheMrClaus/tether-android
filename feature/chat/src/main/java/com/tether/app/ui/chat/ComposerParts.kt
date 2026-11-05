@@ -42,6 +42,7 @@ import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.nativeKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalConfiguration
@@ -50,6 +51,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -112,6 +114,30 @@ internal fun isSubmitKey(event: KeyEvent, value: TextFieldValue): Boolean =
         !event.isShiftPressed &&
         value.composition == null
 
+/** ta-y3dw: what an Enter key event does in a message box (see [composerEnter]). */
+enum class ComposerEnter { Ignore, Submit, Newline, Swallow }
+
+/**
+ * ta-y3dw: the keyboard model shared by the chat composer and the new-session draft composer.
+ * The soft keyboard's Enter is the native multi-line return (a newline; the Send key sends), so a
+ * key event flagged FLAG_SOFT_KEYBOARD inserts a newline. A hardware Enter sends (a held key's
+ * auto-repeat is swallowed, never a second send) and Shift+Enter inserts a newline; Ctrl/Alt/Meta
+ * are ignored, as before. Any Enter during an IME composition is left to the IME.
+ */
+fun composerEnter(event: KeyEvent, value: TextFieldValue): ComposerEnter {
+    if (event.type != KeyEventType.KeyDown || (event.key != Key.Enter && event.key != Key.NumPadEnter)) return ComposerEnter.Ignore
+    if (value.composition != null) return ComposerEnter.Ignore
+    val native = event.nativeKeyEvent
+    if (native.flags and android.view.KeyEvent.FLAG_SOFT_KEYBOARD != 0 || event.isShiftPressed) return ComposerEnter.Newline
+    return if (native.repeatCount > 0) ComposerEnter.Swallow else ComposerEnter.Submit
+}
+
+/** ta-y3dw: "\n" at the selection (replacing any selected text), the caret after it. */
+fun TextFieldValue.insertNewline(): TextFieldValue {
+    val s = selection
+    return TextFieldValue(text.replaceRange(s.min, s.max, "\n"), TextRange(s.min + 1))
+}
+
 /** `.chat-input` inside the well: the type and padding each layout gives it. */
 internal fun composerTextStyle(base: TextStyle, m: ComposerMetrics): TextStyle = when {
     m.phone -> base.copy(fontSize = 16.sp, lineHeight = 25.6.sp)
@@ -120,9 +146,9 @@ internal fun composerTextStyle(base: TextStyle, m: ComposerMetrics): TextStyle =
 
 /**
  * The composer's text field (`textarea.chat-input`, rows=1, auto-growing to its CSS max-height:
- * 30dvh on a phone, 60vh otherwise). The soft keyboard's action key is Send, like the web on a
- * phone, where the keyboard's Enter submits; a hardware Enter submits and Shift+Enter breaks the
- * line ([onKey] sees every key first, for the slash menu). The accessible name is the web's
+ * 30dvh on a phone, 60vh otherwise). ta-y3dw: the soft keyboard's Enter is a newline (the Send key
+ * sends); a hardware Enter submits and Shift+Enter breaks the line ([onKey] sees every key first,
+ * for the slash menu; see [composerEnter]). The accessible name is the web's
  * `aria-label="Message the agent"`.
  */
 @Composable
@@ -133,7 +159,6 @@ internal fun ComposerInput(
     enabled: Boolean,
     metrics: ComposerMetrics,
     onKey: (KeyEvent) -> Boolean,
-    onImeSend: () -> Unit,
     interactionSource: MutableInteractionSource,
     modifier: Modifier = Modifier,
     /** T7.3 `.chat-input--command`: the draft is a `!` command — drawn in the mono face. */
@@ -162,8 +187,8 @@ internal fun ComposerInput(
         enabled = enabled,
         textStyle = style.copy(color = t.ink),
         cursorBrush = SolidColor(t.violet),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-        keyboardActions = KeyboardActions(onSend = { onImeSend() }),
+        // ta-y3dw: a multi-line field's native return key (a newline); the on-screen Send key sends.
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
         interactionSource = interactionSource,
         decorationBox = { inner ->
             Box(Modifier.padding(start = padding.start, top = padding.top, end = padding.end, bottom = padding.bottom)) {

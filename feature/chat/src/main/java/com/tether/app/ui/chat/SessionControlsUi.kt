@@ -47,6 +47,8 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -353,6 +355,14 @@ fun ControlPill(
     stateDescription: String? = null,
     role: Role = Role.DropdownList,
     testTag: String? = null,
+    /** ta-y3dw (opt-in): the icon's tint; Unspecified keeps the pill's ink. */
+    iconTint: Color = Color.Unspecified,
+    /** ta-y3dw (opt-in): how a label too long for the pill is cut (a path keeps its leaf with StartEllipsis). */
+    labelOverflow: TextOverflow = TextOverflow.Ellipsis,
+    /** ta-y3dw (opt-in): also expose the visible [label] as the node's text, so voice control can say it. */
+    labelInName: Boolean = false,
+    /** ta-y3dw (opt-in): the click action's label; null keeps [label]. */
+    clickLabel: String? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -375,7 +385,8 @@ fun ControlPill(
                 this.role = role
                 this.contentDescription = contentDescription
                 stateDescription?.let { this.stateDescription = it }
-                if (!enabled) disabled() else onClick(label) { onClick(); true }
+                if (labelInName) this.text = AnnotatedString(label)
+                if (!enabled) disabled() else onClick(clickLabel ?: label) { onClick(); true }
                 testTag?.let { this.testTag = it }
             },
         contentAlignment = Alignment.Center,
@@ -415,13 +426,13 @@ fun ControlPill(
                     ProviderInlineGlyph(glyphProvider, fallback = providerGlyph(glyphProvider), color = ink, markSize = 14.dp, letterSize = 9.6.sp)
                 }
             }
-            if (icon != null) Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(13.dp))
+            if (icon != null) Icon(icon, contentDescription = null, tint = if (iconTint == Color.Unspecified) ink else iconTint, modifier = Modifier.size(13.dp))
             Text(
                 label,
                 style = type.body.copy(fontSize = 11.52.sp, fontWeight = FontWeight(600)),
                 color = ink,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                overflow = labelOverflow,
                 modifier = Modifier.weight(1f, fill = false),
             )
             if (chevron) Icon(TetherIcons.ChevronDown, contentDescription = null, tint = t.faint, modifier = Modifier.size(13.dp))

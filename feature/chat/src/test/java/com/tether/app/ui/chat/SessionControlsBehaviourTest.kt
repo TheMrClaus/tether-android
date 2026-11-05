@@ -28,7 +28,10 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -56,6 +59,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+
+/**
+ * ta-y3dw: the soft keyboard's Enter is now a newline (the Send key sends), so these tests, which mean "Enter
+ * submits / accepts the open menu", press the hardware Enter.
+ */
+private fun SemanticsNodeInteraction.performImeAction(): SemanticsNodeInteraction = performKeyInput { pressKey(Key.Enter) }
 
 /** Frames for a window to open. */
 internal const val NAV_SETTLE_MS = 200L

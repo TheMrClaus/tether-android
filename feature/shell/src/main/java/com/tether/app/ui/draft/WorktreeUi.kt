@@ -50,6 +50,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -110,9 +111,10 @@ private fun JsObj.s(key: String): String = (this[key] as? JsStr)?.value.orEmpty(
  * `is-active` while isolated; its rows and their descriptions verbatim ([WorktreeModes.OPTIONS]).
  */
 @Composable
-internal fun WorktreeSelect(form: JsObj, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
+internal fun WorktreeSelect(form: JsObj, onSelect: (String) -> Unit, modifier: Modifier = Modifier, maxWidth: Dp = Dp.Unspecified) {
     Box(modifier) {
         ControlSelect(
+            maxWidth = maxWidth,
             control = WorktreeModes.control(form),
             name = WorktreeCopy.SELECT_NAME,
             enabled = true,

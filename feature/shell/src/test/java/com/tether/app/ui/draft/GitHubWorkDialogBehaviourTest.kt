@@ -127,6 +127,11 @@ class GitHubWorkDialogBehaviourTest {
         rule.onNodeWithTag(GitHubWorkTags.PullRequestsButton, useUnmergedTree = true).assertIsEnabled()
         assertEquals(GitHubWorkCopy.ISSUES_BUTTON, said(GitHubWorkTags.IssuesButton))
         assertEquals(GitHubWorkCopy.PULL_REQUESTS_BUTTON, said(GitHubWorkTags.PullRequestsButton))
+        // ta-y3dw: the visible labels are short, the accessible names stay whole (the label rides as the node's text for voice control).
+        fun shown(tag: String) = rule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().config
+            .getOrNull(SemanticsProperties.Text)?.joinToString { it.text }
+        assertEquals("GH issues", shown(GitHubWorkTags.IssuesButton))
+        assertEquals("PR", shown(GitHubWorkTags.PullRequestsButton))
         tap(GitHubWorkTags.PullRequestsButton)
         awaitTag(GitHubWorkTags.Dialog)
         rule.onNodeWithTag(GitHubWorkTags.tab(GitHubWorkTab.PullRequests), useUnmergedTree = true).assertIsSelected()
