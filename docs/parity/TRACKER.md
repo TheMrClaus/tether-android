@@ -19,12 +19,16 @@
 | Program status | IN PROGRESS |
 | Current phase | Phases 0-3 CLOSED; Phase 4+ shipped through the 1.5.x releases; see `bd` for live rows |
 | PARITY_BASE (tether SHA) | Protocol corpora at `19c56e25` (PROTOCOL 152, floor 129); tokens and web screenshots at `887c222`; Parity Matrix re-baselined at `29537e0` (PROTOCOL 143, T14.4). Detail: `parity-corpus/VENDORED.md`, archive L13 |
-| App version | Published: **1.6.0 (code 64)**; tag and release head `3c921956` on 2026-11-05. The archived resume point predates this release. |
+| App version | Published: **1.6.0 (code 64)**; tag and release head `3c921956` on 2026-11-05. **1.6.1 (code 65)** is prepared as a DRAFT only (not published). The archived resume point predates this release. |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches -> PR); S* work only in standalone clones/worktrees under `~/git/tether-wt/`, never the production checkout |
 | Digest condensed | 2026-11-05 (previous tracker header: last updated 2026-10-17 by claude-main) |
 
 ## ▶ RESUME HERE
+
+**Release candidate: 1.6.1 / code 65 — DRAFT (not published; the owner publishes after the server deploy, because the app refuses a server older than itself).**
+- Branch `release/1.6.1` (from `5581abaa`): the delivery lanes (Send again on a failed send, upload progress and "may be lost" wording, Stop-spares-background wording, removal of the no-op "Message while busy" Settings row) merged on top of the 1.6.0 Runtime Desk settings pages.
+- Curated notes: `docs/releases/1.6.1.md`. Gate and draft evidence: the lead #150 Android release receipt.
 
 **Current release: ta-ty2a — APK PUBLISHED (2026-11-05; root-owned).**
 - [v1.6.0 / code 64](https://github.com/TheMrClaus/tether-android/releases/tag/v1.6.0), tag and release head `3c921956`; native PR #8 merged.
