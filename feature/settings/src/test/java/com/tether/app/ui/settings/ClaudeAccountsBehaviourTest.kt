@@ -64,7 +64,7 @@ class ClaudeAccountsBehaviourTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    private val state = SettingsDialogState(SettingsTab.Engines)
+    private val state = SettingsDialogState(route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail))
 
     private fun show(binding: ClaudeAccountsBinding) {
         compose.setContent { SettingsUnderTest(store.prefs, state, claudeAccounts = binding) }
@@ -97,9 +97,20 @@ class ClaudeAccountsBehaviourTest {
         compose.waitUntil(5_000) { "sync" in fake.calls }
         compose.waitForIdle()
         assertEquals(listOf("list", "sync"), fake.calls.toList())
-        // The section sits between the engines and Custom providers, as on the web (ta-dh1 drew the
-        // engines and Host config, ta-q6p the profiles).
-        compose.onNodeWithTag(ProfileTags.Section).assertExists()
+    }
+
+    @Test fun destinationAndEntityChangesKeepOneControllerAndOneInitialRead() {
+        val fake = FakeAccounts()
+        show(fake.binding())
+        waitFor("Claude Code (work)")
+        compose.waitUntil(5_000) { "sync" in fake.calls }
+        compose.runOnUiThread { state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Preferences, level = RuntimeDeskLevel.Detail) }
+        compose.waitForIdle()
+        compose.runOnUiThread { state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.AccountSync, RuntimeDeskLevel.Detail) }
+        compose.waitForIdle()
+        compose.runOnUiThread { state.route = state.route.selectEntity(RuntimeDeskEntities.Credentials) }
+        compose.waitForIdle()
+        assertEquals(listOf("list", "sync"), fake.calls.toList())
     }
 
     @Test fun eachAccountShowsItsLabelPlanOrganizationStatusAndPath() {

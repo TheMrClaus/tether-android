@@ -25,7 +25,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -87,6 +89,64 @@ internal fun EngineCards(binding: ServerSettingsBinding, narrow: Boolean) {
     EngineCard.entries.forEach { engine ->
         EngineCardView(engine, view, binding, narrow)
     }
+}
+
+/** Runtime Desk detail: every editor stays composed so changing the selected engine cannot commit or lose an edit. */
+@Composable
+internal fun EngineDetails(binding: ServerSettingsBinding, selectedId: String?, narrow: Boolean) {
+    val view = binding.settings?.takeIf { binding.origin != null }
+    if (view == null) {
+        SettingsSection(EngineRows.TITLE, AnnotatedString(EngineRows.CAPTION), narrow, modifier = Modifier.testTag(EngineTags.Section)) { ServerSettingsLoading() }
+        return
+    }
+    SettingsSection(EngineRows.TITLE, AnnotatedString(EngineRows.CAPTION), narrow, modifier = Modifier.testTag(EngineTags.Section)) {
+        ScanAgain(binding, view)
+    }
+    EngineCard.entries.forEach { engine ->
+        Box(Modifier.keepEngineMounted(engine.id == selectedId)) {
+            EngineCardView(engine, view, binding, narrow)
+        }
+    }
+}
+
+/** The entity-rail switch uses the same binding and immediate write as the selected detail card. */
+@Composable
+internal fun EngineEntityToggle(engine: EngineCard, binding: ServerSettingsBinding) {
+    val view = binding.settings?.takeIf { binding.origin != null } ?: return
+    val latest by rememberUpdatedState(binding)
+    val on = engine.id in view.headlessModes
+    val switchable = !view.forced(ServerSetting.HeadlessModes) && !(view.needsHome(engine) && !view.forced(engine.home))
+    Box(
+        Modifier
+            .testTag("runtime-${EngineTags.switch(engine)}")
+            .alpha(if (switchable) 1f else 0.45f)
+            .toggleable(
+                value = on,
+                enabled = switchable,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                role = Role.Switch,
+                onValueChange = {
+                    latest.settings?.takeIf { latest.origin != null }?.let { latest.send(ServerSettingsPatch.headlessMode(it, engine)) }
+                },
+            )
+            .semantics { contentDescription = EngineRows.switchLabel(engine) }
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        SettingsSwitchTrack(on)
+    }
+}
+
+private fun Modifier.keepEngineMounted(visible: Boolean): Modifier = if (visible) {
+    this
+} else {
+    this
+        .layout { measurable, _ ->
+            measurable.measure(androidx.compose.ui.unit.Constraints.fixed(0, 0))
+            layout(0, 0) {}
+        }
+        .semantics { invisibleToUser() }
 }
 
 /**

@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -59,7 +60,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    private val state = SettingsDialogState(SettingsTab.Engines)
+    private val state = SettingsDialogState(route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail))
     private val fast = LoginPollPace(first = 20, next = 20, afterFailure = 20)
     private val link = ClaudeLoginLink.parse("https://claude.ai/oauth/authorize?code=true&client_id=FAKE&state=FAKE-STATE")!!
 
@@ -979,20 +980,20 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertTrue("no copy guard on the code field", copy == null || copy.label != NoCopyGuardCopy.ACTION_LABEL)
     }
 
-    /** Nothing in the section is ever the client's raw state: a seed-free dispose leaves no code anywhere. */
-    @Test fun closingTheTabDropsThePastedCode() {
+    /** Destination changes keep the one host and its in-progress login; closing Settings still disposes it. */
+    @Test fun changingDestinationKeepsThePastedCodeInTheSingleController() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
         tap(ClaudeAccountsTags.login("claude-work"))
         waitForCall(actions, "startLogin")
         actions.answer("startLogin", SecurityResult.Ok(ClaudeLoginState(ClaudeLoginStatus.AwaitingCode, link, false, null), ORIGIN, null))
         tag(ClaudeAccountsTags.code("claude-work")).performTextReplacement("FAKE-LEFT-BEHIND")
-        compose.runOnUiThread { state.tab = SettingsTab.General }
+        compose.runOnUiThread { state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Preferences, level = RuntimeDeskLevel.Detail) }
         compose.waitForIdle()
-        compose.runOnUiThread { state.tab = SettingsTab.Engines }
+        compose.runOnUiThread { state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail) }
         compose.waitUntil(5_000) { everything().any { it.contains("Claude Code (work)") } }
-        assertFalse(everything().any { it.contains("FAKE-LEFT-BEHIND") })
-        tag(ClaudeAccountsTags.loginPanel("claude-work")).assertDoesNotExist()
+        assertTrue(everything().any { it.contains("FAKE-LEFT-BEHIND") })
+        tag(ClaudeAccountsTags.loginPanel("claude-work")).assertExists()
         assertNull(actions.calls.firstOrNull { it.name == "submitCode" })
     }
 

@@ -150,6 +150,47 @@ object ClaudeAccountsTags {
  */
 @Composable
 internal fun ClaudeAccountsHost(binding: ClaudeAccountsBinding, narrow: Boolean) {
+    ClaudeAccountsHostContent(binding, narrow) { it.All() }
+}
+
+internal class ClaudeAccountsHostScope(
+    private val controller: ClaudeAccountsController,
+    private val view: ClaudeAccountsPresentation.View,
+    private val narrow: Boolean,
+    private val opener: LoginLinkOpener,
+) {
+    val entities: List<RuntimeDeskNavItem>
+        get() = listOf(
+            RuntimeDeskNavItem(RuntimeDeskEntities.Credentials, "Credentials", "API keys and tokens"),
+            RuntimeDeskNavItem(RuntimeDeskEntities.AccountSync, "Account sync", "Sync from configured providers"),
+            RuntimeDeskNavItem(RuntimeDeskEntities.LimitsBalance, "Limits & balance", "Usage, quotas, and balances"),
+        ) + view.cards.map { card ->
+            RuntimeDeskNavItem(RuntimeDeskEntities.credential(card.id), card.title, card.status, card.planTag)
+        }
+
+    @Composable
+    fun Credentials(accountId: String? = null) {
+        ClaudeAccountsSection(controller, view, narrow, opener, accountId = accountId, includeSync = false)
+    }
+
+    @Composable
+    fun Sync() {
+        ClaudeAccountsSyncSection(controller, view, narrow)
+    }
+
+    @Composable
+    fun All() {
+        ClaudeAccountsSection(controller, view, narrow, opener, includeSync = true)
+    }
+}
+
+/** One controller host wrapped around Runtime Desk so route and entity changes never restart its requests. */
+@Composable
+internal fun ClaudeAccountsHostContent(
+    binding: ClaudeAccountsBinding,
+    narrow: Boolean,
+    content: @Composable (ClaudeAccountsHostScope) -> Unit,
+) {
     val current = binding.origin
     val source = binding.source
     val actions = binding.actions
@@ -195,7 +236,8 @@ internal fun ClaudeAccountsHost(binding: ClaudeAccountsBinding, narrow: Boolean)
         c.foldSync(source.sync())
     }
 
-    ClaudeAccountsSection(c, ClaudeAccountsPresentation.view(c.state, binding.timeOf), narrow, binding.opener)
+    val host = ClaudeAccountsHostScope(c, ClaudeAccountsPresentation.view(c.state, binding.timeOf), narrow, binding.opener)
+    content(host)
 }
 
 /** `new Date(ranAt).toLocaleTimeString()`. */
@@ -208,6 +250,8 @@ private fun ClaudeAccountsSection(
     view: ClaudeAccountsPresentation.View,
     narrow: Boolean,
     opener: LoginLinkOpener,
+    accountId: String? = null,
+    includeSync: Boolean = true,
 ) {
     SettingsSection(
         ClaudeAccountsPresentation.TITLE,
@@ -229,12 +273,35 @@ private fun ClaudeAccountsSection(
             }
             else -> Column(verticalArrangement = Arrangement.spacedBy(if (narrow) 16.dp else 20.dp)) {
                 val accounts = c.state.accounts.orEmpty().associateBy { it.id }
-                view.cards.forEach { card -> accounts[card.id]?.let { AccountCard(card, it, c, narrow, opener) } }
+                view.cards.filter { accountId == null || it.id == accountId }.forEach { card ->
+                    accounts[card.id]?.let { AccountCard(card, it, c, narrow, opener) }
+                }
             }
         }
-        AddRow(c, narrow, topGap = view.cards.isNotEmpty())
+        if (accountId == null) AddRow(c, narrow, topGap = view.cards.isNotEmpty())
         c.line?.let { NoteLine(it, ClaudeAccountsTags.Line) }
-        view.sync?.let { SyncRows(it, c, narrow) }
+        if (includeSync) view.sync?.let { SyncRows(it, c, narrow) }
+    }
+}
+
+@Composable
+private fun ClaudeAccountsSyncSection(c: ClaudeAccountsController, view: ClaudeAccountsPresentation.View, narrow: Boolean) {
+    SettingsSection(
+        "Account sync",
+        AnnotatedString("Choose how account configuration is shared, then run a sync when needed."),
+        narrow,
+        last = true,
+    ) {
+        when {
+            view.notice != null -> ListNotice(view.notice, narrow, c::reload)
+            view.loading || view.sync == null -> Text(
+                ClaudeAccountsPresentation.LOADING,
+                color = LocalTetherTokens.current.muted,
+                style = settingsText(LocalTetherTypography.current.ui, 12f, 400, lineHeight = 1.6f),
+                modifier = Modifier.testTag(ClaudeAccountsTags.Loading).padding(vertical = 17.dp),
+            )
+            else -> SyncRows(view.sync, c, narrow)
+        }
     }
 }
 

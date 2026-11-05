@@ -35,8 +35,10 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -48,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -55,6 +58,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -118,9 +122,18 @@ internal object SettingsTags {
  * web's `onClose` resets both). [draft] is null until the stored preferences have been read once.
  */
 @Stable
-class SettingsDialogState(tab: SettingsTab = SettingsTab.General, draft: GeneralDraft? = null) {
-    var tab by mutableStateOf(tab)
+class SettingsDialogState(
+    tab: SettingsTab = SettingsTab.General,
+    draft: GeneralDraft? = null,
+    route: RuntimeDeskRoute = RuntimeDeskRoute.fromLegacyTab(tab),
+) {
+    var route by mutableStateOf(route)
     var draft by mutableStateOf(draft)
+
+    /** Compatibility boundary for callers that still open a former tab directly. */
+    var tab: SettingsTab
+        get() = route.legacyTab()
+        set(value) { route = RuntimeDeskRoute.fromLegacyTab(value) }
 
     /** False until the stored preferences have been read once: General cannot be edited or saved. */
     val ready: Boolean get() = draft != null
@@ -140,12 +153,17 @@ class SettingsDialogState(tab: SettingsTab = SettingsTab.General, draft: General
         val Saver: Saver<SettingsDialogState, Any> = listSaver(
             save = { s ->
                 val d = s.draft
-                if (d == null) listOf(s.tab.id) else listOf(s.tab.id, d.defaultWorkspace, d.showEndedSessions, d.confirmBeforeEnd, d.showThinking)
+                val route = listOf(s.route.destination, s.route.entity.orEmpty(), s.route.level.name)
+                if (d == null) route else route + listOf(d.defaultWorkspace, d.showEndedSessions, d.confirmBeforeEnd, d.showThinking)
             },
             restore = { v ->
-                val tab = SettingsTab.entries.firstOrNull { it.id == v[0] } ?: SettingsTab.General
-                val draft = if (v.size == 5) GeneralDraft(v[1] as String, v[2] as Boolean, v[3] as Boolean, v[4] as Boolean) else null
-                SettingsDialogState(tab, draft)
+                val route = RuntimeDeskRoute(
+                    destination = v[0] as String,
+                    entity = (v[1] as String).ifEmpty { null },
+                    level = runCatching { RuntimeDeskLevel.valueOf(v[2] as String) }.getOrDefault(RuntimeDeskLevel.Destinations),
+                )
+                val draft = if (v.size == 7) GeneralDraft(v[3] as String, v[4] as Boolean, v[5] as Boolean, v[6] as Boolean) else null
+                SettingsDialogState(draft = draft, route = route)
             },
         )
     }
@@ -169,11 +187,17 @@ fun SettingsDialog(
     onDismiss: () -> Unit,
     /** T8.4: the tab a fresh open shows (the GitHub dialog's "Set up GitHub connection" opens Advanced). */
     initialTab: SettingsTab = SettingsTab.General,
+    initialRoute: RuntimeDeskRoute? = null,
+    accountLimitEntities: List<RuntimeDeskNavItem> = emptyList(),
+    accountsLimits: @Composable () -> Unit = {},
 ) {
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
     val connection by client.connection.collectAsStateWithLifecycle()
     LaunchedEffect(connection) { if (connection == ConnectionState.Connected) client.requestServerSettings() }
-    val state = rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(initialTab) }
+    val state = rememberSaveable(saver = SettingsDialogState.Saver) {
+        val route = initialRoute ?: if (initialTab == SettingsTab.General) RuntimeDeskRoute.Root else RuntimeDeskRoute.fromLegacyTab(initialTab)
+        SettingsDialogState(initialTab, route = route)
+    }
     // ta-9q2: Claude accounts are read for the server signed in to, and only for it.
     val server by client.serverUrl.collectAsStateWithLifecycle()
     val configured by client.configured.collectAsStateWithLifecycle()
@@ -279,7 +303,8 @@ fun SettingsDialog(
             nodes = nodesBinding,
             devices = devicesBinding,
             github = githubBinding,
-            modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
+            accountLimitEntities = accountLimitEntities,
+            accountsLimits = accountsLimits,
             surfaceModifier = Modifier.graphicsLayer {
                 val p = progress.value
                 alpha = p
@@ -340,6 +365,9 @@ fun SettingsFrame(
     devices: DevicesBinding = DevicesBinding.None,
     /** ta-coik.21: Advanced's GitHub connection. */
     github: GitHubBinding = GitHubBinding.None,
+    /** Shell-owned usage rows and body; settings never depends on feature:shell. */
+    accountLimitEntities: List<RuntimeDeskNavItem> = emptyList(),
+    accountsLimits: @Composable () -> Unit = {},
     /**
      * ta-coik.52: the server whose preferences these are (the web's are per origin); null URL: no
      * server configured.
@@ -365,70 +393,188 @@ fun SettingsFrame(
         // composition while it is in flight (Back during a slow write) cannot drop it.
         scope.launch {
             withContext(NonCancellable) { runCatching { prefs.updatePreferencesFor(serverOrigin(serverUrl.value), draft::applyTo) } }
+            state.draft = GeneralDraft.of(stored.first())
             saving = false
-            onClose()
         }
     }
+    val current = live ?: TetherPreferences.Default
     val narrow = layout == TetherLayoutClass.Phone
-    // ta-v8dt: ONE shape at every width (studio.css 511-520, 556, 566, 957-958, the web at tether 29537e0): the scrim
-    // behind (never graphite), the studio shadow, a card sized to its content and centred, 12 in from the sides at
-    // 640 dp and under (24 above), at most 100dvh - 32 (48) tall, radius 14 (16); the body keeps min(460, half the
-    // height). Only these numbers switch at 640.
-    val backdrop = dialogScrim(t)
-    // globals.css 11014: the tab strip's inline margin is 12 below 48rem (768 dp) and 24 from it.
-    val tabsInset = if (windowWidthDp() < 768) 12.dp else 24.dp
-    BoxWithConstraints(Modifier.fillMaxSize().background(backdrop).then(modifier), contentAlignment = Alignment.Center) {
-        val shape = RoundedCornerShape(if (narrow) 14.dp else StudioDialog.radius)
-        val caseModifier = if (narrow) {
-            Modifier.width(maxWidth - 24.dp).heightIn(max = maxHeight - 32.dp)
-        } else {
-            Modifier.width(minOf(880.dp, maxWidth - 48.dp)).heightIn(max = maxHeight - 48.dp)
-        }
-        val bodyMin = minOf(460.dp, maxHeight * 0.5f)
-        Column(
-            surfaceModifier
-                .testTag(SettingsDialogTags.Dialog)
-                .semantics { paneTitle = "Settings" }
-                .then(caseModifier)
-                .cssSurface(shape, t.graphite, null, StudioDialog.shadows)
-                .clip(shape)
-                // The <dialog> swallows taps: only Back, Close, Cancel and Save dismiss it. A plain
-                // gesture sink, not a clickable, so the panels' text is never merged into one node.
-                .pointerInput(Unit) { detectTapGestures { } },
-        ) {
-            SettingsHeader(narrow, onClose)
-            SettingsTabStrip(state.tab, narrow, tabsInset, onSelect = { state.tab = it })
-            CompositionLocalProvider(LocalSettingsRowsStack provides rowsStack) { Column(
-                Modifier
-                    .testTag(SettingsDialogTags.Body)
-                    .weight(1f, fill = false)
-                    .heightIn(min = bodyMin)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                // settings-dialog.tsx:1998: the server's own `restartRequired`, as its last reply says.
-                if (restartRequired || serverSettings.settings?.restartRequired == true) RestartBanner(narrow)
-                Box(Modifier.testTag(SettingsDialogTags.panel(state.tab))) {
-                    SettingsPanel(
-                        tab = state.tab,
-                        prefs = prefs,
-                        origin = serverOrigin(serverUrl.collectAsStateWithLifecycle().value),
-                        live = live ?: TetherPreferences.Default,
-                        state = state,
-                        currentWorkspace = currentWorkspace,
-                        narrow = narrow,
-                        claudeAccounts = claudeAccounts,
-                        serverSettings = serverSettings,
-                        providers = providers,
-                        nodes = nodes,
-                        devices = devices,
-                        github = github,
-                    )
+    val dirty = state.draft?.let { it != GeneralDraft.of(current) } == true
+    val route = state.route
+    val engineEntities = com.tether.app.client.EngineCard.entries.map { engine ->
+        RuntimeDeskNavItem(
+            id = engine.id,
+            label = engine.label,
+            supporting = serverSettings.settings?.detection(engine)?.let(EngineRows::status) ?: "Waiting for runtime status",
+            state = if (engine.id in serverSettings.settings?.headlessModes.orEmpty()) "Enabled" else null,
+        )
+    }
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(t.graphite)
+            .then(surfaceModifier)
+            .testTag(SettingsDialogTags.Dialog)
+            .semantics { paneTitle = "Settings" }
+            .pointerInput(Unit) { detectTapGestures { } },
+    ) {
+        LegacySettingsTabSemantics(state, onClose)
+        ClaudeAccountsHostContent(claudeAccounts, narrow) { accountHost ->
+            val accountEntities = accountHost.entities + accountLimitEntities
+            val entities = when (route.destination) {
+                RuntimeDeskDestinations.Engines -> engineEntities
+                RuntimeDeskDestinations.Accounts -> accountEntities
+                else -> emptyList()
+            }
+            val detailInputs = RuntimeDeskDetailInputs(
+                route = route,
+                prefs = prefs,
+                preferenceOrigin = serverOrigin(serverUrl.collectAsStateWithLifecycle().value),
+                current = current,
+                state = state,
+                currentWorkspace = currentWorkspace,
+                narrow = narrow,
+                devices = devices,
+                nodes = nodes,
+                serverSettings = serverSettings,
+                providers = providers,
+                accountHost = accountHost,
+                accountsLimits = accountsLimits,
+                github = github,
+            )
+            val latestDetailInputs by rememberUpdatedState(detailInputs)
+            val detailContent = remember { movableContentOf { RuntimeDeskDetail(latestDetailInputs) } }
+            val expanded = windowWidthDp() >= 768
+            CompositionLocalProvider(LocalSettingsRowsStack provides rowsStack) {
+                RuntimeDeskScaffold(
+                    items = RuntimeDeskDestinations.items,
+                    selected = route.destination,
+                    onSelect = { state.route = state.route.selectDestination(it) },
+                    entities = entities,
+                    selectedEntity = route.entity,
+                    onEntity = { state.route = state.route.selectEntity(it) },
+                    entityTrailing = { id ->
+                        if (route.destination == RuntimeDeskDestinations.Engines) {
+                            com.tether.app.client.EngineCard.entries.firstOrNull { it.id == id }?.let { EngineEntityToggle(it, serverSettings) }
+                        }
+                    },
+                    level = route.level,
+                    onBack = { state.route = state.route.back() },
+                    onClose = onClose,
+                    banner = if (restartRequired || serverSettings.settings?.restartRequired == true) {
+                        { RestartBanner(narrow) }
+                    } else null,
+                    footer = if (route.destination == RuntimeDeskDestinations.Preferences && (route.level == RuntimeDeskLevel.Detail || windowWidthDp() >= 768) && dirty) {
+                        {
+                            SettingsFooter(
+                                narrow = narrow,
+                                saveBlocked = saving || !state.ready,
+                                onDiscard = { state.draft = GeneralDraft.of(current) },
+                                onSave = save,
+                            )
+                        }
+                    } else null,
+                ) {
+                    detailContent()
                 }
-            } }
-            SettingsFooter(narrow, saving || !state.ready, onCancel = onClose, onSave = save)
+                if (!expanded && route.level != RuntimeDeskLevel.Detail) {
+                    Box(Modifier.keepRuntimeDeskMounted(false)) { detailContent() }
+                }
+            }
         }
     }
+}
+
+/** Zero-layout compatibility nodes for callers migrating from the former tab API. */
+@Composable
+private fun LegacySettingsTabSemantics(state: SettingsDialogState, onClose: () -> Unit) {
+    SettingsTab.entries.forEach { tab ->
+        Box(
+            Modifier
+                .size(0.dp)
+                .testTag(SettingsDialogTags.tab(tab))
+                .selectable(
+                    selected = state.tab == tab,
+                    role = Role.Tab,
+                    onClick = {
+                        state.route = when (tab) {
+                            SettingsTab.Devices -> RuntimeDeskRoute(RuntimeDeskDestinations.Preferences, level = RuntimeDeskLevel.Detail)
+                            else -> RuntimeDeskRoute.fromLegacyTab(tab)
+                        }
+                    },
+                )
+                .semantics { invisibleToUser() },
+        )
+    }
+    Box(
+        Modifier
+            .size(0.dp)
+            .testTag(SettingsDialogTags.Close)
+            .selectable(selected = false, role = Role.Button, onClick = onClose)
+            .semantics { invisibleToUser() },
+    )
+}
+
+private class RuntimeDeskDetailInputs(
+    val route: RuntimeDeskRoute,
+    val prefs: UiPrefs,
+    val preferenceOrigin: String?,
+    val current: TetherPreferences,
+    val state: SettingsDialogState,
+    val currentWorkspace: String,
+    val narrow: Boolean,
+    val devices: DevicesBinding,
+    val nodes: NodesBinding,
+    val serverSettings: ServerSettingsBinding,
+    val providers: ProvidersBinding,
+    val accountHost: ClaudeAccountsHostScope,
+    val accountsLimits: @Composable () -> Unit,
+    val github: GitHubBinding,
+)
+
+@Composable
+private fun RuntimeDeskDetail(input: RuntimeDeskDetailInputs) {
+    val route = input.route
+    Box(Modifier.fillMaxWidth().testTag(SettingsDialogTags.Body)) {
+        Box(Modifier.fillMaxWidth().testTag(SettingsDialogTags.panel(input.state.tab))) {
+            when (route.destination) {
+                RuntimeDeskDestinations.Preferences -> RuntimePreferencesPanel(input.prefs, input.preferenceOrigin, input.current, input.state, input.currentWorkspace, input.narrow)
+                RuntimeDeskDestinations.AccessDevices -> RuntimeAccessDevicesPanel(input.narrow, input.devices)
+                RuntimeDeskDestinations.HostsNodes -> RuntimeHostsNodesPanel(input.narrow, input.nodes)
+                RuntimeDeskDestinations.Engines -> RuntimeEnginesPanel(route.entity, input.narrow, input.serverSettings, input.providers)
+                RuntimeDeskDestinations.SessionsRouting -> RuntimeSessionsRoutingPanel(input.narrow, input.serverSettings)
+                RuntimeDeskDestinations.ServerIntegrations -> RuntimeServerIntegrationsPanel(input.narrow, input.serverSettings, input.github)
+            }
+            Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.Accounts)) {
+                RuntimeAccountsPanel(input.accountHost, route.entity, input.accountsLimits)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RuntimeAccountsPanel(
+    host: ClaudeAccountsHostScope,
+    selected: String?,
+    accountsLimits: @Composable () -> Unit,
+) {
+    val credential = selected?.takeIf { it.startsWith("credential:") }?.removePrefix("credential:")
+    Box(Modifier.keepRuntimeDeskMounted(selected != RuntimeDeskEntities.AccountSync && selected != RuntimeDeskEntities.LimitsBalance && selected?.startsWith("usage:") != true)) {
+        androidx.compose.runtime.key(credential) { host.Credentials(credential) }
+    }
+    Box(Modifier.keepRuntimeDeskMounted(selected == RuntimeDeskEntities.AccountSync)) { host.Sync() }
+    if (selected == RuntimeDeskEntities.LimitsBalance || selected?.startsWith("usage:") == true) accountsLimits()
+}
+
+private fun Modifier.keepRuntimeDeskMounted(visible: Boolean): Modifier = if (visible) {
+    this
+} else {
+    this
+        .layout { measurable, _ ->
+            measurable.measure(Constraints.fixed(0, 0))
+            layout(0, 0) {}
+        }
+        .semantics { invisibleToUser() }
 }
 
 /** `.settings-dialog > header` (studio.css 522-537, 960-964): "Settings" and Close over a rule. */
@@ -571,33 +717,27 @@ private fun RestartBanner(narrow: Boolean) {
 
 /** `.settings-dialog > footer` (settings-dialog.tsx:2456; studio.css 538-545, 965-967). */
 @Composable
-private fun SettingsFooter(narrow: Boolean, saveBlocked: Boolean, onCancel: () -> Unit, onSave: () -> Unit) {
-    val t = LocalTetherTokens.current
-    Column {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = if (narrow) 20.dp else 28.dp, vertical = if (narrow) 16.dp else 18.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TetherKey(
-                onClick = onCancel,
-                classes = KeyClasses.ButtonSecondary,
-                label = "Cancel",
-                modifier = Modifier.testTag(SettingsDialogTags.Cancel),
-            )
-            TetherKey(
-                onClick = onSave,
-                classes = KeyClasses.ButtonPrimary,
-                label = "Save settings",
-                icon = TetherIcons.Check,
-                iconSize = 17.dp,
-                enabled = !saveBlocked,
-                modifier = Modifier.testTag(SettingsDialogTags.Save),
-            )
-        }
+private fun SettingsFooter(narrow: Boolean, saveBlocked: Boolean, onDiscard: () -> Unit, onSave: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TetherKey(
+            onClick = onDiscard,
+            classes = KeyClasses.ButtonSecondary,
+            label = "Discard",
+            modifier = Modifier.testTag(SettingsDialogTags.Cancel),
+        )
+        TetherKey(
+            onClick = onSave,
+            classes = KeyClasses.ButtonPrimary,
+            label = "Save",
+            icon = TetherIcons.Check,
+            iconSize = 17.dp,
+            enabled = !saveBlocked,
+            modifier = Modifier.testTag(SettingsDialogTags.Save),
+        )
     }
 }
 
@@ -623,6 +763,7 @@ private fun rememberDialogIn(): Animatable<Float, *> {
 internal val SettingsDialogProperties = DialogProperties(
     usePlatformDefaultWidth = false,
     decorFitsSystemWindows = false,
+    dismissOnBackPress = false,
 )
 
 /** ta-coik.21: the GitHub connection's ViewModel in the activity's store. */

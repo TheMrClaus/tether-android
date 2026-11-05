@@ -39,7 +39,7 @@ class ClaudeAccountsAliasBehaviourTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    private val state = SettingsDialogState(SettingsTab.Engines)
+    private val state = SettingsDialogState(route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail))
 
     private val line = """alias claude-work='CLAUDE_CONFIG_DIR="/srv/tether/state/claude-accounts/claude-work" claude'"""
     private val snippet = """[ -f "/srv/tether/state/claude-aliases.sh" ] && . "/srv/tether/state/claude-aliases.sh""""

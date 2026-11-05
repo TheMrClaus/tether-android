@@ -1,11 +1,15 @@
 package com.tether.app.ui.shell
 
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.tether.app.ui.overview.OverviewTags
 import com.tether.app.ui.usage.AccountsTags
 import com.tether.app.ui.usage.UsageTags
+import com.tether.app.ui.settings.SettingsDialogTags
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -38,10 +42,12 @@ class MainShellUsageTest : NavigationBase(1200, 1000) {
         assertNotEquals("the page is never the stored view", "usage", storedView())
     }
 
-    @Test fun accountsOpensTheDialog() {
+    @Test fun accountsOpensRuntimeDeskDirectlyAtLimits() {
         launch()
         onOverview()
         rule.onNodeWithTag(ShellTags.AccountsKey).performClick()
-        awaitTag(AccountsTags.Dialog)
+        awaitTag(SettingsDialogTags.Dialog)
+        rule.onNodeWithText("Limits & balance").assertExists()
+        rule.onNodeWithTag(AccountsTags.Dialog).assertDoesNotExist()
     }
 }

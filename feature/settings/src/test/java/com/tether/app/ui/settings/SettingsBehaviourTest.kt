@@ -60,9 +60,7 @@ class SettingsBehaviourTest {
         }
         // The draft is seeded from the store's first read.
         compose.waitUntil(5_000) { state.draft != null }
-        // ta-b72: and it is drawn: wait until the screen is ready too (Save is enabled only then, as
-        // are Use current and the switches), so no tap lands on a still-disabled control.
-        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
+        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsPanelTags.UseCurrent) }
         compose.waitForIdle()
     }
 
@@ -70,7 +68,6 @@ class SettingsBehaviourTest {
     private fun waitSelected(t: String) =
         compose.waitUntil(5_000) { compose.onAllNodesWithTag(t).fetchSemanticsNodes().singleOrNull()?.config?.getOrNull(SemanticsProperties.Selected) == true }
 
-    private fun tab(tab: SettingsTab) = compose.onNodeWithTag(SettingsDialogTags.tab(tab))
     private fun toggle(toggle: GeneralToggle) = compose.onNodeWithTag(SettingsPanelTags.toggle(toggle))
 
     private fun waitClosed(count: Int = 1) = compose.waitUntil(5_000) { closes == count }
@@ -92,23 +89,18 @@ class SettingsBehaviourTest {
         for ((k, v) in expected) assertEquals(k, v, raw[k])
     }
 
-    @Test fun theSevenTabsShowGeneralFirstAndSwitchPanels() {
+    @Test fun theSevenDestinationsDrillIntoTheirPanels() {
+        state.route = RuntimeDeskRoute.Root
         show()
-        SettingsTab.entries.forEach { t ->
-            tab(t).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
+        RuntimeDeskDestinations.items.forEach { item ->
+            compose.onNodeWithText(item.label).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
         }
-        tab(SettingsTab.General).assertIsSelected()
-        compose.onNodeWithTag(SettingsDialogTags.panel(SettingsTab.General)).assertExists()
-        compose.onNodeWithText("Startup").assertExists()
-
-        tab(SettingsTab.Appearance).performClick()
+        compose.onNodeWithText("Preferences").performClick()
         compose.waitForIdle()
-        tab(SettingsTab.Appearance).assertIsSelected()
-        tab(SettingsTab.General).assertIsNotSelected()
-        compose.onNodeWithTag(SettingsDialogTags.panel(SettingsTab.General)).assertDoesNotExist()
+        compose.onNodeWithText("Startup").assertExists()
         compose.onNodeWithText("Sign-in screen").assertExists()
-
-        tab(SettingsTab.Devices).performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Access & devices").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Sessions opened on this phone").assertExists()
         compose.onNodeWithText("Paired devices").assertExists()
@@ -121,13 +113,12 @@ class SettingsBehaviourTest {
      * Every panel is drawn when its tab is chosen (ta-coik.21: the last "coming later" slot, Advanced's
      * GitHub connection, is ported, and the slot itself is gone).
      */
-    @Test fun everyPanelIsDrawnWhenItsTabIsChosen() {
+    @Test fun everyDestinationHasAControlledDetail() {
         show()
-        // ta-t7l: Metadata and Advanced are drawn now (here, before any server reply, they wait for it).
-        listOf(SettingsTab.Devices, SettingsTab.Nodes, SettingsTab.Engines, SettingsTab.Metadata, SettingsTab.Advanced).forEach { t ->
-            tab(t).performScrollTo().performClick()
+        RuntimeDeskDestinations.items.forEach { item ->
+            compose.runOnUiThread { state.route = state.route.selectDestination(item.id).let { if (it.level == RuntimeDeskLevel.Entities) it.copy(level = RuntimeDeskLevel.Detail) else it } }
             compose.waitForIdle()
-            compose.onNodeWithTag(SettingsDialogTags.panel(t)).assertExists()
+            compose.onNodeWithTag(SettingsDialogTags.Body).assertExists()
         }
     }
 
@@ -145,17 +136,19 @@ class SettingsBehaviourTest {
         assertEquals(emptyMap<String, Any>(), store.stored())
 
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
-        waitClosed()
         waitStored(PreferenceKeys.SHOW_ENDED_SESSIONS to false, PreferenceKeys.CONFIRM_BEFORE_END to false, PreferenceKeys.SHOW_THINKING to true)
+        assertEquals("Save stays in Runtime Desk", 0, closes)
+        compose.onNodeWithTag(SettingsDialogTags.Save).assertDoesNotExist()
     }
 
     @Test fun cancelAndCloseDropTheDraft() {
         show()
         flip(GeneralToggle.ConfirmBeforeEnd)
         compose.onNodeWithTag(SettingsDialogTags.Cancel).performClick()
+        assertEquals(0, closes)
+        toggle(GeneralToggle.ConfirmBeforeEnd).assertIsOn()
+        compose.onNodeWithContentDescription("Close settings").performClick()
         waitClosed(1)
-        compose.onNodeWithContentDescription("Close").performClick()
-        waitClosed(2)
         assertEquals(emptyMap<String, Any>(), store.stored())
     }
 
@@ -172,7 +165,6 @@ class SettingsBehaviourTest {
         compose.onNodeWithText("Workspace root").assertDoesNotExist()
         assertEquals("nothing written before Save", null, store.storedFor()[PreferenceKeys.DEFAULT_WORKSPACE])
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
-        waitClosed()
         waitStored(PreferenceKeys.DEFAULT_WORKSPACE to CURRENT)
     }
 
@@ -199,8 +191,6 @@ class SettingsBehaviourTest {
     @Test fun appearanceAppliesAtOnceAndSaveKeepsIt() {
         show()
         flip(GeneralToggle.ShowThinking)
-        tab(SettingsTab.Appearance).performClick()
-        compose.waitForIdle()
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performClick()
         compose.waitUntil(5_000) { store.storedFor()[PreferenceKeys.THEME_MODE] == "dark" }
         waitSelected(SettingsPanelTags.themeMode(ThemeMode.Dark))
@@ -211,7 +201,6 @@ class SettingsBehaviourTest {
         assertEquals(false, store.storedFor()[PreferenceKeys.SHOW_THINKING])
 
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
-        waitClosed()
         waitStored(PreferenceKeys.THEME_MODE to "dark", PreferenceKeys.LOGIN_VARIANT to "retro", PreferenceKeys.SHOW_THINKING to true)
     }
 
@@ -223,7 +212,6 @@ class SettingsBehaviourTest {
     @Test fun appearanceOffersTheThreeModesAndMigratesARetiredFamily() {
         store.seed(PreferenceKeys.THEME_FAMILY to "tactile", PreferenceKeys.THEME_MODE to "dark", PreferenceKeys.LEGACY_THEME to "night")
         show()
-        tab(SettingsTab.Appearance).performClick()
         compose.waitForIdle()
         for (mode in listOf("Light", "Dark", "Follow system")) compose.onNodeWithText(mode).assertExists()
         for (retired in listOf("Tactile Console", "Precision Machine", "THEME")) {
@@ -242,7 +230,6 @@ class SettingsBehaviourTest {
 
     @Test fun aFreshInstallFollowsTheSystemAndTheDefaultSignIn() {
         show()
-        tab(SettingsTab.Appearance).performClick()
         compose.waitForIdle()
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.System)).assertIsSelected()
         compose.onNodeWithTag(SettingsPanelTags.loginVariant("default")).assertIsSelected()
@@ -254,7 +241,7 @@ class SettingsBehaviourTest {
         show(restartRequired = true)
         compose.onNodeWithTag(SettingsDialogTags.RestartBanner).assertExists()
         compose.onNodeWithText(RESTART_REQUIRED).assertExists()
-        tab(SettingsTab.Advanced).performScrollTo().performClick()
+        compose.runOnUiThread { state.route = RuntimeDeskRoute(RuntimeDeskDestinations.ServerIntegrations, level = RuntimeDeskLevel.Detail) }
         compose.waitForIdle()
         compose.onNodeWithTag(SettingsDialogTags.RestartBanner).assertExists()
     }

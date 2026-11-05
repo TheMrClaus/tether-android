@@ -236,6 +236,28 @@ private fun SpinningKey(spinning: Boolean, content: @Composable (Float) -> Unit)
     content(angle)
 }
 
+/** Runtime Desk adapter over the shell-owned state. It adds no controller and performs no request. */
+@Composable
+fun UsageAccountsContent(
+    state: UsageAccountsState,
+    onUseCredit: (CodexResetRequest) -> Unit,
+    onUseGrant: (ClaudeResetRequest) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val narrow = maxWidth <= 640.dp
+        Body(
+            state = state,
+            narrow = narrow,
+            width = maxWidth,
+            onUseCredit = onUseCredit,
+            onUseGrant = onUseGrant,
+            modifier = Modifier.fillMaxWidth(),
+            scrollable = false,
+        )
+    }
+}
+
 @Composable
 private fun Body(
     state: UsageAccountsState,
@@ -244,13 +266,18 @@ private fun Body(
     onUseCredit: (CodexResetRequest) -> Unit,
     onUseGrant: (ClaudeResetRequest) -> Unit,
     modifier: Modifier,
+    scrollable: Boolean = true,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val env = LocalUsageEnv.current
     val data = state.data
     Column(
-        modifier.fillMaxWidth().background(t.graphite).verticalScroll(rememberScrollState()).padding(horizontal = if (narrow) 20.dp else 28.dp, vertical = if (narrow) 24.dp else 28.dp),
+        modifier
+            .fillMaxWidth()
+            .background(t.graphite)
+            .then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+            .padding(horizontal = if (narrow) 20.dp else 28.dp, vertical = if (narrow) 24.dp else 28.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
         if (state.error.isNotEmpty()) {

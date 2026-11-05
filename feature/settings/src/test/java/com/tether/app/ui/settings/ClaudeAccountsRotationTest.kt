@@ -36,7 +36,9 @@ class ClaudeAccountsRotationTest {
         val binding = ClaudeAccountsBinding(FakeAccounts(), ORIGIN, AccountsFixtures.TIME, actions = actions, pace = LoginPollPace(20, 20, 20))
         val restoration = StateRestorationTester(compose)
         restoration.setContent {
-            val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Engines) }
+            val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) {
+                SettingsDialogState(route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail))
+            }
             SettingsUnderTest(store.prefs, state, claudeAccounts = binding)
         }
         compose.waitUntil(5_000) { compose.onAllNodesWithTag(ClaudeAccountsTags.Add, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }

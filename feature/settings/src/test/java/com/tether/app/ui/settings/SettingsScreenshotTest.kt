@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import com.tether.app.client.ClaudeAccount
@@ -59,6 +60,7 @@ enum class SettingsShot(
     /** v144: the Authentication shots (ServerSecretScreenshotTest sets their own sizes and skins; the generic classes skip them). */
     val own: Boolean = false,
 ) {
+    Desk("runtime-desk", SettingsTab.General),
     General("settings-general", SettingsTab.General),
     Appearance("settings-appearance", SettingsTab.Appearance),
     Devices("settings-devices", SettingsTab.Devices, devices = DevicesShot.Top),
@@ -113,6 +115,17 @@ enum class SettingsShot(
     NodesAdding("settings-nodes-adding", SettingsTab.Nodes, nodes = NodesShot.Adding),
     NodesResult("settings-nodes-result", SettingsTab.Nodes, nodes = NodesShot.Result),
     NodesError("settings-nodes-error", SettingsTab.Nodes, nodes = NodesShot.Error),
+}
+
+private fun SettingsShot.runtimeRoute(): RuntimeDeskRoute = when {
+    this == SettingsShot.Desk -> RuntimeDeskRoute.Root
+    accounts == AccountsShot.Sync -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.AccountSync, RuntimeDeskLevel.Detail)
+    accounts != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail)
+    this == SettingsShot.AdvancedLifecycle || this == SettingsShot.AdvancedDefaults || tab == SettingsTab.Metadata ->
+        RuntimeDeskRoute(RuntimeDeskDestinations.SessionsRouting, level = RuntimeDeskLevel.Detail)
+    this == SettingsShot.AdvancedCli || tab == SettingsTab.Engines ->
+        RuntimeDeskRoute(RuntimeDeskDestinations.Engines, "claude", RuntimeDeskLevel.Detail)
+    else -> RuntimeDeskRoute.fromLegacyTab(tab)
 }
 
 /**
@@ -431,7 +444,7 @@ fun ComposeContentTestRule.snapSettings(
     // dialog (the not-loaded state never renders). Nothing in it animates from a start value then:
     // keys, switches and choice rows compose at their resting look. The clock is driven by hand.
     val stored = runBlocking { store.prefs.preferences.first() }
-    val state = SettingsDialogState(shot.tab, GeneralDraft.of(stored))
+    val state = SettingsDialogState(shot.tab, GeneralDraft.of(stored), shot.runtimeRoute())
     mainClock.autoAdvance = false
     // T12.2: notifications allowed, so the push row shows the registration (not the permission).
     grantNotificationPermission()
@@ -475,29 +488,16 @@ fun ComposeContentTestRule.snapSettings(
         waitForIdle()
     }
     (shot.accounts?.scrollTo ?: shot.server?.scrollTo ?: shot.profiles?.scrollTo ?: shot.nodes?.scrollTo ?: shot.devices?.scrollTo)?.let { scrollTo ->
-        // Bring the section (or its sync rows) to the top of the dialog's body: the offset is
-        // measured on the laid-out frame (positionInRoot: boundsInRoot is clipped to what the body
-        // shows), and the scroll runs out on the hand-driven clock.
-        val body = onNodeWithTag(SettingsDialogTags.Body)
         val target = onNodeWithTag(scrollTo, useUnmergedTree = true)
-        repeat(2) {
-            val delta = target.fetchSemanticsNode().positionInRoot.y - body.fetchSemanticsNode().positionInRoot.y
-            if (kotlin.math.abs(delta) > 0.5f) body.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, delta) }
-            mainClock.advanceTimeBy(1_000)
-            waitForIdle()
-        }
+        target.performScrollTo()
+        mainClock.advanceTimeBy(1_000)
+        waitForIdle()
     }
     ensureVisible?.let { tag ->
-        val body = onNodeWithTag(SettingsDialogTags.Body)
         val target = onNodeWithTag(tag, useUnmergedTree = true)
-        repeat(2) {
-            val b = body.fetchSemanticsNode()
-            val t = target.fetchSemanticsNode()
-            val delta = (t.positionInRoot.y + t.size.height) - (b.positionInRoot.y + b.size.height) + 24f
-            if (delta > 0.5f) body.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, delta) }
-            mainClock.advanceTimeBy(1_000)
-            waitForIdle()
-        }
+        target.performScrollTo()
+        mainClock.advanceTimeBy(1_000)
+        waitForIdle()
     }
     onRoot().captureRoboImage(
         "src/test/screenshots/$name/${skin.id}-$size.png",
@@ -526,9 +526,9 @@ class SettingsPhoneScreenshotTest(private val shot: SettingsShot, private val sk
 }
 
 @RunWith(ParameterizedRobolectricTestRunner::class)
-@Config(qualifiers = "w1280dp-h800dp-mdpi")
+@Config(qualifiers = "w800dp-h1000dp-mdpi")
 class SettingsTabletScreenshotTest(private val shot: SettingsShot, private val skin: TetherSkin) : SettingsShotBase() {
-    @Test fun settings() = rule.snapSettings(store, shot, skin, "tablet")
+    @Test fun settings() = rule.snapSettings(store, shot, skin, "expanded")
 
     companion object {
         @JvmStatic

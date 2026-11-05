@@ -71,6 +71,68 @@ internal fun SettingsPanel(
     }
 }
 
+@Composable
+internal fun RuntimePreferencesPanel(
+    prefs: UiPrefs,
+    origin: String?,
+    live: TetherPreferences,
+    state: SettingsDialogState,
+    currentWorkspace: String,
+    narrow: Boolean,
+) {
+    Column {
+        GeneralPanel(live, state, currentWorkspace, narrow)
+        AppearancePanel(prefs, origin, live, narrow)
+        SettingsSection(
+            "Notifications",
+            AnnotatedString("Private, generic alerts for approvals, agent questions, and completed turns."),
+            narrow,
+            last = true,
+        ) {
+            PushNotificationsRow(prefs, narrow)
+        }
+    }
+}
+
+@Composable
+internal fun RuntimeAccessDevicesPanel(narrow: Boolean, devices: DevicesBinding) {
+    key(devices.controller?.origin) { DevicesSecuritySections(devices, narrow) }
+}
+
+@Composable
+internal fun RuntimeHostsNodesPanel(narrow: Boolean, nodes: NodesBinding) {
+    key(nodes.origin) { NodesSection(nodes, narrow) }
+}
+
+@Composable
+internal fun RuntimeEnginesPanel(
+    selectedId: String?,
+    narrow: Boolean,
+    serverSettings: ServerSettingsBinding,
+    providers: ProvidersBinding,
+) {
+    val loaded = serverSettings.settings != null && serverSettings.origin != null
+    Column {
+        key(serverSettings.origin) { EngineDetails(serverSettings, selectedId, narrow) }
+        key(providers.origin) { ProfilesSection(providers, narrow, last = !loaded) }
+        key(serverSettings.origin) { HostConfigSection(serverSettings, narrow) }
+        ClaudeCliSection(serverSettings, narrow)
+    }
+}
+
+@Composable
+internal fun RuntimeSessionsRoutingPanel(narrow: Boolean, binding: ServerSettingsBinding) {
+    Column {
+        MetadataPanel(narrow, binding)
+        SessionSettingsPanel(narrow, binding)
+    }
+}
+
+@Composable
+internal fun RuntimeServerIntegrationsPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding) {
+    ServerIntegrationsPanel(narrow, binding, github)
+}
+
 /**
  * General (settings-dialog.tsx:2003-2014): Startup's default workspace with "Use current", and
  * Session behavior's three switches. Everything here edits the Save draft, never the store.
@@ -279,7 +341,15 @@ private fun MetadataPanel(narrow: Boolean, binding: ServerSettingsBinding) {
  */
 @Composable
 private fun AdvancedPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding) {
-    // r2: no server, nothing drawn (a frame kept past a sign-out must never show).
+    Column {
+        ServerIntegrationsPanel(narrow, binding, github)
+        SessionSettingsPanel(narrow, binding)
+        ClaudeCliSection(binding, narrow)
+    }
+}
+
+@Composable
+private fun ServerIntegrationsPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding) {
     val view = binding.settings?.takeIf { binding.origin != null }
     Column {
         if (view == null) {
@@ -298,29 +368,39 @@ private fun AdvancedPanel(narrow: Boolean, binding: ServerSettingsBinding, githu
                 ServerTextRow(AdvancedRows.workspaceRoot, view, binding, narrow)
             }
             GitHubConnectionSection(github, narrow)
-            SettingsSection(AdvancedRows.LIFECYCLE, AnnotatedString(AdvancedRows.LIFECYCLE_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("lifecycle"))) {
-                ServerToggleRow(AdvancedRows.claudePersistent, view, binding, narrow)
-                ServerToggleRow(AdvancedRows.claudeTaskTelemetry, view, binding, narrow)
-                ServerNumberRow(AdvancedRows.warmMaxSessions, view, binding, narrow)
-                ServerNumberRow(AdvancedRows.maxConcurrentTurns, view, binding, narrow)
-                ServerNumberRow(AdvancedRows.warmIdleEvictionMs, view, binding, narrow)
-                ServerNumberRow(AdvancedRows.warmBgHardCapMs, view, binding, narrow)
-                ServerNumberRow(AdvancedRows.warmSweepMs, view, binding, narrow)
-                ServerNumberRow(AdvancedRows.shutdownDrainMs, view, binding, narrow)
-                ServerSelectRow(AdvancedRows.messageInterruptMode, AdvancedRows.messageInterruptModes, view, binding, narrow)
-                ServerSelectRow(AdvancedRows.claudeModelFallback, AdvancedRows.claudeModelFallbacks, view, binding, narrow)
-                ServerNumberRow(AdvancedRows.autoArchiveIdleDays, view, binding, narrow)
-                ServerToggleRow(AdvancedRows.archiveOnMerge, view, binding, narrow)
-            }
-            SettingsSection(AdvancedRows.DEFAULTS, AnnotatedString(AdvancedRows.DEFAULTS_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("defaults"))) {
-                ServerSelectRow(AdvancedRows.defaultPermissionMode, AdvancedRows.permissionModes, view, binding, narrow)
-                ServerSelectRow(AdvancedRows.defaultSandboxPolicy, AdvancedRows.sandboxPolicies, view, binding, narrow)
-                ServerToggleRow(AdvancedRows.defaultUseWorktree, view, binding, narrow)
-                ServerRootsRow(AdvancedRows.allowedRoots, view, binding, narrow)
-                ServerRootsRow(AdvancedRows.spawnExtraWritableRoots, view, binding, narrow)
-                ServerSelectRow(AdvancedRows.preferSpawnAgent, AdvancedRows.preferSpawnAgents, view, binding, narrow)
-            }
         }
-        ClaudeCliSection(binding, narrow)
+    }
+}
+
+@Composable
+private fun SessionSettingsPanel(narrow: Boolean, binding: ServerSettingsBinding) {
+    val view = binding.settings?.takeIf { binding.origin != null }
+    if (view == null) {
+        SettingsSection("Session settings", null, narrow) { ServerSettingsLoading() }
+        return
+    }
+    Column {
+        SettingsSection(AdvancedRows.LIFECYCLE, AnnotatedString(AdvancedRows.LIFECYCLE_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("lifecycle"))) {
+            ServerToggleRow(AdvancedRows.claudePersistent, view, binding, narrow)
+            ServerToggleRow(AdvancedRows.claudeTaskTelemetry, view, binding, narrow)
+            ServerNumberRow(AdvancedRows.warmMaxSessions, view, binding, narrow)
+            ServerNumberRow(AdvancedRows.maxConcurrentTurns, view, binding, narrow)
+            ServerNumberRow(AdvancedRows.warmIdleEvictionMs, view, binding, narrow)
+            ServerNumberRow(AdvancedRows.warmBgHardCapMs, view, binding, narrow)
+            ServerNumberRow(AdvancedRows.warmSweepMs, view, binding, narrow)
+            ServerNumberRow(AdvancedRows.shutdownDrainMs, view, binding, narrow)
+            ServerSelectRow(AdvancedRows.messageInterruptMode, AdvancedRows.messageInterruptModes, view, binding, narrow)
+            ServerSelectRow(AdvancedRows.claudeModelFallback, AdvancedRows.claudeModelFallbacks, view, binding, narrow)
+            ServerNumberRow(AdvancedRows.autoArchiveIdleDays, view, binding, narrow)
+            ServerToggleRow(AdvancedRows.archiveOnMerge, view, binding, narrow)
+        }
+        SettingsSection(AdvancedRows.DEFAULTS, AnnotatedString(AdvancedRows.DEFAULTS_CAPTION), narrow, modifier = Modifier.testTag(ServerSettingsTags.section("defaults")), last = true) {
+            ServerSelectRow(AdvancedRows.defaultPermissionMode, AdvancedRows.permissionModes, view, binding, narrow)
+            ServerSelectRow(AdvancedRows.defaultSandboxPolicy, AdvancedRows.sandboxPolicies, view, binding, narrow)
+            ServerToggleRow(AdvancedRows.defaultUseWorktree, view, binding, narrow)
+            ServerRootsRow(AdvancedRows.allowedRoots, view, binding, narrow)
+            ServerRootsRow(AdvancedRows.spawnExtraWritableRoots, view, binding, narrow)
+            ServerSelectRow(AdvancedRows.preferSpawnAgent, AdvancedRows.preferSpawnAgents, view, binding, narrow)
+        }
     }
 }

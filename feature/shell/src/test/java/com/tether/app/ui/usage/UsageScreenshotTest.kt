@@ -53,7 +53,7 @@ import org.robolectric.annotation.Config
  */
 enum class UsageShot(val id: String) {
     Page("usage-page"), Loading("usage-page-loading"), Error("usage-page-error"), Empty("usage-page-empty"),
-    Accounts("usage-accounts"), CodexReset("usage-codex-reset"), ClaudeReset("usage-claude-reset"),
+    Accounts("usage-accounts"), RuntimeDeskLimits("runtime-desk-limits"), CodexReset("usage-codex-reset"), ClaudeReset("usage-claude-reset"),
 }
 
 private fun exact() = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
@@ -91,7 +91,11 @@ fun ComposeContentTestRule.snapUsage(shot: UsageShot, skin: TetherSkin, size: Sc
                         val claude = remember { ClaudeResetState(scope, { source }, { ORIGIN }, clock = { UsageFixtures.NOW }) }
                         accounts = a
                         Box {
-                            UsageAccountsFrame(a, onUseCredit = { codex.open(it) }, onUseGrant = { claude.open(it) })
+                            if (shot == UsageShot.RuntimeDeskLimits) {
+                                UsageAccountsContent(a, onUseCredit = { codex.open(it) }, onUseGrant = { claude.open(it) })
+                            } else {
+                                UsageAccountsFrame(a, onUseCredit = { codex.open(it) }, onUseGrant = { claude.open(it) })
+                            }
                             CodexResetDialog(codex)
                             ClaudeResetDialog(claude)
                         }
@@ -184,7 +188,7 @@ class UsageFontScaleScreenshotTest(private val shot: UsageShot, private val skin
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = shots(listOf(UsageShot.Page, UsageShot.Accounts, UsageShot.CodexReset))
+        fun params(): List<Array<Any>> = shots(listOf(UsageShot.Page, UsageShot.Accounts, UsageShot.RuntimeDeskLimits, UsageShot.CodexReset))
     }
 }
 

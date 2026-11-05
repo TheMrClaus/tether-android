@@ -75,7 +75,12 @@ abstract class SettingsRowsBandBase(private val width: Int) {
         accounts: AccountsShot? = null,
     ) {
         val stored = runBlocking { store.prefs.preferences.first() }
-        val state = SettingsDialogState(tab, GeneralDraft.of(stored))
+        val route = when {
+            accounts == AccountsShot.Sync -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.AccountSync, RuntimeDeskLevel.Detail)
+            accounts != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail)
+            else -> RuntimeDeskRoute.fromLegacyTab(tab)
+        }
+        val state = SettingsDialogState(tab, GeneralDraft.of(stored), route)
         compose.setContent {
             val actions = nodes?.let { rememberNodesActions(NeverWritesNodes, null) }
             val controller = devices?.let { rememberDevicesController(NeverCalledSecurity, DevicesFixtures.ORIGIN, it, authenticator = NeverPromptsPasskeys) }

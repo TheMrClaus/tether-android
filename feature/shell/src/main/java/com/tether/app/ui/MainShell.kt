@@ -273,8 +273,9 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     val sessionsView = view == DashboardView.Sessions && !usageOpen
     // Saveable: a rotation recreates the activity, and an open Settings (its tab and draft) comes back.
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
-    // T8.4: the tab Settings opens on (General; Advanced from the GitHub dialog's "Set up GitHub connection").
-    var settingsTab by rememberSaveable { mutableStateOf(com.tether.app.ui.settings.SettingsTab.General) }
+    var settingsRoute by rememberSaveable(stateSaver = com.tether.app.ui.settings.RuntimeDeskRoute.Saver) {
+        mutableStateOf(com.tether.app.ui.settings.RuntimeDeskRoute.Root)
+    }
     // ta-3e7: the Studio welcome's "Open workspace" (dashboard.tsx folderDialogRef), at shell level.
     var workspacePickerOpen by rememberSaveable { mutableStateOf(false) }
     // ta-coik.52 (overview.tsx 90fbb9f :24, :43-62): the filter choice is kept per server, as the web's
@@ -369,10 +370,6 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     val accounts = remember(vm) { com.tether.app.ui.usage.UsageAccountsState(usageScope, { vm.client.usage }, usageOrigin) }
     val codexReset = remember(vm) { com.tether.app.ui.usage.CodexResetState(usageScope, { vm.client.usage }, usageOrigin) }
     val claudeReset = remember(vm) { com.tether.app.ui.usage.ClaudeResetState(usageScope, { vm.client.usage }, usageOrigin) }
-    // A rotation brings an open Accounts dialog back, refetching (its reading is not saved).
-    var accountsWasOpen by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(Unit) { if (accountsWasOpen && !accounts.visible) accounts.open() }
-    SideEffect { accountsWasOpen = accounts.visible }
     val sessionControls by vm.client.sessionControls.collectAsStateWithLifecycle()
     val openUsagePage: () -> Unit = {
         shell.closeDrawer()
@@ -546,9 +543,15 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                 onOpenDrawer = {},
                 // dashboard.tsx:1264; the key is disabled without a session (fileBrowserDisabled).
                 onOpenFiles = { fileBrowser.open() },
-                // T9.2: Accounts opens the usage accounts dialog (topbar.tsx onOpenUsage); Usage opens
-                // the Usage page (the web's `/usage`).
-                onOpenUsage = { accounts.open() },
+                // Accounts enters the one Runtime Desk workspace and refreshes its existing state.
+                onOpenUsage = {
+                    settingsRoute = com.tether.app.ui.settings.RuntimeDeskRoute(
+                        com.tether.app.ui.settings.RuntimeDeskDestinations.Accounts,
+                        com.tether.app.ui.settings.RuntimeDeskEntities.LimitsBalance,
+                        com.tether.app.ui.settings.RuntimeDeskLevel.Detail,
+                    )
+                    settingsOpen = true
+                },
                 onOpenUsageAnalytics = openUsagePage,
                 onOpenSettings = { settingsOpen = true },
                 // dashboard.tsx:1351 navigateTo. Sessions comes back to the conversation still
@@ -869,8 +872,9 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
 
     WorkspaceFileBrowser(fileBrowser)
 
-    // T9.2: the Accounts dialog and the reset confirmations (the inspector's Codex one too).
-    com.tether.app.ui.usage.UsageAccountsDialog(accounts, codexReset, claudeReset)
+    // The account limits body is inside Runtime Desk; confirmations stay shell-owned beside its state.
+    com.tether.app.ui.usage.CodexResetDialog(codexReset)
+    com.tether.app.ui.usage.ClaudeResetDialog(claudeReset)
 
     // T8.5 dashboard.tsx:1886-1887: the metadata draft panel, at the shell's root so a draft shows
     // whatever the phone's sheet or the tablet's columns are drawing.
@@ -892,9 +896,9 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
 
     // T15.4: the top bar's Settings and the rail footer's open the same dialog (T10.1).
     if (settingsOpen) {
-        ShellSettings(vm, prefs, workspaceRoot, settingsTab, onDismiss = {
+        ShellSettings(vm, prefs, workspaceRoot, settingsRoute, accounts, codexReset, claudeReset, onDismiss = {
             settingsOpen = false
-            settingsTab = com.tether.app.ui.settings.SettingsTab.General
+            settingsRoute = com.tether.app.ui.settings.RuntimeDeskRoute.Root
         })
     }
     if (workspacePickerOpen) com.tether.app.ui.WorkspacePickerHost(vm, prefs, workspaceRoot, scope = scope, onDismiss = { workspacePickerOpen = false })
@@ -904,7 +908,10 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     // T8.4: "Set up GitHub connection" (github-work-dialog.tsx :251-254, dashboard.tsx openFullSettings)
     // opens Settings on Advanced, where the GitHub connection is (ta-coik.21); the draft stays.
     com.tether.app.ui.draft.DraftComposerHost(vm, prefs, onOpenGitHubSettings = {
-        settingsTab = com.tether.app.ui.settings.SettingsTab.Advanced
+        settingsRoute = com.tether.app.ui.settings.RuntimeDeskRoute(
+            com.tether.app.ui.settings.RuntimeDeskDestinations.ServerIntegrations,
+            level = com.tether.app.ui.settings.RuntimeDeskLevel.Detail,
+        )
         settingsOpen = true
     })
 
@@ -990,11 +997,46 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
  * General's "Use current", read here so the shell itself never recomposes on preference changes.
  */
 @Composable
-private fun ShellSettings(vm: TetherViewModel, prefs: UiPrefs, workspaceRoot: String?, tab: com.tether.app.ui.settings.SettingsTab, onDismiss: () -> Unit) {
+private fun ShellSettings(
+    vm: TetherViewModel,
+    prefs: UiPrefs,
+    workspaceRoot: String?,
+    route: com.tether.app.ui.settings.RuntimeDeskRoute,
+    accounts: com.tether.app.ui.usage.UsageAccountsState,
+    codexReset: com.tether.app.ui.usage.CodexResetState,
+    claudeReset: com.tether.app.ui.usage.ClaudeResetState,
+    onDismiss: () -> Unit,
+) {
     val preferences by remember(prefs, vm.client) { prefs.preferencesFor(vm.client.serverUrl) }.collectAsStateWithLifecycle(initialValue = com.tether.app.ui.prefs.TetherPreferences.Default)
     val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
     val current = com.tether.app.ui.sidebar.SidebarController.resolveCurrentWorkspace(picked, preferences, workspaceRoot)
-    com.tether.app.ui.settings.SettingsDialog(vm.client, prefs, currentWorkspace = current.orEmpty(), onDismiss = onDismiss, initialTab = tab)
+    val usageEntities = buildList {
+        accounts.data?.claude.orEmpty().forEach { account ->
+            add(com.tether.app.ui.settings.RuntimeDeskNavItem("usage:claude:${account.id}", com.tether.app.client.LabelText.label(account.label).ifEmpty { "Claude account" }, "Claude limits"))
+        }
+        accounts.data?.codex.orEmpty().forEach { account ->
+            add(com.tether.app.ui.settings.RuntimeDeskNavItem("usage:codex:${account.id}", com.tether.app.client.LabelText.label(account.label).ifEmpty { "Codex" }, "Codex limits"))
+        }
+        accounts.data?.deepseek?.accounts.orEmpty().forEach { account ->
+            add(com.tether.app.ui.settings.RuntimeDeskNavItem("usage:deepseek:${account.id}", com.tether.app.client.LabelText.label(account.identity).ifEmpty { "DeepSeek" }, "Balance"))
+        }
+    }
+    com.tether.app.ui.settings.SettingsDialog(
+        vm.client,
+        prefs,
+        currentWorkspace = current.orEmpty(),
+        onDismiss = onDismiss,
+        initialRoute = route,
+        accountLimitEntities = usageEntities,
+        accountsLimits = {
+            LaunchedEffect(accounts) { accounts.refresh() }
+            com.tether.app.ui.usage.UsageAccountsContent(
+                accounts,
+                onUseCredit = { codexReset.open(it) },
+                onUseGrant = { claudeReset.open(it) },
+            )
+        },
+    )
 }
 
 /** T6.7: the caption over an error toast whose words a server wrote. */

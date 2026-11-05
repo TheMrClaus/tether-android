@@ -11,6 +11,7 @@ import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.IntSize
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -79,6 +80,8 @@ class SettingsRotationTest {
         rule.onAllNodesWithContentDescription("Settings")[0].performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(SettingsDialogTags.Dialog).assertExists()
+        rule.onNodeWithText("Preferences").performClick()
+        rule.waitForIdle()
         val tag = SettingsPanelTags.toggle(GeneralToggle.ConfirmBeforeEnd)
         // ta-9j0x: the toggle reads On (the default) before the preferences load, but is enabled only
         // once the draft is seeded from them; a tap before that is dropped.
@@ -90,7 +93,7 @@ class SettingsRotationTest {
         restorer.emulateSavedInstanceStateRestore()
         rule.waitForIdle()
         rule.onNodeWithTag(SettingsDialogTags.Dialog).assertExists()
-        rule.onNodeWithTag(SettingsDialogTags.tab(SettingsTab.General)).assertIsSelected()
+        rule.onNodeWithText("Startup").assertExists()
         rule.onNodeWithTag(tag).assertIsOff()
         // Still a draft: the preference model was never saved (the shell's own last view aside).
         val stored = runBlocking { store.data.first().asMap().keys.map { it.name } }

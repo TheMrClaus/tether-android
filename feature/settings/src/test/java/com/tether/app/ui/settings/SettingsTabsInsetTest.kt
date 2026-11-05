@@ -6,6 +6,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertExists
+import androidx.compose.ui.test.assertDoesNotExist
 import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
@@ -24,20 +27,21 @@ import org.robolectric.annotation.Config
  * 24 dp from it, independent of the 640 switch (the tabs' padding stays on that one). The web at tether 29537e0: 12 at
  * 412 / 640 / 641 / 767, 24 at 800.
  */
-abstract class SettingsTabsInsetBase(private val expected: Float) {
+abstract class SettingsTabsInsetBase(private val expanded: Boolean) {
     private val tmp = TemporaryFolder()
     private val store = PrefsStore(tmp)
     private val compose = createComposeRule()
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    @Test fun theTabStripSitsThisFarInFromTheCardsEdge() {
+    @Test fun runtimeDeskSwitchesAtTheContractBreakpoint() {
         compose.setContent {
             TetherTheme(TetherSkin.StudioDark.mode) {
                 CompositionLocalProvider(LocalReducedMotion provides true) {
                     Box(Modifier.fillMaxSize()) {
                         SettingsFrame(
-                            prefs = store.prefs, serverUrl = kotlinx.coroutines.flow.MutableStateFlow<String?>(null), state = SettingsDialogState(),
+                            prefs = store.prefs, serverUrl = kotlinx.coroutines.flow.MutableStateFlow<String?>(null),
+                            state = SettingsDialogState(route = RuntimeDeskRoute.Root),
                             restartRequired = false, currentWorkspace = CURRENT, onClose = {}, layout = settingsLayout(),
                         )
                     }
@@ -45,16 +49,14 @@ abstract class SettingsTabsInsetBase(private val expected: Float) {
             }
         }
         compose.waitForIdle()
-        val card = compose.onNodeWithTag(SettingsDialogTags.Dialog).fetchSemanticsNode().boundsInRoot
-        val tabs = compose.onNodeWithTag(SettingsDialogTags.Tabs).fetchSemanticsNode().boundsInRoot
-        assertEquals("tab strip inset", expected, tabs.left - card.left, 0.5f)
-        assertEquals("and from the right edge", expected, card.right - tabs.right, 0.5f)
-        println("W21-RECORD tabs inset=${tabs.left - card.left}")
+        compose.onNodeWithTag(SettingsDialogTags.Dialog).assertExists()
+        compose.onNodeWithText("Preferences").assertExists()
+        if (expanded) compose.onNodeWithText("Startup").assertExists() else compose.onNodeWithText("Startup").assertDoesNotExist()
     }
 }
 
-@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w640dp-h900dp-mdpi") class SettingsTabsInset640Test : SettingsTabsInsetBase(12f)
-@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w641dp-h900dp-mdpi") class SettingsTabsInset641Test : SettingsTabsInsetBase(12f)
-@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w767dp-h900dp-mdpi") class SettingsTabsInset767Test : SettingsTabsInsetBase(12f)
-@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w768dp-h900dp-mdpi") class SettingsTabsInset768Test : SettingsTabsInsetBase(24f)
-@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w412dp-h915dp-mdpi") class SettingsTabsInset412Test : SettingsTabsInsetBase(12f)
+@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w640dp-h900dp-mdpi") class SettingsTabsInset640Test : SettingsTabsInsetBase(false)
+@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w641dp-h900dp-mdpi") class SettingsTabsInset641Test : SettingsTabsInsetBase(false)
+@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w767dp-h900dp-mdpi") class SettingsTabsInset767Test : SettingsTabsInsetBase(false)
+@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w768dp-h900dp-mdpi") class SettingsTabsInset768Test : SettingsTabsInsetBase(true)
+@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w412dp-h915dp-mdpi") class SettingsTabsInset412Test : SettingsTabsInsetBase(false)
