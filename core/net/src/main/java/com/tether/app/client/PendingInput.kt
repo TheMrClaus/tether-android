@@ -155,7 +155,12 @@ object PendingInput {
      * are written to the spool and the record is kept, carrying `attachmentFiles` (refs, no bytes);
      * a record the spool cannot take is left out as before.
      */
-    fun toPersistable(store: PendingStore, cleared: Collection<String> = emptyList(), spool: AttachmentSpool? = null): String {
+    fun toPersistable(
+        store: PendingStore,
+        cleared: Collection<String> = emptyList(),
+        spool: AttachmentSpool? = null,
+        carry: List<JsObj> = emptyList(),
+    ): String {
         if (spool == null) return Web.toPersistable(store.tree, cleared.map(::js))
         val records = store.records.map { record ->
             val attachments = record.attachments
@@ -163,7 +168,16 @@ object PendingInput {
             val refs = spool.put(record.key, attachments) ?: return@map record.tree
             record.tree.remove("attachments").put("attachmentFiles", JsArr.of(refs.map(::refTree)))
         }
-        return Web.toPersistable(JsObj.of("records" to JsArr.of(records)), cleared.map(::js))
+        val out = Web.toPersistable(JsObj.of("records" to JsArr.of(records)), cleared.map(::js))
+        if (carry.isEmpty()) return out
+        // Records this process could not read back (their spooled files are gone) stay in the slot
+        // exactly as they were read, so the owning server's next restore turns them into a failed bubble.
+        val payload = JsCodec.parse(out) as? JsObj ?: return out
+        val have = (payload["records"] as? JsArr).orEmpty().mapNotNull { (it as? JsObj)?.get("key").str }.toSet()
+        val skip = have + cleared
+        val extra = carry.filter { (it["key"].str ?: return@filter false) !in skip }
+        if (extra.isEmpty()) return out
+        return JsCodec.stringify(payload.put("records", JsArr.of((payload["records"] as? JsArr).orEmpty().toList() + extra)))
     }
 
     /**
@@ -174,7 +188,7 @@ object PendingInput {
     fun fromPersisted(raw: String?): PendingStore = PendingStore(Web.fromPersisted(raw?.let(::js)))
 
     /** A rehydrated slot: [store] is what may be delivered; [lost] are records whose spooled files could not be read back. */
-    class Restored(val store: PendingStore, val lost: List<PendingRecord>)
+    class Restored(val store: PendingStore, val lost: List<PendingRecord>, val lostRaw: List<JsObj> = emptyList())
 
     /**
      * Rehydrate with the attachments of spooled records read back from [spool]. A record whose
@@ -186,6 +200,8 @@ object PendingInput {
         val refsByKey = persistedRefs(raw)
         if (refsByKey.isEmpty()) return Restored(base, emptyList())
         val lost = ArrayList<PendingRecord>()
+        val rawByKey = (parseOrNull(raw) as? JsObj)?.let { o -> (o["records"] as? JsArr).orEmpty().mapNotNull { it as? JsObj } }.orEmpty()
+            .associateBy { it["key"].str }
         val records = base.records.mapNotNull { record ->
             val refs = refsByKey[record.key] ?: return@mapNotNull record.tree
             val attachments = spool.load(record.key, refs)
@@ -195,7 +211,7 @@ object PendingInput {
             }
             record.tree.put("attachments", JsArr.of(attachments.map(::attachmentTree)))
         }
-        return Restored(PendingStore(JsObj.of("records" to JsArr.of(records))), lost)
+        return Restored(PendingStore(JsObj.of("records" to JsArr.of(records))), lost, lost.mapNotNull { rawByKey[it.key] })
     }
 
     /** [fromPersistedWithLost] without the lost records (a record whose files are gone is dropped). */

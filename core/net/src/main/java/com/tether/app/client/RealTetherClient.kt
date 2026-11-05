@@ -4752,12 +4752,6 @@ class RealTetherClient(
         return PendingInput.fromPersistedWithLost(raw, spool)
     }
 
-    /** A persisted slot as a record may be delivered from: spooled attachments read back. */
-    private fun fromDisk(raw: String?): PendingStore {
-        val spool = attachmentSpool ?: return PendingInput.fromPersisted(raw)
-        return PendingInput.fromPersisted(raw, spool)
-    }
-
     /**
      * Delete every spooled file no record references (delivered, discarded, expired, wiped, or left by
      * a crash). Referenced = any record in a disk slot, in memory, or in a set-aside store; an
@@ -4800,13 +4794,18 @@ class RealTetherClient(
                 try {
                     var store = write.store
                     var cleared = write.cleared
+                    var carry = emptyList<JsObj>()
                     if (write.mergeWithDisk) {
                         val raw = settings.readPendingInput(write.origin)
                         cleared = (PendingInput.clearedFromPersisted(raw) + cleared).distinct()
                             .takeLast(PendingInput.MAX_TOMBSTONES)
-                        store = PendingInput.mergeStores(store, fromDisk(raw), cleared)
+                        // That server is not the one in force, so a record whose photos are gone cannot show a
+                        // failed bubble here: it stays in its slot, and its own restore shows it.
+                        val disk = fromDiskWithLost(raw)
+                        carry = disk.lostRaw
+                        store = PendingInput.mergeStores(store, disk.store, cleared)
                     }
-                    settings.writePendingInput(write.origin, PendingInput.toPersistable(store, cleared, attachmentSpool))
+                    settings.writePendingInput(write.origin, PendingInput.toPersistable(store, cleared, attachmentSpool, carry))
                     persistedVersions[write.origin] = write.version
                     sweepSpool()
                 } catch (e: CancellationException) {
