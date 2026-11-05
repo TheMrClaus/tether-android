@@ -351,7 +351,7 @@ fun ChatScreen(
     val pendingSends by vm.client.pendingSends.collectAsStateWithLifecycle()
     val failedSends by vm.client.failedSends.collectAsStateWithLifecycle()
     val sends = remember(session?.id, pendingSends, failedSends, vm) {
-        SendBubbles.forSession(session?.id, pendingSends, failedSends) { key -> vm.client.dismissFailedSend(key) }
+        SendBubbles.forSession(session?.id, pendingSends, failedSends, { key -> vm.client.sendAgain(key) }) { key -> vm.client.dismissFailedSend(key) }
     }
 
     // T5.3 in-chat find (chat-view.tsx:2013-2120): per conversation, reset on a session switch.

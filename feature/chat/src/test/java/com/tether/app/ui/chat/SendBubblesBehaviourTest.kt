@@ -3,6 +3,7 @@ package com.tether.app.ui.chat
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -61,7 +62,8 @@ object SendFixtures {
         bytes: Double = 0.0,
         reason: FailedSendReason = FailedSendReason.Expired,
         sessionId: String = SESSION_ID,
-    ) = FailedSend(key, sessionId, PendingInput.KIND_SEND, text, attachments, images, bytes, reason)
+        canSendAgain: Boolean = false,
+    ) = FailedSend(key, sessionId, PendingInput.KIND_SEND, text, attachments, images, bytes, reason, canSendAgain = canSendAgain)
 }
 
 /**
@@ -197,6 +199,66 @@ class SendBubblesBehaviourTest {
         rule.onAllNodesWithTag(FAILED_SEND_TAG).assertCountEquals(0)
         // Dismiss is local: nothing went out.
         assertTrue(c.outbox.isEmpty())
+    }
+
+    // ---- A9: Send again (spec 5.4) -----------------------------------------------------------------------------
+
+    private fun sendAgainTapOnce(reason: FailedSendReason) {
+        val c = client()
+        c.failedRows.value = listOf(SendFixtures.failed("k-orig", "Say this again.", reason = reason, canSendAgain = true))
+        host(c)
+        rule.onNodeWithTag(SEND_AGAIN_TAG).assertIsDisplayed().assertHasClickAction().performClick()
+        settle()
+        assertEquals(listOf("k-orig"), c.sentAgain.toList())
+        rule.onAllNodesWithTag(FAILED_SEND_TAG).assertCountEquals(0)
+        rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Send again")).assertCountEquals(0)
+    }
+
+    @Test fun aLinkTextOnlyBubbleOffersSendAgainAndATapSendsOnceUnderTheSameKey() = sendAgainTapOnce(FailedSendReason.Link)
+
+    @Test fun anExpiredTextOnlyBubbleOffersSendAgainAndATapSendsOnceUnderTheSameKey() = sendAgainTapOnce(FailedSendReason.Expired)
+
+    @Test
+    fun theSendAgainKeyIs44dpHasItsWordsAndLeavesDismissAtTheEnd() {
+        val c = client()
+        c.failedRows.value = listOf(SendFixtures.failed("k1", "Words.", reason = FailedSendReason.Link, canSendAgain = true))
+        host(c)
+        val density = rule.density
+        val key = rule.onNodeWithTag(SEND_AGAIN_TAG).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        with(density) {
+            assertTrue("44dp tall (${key.height.toDp()})", key.height.toDp() >= androidx.compose.ui.unit.Dp(43.9f))
+            assertTrue("44dp wide (${key.width.toDp()})", key.width.toDp() >= androidx.compose.ui.unit.Dp(43.9f))
+        }
+        rule.onNodeWithText("Send again").assertIsDisplayed()
+        val dismiss = rule.onNodeWithContentDescription("Dismiss failed message").fetchSemanticsNode().boundsInRoot
+        assertTrue("Dismiss sits above Send again", dismiss.bottom <= key.top + 1f)
+        rule.onNodeWithContentDescription("Dismiss failed message").performClick()
+        settle()
+        assertEquals(listOf("k1"), c.dismissedSends.toList())
+        assertTrue("Dismiss sends nothing", c.sentAgain.isEmpty() && c.outbox.isEmpty())
+    }
+
+    @Test
+    fun aBubbleTheClientCannotResendShowsNoSendAgain() {
+        val c = client()
+        c.failedRows.value = listOf(
+            SendFixtures.failed("lost", "Photo words.", 1, 1, 10.0, FailedSendReason.PhotoLost),
+            SendFixtures.failed("up", "Up words.", 1, 1, 10.0, FailedSendReason.Upload).copy(detail = "The server could not take the upload right now.", retryable = true),
+            SendFixtures.failed("exp", "Expired with files.", 2, 2, 20.0),
+        )
+        host(c)
+        rule.onAllNodesWithTag(FAILED_SEND_TAG).assertCountEquals(3)
+        rule.onAllNodesWithTag(SEND_AGAIN_TAG).assertCountEquals(0)
+    }
+
+    @Test
+    fun theFailedUploadWordsAreThePrintedFormat() {
+        fun label(detail: String?, attachments: Int = 2, images: Int = 2, bytes: Double = 3.1 * 1024 * 1024) =
+            failedSendLabel(SendFixtures.failed("k", "x", attachments, images, bytes, FailedSendReason.Upload).copy(detail = detail))
+        assertEquals("Not sent — the upload failed. The link was down. · 2 images · 3.1 MB", label("The link was down."))
+        assertEquals("Not sent — the upload failed. · 2 images · 3.1 MB", label(null))
+        assertEquals("Not sent — the upload failed. The link was down.", label("The link was down.", 0, 0, 0.0))
+        assertEquals("Not sent — the upload failed.", label(null, 0, 0, 0.0))
     }
 
     @Test

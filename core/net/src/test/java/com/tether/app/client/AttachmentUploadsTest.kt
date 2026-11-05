@@ -219,6 +219,21 @@ class AttachmentUploadsTest {
     }
 
     @Test
+    fun aDroppedConnectionIsTransientAndItsFinalReasonIsThePrintedLinkWasDown() {
+        server.start()
+        val hub = hub(root())
+        val id = hub.begin(origin, "s1", "p.png", "image/png", bytes)!!
+        repeat(AttachmentUploads.MAX_ATTEMPTS) {
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+            runBlocking { hub.run(id) }
+        }
+        val state = hub.state(id)!!
+        assertEquals(UploadPhase.Failed, state.phase)
+        assertEquals("The link was down.", state.reason)
+        assertTrue(state.retryable)
+    }
+
+    @Test
     fun aMissingRouteOnTheFirstPutLetsAnIdleSendGoInlineButNeverAQueuedMessage() {
         server.start()
         val hub = hub(root())

@@ -34,6 +34,8 @@ import com.tether.app.client.PendingSendRow
 import com.tether.app.client.SendStatus
 import com.tether.app.protocol.helpers.AttachmentDraft
 import com.tether.app.ui.components.CssBorder
+import com.tether.app.ui.components.KeyClasses
+import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.SpinningIcon
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.currentLayoutClass
@@ -56,6 +58,8 @@ import com.tether.app.ui.text.proseText
 class SendBubbles(
     val pending: List<PendingSendRow>,
     val failed: List<FailedSend>,
+    /** A9: the Send again key's tap (an explicit act, one frame under the original key); only drawn for a [FailedSend.canSendAgain] row. */
+    val onSendAgain: (key: String) -> Unit = {},
     val onDismiss: (key: String) -> Unit,
 ) {
     val isEmpty: Boolean get() = pending.isEmpty() && failed.isEmpty()
@@ -64,11 +68,11 @@ class SendBubbles(
         val None = SendBubbles(emptyList(), emptyList()) {}
 
         /** chat-view.tsx 90fbb9f :1983-1990: every client row filtered to this session, in order. */
-        fun forSession(sessionId: String?, pending: List<PendingSendRow>, failed: List<FailedSend>, onDismiss: (String) -> Unit): SendBubbles {
+        fun forSession(sessionId: String?, pending: List<PendingSendRow>, failed: List<FailedSend>, onSendAgain: (String) -> Unit = {}, onDismiss: (String) -> Unit): SendBubbles {
             if (sessionId == null) return None
             val p = pending.filter { it.sessionId == sessionId }
             val f = failed.filter { it.sessionId == sessionId }
-            return if (p.isEmpty() && f.isEmpty()) None else SendBubbles(p, f, onDismiss)
+            return if (p.isEmpty() && f.isEmpty()) None else SendBubbles(p, f, onSendAgain, onDismiss)
         }
     }
 }
@@ -103,7 +107,16 @@ fun pendingSendLabel(row: PendingSendRow): String {
 fun failedSendLabel(row: FailedSend): String {
     if (row.reason == FailedSendReason.PhotoLost) return "Photo could not be recovered — send again."
     // ta-delivery A2: the upload failed; the server's own reason follows (never the bytes, never a path).
-    if (row.reason == FailedSendReason.Upload) return "Not sent — the upload failed (${row.detail ?: "the server did not take the photo"})"
+    // spec 4.1b B.1: "Not sent — the upload failed." then " {reason}" when there is one, then " · {summary}".
+    if (row.reason == FailedSendReason.Upload) {
+        val reason = row.detail?.takeIf { it.isNotBlank() }
+        val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
+        return buildString {
+            append("Not sent — the upload failed.")
+            if (reason != null) append(' ').append(reason)
+            if (summary.isNotEmpty()) append(" · ").append(summary)
+        }
+    }
     val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
     return if (row.reason == FailedSendReason.Link) {
         if (summary.isNotEmpty()) "Not sent — the link was down ($summary)" else "Not sent — the link was down"
@@ -130,6 +143,7 @@ fun sendRowLabel(rows: List<PendingSendRow>): String? {
 const val PENDING_SEND_TAG = "pending-send"
 const val FAILED_SEND_TAG = "failed-send"
 const val SEND_ROW_TAG = "composer-send-row"
+const val SEND_AGAIN_TAG = "failed-send-again"
 
 private val DISMISS_TARGET = 44.dp
 
@@ -157,7 +171,12 @@ internal fun PendingSendBubble(row: PendingSendRow, modifier: Modifier = Modifie
  * :4236-4250), and one action, Dismiss (`.chat-queue-remove`, :7084-7098: an X in muted).
  */
 @Composable
-internal fun FailedSendBubble(row: FailedSend, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+internal fun FailedSendBubble(row: FailedSend, onDismiss: () -> Unit, modifier: Modifier = Modifier, onSendAgain: () -> Unit = {}) {
+    FailedSendBubbleBody(row, onDismiss, onSendAgain, modifier)
+}
+
+@Composable
+private fun FailedSendBubbleBody(row: FailedSend, onDismiss: () -> Unit, onSendAgain: () -> Unit, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val base = bubbleLook(t, type, user = true, phone = currentLayoutClass() == TetherLayoutClass.Phone)
@@ -187,6 +206,19 @@ internal fun FailedSendBubble(row: FailedSend, onDismiss: () -> Unit, modifier: 
             contentAlignment = Alignment.Center,
         ) {
             Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
+        }
+        // ta-delivery A9 (spec 5.4): "Send again" (RotateCw + words, neutral, 44dp) on its own row, only where the
+        // client still holds the whole content; one explicit tap re-dispatches it under the same key.
+        if (row.canSendAgain) {
+            TetherKey(
+                onClick = onSendAgain,
+                classes = KeyClasses.ButtonSecondary,
+                label = "Send again",
+                icon = TetherIcons.RotateCw,
+                iconSize = 13.dp,
+                contentDescription = "Send again",
+                modifier = Modifier.testTag(SEND_AGAIN_TAG),
+            )
         }
     }
 }
@@ -218,7 +250,7 @@ private fun SendStatusLine(label: String, bubbleStyle: TextStyle, color: Color, 
 internal fun SendBubbleColumn(sends: SendBubbles, gap: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
     androidx.compose.foundation.layout.Column(modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
         sends.pending.forEach { row -> androidx.compose.runtime.key("p:${row.key}") { PendingSendBubble(row) } }
-        sends.failed.forEach { row -> androidx.compose.runtime.key("f:${row.key}") { FailedSendBubble(row, { sends.onDismiss(row.key) }) } }
+        sends.failed.forEach { row -> androidx.compose.runtime.key("f:${row.key}") { FailedSendBubble(row, { sends.onDismiss(row.key) }, onSendAgain = { sends.onSendAgain(row.key) }) } }
     }
 }
 
