@@ -42,6 +42,7 @@ import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreInterceptKeyBeforeSoftKeyboard
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalConfiguration
@@ -131,6 +132,16 @@ fun composerEnter(event: KeyEvent, value: TextFieldValue): ComposerEnter {
     return if (native.repeatCount > 0) ComposerEnter.Swallow else ComposerEnter.Submit
 }
 
+/**
+ * ta-y3dw: one key seam for both composers. A hardware Enter must be seen BEFORE the soft keyboard
+ * (Gboard turns it into a software newline under ImeAction.Default), so [onKey] runs at
+ * dispatchKeyEventPreIme first; `onPreviewKeyEvent` stays as the fallback for events that path does
+ * not carry. A consumed event stops at the first seam, so nothing is handled twice.
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+fun Modifier.composerKeys(onKey: (KeyEvent) -> Boolean): Modifier =
+    onPreInterceptKeyBeforeSoftKeyboard(onKey).onPreviewKeyEvent(onKey)
+
 /** ta-y3dw: "\n" at the selection (replacing any selected text), the caret after it. */
 fun TextFieldValue.insertNewline(): TextFieldValue {
     val s = selection
@@ -181,7 +192,7 @@ internal fun ComposerInput(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = minHeight, max = maxHeight)
-            .onPreviewKeyEvent(onKey)
+            .composerKeys(onKey)
             .semantics { contentDescription = "Message the agent" },
         enabled = enabled,
         textStyle = style.copy(color = t.ink),

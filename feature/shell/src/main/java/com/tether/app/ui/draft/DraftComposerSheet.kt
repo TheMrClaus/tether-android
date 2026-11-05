@@ -56,7 +56,6 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -126,6 +125,7 @@ import com.tether.app.ui.chat.AttachSheet
 import com.tether.app.ui.chat.ComposerEnter
 import com.tether.app.ui.chat.ControlPill
 import com.tether.app.ui.chat.composerEnter
+import com.tether.app.ui.chat.composerKeys
 import com.tether.app.ui.chat.insertNewline
 import com.tether.app.ui.chat.DraftAttachmentStager
 import com.tether.app.ui.chat.StagedAttachmentChip
@@ -966,7 +966,7 @@ private fun MessageWell(draft: DraftComposerState, readiness: String, narrow: Bo
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = minInput, max = maxInput)
-                .onPreviewKeyEvent { event ->
+                .composerKeys { event ->
                     when (composerEnter(event, field)) {
                         ComposerEnter.Submit -> {
                             submit()

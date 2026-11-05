@@ -94,10 +94,14 @@ class DraftComposerSheetBehaviourTest {
         override val containerSize: IntSize get() = IntSize(412, 915)
     }
 
+    /** The Compose host view: ta-y3dw drives `dispatchKeyEventPreIme` on it, the path Gboard-bound hardware keys take. */
+    private var host: android.view.View? = null
+
     @After fun closeStore() = runBlocking { job.cancel() }
 
     private fun launch(restorer: StateRestorationTester? = null, keyboard: KeyboardInset? = null) {
         val content: @Composable () -> Unit = {
+            host = androidx.compose.ui.platform.LocalView.current
             TetherTheme {
                 CompositionLocalProvider(LocalWindowInfo provides window) {
                     if (keyboard != null) CompositionLocalProvider(LocalKeyboardInset provides keyboard) { MainShell(vm, prefs) } else MainShell(vm, prefs)
@@ -268,6 +272,40 @@ class DraftComposerSheetBehaviourTest {
         until("the draft gained the newline") { composer.state.value.text == "ab\n" }
         rule.waitForIdle()
         assertTrue(client.creates.isEmpty())
+    }
+
+    private fun preIme(code: Int, meta: Int = 0, action: Int = android.view.KeyEvent.ACTION_DOWN): Boolean {
+        var consumed = false
+        rule.runOnUiThread { consumed = host!!.dispatchKeyEventPreIme(android.view.KeyEvent(0, 0, action, code, 0, meta)) }
+        return consumed
+    }
+
+    /** ta-y3dw: the pre-IME seam (before Gboard can turn it into a software newline): hardware Enter sends once and is consumed. */
+    @Test
+    fun preImeHardwareEnterSendsOnceAndIsConsumed() {
+        openSheet()
+        compose("work", "ship it")
+        focusInput()
+        assertTrue(preIme(android.view.KeyEvent.KEYCODE_ENTER))
+        until("one create") { client.creates.size == 1 }
+        rule.waitForIdle()
+        assertEquals(1, client.creates.size)
+    }
+
+    /** ta-y3dw: at the pre-IME seam Shift+Enter inserts one newline, is consumed, and does not send; the next plain Enter then sends once. */
+    @Test
+    fun preImeShiftEnterIsANewlineThenEnterSends() {
+        openSheet()
+        compose("work", "ab")
+        focusInput()
+        assertTrue(preIme(android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.META_SHIFT_ON or android.view.KeyEvent.META_SHIFT_LEFT_ON))
+        until("the draft gained the newline") { composer.state.value.text == "ab\n" }
+        assertTrue(client.creates.isEmpty())
+        assertTrue(preIme(android.view.KeyEvent.KEYCODE_ENTER))
+        until("one create") { client.creates.size == 1 }
+        rule.waitForIdle()
+        assertEquals(1, client.creates.size)
+        assertFalse(composer.state.value.text.endsWith("\n\n"))
     }
 
     /** ta-y3dw: an Enter key event from the soft keyboard (FLAG_SOFT_KEYBOARD) is a newline, never a send. */
