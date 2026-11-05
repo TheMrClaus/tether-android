@@ -3,9 +3,12 @@ package com.tether.app.ui.settings
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import com.tether.app.client.ClaudeAccount
@@ -488,16 +491,32 @@ fun ComposeContentTestRule.snapSettings(
         waitForIdle()
     }
     (shot.accounts?.scrollTo ?: shot.server?.scrollTo ?: shot.profiles?.scrollTo ?: shot.nodes?.scrollTo ?: shot.devices?.scrollTo)?.let { scrollTo ->
+        val body = onNode(
+            hasScrollAction() and hasAnyDescendant(hasTestTag(scrollTo)),
+            useUnmergedTree = true,
+        )
         val target = onNodeWithTag(scrollTo, useUnmergedTree = true)
-        target.performScrollTo()
-        mainClock.advanceTimeBy(1_000)
-        waitForIdle()
+        repeat(2) {
+            val delta = target.fetchSemanticsNode().positionInRoot.y - body.fetchSemanticsNode().positionInRoot.y
+            if (kotlin.math.abs(delta) > 0.5f) body.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, delta) }
+            mainClock.advanceTimeBy(1_000)
+            waitForIdle()
+        }
     }
     ensureVisible?.let { tag ->
+        val body = onNode(
+            hasScrollAction() and hasAnyDescendant(hasTestTag(tag)),
+            useUnmergedTree = true,
+        )
         val target = onNodeWithTag(tag, useUnmergedTree = true)
-        target.performScrollTo()
-        mainClock.advanceTimeBy(1_000)
-        waitForIdle()
+        repeat(2) {
+            val b = body.fetchSemanticsNode()
+            val t = target.fetchSemanticsNode()
+            val delta = (t.positionInRoot.y + t.size.height) - (b.positionInRoot.y + b.size.height) + 24f
+            if (delta > 0.5f) body.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, delta) }
+            mainClock.advanceTimeBy(1_000)
+            waitForIdle()
+        }
     }
     onRoot().captureRoboImage(
         "src/test/screenshots/$name/${skin.id}-$size.png",
