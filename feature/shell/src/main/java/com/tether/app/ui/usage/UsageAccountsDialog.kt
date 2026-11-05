@@ -233,10 +233,14 @@ fun UsageAccountsContent(
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val narrow = maxWidth <= 640.dp
+        val width = maxWidth
+        val narrow = width <= 640.dp
         Column(Modifier.fillMaxWidth()) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = if (narrow) 20.dp else 28.dp, top = 12.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = if (narrow) 20.dp else 28.dp)
+                    .padding(top = 12.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
                 RefreshUsageKey(state)
@@ -244,7 +248,7 @@ fun UsageAccountsContent(
             Body(
                 state = state,
                 narrow = narrow,
-                width = maxWidth,
+                width = width,
                 onUseCredit = onUseCredit,
                 onUseGrant = onUseGrant,
                 modifier = Modifier.fillMaxWidth(),

@@ -35,7 +35,13 @@ class ClaudeAccountsStaleFoldTest {
     private val store = PrefsStore(tmp)
     private val compose = createComposeRule()
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
-    private val state = SettingsDialogState(SettingsTab.Engines)
+    private val state = SettingsDialogState(
+        route = RuntimeDeskRoute(
+            RuntimeDeskDestinations.Accounts,
+            RuntimeDeskEntities.Credentials,
+            RuntimeDeskLevel.Detail,
+        ),
+    )
 
     private fun everything(): List<String> {
         val out = mutableListOf<String>()
@@ -65,7 +71,7 @@ class ClaudeAccountsStaleFoldTest {
         })
         compose.setContent { SettingsUnderTest(store.prefs, state, claudeAccounts = ClaudeAccountsBinding(reads, ORIGIN, AccountsFixtures.TIME, actions = actions)) }
         compose.waitUntil(5_000) { state.draft != null }
-        compose.waitUntil(5_000) { has("Claude Code (work)") && has("Sync across accounts") }
+        compose.waitUntil(5_000) { has("Claude Code (work)") }
         // Add -> Ok -> the list is read again (held at the gate)
         tag(ClaudeAccountsTags.Add).performScrollTo().performClick()
         tag(ClaudeAccountsTags.AddField).performTextReplacement("x")
@@ -73,6 +79,8 @@ class ClaudeAccountsStaleFoldTest {
         compose.waitUntil(5_000) { lists == 2 && actions.calls.none { it.name == "add" && !it.reply.isCompleted } }
         compose.waitForIdle()
         // Sync now while that read is in flight
+        compose.runOnUiThread { state.route = state.route.selectEntity(RuntimeDeskEntities.AccountSync) }
+        compose.waitUntil(5_000) { has("Sync across accounts") }
         tag(ClaudeAccountsTags.SyncNow).performScrollTo().performClick()
         compose.waitUntil(5_000) { has("0 updated, 0 already current.") }  // positive control: the run's result is shown
         gate.complete(Unit)
@@ -97,12 +105,14 @@ class ClaudeAccountsStaleFoldTest {
         })
         compose.setContent { SettingsUnderTest(store.prefs, state, claudeAccounts = ClaudeAccountsBinding(reads, ORIGIN, AccountsFixtures.TIME, actions = actions)) }
         compose.waitUntil(5_000) { state.draft != null }
-        compose.waitUntil(5_000) { has("Claude Code (work)") && has("Sync across accounts") }
+        compose.waitUntil(5_000) { has("Claude Code (work)") }
         tag(ClaudeAccountsTags.Add).performScrollTo().performClick()
         tag(ClaudeAccountsTags.AddField).performTextReplacement("x")
         tag(ClaudeAccountsTags.AddSubmit).performScrollTo().performClick()
         compose.waitUntil(5_000) { lists == 2 && actions.calls.none { it.name == "add" && !it.reply.isCompleted } }
         compose.waitForIdle()
+        compose.runOnUiThread { state.route = state.route.selectEntity(RuntimeDeskEntities.AccountSync) }
+        compose.waitUntil(5_000) { has("Sync across accounts") }
         tag(ClaudeAccountsTags.syncCategory("hooks")).performScrollTo().performClick()
         compose.waitUntil(5_000) { actions.calls.count { it.name == "saveSync" } == 1 }
         compose.waitForIdle()

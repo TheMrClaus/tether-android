@@ -70,7 +70,14 @@ abstract class AccountCardHeadBase(private val width: Int) {
 
     private fun show(claudeAccounts: ClaudeAccountsBinding = AccountsShot.Loaded.binding()) {
         val stored = runBlocking { store.prefs.preferences.first() }
-        val state = SettingsDialogState(SettingsTab.Engines, GeneralDraft.of(stored))
+        val state = SettingsDialogState(
+            draft = GeneralDraft.of(stored),
+            route = RuntimeDeskRoute(
+                RuntimeDeskDestinations.Accounts,
+                RuntimeDeskEntities.Credentials,
+                RuntimeDeskLevel.Detail,
+            ),
+        )
         compose.setContent {
             TetherTheme(TetherSkin.Studio.mode) {
                 CompositionLocalProvider(LocalReducedMotion provides true) {

@@ -61,9 +61,9 @@ class RefusedPreferenceWriteTest {
 
     private fun show(tab: SettingsTab) {
         grantNotificationPermission()
+        state.route = RuntimeDeskRoute.fromLegacyTab(tab)
         compose.setContent { SettingsUnderTest(prefs, state) }
         compose.waitUntil(5_000) { state.draft != null }
-        compose.onNodeWithTag(SettingsDialogTags.tab(tab)).performClick()
         compose.waitForIdle()
     }
 
@@ -81,7 +81,7 @@ class RefusedPreferenceWriteTest {
     }
 
     @Test fun theNotificationsRowAppliesWhenTheDiskRefusesIt() {
-        show(SettingsTab.Devices)
+        show(SettingsTab.Appearance)
         compose.onNodeWithText("Pinned sessions").performScrollTo().performClick()
         compose.waitUntil(5_000) { runBlocking(Dispatchers.IO) { prefs.pushScope.first() } == PushScope.Pinned }
         // T12.2: the web's Disable (notifications allowed, the registration in place).
