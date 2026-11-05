@@ -9,8 +9,10 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -93,13 +95,15 @@ class SettingsLoadingTest {
         compose.waitForIdle()
         save.assertDoesNotExist()
         thinking.assertIsEnabled().assertIsOn()
-        thinking.performClick()
+        thinking.performScrollTo().performClick()
         compose.waitForIdle()
         thinking.assertIsOff()
         compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
         save.assertIsEnabled()
         save.performClick()
-        compose.waitUntil(5_000) { closes == 1 }
+        compose.waitUntil(5_000) { store.storedFor()[PreferenceKeys.SHOW_THINKING] == false }
+        save.assertDoesNotExist()
+        assertEquals(0, closes)
         // ta-coik.52: written to the server's own record (here no server is configured: the "" one).
         val raw = store.storedFor()
         assertEquals(false, raw[PreferenceKeys.SHOW_ENDED_SESSIONS])
@@ -120,7 +124,7 @@ private class SlowWriteStore(private val real: DataStore<Preferences>) : DataSto
 }
 
 /**
- * ta-t7l r3: Save closes the dialog only after the General draft's write has landed, and a dialog
+ * ta-t7l r3: Save settles only after the General draft's write has landed, and a dialog
  * that leaves composition while the write is in flight (Back during a slow write) still writes it.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -139,24 +143,33 @@ class SettingsSaveTest {
         compose.isDrawnEnabled(SettingsPanelTags.toggle(GeneralToggle.ShowThinking))
     }
 
-    @Test fun saveClosesOnlyAfterTheWriteLands() {
+    @Test fun saveSettlesOnlyAfterTheWriteLands() {
         val slow = SlowWriteStore(store.store)
         val state = SettingsDialogState()
         var closes = 0
         compose.setContent { SettingsUnderTest(UiPrefs.on(slow), state, onClose = { closes++ }) }
         compose.waitUntil(5_000) { state.draft != null }
         waitReady()
-        compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performScrollTo().performClick()
         compose.waitUntil(5_000) { state.draft?.showThinking == true }
         compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
-        compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
+        val save = compose.onNodeWithTag(SettingsDialogTags.Save)
+        save.performClick()
         compose.waitForIdle()
-        // The write is held: not stored, and the dialog is still open.
+        // The write is held: not stored, and the footer stays present with Save disabled.
         assertEquals(0, closes)
         assertEquals(null, stored()[PreferenceKeys.SHOW_THINKING])
+        compose.onNodeWithTag(SettingsDialogTags.Cancel).assertExists()
+        save.assertExists().assertIsNotEnabled()
         slow.open.value = true
-        compose.waitUntil(5_000) { closes == 1 }
-        // Closed: the write had already landed.
+        compose.waitUntil(5_000) { stored()[PreferenceKeys.SHOW_THINKING] == true }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag(SettingsDialogTags.Save).fetchSemanticsNodes().isEmpty()
+        }
+        save.assertDoesNotExist()
+        compose.onNodeWithTag(SettingsDialogTags.Cancel).assertDoesNotExist()
+        assertEquals(0, closes)
+        // Settled in place: the write landed and the footer disappeared.
         assertEquals(true, stored()[PreferenceKeys.SHOW_THINKING])
     }
 

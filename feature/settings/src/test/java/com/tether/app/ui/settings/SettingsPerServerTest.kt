@@ -2,14 +2,13 @@ package com.tether.app.ui.settings
 
 import com.tether.app.testsupport.runPrefsWrite
 
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performScrollTo
 import com.tether.app.ui.prefs.PreferenceKeys
 import com.tether.app.ui.prefs.ServerPreferences
 import com.tether.app.ui.theme.ThemeMode
@@ -56,9 +55,9 @@ class SettingsPerServerTest {
         compose.waitUntil(5_000) { state.draft != null }
         assertEquals("the draft is A's", GeneralDraft("/srv/a", showEndedSessions = true, confirmBeforeEnd = true, showThinking = false), state.draft)
         waitSelected(SettingsPanelTags.themeMode(ThemeMode.Light))
-        compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performClick()
+        compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performScrollTo().performClick()
         compose.waitUntil(5_000) { store.storedFor(a)[PreferenceKeys.THEME_MODE] == "dark" }
-        compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performScrollTo().performClick()
         compose.waitUntil(5_000) { state.draft?.showThinking == true }
         compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()

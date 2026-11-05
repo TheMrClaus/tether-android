@@ -13,6 +13,7 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -409,6 +410,7 @@ class DevicesBehaviourTest {
         compose.mainClock.advanceTimeBy(20_000)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(OLD_CLEAR_AFTER_MS + 1_000))
         state.tab = SettingsTab.Devices
+        tag(DevicesTags.CodeCard).performScrollTo()
         waitText(DevicesCopy.EXPIRED)
         assertEquals(DevicesCopy.codeSpoken(SENTINEL), description(DevicesTags.CodeShown))
         assertTrue(exists(DevicesTags.CodeCopy))
@@ -690,7 +692,9 @@ class DevicesBehaviourTest {
 
     @Test fun sessionsSignOutAtOnceButEverywhereElseAsks() {
         opened()
-        tap(DevicesTags.signOut(BROWSER.id))
+        tag(DevicesTags.session(BROWSER.id)).performScrollTo()
+        compose.waitForIdle()
+        tag(DevicesTags.signOut(BROWSER.id)).assertIsDisplayed().performClick()
         waitCalls(4)
         assertEquals("revokeSession", source.calls.last().name)
         assertEquals(BROWSER.id, source.calls.last().arg)

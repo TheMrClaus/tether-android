@@ -11,6 +11,8 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -88,6 +90,20 @@ class ServerSettingsBehaviourTest {
     private fun engines() = destination(RuntimeDeskDestinations.Engines, "claude")
 
     private fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
+
+    private fun assertThreeEnvLocksFor(vararg settings: ServerSetting) {
+        assertEquals(3, settings.size)
+        assertEquals(
+            listOf(1, 1, 1),
+            settings.map { setting ->
+                compose.onAllNodes(
+                    hasTestTag(SettingsTags.EnvLock) and
+                        hasAnyAncestor(hasTestTag(ServerSettingsTags.row(setting))),
+                    useUnmergedTree = true,
+                ).fetchSemanticsNodes().size
+            },
+        )
+    }
 
     /** A select's trigger is named by its row (tether-select's `ariaLabel`); tapping it opens the menu. */
     private fun openSelect(label: String) {
@@ -350,7 +366,7 @@ class ServerSettingsBehaviourTest {
         val forced = mapOf("host" to true, "password" to true, "claudePersistent" to true, "allowedRoots" to true, "messageInterruptMode" to true, "stateDir" to true)
         show(ServerFixtures.binding(view = ServerFixtures.view(envForced = forced), advanced = ServerFixtures.ADVANCED_FORCED, writer = writer))
         // Server & integrations owns the host, password, and state-directory locks.
-        assertEquals(3, compose.onAllNodesWithTag(SettingsTags.EnvLock).fetchSemanticsNodes().size)
+        assertThreeEnvLocksFor(ServerSetting.Host, ServerSetting.Password, ServerSetting.StateDir)
         tag(ServerSettingsTags.input(ServerSetting.Host)).assertIsNotEnabled()
         tag(ServerSettingsTags.input(ServerSetting.StateDir)).assertIsNotEnabled()
         // A forced secret has no key at all (the web hides them), the token (not forced) does.
@@ -358,7 +374,7 @@ class ServerSettingsBehaviourTest {
         tag(ServerSecretTags.opener(ServerSetting.ProxyToken)).assertExists()
         // A forced toggle does nothing; a forced list has no remove or add.
         sessions()
-        assertEquals(3, compose.onAllNodesWithTag(SettingsTags.EnvLock).fetchSemanticsNodes().size)
+        assertThreeEnvLocksFor(ServerSetting.ClaudePersistent, ServerSetting.AllowedRoots, ServerSetting.MessageInterruptMode)
         tag(ServerSettingsTags.row(ServerSetting.ClaudePersistent)).performScrollTo().performClick()
         tag(ServerSettingsTags.remove(ServerSetting.AllowedRoots, "/srv/work")).assertDoesNotExist()
         tag(ServerSettingsTags.add(ServerSetting.AllowedRoots)).assertDoesNotExist()
