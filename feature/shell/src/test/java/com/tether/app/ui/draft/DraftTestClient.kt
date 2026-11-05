@@ -12,6 +12,7 @@ import com.tether.app.client.TetherClient
 import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ClientMessage
 import com.tether.app.protocol.SessionModelOption
+import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.model.AgentSession
 import com.tether.app.protocol.model.DirectoryListing
 import com.tether.app.protocol.model.ProviderInfo
@@ -20,6 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.serialization.json.JsonObject
 
 /** ta-abm: the new-session sheet's seeded catalog (ta-895's case: two Claude accounts first). */
 object DraftFixtures {
@@ -74,6 +76,9 @@ class DraftTestClient(
     override val consentOrigin = MutableStateFlow<String?>(DraftFixtures.ORIGIN)
     val server = MutableStateFlow<String?>(DraftFixtures.SERVER)
     override val serverUrl: StateFlow<String?> get() = server
+    override val serverSettings = MutableStateFlow<ServerMessage.ServerSettings?>(
+        ServerMessage.ServerSettings(JsonObject(emptyMap()), emptyMap(), false, emptyList(), JsonObject(emptyMap())),
+    )
     override val workspaceRoot = MutableStateFlow<String?>(DraftFixtures.ROOT)
     override val directories = MutableStateFlow<DirectoryListing?>(null)
     override val createdSessions = MutableStateFlow<CreatedReply?>(null)

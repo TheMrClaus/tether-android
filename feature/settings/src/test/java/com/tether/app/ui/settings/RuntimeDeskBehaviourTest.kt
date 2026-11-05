@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -18,6 +19,7 @@ import org.junit.rules.RuleChain
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -113,5 +115,57 @@ class RuntimeDeskBehaviourTest {
 
         assertEquals("codex", state.route.entity)
         compose.onNode(hasText("Codex") and hasClickAction()).assertExists()
+    }
+
+    @Test fun routeBodyUpdatesAfterTheDetailMovesFromCompactToExpanded() {
+        val state = SettingsDialogState(
+            draft = GeneralDraft.of(com.tether.app.ui.prefs.TetherPreferences.Default),
+            route = RuntimeDeskRoute(
+                RuntimeDeskDestinations.Accounts,
+                RuntimeDeskEntities.LimitsBalance,
+                RuntimeDeskLevel.Detail,
+            ),
+        )
+        val binding = ServerFixtures.binding()
+        compose.setContent { SettingsUnderTest(store.prefs, state, serverSettings = binding) }
+        compose.onNodeWithContentDescription("Back").assertExists()
+
+        RuntimeEnvironment.setQualifiers("w800dp-h1000dp-mdpi")
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Back").assertDoesNotExist()
+
+        compose.runOnUiThread {
+            state.route = RuntimeDeskRoute(
+                RuntimeDeskDestinations.Accounts,
+                RuntimeDeskEntities.Credentials,
+                RuntimeDeskLevel.Detail,
+            )
+        }
+        compose.waitForIdle()
+        compose.runOnUiThread {
+            state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Engines, "claude", RuntimeDeskLevel.Detail)
+        }
+        compose.waitForIdle()
+        val command = ServerSettingsTags.input(ServerSetting.ClaudeCommand)
+        compose.onNodeWithTag(command, useUnmergedTree = true).performTextReplacement("claude-retained")
+
+        compose.runOnUiThread {
+            state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Preferences, level = RuntimeDeskLevel.Detail)
+        }
+        compose.waitForIdle()
+        compose.onNode(
+            hasText("Preferences") and SemanticsMatcher.expectValue(SemanticsProperties.Selected, true),
+        ).assertExists()
+        compose.onNode(hasText("Preferences") and isHeading()).assertExists()
+        compose.onNodeWithText("Startup").assertExists()
+        compose.onNodeWithTag(EngineTags.Section, useUnmergedTree = true).assertDoesNotExist()
+
+        compose.runOnUiThread {
+            state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Engines, "claude", RuntimeDeskLevel.Detail)
+        }
+        compose.waitForIdle()
+        val retained = compose.onNodeWithTag(command, useUnmergedTree = true)
+            .fetchSemanticsNode().config[SemanticsProperties.EditableText].text
+        assertEquals("claude-retained", retained)
     }
 }

@@ -250,7 +250,7 @@ abstract class UsageBehaviourBase {
         assertEquals(listOf<String?>(null), source.of("accounts").map { it.a })
         rule.onNodeWithText("Host default").assertExists()
         rule.onAllNodesWithText("Codex").assertCountEquals(2)
-        rule.onNodeWithText("DeepSeek").assertExists()
+        rule.onAllNodesWithText("DeepSeek").assertCountEquals(3)
 
         rule.onNodeWithTag(AccountsTags.Refresh).performClick()
         advance(100)

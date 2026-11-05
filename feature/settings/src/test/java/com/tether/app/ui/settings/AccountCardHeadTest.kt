@@ -2,6 +2,8 @@ package com.tether.app.ui.settings
 
 import android.icu.text.BreakIterator
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -13,10 +15,13 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.rememberTextMeasurer
 import java.util.Locale
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.theme.LocalReducedMotion
+import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.TetherSkin
 import com.tether.app.ui.theme.TetherTheme
 import com.tether.app.ui.theme.mode
@@ -46,6 +51,7 @@ abstract class AccountCardHeadBase(private val width: Int) {
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
     private val narrow = width <= 640
+    private var originalWorkTitleBasis: Float? = null
 
     private class R(val l: Float, val t: Float, val w: Float, val h: Float) {
         val r get() = l + w
@@ -80,6 +86,24 @@ abstract class AccountCardHeadBase(private val width: Int) {
         compose.setContent {
             TetherTheme(TetherSkin.Studio.mode) {
                 CompositionLocalProvider(LocalReducedMotion provides true) {
+                    val card = ClaudeAccountsPresentation.view(AccountsShot.Loaded.seed(), AccountsFixtures.TIME)
+                        .cards.single { it.id == "claude-work" }
+                    val type = LocalTetherTypography.current
+                    val titleStyle = settingsText(type.ui, 15f, 700, lineHeight = 1.4f)
+                    val idStyle = settingsText(type.mono, 11.5f, 400, lineHeight = 1.5f)
+                    val smallStyle = settingsText(type.ui, 12f, 400, lineHeight = 1.5f)
+                    val measurer = rememberTextMeasurer()
+                    val density = LocalDensity.current.density
+                    SideEffect {
+                        originalWorkTitleBasis = listOfNotNull(
+                            AnnotatedString(card.title) to titleStyle,
+                            card.idLine?.let { AnnotatedString(it) to idStyle },
+                            AnnotatedString(card.status) to smallStyle,
+                            card.organization?.let { AnnotatedString(it) to smallStyle },
+                        ).maxOf { (text, style) ->
+                            measurer.measure(text, style, softWrap = false).size.width / density
+                        }
+                    }
                     SettingsFrame(
                         prefs = store.prefs,
                         state = state,
@@ -151,7 +175,7 @@ abstract class AccountCardHeadBase(private val width: Int) {
             val card = tag(ClaudeAccountsTags.card("claude-work"))
             val rename = tag(ClaudeAccountsTags.rename("claude-work"))
             val check = tag(ClaudeAccountsTags.check("claude-work"))
-            val titleBasis = titleLayouts("claude-work").maxOf { it.multiParagraph.maxIntrinsicWidth / d }
+            val titleBasis = requireNotNull(originalWorkTitleBasis)
             val available = card.w - 2 * 16f - rename.w - 12f - check.w - 2 * 12f
             val deficit = (32f + titleBasis - available).coerceAtLeast(0f)
             val expectedGlyph = 32f - deficit * 32f / (32f + titleBasis)

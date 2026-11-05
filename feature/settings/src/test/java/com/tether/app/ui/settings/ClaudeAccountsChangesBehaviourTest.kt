@@ -623,12 +623,12 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
             tag(ClaudeAccountsTags.remove(id)).assertIsEnabled()
             tag(ClaudeAccountsTags.check(id)).assertIsEnabled()
         }
-        tag(ClaudeAccountsTags.SyncNow).assertIsEnabled()
         tap(ClaudeAccountsTags.check("claude-work"))
         waitFor("Logged in — work@example.com")
         assertEquals(listOf("add"), actions.names())
         // The next change is sent as it is on the web, and the note goes while it runs.
         openAccountSync()
+        tag(ClaudeAccountsTags.SyncNow).assertIsEnabled()
         tap(ClaudeAccountsTags.SyncNow)
         waitForCall(actions, "runSync")
         tag(ClaudeAccountsTags.OwnerNeeded).assertDoesNotExist()

@@ -98,10 +98,10 @@ class SettingsBehaviourTest {
         compose.waitForIdle()
         compose.onNodeWithText("Startup").assertExists()
         compose.onNodeWithText("Sign-in screen").assertExists()
+        compose.onNodeWithText("Sessions opened on this phone").assertExists()
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Access & devices").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Sessions opened on this phone").assertExists()
         compose.onNodeWithText("Paired devices").assertExists()
         // T10.4: the web's SignInSecuritySection headings (the slot's "Sign-in security" is gone).
         compose.onNodeWithText("Passkeys").performScrollTo().assertExists()

@@ -38,7 +38,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -458,8 +457,9 @@ fun SettingsFrame(
                 accountsLimits = accountsLimits,
                 github = github,
             )
-            val latestDetailInputs by rememberUpdatedState(detailInputs)
-            val detailContent = remember { movableContentOf { RuntimeDeskDetail(latestDetailInputs) } }
+            val detailContent = remember {
+                movableContentOf<RuntimeDeskDetailInputs> { input -> RuntimeDeskDetail(input) }
+            }
             val expanded = windowWidthDp() >= 768
             CompositionLocalProvider(LocalSettingsRowsStack provides rowsStack) {
                 RuntimeDeskScaffold(
@@ -504,10 +504,10 @@ fun SettingsFrame(
                         }
                     } else null,
                 ) {
-                    detailContent()
+                    detailContent(detailInputs)
                 }
                 if (!expanded && route.level != RuntimeDeskLevel.Detail) {
-                    Box(Modifier.keepRuntimeDeskMounted(false)) { detailContent() }
+                    Box(Modifier.keepRuntimeDeskMounted(false)) { detailContent(detailInputs) }
                 }
             }
         }
