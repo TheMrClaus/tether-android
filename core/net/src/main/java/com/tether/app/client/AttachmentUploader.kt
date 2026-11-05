@@ -160,6 +160,10 @@ class AttachmentUploader(
             status == 400 && code == "upload_interrupted" -> UploadOutcome.Transient(serverReason ?: "The upload was interrupted.")
             (status == 404 || status == 405) && code == null -> UploadOutcome.RouteMissing
             status == 401 || status == 403 -> UploadOutcome.Refused(status, code, serverReason ?: "You are not allowed to upload here.", retryable = false)
+            // Server side (tether lib/attachment-store.ts): a same-id PUT already being written answers
+            // `409 upload_in_progress` ("retry in a moment") - recoverable, the SAME id is retried with backoff.
+            // `409 attachment_id_conflict` (same id, other bytes) stays final.
+            status == 409 && code == "upload_in_progress" -> UploadOutcome.Transient(serverReason ?: "That photo is already being uploaded; retrying.")
             status == 409 -> UploadOutcome.Refused(status, code, serverReason ?: "That attachment id already holds different bytes.", retryable = false)
             status == 413 -> UploadOutcome.Refused(status, code, serverReason ?: "An attachment is limited to 9 MiB.", retryable = false)
             status == 429 || status >= 500 -> UploadOutcome.Refused(status, code, serverReason ?: "The server could not take the upload right now.", retryable = true)

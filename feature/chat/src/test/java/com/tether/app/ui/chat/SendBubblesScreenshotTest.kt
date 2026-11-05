@@ -30,6 +30,8 @@ enum class SendShot(val id: String) {
     Waiting("send-waiting"),
     Failed("send-failed"),
     PhotoLost("send-photo-lost"),
+    Uploading("send-uploading"),
+    UploadFailed("send-upload-failed"),
 }
 
 private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
@@ -53,6 +55,21 @@ private fun sendsFor(shot: SendShot): SendBubbles = when (shot) {
     SendShot.PhotoLost -> SendBubbles(
         emptyList(),
         listOf(SendFixtures.failed("k8", "Here are the two screenshots.", reason = com.tether.app.client.FailedSendReason.PhotoLost)),
+    ) {}
+    // ta-delivery A2 (fix1 B2): "Uploading N%" while the photos go up, and "Not sent — the upload failed (<server reason>)".
+    SendShot.Uploading -> SendBubbles(
+        listOf(
+            SendFixtures.pending("k7", "Here are the two screenshots.", attachments = 2, images = 2, bytes = SendFixtures.THREE_MB)
+                .copy(uploadPercent = 42),
+        ),
+        emptyList(),
+    ) {}
+    SendShot.UploadFailed -> SendBubbles(
+        emptyList(),
+        listOf(
+            SendFixtures.failed("k6", "Here are the two screenshots.", 2, 2, SendFixtures.THREE_MB, reason = com.tether.app.client.FailedSendReason.Upload)
+                .copy(detail = "An attachment is limited to 9 MiB."),
+        ),
     ) {}
 }
 
