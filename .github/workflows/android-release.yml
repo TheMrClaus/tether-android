@@ -41,8 +41,8 @@ on:
         description: "Release title. Blank → Tether Android <versionName>."
         required: false
         type: string
-      extra_notes:
-        description: "Optional extra Markdown appended to the generated notes."
+      public_notes:
+        description: "Optional curated notes replacing docs/releases/<versionName>.md (3-5 short user-outcome bullets)."
         required: false
         type: string
 
@@ -121,37 +121,17 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "Building $title ($version_name / code $version_code) → tag $tag"
 
-      - name: Generate release notes
+      # Curated notes only: docs/releases/<versionName>.md, or the public_notes override. Missing or
+      # blank notes fail here, before the build, signing or any release step. Never git log subjects.
+      - name: Resolve release notes
         id: notes
         env:
-          META_TITLE: ${{ steps.meta.outputs.title }}
-          META_VERSION_NAME: ${{ steps.meta.outputs.version_name }}
-          META_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
-          META_TAG: ${{ steps.meta.outputs.tag }}
-          EXTRA_NOTES: ${{ inputs.extra_notes }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          PUBLIC_NOTES: ${{ inputs.public_notes }}
         run: |
           set -euo pipefail
-          # Baseline = the previous v* tag reachable from HEAD, excluding the
-          # release's own tag. On a draft→publish rerun the draft's tag is already
-          # the newest one, so without this the range would be empty and overwrite
-          # the draft's notes with a blank changelog.
-          prev_tag=$(git tag --merged HEAD --list 'v*' --sort=-creatordate \
-            | grep -Fvx -- "$META_TAG" | head -n1 || true)
-          range=""
-          [ -n "$prev_tag" ] && range="$prev_tag..HEAD"
           notes_file="$RUNNER_TEMP/release-notes.md"
-          {
-            echo "## ${META_TITLE}"
-            echo
-            echo "_versionName ${META_VERSION_NAME} · versionCode ${META_VERSION_CODE}_"
-            echo
-            echo "### Changes"
-            git log $range --no-merges --pretty='- %s' | head -n 100 || true
-            if [ -n "$EXTRA_NOTES" ]; then
-              echo
-              echo "$EXTRA_NOTES"
-            fi
-          } > "$notes_file"
+          bash .github/scripts/release-notes.sh "$notes_file"
           echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
           echo "----- notes -----"; cat "$notes_file"
 
