@@ -2,6 +2,7 @@ package com.tether.app.ui.settings
 
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
+import com.tether.app.ui.icons.TetherIcons
 
 /** Stable local route keys for the Runtime Desk. They are never sent to the server. */
 object RuntimeDeskDestinations {
@@ -14,13 +15,13 @@ object RuntimeDeskDestinations {
     const val ServerIntegrations = "server-integrations"
 
     val items = listOf(
-        RuntimeDeskNavItem(Preferences, "Preferences", "Workspace, appearance, and notifications"),
-        RuntimeDeskNavItem(AccessDevices, "Access & devices", "Passkeys, sessions, and paired devices"),
-        RuntimeDeskNavItem(HostsNodes, "Hosts & nodes", "Node registry and credentials"),
-        RuntimeDeskNavItem(Engines, "Engines", "Runtime detection and configuration"),
-        RuntimeDeskNavItem(Accounts, "Accounts", "Credentials, sync, limits, and balances"),
-        RuntimeDeskNavItem(SessionsRouting, "Sessions & routing", "Metadata, lifecycle, and defaults"),
-        RuntimeDeskNavItem(ServerIntegrations, "Server & integrations", "Network, storage, secrets, and GitHub"),
+        RuntimeDeskNavItem(Preferences, "Preferences", "Workspace, appearance, and notifications", icon = TetherIcons.Settings),
+        RuntimeDeskNavItem(AccessDevices, "Access & devices", "Passkeys, sessions, and paired devices", icon = TetherIcons.Laptop),
+        RuntimeDeskNavItem(HostsNodes, "Hosts & nodes", "Node registry and credentials", icon = TetherIcons.Network),
+        RuntimeDeskNavItem(Engines, "Engines", "Runtime detection and configuration", icon = TetherIcons.SquareTerminal),
+        RuntimeDeskNavItem(Accounts, "Accounts", "Credentials, sync, limits, and balances", icon = TetherIcons.UserRound),
+        RuntimeDeskNavItem(SessionsRouting, "Sessions & routing", "Metadata, lifecycle, and defaults", icon = TetherIcons.GitBranch),
+        RuntimeDeskNavItem(ServerIntegrations, "Server & integrations", "Network, storage, secrets, and GitHub", icon = TetherIcons.ServerCog),
     )
 
     fun hasEntities(destination: String): Boolean = destination == Engines || destination == Accounts

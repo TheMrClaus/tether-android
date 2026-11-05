@@ -236,15 +236,6 @@ fun UsageAccountsContent(
         val width = maxWidth
         val narrow = width <= 640.dp
         Column(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = if (narrow) 20.dp else 28.dp)
-                    .padding(top = 12.dp),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                RefreshUsageKey(state)
-            }
             Body(
                 state = state,
                 narrow = narrow,
@@ -253,6 +244,7 @@ fun UsageAccountsContent(
                 onUseGrant = onUseGrant,
                 modifier = Modifier.fillMaxWidth(),
                 scrollable = false,
+                embedded = true,
             )
         }
     }
@@ -260,7 +252,7 @@ fun UsageAccountsContent(
 
 /** The same global force-all action in the dialog and the Runtime Desk adapter. */
 @Composable
-private fun RefreshUsageKey(state: UsageAccountsState) {
+private fun RefreshUsageKey(state: UsageAccountsState, target: Dp = 44.dp) {
     val t = LocalTetherTokens.current
     val look = rememberIconLook(t.ink, t.radiusSm, enabled = !state.loading)
     SpinningKey(spinning = state.loading) { angle ->
@@ -269,8 +261,8 @@ private fun RefreshUsageKey(state: UsageAccountsState) {
             TetherIcons.RefreshCw,
             "Refresh usage",
             look,
-            44.dp,
-            44.dp,
+            target,
+            target,
             16.dp,
             enabled = !state.loading,
             modifier = Modifier.testTag(AccountsTags.Refresh).rotate(angle),
@@ -287,6 +279,7 @@ private fun Body(
     onUseGrant: (ClaudeResetRequest) -> Unit,
     modifier: Modifier,
     scrollable: Boolean = true,
+    embedded: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -297,8 +290,9 @@ private fun Body(
             .fillMaxWidth()
             .background(t.graphite)
             .then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier)
-            .padding(horizontal = if (narrow) 20.dp else 28.dp, vertical = if (narrow) 24.dp else 28.dp),
-        verticalArrangement = Arrangement.spacedBy(28.dp),
+            .padding(horizontal = if (narrow) 20.dp else 28.dp)
+            .padding(vertical = if (embedded) 16.dp else if (narrow) 24.dp else 28.dp),
+        verticalArrangement = Arrangement.spacedBy(if (embedded) 16.dp else 28.dp),
     ) {
         if (state.error.isNotEmpty()) {
             val text = buildString {
@@ -313,7 +307,11 @@ private fun Body(
             // `.usage-accounts-grid`: auto-fill columns of at least 15rem (one ≤ 640).
             val inner = width - if (narrow) 40.dp else 56.dp
             val columns = if (narrow) 1 else maxOf(1, ((inner + 20.dp) / (240.dp + 20.dp)).toInt())
-            SectionTitle("Claude accounts")
+            if (embedded) {
+                SectionTitle("Claude accounts", embedded = true) { RefreshUsageKey(state, 48.dp) }
+            } else {
+                SectionTitle("Claude accounts")
+            }
             Grid(columns) {
                 data.claude.map { entry ->
                     {
@@ -343,7 +341,7 @@ private fun Body(
                     }
                 }
             }
-            SectionTitle("Codex")
+            SectionTitle("Codex", embedded = embedded)
             val codex = data.codex.firstOrNull()
             Grid(columns) {
                 buildList<@Composable () -> Unit> {
@@ -359,7 +357,7 @@ private fun Body(
                 }
             }
             data.deepseek?.let { deepseek ->
-                SectionTitle("DeepSeek")
+                SectionTitle("DeepSeek", embedded = embedded)
                 Grid(columns) { deepSeekCards(deepseek, data.generatedAt) }
                 // Issue #193: the balance is half the picture; the rate in force and its card.
                 DeepSeekRateCard()
@@ -399,14 +397,23 @@ private fun EmptyNote(text: String, modifier: Modifier) {
 
 /** `.usage-accounts-section-title` (Studio): 14px / 650 `--ink`, 24px above, 14px below. */
 @Composable
-private fun SectionTitle(text: String) {
+private fun SectionTitle(text: String, embedded: Boolean = false, trailing: (@Composable () -> Unit)? = null) {
     val t = LocalTetherTokens.current
-    Text(
-        text,
-        color = t.ink,
-        style = cssText(LocalTetherTypography.current.ui, 0.875f, 650),
-        modifier = Modifier.padding(top = 24.dp, bottom = 14.dp).semantics { heading() },
-    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .then(if (embedded) Modifier else Modifier.padding(top = 24.dp, bottom = 14.dp)),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text,
+            color = t.ink,
+            style = cssText(LocalTetherTypography.current.ui, 0.875f, 650),
+            modifier = Modifier.weight(1f).semantics { heading() },
+        )
+        trailing?.invoke()
+    }
 }
 
 @Composable

@@ -17,6 +17,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -431,14 +432,19 @@ class MainShellNavigationTest : NavigationBase(1200, 1000) {
         assertEquals(listOf("h-s1"), client.seenCalls.toList())
     }
 
-    @Test fun settingsOpensFromTheBarOnEveryView() {
+    @Test fun settingsReplacesTheWorkspaceAndBothReturnPathsRestoreIt() {
         launch()
         onOverview()
-        val sheetTitle = androidx.compose.ui.test.hasText("Settings")
-        assertEquals(0, rule.onAllNodes(sheetTitle).fetchSemanticsNodes().size)
         rule.onNodeWithTag(ShellTags.SettingsKey).performClick()
-        rule.waitForIdle()
-        assertEquals("the interim settings sheet (the rail footer's) is open", 1, rule.onAllNodes(sheetTitle).fetchSemanticsNodes().size)
+        awaitTag(com.tether.app.ui.settings.SettingsDialogTags.Dialog)
+        assertFalse("Settings replaces the Overview", exists(OverviewTags.Root))
+        rule.onNodeWithContentDescription("Return to workspace").performClick()
+        onOverview()
+
+        rule.onNodeWithTag(ShellTags.SettingsKey).performClick()
+        awaitTag(com.tether.app.ui.settings.SettingsDialogTags.Dialog)
+        back()
+        onOverview()
     }
 }
 

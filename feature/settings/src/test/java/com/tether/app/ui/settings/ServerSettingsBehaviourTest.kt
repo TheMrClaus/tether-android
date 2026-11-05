@@ -302,11 +302,6 @@ class ServerSettingsBehaviourTest {
         tag(ServerSettingsTags.row(ServerSetting.MetadataGenerationEnabled)).assertDoesNotExist()
     }
 
-    /** ta-coik.65: the dialog's window is not FLAG_SECURE (the web does not block screenshots of Settings). */
-    @Test fun theDialogWindowIsNotSecure() {
-        assertEquals(androidx.compose.ui.window.SecureFlagPolicy.Inherit, SettingsDialogProperties.securePolicy)
-    }
-
     @Test fun anUneditedFieldSendsNothingWhenItLosesFocusOrLeaves() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(writer = writer))

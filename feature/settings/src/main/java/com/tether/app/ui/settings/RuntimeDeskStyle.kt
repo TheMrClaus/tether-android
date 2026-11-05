@@ -10,8 +10,8 @@ import com.tether.app.ui.theme.TokenScope
 
 internal object RuntimeDeskStyle {
     val ExpandedBreakpoint = 768.dp
-    val DestinationWidth = 232.dp
-    val EntityWidth = 288.dp
+    val DestinationWidth = 192.dp
+    val EntityWidth = 220.dp
     val HeaderHeight = 72.dp
     val TouchTarget = 48.dp
     val PanePadding = 12.dp

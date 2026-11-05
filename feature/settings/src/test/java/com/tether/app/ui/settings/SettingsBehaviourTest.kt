@@ -90,7 +90,7 @@ class SettingsBehaviourTest {
 
     @Test fun theSevenDestinationsDrillIntoTheirPanels() {
         show()
-        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
         RuntimeDeskDestinations.items.forEach { item ->
             compose.onNodeWithText(item.label).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
         }
@@ -99,7 +99,7 @@ class SettingsBehaviourTest {
         compose.onNodeWithText("Startup").assertExists()
         compose.onNodeWithText("Sign-in screen").assertExists()
         compose.onNodeWithText("Sessions opened on this phone").assertExists()
-        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
         compose.onNodeWithText("Access & devices").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Paired devices").assertExists()
@@ -114,7 +114,7 @@ class SettingsBehaviourTest {
      */
     @Test fun everyDestinationHasAControlledDetail() {
         show()
-        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
         val uniqueContent = mapOf(
             RuntimeDeskDestinations.Preferences to "Startup",
             RuntimeDeskDestinations.AccessDevices to "Passkeys",
@@ -130,8 +130,8 @@ class SettingsBehaviourTest {
             if (item.id == RuntimeDeskDestinations.Accounts) compose.onNodeWithText("Credentials").performClick()
             compose.waitForIdle()
             compose.onNodeWithText(uniqueContent.getValue(item.id)).performScrollTo().assertExists()
-            compose.onNodeWithContentDescription("Back").performClick()
-            if (RuntimeDeskDestinations.hasEntities(item.id)) compose.onNodeWithContentDescription("Back").performClick()
+            compose.onNodeWithContentDescription("Back", substring = true).performClick()
+            if (RuntimeDeskDestinations.hasEntities(item.id)) compose.onNodeWithContentDescription("Back", substring = true).performClick()
             compose.waitForIdle()
         }
     }

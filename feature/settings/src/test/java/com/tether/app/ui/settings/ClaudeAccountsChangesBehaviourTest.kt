@@ -100,7 +100,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     private fun exists(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
 
     private fun openAccountSync() {
-        if (layout == TetherLayoutClass.Phone) compose.onNodeWithContentDescription("Back").performClick()
+        if (layout == TetherLayoutClass.Phone) compose.onNodeWithContentDescription("Back", substring = true).performClick()
         compose.onNodeWithText("Account sync").performClick()
         compose.waitForIdle()
     }

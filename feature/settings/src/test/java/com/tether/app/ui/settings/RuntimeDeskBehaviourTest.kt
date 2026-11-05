@@ -55,9 +55,9 @@ class RuntimeDeskBehaviourTest {
         assertEquals(RuntimeDeskLevel.Detail, state.route.level)
         assertEquals("codex", state.route.entity)
 
-        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
         assertEquals(RuntimeDeskLevel.Entities, state.route.level)
-        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
         assertEquals(RuntimeDeskLevel.Destinations, state.route.level)
         compose.onNodeWithText("Accounts").assertExists()
     }
@@ -93,7 +93,7 @@ class RuntimeDeskBehaviourTest {
         }
         val tag = ServerSettingsTags.input(ServerSetting.ClaudeCommand)
         compose.onNodeWithTag(tag, useUnmergedTree = true).performTextReplacement("claude-preview")
-        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
         compose.waitForIdle()
         assertEquals(
             listOf(ServerFixtures.json("""{"claudeCommand":"claude-preview"}""") to ServerFixtures.ORIGIN),
@@ -102,7 +102,7 @@ class RuntimeDeskBehaviourTest {
         assertEquals("claude", binding.settings!!.text(ServerSetting.ClaudeCommand))
         compose.onNode(hasText("Codex") and hasClickAction()).performClick()
         compose.waitForIdle()
-        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
         compose.onNode(hasText("Claude Code") and hasClickAction()).performClick()
         compose.waitForIdle()
 
@@ -119,10 +119,10 @@ class RuntimeDeskBehaviourTest {
 
         compose.onNodeWithText("Engines").performClick()
         compose.onNode(hasText("Codex") and hasClickAction()).performClick()
-        compose.onNodeWithContentDescription("Back").performClick()
-        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
         compose.onNodeWithText("Preferences").performClick()
-        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
         compose.onNodeWithText("Engines").performClick()
 
         assertEquals("codex", state.route.entity)
@@ -152,14 +152,14 @@ class RuntimeDeskBehaviourTest {
                 }
             }
         }
-        compose.onNodeWithContentDescription("Back").assertExists()
+        compose.onNodeWithContentDescription("Back", substring = true).assertExists()
 
         compose.runOnIdle {
             width = 800
             height = 1000
         }
         compose.waitForIdle()
-        compose.onNodeWithContentDescription("Back").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Back", substring = true).assertDoesNotExist()
 
         compose.runOnUiThread {
             state.route = RuntimeDeskRoute(

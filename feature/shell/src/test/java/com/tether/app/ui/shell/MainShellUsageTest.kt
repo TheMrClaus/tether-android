@@ -50,5 +50,8 @@ class MainShellUsageTest : NavigationBase(1200, 1000) {
         awaitTag(AccountsTags.Refresh)
         rule.onNodeWithTag(AccountsTags.Refresh).assertExists()
         rule.onNodeWithTag(AccountsTags.Dialog).assertDoesNotExist()
+        assertFalse("Accounts uses the same full-page Runtime Desk", exists(OverviewTags.Root))
+        back()
+        onOverview()
     }
 }

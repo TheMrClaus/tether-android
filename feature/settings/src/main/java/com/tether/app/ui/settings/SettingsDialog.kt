@@ -1,7 +1,5 @@
 package com.tether.app.ui.settings
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -11,16 +9,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -46,12 +41,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -62,9 +55,6 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tether.app.client.ConnectionState
 import com.tether.app.client.ProvidersList
@@ -73,17 +63,14 @@ import com.tether.app.client.TetherClient
 import com.tether.app.client.serverOrigin
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
-import com.tether.app.ui.components.StudioDialog
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherLayoutClass
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.currentLayoutClass
-import com.tether.app.ui.components.dialogScrim
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.prefs.TetherPreferences
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.components.windowWidthDp
-import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.protocol.ClientMessage
@@ -170,20 +157,20 @@ class SettingsDialogState(
 
 /**
  * T10.1 (components/settings-dialog.tsx): Settings, opened by the top bar and the sidebar footer.
- * On a phone it fills the screen; on an expanded window it is the web's centred dialog. Like the
- * web's `<dialog>`, a tap on the backdrop does nothing; Back (the web's Esc), Close and Cancel
- * drop the draft, Save settings writes it.
+ * It fills the Activity content at every width. Hierarchical Back stays inside Runtime Desk; Back
+ * at the root and Return reveal the workspace. General's draft is discarded only when the screen
+ * leaves composition, while Save writes it.
  *
  * [currentWorkspace] is the sidebar's current workspace (use-tether.ts `currentWorkspace`), what
  * General's "Use current" takes. Opening asks for the server settings (dashboard.tsx:1332-1334
  * `openFullSettings`), whose `restartRequired` drives the banner.
  */
 @Composable
-fun SettingsDialog(
+fun SettingsScreen(
     client: TetherClient,
     prefs: UiPrefs,
     currentWorkspace: String,
-    onDismiss: () -> Unit,
+    onReturn: () -> Unit,
     /** T8.4: the tab a fresh open shows (the GitHub dialog's "Set up GitHub connection" opens Advanced). */
     initialTab: SettingsTab = SettingsTab.General,
     initialRoute: RuntimeDeskRoute? = null,
@@ -284,35 +271,51 @@ fun SettingsDialog(
     val layout = settingsLayout()
     // T8.2: the home "Browse folders" picker (settings-dialog.tsx 90fbb9f :2457-2480).
     val homePicker = remember(client) { HomeFolderPicker.of(client) }
-    Dialog(onDismissRequest = onDismiss, properties = SettingsDialogProperties) {
-        val view = LocalView.current
-        SideEffect { (view.parent as? DialogWindowProvider)?.window?.setDimAmount(0f) }
-        val progress = rememberDialogIn()
-        androidx.compose.runtime.CompositionLocalProvider(LocalHomeFolderPicker provides homePicker) { SettingsFrame(
-            prefs = prefs,
-            serverUrl = client.serverUrl,
-            state = state,
-            restartRequired = serverSettings?.restartRequired == true,
-            currentWorkspace = currentWorkspace,
-            onClose = onDismiss,
-            layout = layout,
-            claudeAccounts = claudeAccounts,
-            serverSettings = serverBinding.copy(onPasswordChanged = { devicesController?.refresh() }),
-            providers = providersBinding,
-            nodes = nodesBinding,
-            devices = devicesBinding,
-            github = githubBinding,
-            accountLimitEntities = accountLimitEntities,
-            accountsLimits = accountsLimits,
-            surfaceModifier = Modifier.graphicsLayer {
-                val p = progress.value
-                alpha = p
-                translationY = (1f - p) * 8.dp.toPx()
-            },
-        ) }
+    Box(Modifier.fillMaxSize()) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalHomeFolderPicker provides homePicker) {
+            SettingsFrame(
+                prefs = prefs,
+                serverUrl = client.serverUrl,
+                state = state,
+                restartRequired = serverSettings?.restartRequired == true,
+                currentWorkspace = currentWorkspace,
+                onClose = onReturn,
+                layout = layout,
+                claudeAccounts = claudeAccounts,
+                serverSettings = serverBinding.copy(onPasswordChanged = { devicesController?.refresh() }),
+                providers = providersBinding,
+                nodes = nodesBinding,
+                devices = devicesBinding,
+                github = githubBinding,
+                accountLimitEntities = accountLimitEntities,
+                accountsLimits = accountsLimits,
+            )
+        }
         HomeFolderPickerHost(homePicker)
     }
 }
+
+/** Compatibility entry point for callers that still use the former host name. */
+@Composable
+fun SettingsDialog(
+    client: TetherClient,
+    prefs: UiPrefs,
+    currentWorkspace: String,
+    onDismiss: () -> Unit,
+    initialTab: SettingsTab = SettingsTab.General,
+    initialRoute: RuntimeDeskRoute? = null,
+    accountLimitEntities: List<RuntimeDeskNavItem> = emptyList(),
+    accountsLimits: @Composable () -> Unit = {},
+) = SettingsScreen(
+    client = client,
+    prefs = prefs,
+    currentWorkspace = currentWorkspace,
+    onReturn = onDismiss,
+    initialTab = initialTab,
+    initialRoute = initialRoute,
+    accountLimitEntities = accountLimitEntities,
+    accountsLimits = accountsLimits,
+)
 
 /** The settings dialog's own switch (studio.css 957 `(max-width: 640px)`), read from the one width source. */
 @Composable
@@ -330,10 +333,8 @@ internal const val SETTINGS_ROWS_STACK_MAX_DP = SETTINGS_ROWS_STACK_REM * 16
 internal fun settingsRowsStack(): Boolean = windowWidthDp() <= SETTINGS_ROWS_STACK_MAX_DP
 
 /**
- * The dialog in place (the inline form the goldens shoot): the same card at every width, content-sized and centred on
- * the skin's scrim. [TetherLayoutClass.Phone] (640 dp and under, studio.css 957-958) is `100vw - 24px` wide, at most
- * `100dvh - 32px` tall, radius 14; [TetherLayoutClass.Expanded] is `min(880px, 100vw - 48px)` (556), at most
- * `100dvh - 48px` (511), radius 16.
+ * The full-size Runtime Desk frame. Presentation and insets belong to [RuntimeDeskScaffold]; this
+ * host owns the saveable route/draft and the long-lived controllers feeding its detail pane.
  */
 @Composable
 fun SettingsFrame(
@@ -343,7 +344,6 @@ fun SettingsFrame(
     currentWorkspace: String,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
-    surfaceModifier: Modifier = Modifier,
     layout: TetherLayoutClass = currentLayoutClass(),
     /** The 35rem row switch (globals.css 3217): the rows' own width source, apart from [layout]'s 640px terms. */
     rowsStack: Boolean = settingsRowsStack(),
@@ -398,6 +398,7 @@ fun SettingsFrame(
     }
     val current = live ?: TetherPreferences.Default
     val narrow = layout == TetherLayoutClass.Phone
+    var detailNarrow by remember { mutableStateOf(narrow) }
     val dirty = state.draft?.let { it != GeneralDraft.of(current) } == true
     val route = state.route
     var lastEngineEntity by rememberSaveable { mutableStateOf(route.entity?.takeIf { it in RuntimeDeskRoute.ENGINE_IDS } ?: RuntimeDeskRoute.ENGINE_IDS.first()) }
@@ -427,87 +428,93 @@ fun SettingsFrame(
         modifier
             .fillMaxSize()
             .background(t.graphite)
-            .then(surfaceModifier)
             .testTag(SettingsDialogTags.Dialog)
             .semantics { paneTitle = "Settings" }
             .pointerInput(Unit) { detectTapGestures { } },
     ) {
-        ClaudeAccountsHostContent(claudeAccounts, narrow) { accountHost ->
+        ClaudeAccountsHostContent(claudeAccounts, detailNarrow) { accountHost ->
             val accountEntities = accountHost.entities + accountLimitEntities
             val entities = when (route.destination) {
                 RuntimeDeskDestinations.Engines -> engineEntities
                 RuntimeDeskDestinations.Accounts -> accountEntities
                 else -> emptyList()
             }
-            val detailInputs = RuntimeDeskDetailInputs(
-                route = route,
-                prefs = prefs,
-                preferenceOrigin = serverOrigin(serverUrl.collectAsStateWithLifecycle().value),
-                current = current,
-                state = state,
-                currentWorkspace = currentWorkspace,
-                narrow = narrow,
-                devices = devices,
-                nodes = nodes,
-                serverSettings = serverSettings,
-                providers = providers,
-                accountHost = accountHost,
-                engineEntity = if (route.destination == RuntimeDeskDestinations.Engines) route.entity ?: lastEngineEntity else lastEngineEntity,
-                accountEntity = if (route.destination == RuntimeDeskDestinations.Accounts) route.entity ?: lastAccountEntity else lastAccountEntity,
-                accountsLimits = accountsLimits,
-                github = github,
-            )
+            val preferenceOrigin = serverOrigin(serverUrl.collectAsStateWithLifecycle().value)
+            val detailInputs: (Boolean) -> RuntimeDeskDetailInputs = { isNarrow ->
+                RuntimeDeskDetailInputs(
+                    route = route,
+                    prefs = prefs,
+                    preferenceOrigin = preferenceOrigin,
+                    current = current,
+                    state = state,
+                    currentWorkspace = currentWorkspace,
+                    narrow = isNarrow,
+                    devices = devices,
+                    nodes = nodes,
+                    serverSettings = serverSettings,
+                    providers = providers,
+                    accountHost = accountHost,
+                    engineEntity = if (route.destination == RuntimeDeskDestinations.Engines) route.entity ?: lastEngineEntity else lastEngineEntity,
+                    accountEntity = if (route.destination == RuntimeDeskDestinations.Accounts) route.entity ?: lastAccountEntity else lastAccountEntity,
+                    accountsLimits = accountsLimits,
+                    github = github,
+                )
+            }
             val detailContent = remember {
                 movableContentOf<RuntimeDeskDetailInputs> { input -> RuntimeDeskDetail(input) }
             }
             val expanded = windowWidthDp() >= 768
-            CompositionLocalProvider(LocalSettingsRowsStack provides rowsStack) {
-                RuntimeDeskScaffold(
-                    items = RuntimeDeskDestinations.items,
-                    selected = route.destination,
-                    onSelect = { destination ->
-                        val selected = state.route.selectDestination(destination)
-                        state.route = when (destination) {
-                            RuntimeDeskDestinations.Engines -> selected.copy(entity = lastEngineEntity)
-                            RuntimeDeskDestinations.Accounts -> selected.copy(entity = lastAccountEntity)
-                            else -> selected
-                        }
-                    },
-                    entities = entities,
-                    selectedEntity = route.entity,
-                    onEntity = { entity ->
-                        when (route.destination) {
-                            RuntimeDeskDestinations.Engines -> lastEngineEntity = entity
-                            RuntimeDeskDestinations.Accounts -> lastAccountEntity = entity
-                        }
-                        state.route = state.route.selectEntity(entity)
-                    },
-                    entityTrailing = { id ->
-                        if (route.destination == RuntimeDeskDestinations.Engines) {
-                            com.tether.app.client.EngineCard.entries.firstOrNull { it.id == id }?.let { EngineEntityToggle(it, serverSettings) }
-                        }
-                    },
-                    level = route.level,
-                    onBack = { state.route = state.route.back() },
-                    onClose = onClose,
-                    banner = if (restartRequired || serverSettings.settings?.restartRequired == true) {
-                        { RestartBanner(narrow) }
-                    } else null,
-                    footer = if (route.destination == RuntimeDeskDestinations.Preferences && (route.level == RuntimeDeskLevel.Detail || windowWidthDp() >= 768) && dirty) {
-                        {
-                            SettingsFooter(
-                                narrow = narrow,
-                                saveBlocked = saving || !state.ready,
-                                onDiscard = { state.draft = GeneralDraft.of(current) },
-                                onSave = save,
-                            )
-                        }
-                    } else null,
-                ) {
-                    detailContent(detailInputs)
+            RuntimeDeskScaffold(
+                items = RuntimeDeskDestinations.items,
+                selected = route.destination,
+                onSelect = { destination ->
+                    val selected = state.route.selectDestination(destination)
+                    state.route = when (destination) {
+                        RuntimeDeskDestinations.Engines -> selected.copy(entity = lastEngineEntity)
+                        RuntimeDeskDestinations.Accounts -> selected.copy(entity = lastAccountEntity)
+                        else -> selected
+                    }
+                },
+                entities = entities,
+                selectedEntity = route.entity,
+                onEntity = { entity ->
+                    when (route.destination) {
+                        RuntimeDeskDestinations.Engines -> lastEngineEntity = entity
+                        RuntimeDeskDestinations.Accounts -> lastAccountEntity = entity
+                    }
+                    state.route = state.route.selectEntity(entity)
+                },
+                entityTrailing = { id ->
+                    if (route.destination == RuntimeDeskDestinations.Engines) {
+                        com.tether.app.client.EngineCard.entries.firstOrNull { it.id == id }?.let { EngineEntityToggle(it, serverSettings) }
+                    }
+                },
+                level = route.level,
+                onBack = { state.route = state.route.back() },
+                onReturn = onClose,
+                banner = if (restartRequired || serverSettings.settings?.restartRequired == true) {
+                    { RestartBanner(detailNarrow) }
+                } else null,
+                footer = if (route.destination == RuntimeDeskDestinations.Preferences && (route.level == RuntimeDeskLevel.Detail || windowWidthDp() >= 768) && dirty) {
+                    {
+                        SettingsFooter(
+                            narrow = detailNarrow,
+                            saveBlocked = saving || !state.ready,
+                            onDiscard = { state.draft = GeneralDraft.of(current) },
+                            onSave = save,
+                        )
+                    }
+                } else null,
+            ) { detailWidth ->
+                val measuredNarrow = detailWidth <= 640.dp
+                SideEffect { detailNarrow = measuredNarrow }
+                CompositionLocalProvider(LocalSettingsRowsStack provides (rowsStack || detailWidth <= SETTINGS_ROWS_STACK_MAX_DP.dp)) {
+                    detailContent(detailInputs(measuredNarrow))
                 }
-                if (!expanded && route.level != RuntimeDeskLevel.Detail) {
-                    Box(Modifier.keepRuntimeDeskMounted(false)) { detailContent(detailInputs) }
+            }
+            if (!expanded && route.level != RuntimeDeskLevel.Detail) {
+                CompositionLocalProvider(LocalSettingsRowsStack provides rowsStack) {
+                    Box(Modifier.keepRuntimeDeskMounted(false)) { detailContent(detailInputs(narrow)) }
                 }
             }
         }
@@ -781,31 +788,6 @@ private fun SettingsFooter(narrow: Boolean, saveBlocked: Boolean, onDiscard: () 
         )
     }
 }
-
-/** `dialog-in`: 0 -> 1 over `--duration` with `--ease-out`; at once under reduced motion. */
-@Composable
-private fun rememberDialogIn(): Animatable<Float, *> {
-    val t = LocalTetherTokens.current
-    val reduced = LocalReducedMotion.current
-    val progress = remember { Animatable(if (reduced) 1f else 0f) }
-    LaunchedEffect(reduced) {
-        if (!reduced) progress.animateTo(1f, tween(t.css.duration, easing = t.css.easeOut.toEasing()))
-    }
-    return progress
-}
-
-/**
- * The dialog's window. ta-coik.65: no FLAG_SECURE (the platform default, [SecureFlagPolicy.Inherit]),
- * as the browser does not block a screenshot or a recording of the web's Settings: the app is as
- * capable as the web console. What keeps a secret off the screen is the field, not the window: the
- * masked fields stay masked until Reveal (a password input's rule), and a secret is never in saved
- * state (ta-coik.20).
- */
-internal val SettingsDialogProperties = DialogProperties(
-    usePlatformDefaultWidth = false,
-    decorFitsSystemWindows = false,
-    dismissOnBackPress = false,
-)
 
 /** ta-coik.21: the GitHub connection's ViewModel in the activity's store. */
 private const val GITHUB_VIEW_MODEL_KEY = "settings-github-connection"

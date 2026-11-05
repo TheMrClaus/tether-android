@@ -575,27 +575,39 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
         CardRow(narrow = narrow, title = "Remove account", caption = AnnotatedString("Deletes the profile entry from Tether")) {
             val removing = c.busy(AccountsAction.Remove, id)
             val armed = c.armedRemove == id
-            AccountCheckbox(
-                label = ClaudeAccountsCopy.ALSO_DELETE,
-                checked = c.deleteCredentials[id] == true,
-                enabled = can,
-                description = "Also delete stored login for ${card.title}",
-                tag = ClaudeAccountsTags.deleteCredentials(id),
-                onChange = { c.setDeleteCredentials(id, it) },
-            )
-            // settings-dialog.tsx `armRemove`: tap, then "Confirm remove" within 4 s (r2: it names the profile id when the card does).
-            ChangeKey(
-                when {
-                    removing -> ClaudeAccountsCopy.REMOVING
-                    armed -> ClaudeAccountsCopy.CONFIRM_REMOVE
-                    else -> ClaudeAccountsCopy.REMOVE
-                },
-                TetherIcons.Trash2,
-                if (armed) ClaudeAccountsCopy.confirmRemoveLabel(card.title, card.idLine) else "Remove ${card.title}",
-                ClaudeAccountsTags.remove(id),
-                enabled = can && !removing,
-            ) {
-                c.tapRemove(account, card.title)
+            val controls: @Composable () -> Unit = {
+                AccountCheckbox(
+                    label = ClaudeAccountsCopy.ALSO_DELETE,
+                    checked = c.deleteCredentials[id] == true,
+                    enabled = can,
+                    description = "Also delete stored login for ${card.title}",
+                    tag = ClaudeAccountsTags.deleteCredentials(id),
+                    onChange = { c.setDeleteCredentials(id, it) },
+                )
+                // settings-dialog.tsx `armRemove`: tap, then "Confirm remove" within 4 s (r2: it names the profile id when the card does).
+                ChangeKey(
+                    when {
+                        removing -> ClaudeAccountsCopy.REMOVING
+                        armed -> ClaudeAccountsCopy.CONFIRM_REMOVE
+                        else -> ClaudeAccountsCopy.REMOVE
+                    },
+                    TetherIcons.Trash2,
+                    if (armed) ClaudeAccountsCopy.confirmRemoveLabel(card.title, card.idLine) else "Remove ${card.title}",
+                    ClaudeAccountsTags.remove(id),
+                    enabled = can && !removing,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    c.tapRemove(account, card.title)
+                }
+            }
+            if (narrow) {
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) { controls() }
+            } else {
+                controls()
             }
         }
         AliasRows(card, c, narrow)
@@ -842,7 +854,15 @@ private fun accountIdText(id: String): AnnotatedString {
 
 /** A change's key: enabled only when a change may start. */
 @Composable
-private fun ChangeKey(label: String, icon: ImageVector, description: String, tag: String, enabled: Boolean, onClick: () -> Unit) {
+private fun ChangeKey(
+    label: String,
+    icon: ImageVector,
+    description: String,
+    tag: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     TetherKey(
         onClick = onClick,
         enabled = enabled,
@@ -851,7 +871,7 @@ private fun ChangeKey(label: String, icon: ImageVector, description: String, tag
         icon = icon,
         iconSize = 14.dp,
         contentDescription = description,
-        modifier = Modifier.testTag(tag),
+        modifier = modifier.testTag(tag),
     )
 }
 

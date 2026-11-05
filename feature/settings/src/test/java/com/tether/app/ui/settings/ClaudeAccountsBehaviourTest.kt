@@ -92,7 +92,7 @@ class ClaudeAccountsBehaviourTest {
     private fun waitFor(text: String) = compose.waitUntil(5_000) { everything().any { it.contains(text) } }
 
     private fun openAccountSync() {
-        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
         compose.onNodeWithText("Account sync").performClick()
         compose.waitForIdle()
     }

@@ -34,12 +34,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.TetherKey
@@ -53,6 +55,7 @@ data class RuntimeDeskNavItem(
     val supporting: String? = null,
     val state: String? = null,
     val enabled: Boolean = true,
+    val icon: ImageVector? = null,
 )
 
 enum class RuntimeDeskLevel { Destinations, Entities, Detail }
@@ -67,17 +70,17 @@ fun RuntimeDeskScaffold(
     onEntity: (String) -> Unit,
     level: RuntimeDeskLevel,
     onBack: () -> Unit,
-    onClose: () -> Unit,
+    onReturn: () -> Unit,
     entityTrailing: @Composable (String) -> Unit = {},
     banner: (@Composable () -> Unit)? = null,
     footer: (@Composable () -> Unit)? = null,
-    detail: @Composable () -> Unit,
+    detail: @Composable (Dp) -> Unit,
 ) {
     val t = LocalTetherTokens.current
     val selectedDestination = items.firstOrNull { it.id == selected }?.label ?: "Settings"
     val selectedDetail = entities.firstOrNull { it.id == selectedEntity }?.label ?: selectedDestination
 
-    BackHandler { if (level == RuntimeDeskLevel.Destinations) onClose() else onBack() }
+    BackHandler { if (level == RuntimeDeskLevel.Destinations) onReturn() else onBack() }
 
     BoxWithConstraints(
         Modifier
@@ -95,7 +98,7 @@ fun RuntimeDeskScaffold(
                 onEntity = onEntity,
                 selectedDestination = selectedDestination,
                 selectedDetail = selectedDetail,
-                onClose = onClose,
+                onReturn = onReturn,
                 entityTrailing = entityTrailing,
                 banner = banner,
                 footer = footer,
@@ -113,7 +116,7 @@ fun RuntimeDeskScaffold(
                 selectedDestination = selectedDestination,
                 selectedDetail = selectedDetail,
                 onBack = onBack,
-                onClose = onClose,
+                onReturn = onReturn,
                 entityTrailing = entityTrailing,
                 banner = banner,
                 footer = footer,
@@ -133,16 +136,16 @@ private fun ExpandedRuntimeDesk(
     onEntity: (String) -> Unit,
     selectedDestination: String,
     selectedDetail: String,
-    onClose: () -> Unit,
+    onReturn: () -> Unit,
     entityTrailing: @Composable (String) -> Unit,
     banner: (@Composable () -> Unit)?,
     footer: (@Composable () -> Unit)?,
-    detail: @Composable () -> Unit,
+    detail: @Composable (Dp) -> Unit,
 ) {
     val t = LocalTetherTokens.current
     Row(Modifier.fillMaxSize()) {
         ProvideTokenScope(RuntimeDeskRailScope) {
-            RuntimeDeskDestinationRail(items, selected, onSelect)
+            RuntimeDeskDestinationRail(items, selected, onSelect, onReturn)
         }
 
         if (entities.isNotEmpty()) {
@@ -159,9 +162,12 @@ private fun ExpandedRuntimeDesk(
         }
 
         Column(Modifier.weight(1f).fillMaxHeight().background(t.graphite)) {
-            DetailHeader(selectedDestination, selectedDetail, onClose)
+            DetailHeader(selectedDestination, selectedDetail)
             banner?.invoke()
-            Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) { detail() }
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                val detailWidth = maxWidth
+                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { detail(detailWidth) }
+            }
             footer?.let {
                 HorizontalRule()
                 Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp), contentAlignment = Alignment.CenterEnd) { it() }
@@ -175,6 +181,7 @@ private fun RuntimeDeskDestinationRail(
     items: List<RuntimeDeskNavItem>,
     selected: String,
     onSelect: (String) -> Unit,
+    onReturn: () -> Unit,
 ) {
     val t = LocalTetherTokens.current
     Column(
@@ -184,16 +191,16 @@ private fun RuntimeDeskDestinationRail(
             .background(t.graphite)
             .padding(RuntimeDeskStyle.PanePadding),
     ) {
-        Column(
-            Modifier
-                .height(RuntimeDeskStyle.HeaderHeight)
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text("Tether", color = t.white, style = runtimeDeskPaneTitleStyle())
-            Text("Settings", color = t.muted, style = runtimeDeskSupportingStyle())
-        }
+        TetherKey(
+            onClick = onReturn,
+            classes = KeyClasses.ButtonSecondary,
+            label = "Return to workspace",
+            icon = TetherIcons.PanelLeftOpen,
+            iconSize = 20.dp,
+            contentDescription = "Return to workspace",
+            modifier = Modifier.fillMaxWidth().heightIn(min = RuntimeDeskStyle.TouchTarget),
+        )
+        Text("Settings", color = t.muted, style = runtimeDeskSupportingStyle(), modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp))
         RuntimeDeskList(items, selected, onSelect, dark = true, showChevron = false)
     }
 }
@@ -210,11 +217,11 @@ private fun CompactRuntimeDesk(
     selectedDestination: String,
     selectedDetail: String,
     onBack: () -> Unit,
-    onClose: () -> Unit,
+    onReturn: () -> Unit,
     entityTrailing: @Composable (String) -> Unit,
     banner: (@Composable () -> Unit)?,
     footer: (@Composable () -> Unit)?,
-    detail: @Composable () -> Unit,
+    detail: @Composable (Dp) -> Unit,
 ) {
     val t = LocalTetherTokens.current
     val effectiveLevel = if (level == RuntimeDeskLevel.Entities && entities.isEmpty()) RuntimeDeskLevel.Detail else level
@@ -225,7 +232,8 @@ private fun CompactRuntimeDesk(
     }
 
     Column(Modifier.fillMaxSize().background(t.graphite).semantics { paneTitle = title }) {
-        RuntimeDeskTopBar(title, effectiveLevel != RuntimeDeskLevel.Destinations, onBack, onClose)
+        val backLabel = if (effectiveLevel == RuntimeDeskLevel.Detail && entities.isNotEmpty()) selectedDestination else "Settings"
+        RuntimeDeskTopBar(title, effectiveLevel != RuntimeDeskLevel.Destinations, backLabel, onBack, onReturn)
         banner?.invoke()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (effectiveLevel) {
@@ -235,7 +243,10 @@ private fun CompactRuntimeDesk(
                 RuntimeDeskLevel.Entities -> Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     RuntimeDeskEntityList(entities, selectedEntity, onEntity, true, entityTrailing)
                 }
-                RuntimeDeskLevel.Detail -> Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { detail() }
+                RuntimeDeskLevel.Detail -> BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val detailWidth = maxWidth
+                    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { detail(detailWidth) }
+                }
             }
         }
         footer?.let {
@@ -246,7 +257,7 @@ private fun CompactRuntimeDesk(
 }
 
 @Composable
-private fun RuntimeDeskTopBar(title: String, canGoBack: Boolean, onBack: () -> Unit, onClose: () -> Unit) {
+private fun RuntimeDeskTopBar(title: String, canGoBack: Boolean, backLabel: String, onBack: () -> Unit, onReturn: () -> Unit) {
     val t = LocalTetherTokens.current
     Row(
         Modifier.fillMaxWidth().heightIn(min = RuntimeDeskStyle.HeaderHeight).padding(horizontal = 12.dp),
@@ -259,7 +270,7 @@ private fun RuntimeDeskTopBar(title: String, canGoBack: Boolean, onBack: () -> U
                 classes = KeyClasses.IconButton,
                 icon = TetherIcons.ArrowLeft,
                 iconSize = 20.dp,
-                contentDescription = "Back",
+                contentDescription = "Back to $backLabel",
                 modifier = Modifier.size(RuntimeDeskStyle.TouchTarget),
             )
         } else {
@@ -275,11 +286,11 @@ private fun RuntimeDeskTopBar(title: String, canGoBack: Boolean, onBack: () -> U
             textAlign = TextAlign.Center,
         )
         TetherKey(
-            onClick = onClose,
+            onClick = onReturn,
             classes = KeyClasses.IconButton,
-            icon = TetherIcons.X,
-            iconSize = 19.dp,
-            contentDescription = "Close settings",
+            icon = TetherIcons.PanelLeftOpen,
+            iconSize = 20.dp,
+            contentDescription = "Return to workspace",
             modifier = Modifier.size(RuntimeDeskStyle.TouchTarget),
         )
     }
@@ -300,7 +311,7 @@ private fun PaneHeading(title: String) {
 }
 
 @Composable
-private fun DetailHeader(destination: String, detail: String, onClose: () -> Unit) {
+private fun DetailHeader(destination: String, detail: String) {
     val t = LocalTetherTokens.current
     Row(
         Modifier.fillMaxWidth().heightIn(min = RuntimeDeskStyle.HeaderHeight).padding(horizontal = 24.dp, vertical = 12.dp),
@@ -311,14 +322,6 @@ private fun DetailHeader(destination: String, detail: String, onClose: () -> Uni
             Text(destination, color = t.muted, style = runtimeDeskSupportingStyle())
             Text(detail, color = t.ink, style = runtimeDeskTitleStyle(), modifier = Modifier.semantics { heading() })
         }
-        TetherKey(
-            onClick = onClose,
-            classes = KeyClasses.IconButton,
-            icon = TetherIcons.X,
-            iconSize = 19.dp,
-            contentDescription = "Close settings",
-            modifier = Modifier.size(RuntimeDeskStyle.TouchTarget),
-        )
     }
     HorizontalRule()
 }
@@ -398,6 +401,7 @@ private fun RuntimeDeskItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        item.icon?.let { Icon(it, contentDescription = null, tint = if (active) activeText else idleText, modifier = Modifier.size(20.dp)) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(item.label, color = if (active) activeText else idleText, style = runtimeDeskItemStyle(), maxLines = 2, overflow = TextOverflow.Ellipsis)
             item.supporting?.let { Text(it, color = supporting, style = runtimeDeskSupportingStyle(), maxLines = 2, overflow = TextOverflow.Ellipsis) }

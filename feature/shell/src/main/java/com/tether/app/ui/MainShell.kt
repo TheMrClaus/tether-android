@@ -539,6 +539,12 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
             isGlobalSearchShortcut(event).also { if (it) vm.openGlobalSearch() }
         },
     ) {
+        if (settingsOpen) {
+            ShellSettings(vm, prefs, workspaceRoot, settingsRoute, accounts, codexReset, claudeReset, onReturn = {
+                settingsOpen = false
+                settingsRoute = com.tether.app.ui.settings.RuntimeDeskRoute.Root
+            })
+        } else {
         val topbarActions = TopbarActions(
                 onOpenDrawer = {},
                 // dashboard.tsx:1264; the key is disabled without a session (fileBrowserDisabled).
@@ -868,6 +874,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                 .padding(12.dp)
                 .zIndex(21f),
         )
+        }
     }
 
     WorkspaceFileBrowser(fileBrowser)
@@ -894,13 +901,6 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
         )
     }
 
-    // T15.4: the top bar's Settings and the rail footer's open the same dialog (T10.1).
-    if (settingsOpen) {
-        ShellSettings(vm, prefs, workspaceRoot, settingsRoute, accounts, codexReset, claudeReset, onDismiss = {
-            settingsOpen = false
-            settingsRoute = com.tether.app.ui.settings.RuntimeDeskRoute.Root
-        })
-    }
     if (workspacePickerOpen) com.tether.app.ui.WorkspacePickerHost(vm, prefs, workspaceRoot, scope = scope, onDismiss = { workspacePickerOpen = false })
 
     // ta-abm (T8.1 slice 2): the new-session sheet, raised by every New session key (the drawer's,
@@ -992,7 +992,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
 }
 
 /**
- * T10.1: the Settings dialog with the sidebar's current workspace (use-tether.ts `currentWorkspace`:
+ * T10.1: the Settings screen with the sidebar's current workspace (use-tether.ts `currentWorkspace`:
  * the operator's pick, else the last-opened or default folder, else the server's root) for
  * General's "Use current", read here so the shell itself never recomposes on preference changes.
  */
@@ -1005,7 +1005,7 @@ private fun ShellSettings(
     accounts: com.tether.app.ui.usage.UsageAccountsState,
     codexReset: com.tether.app.ui.usage.CodexResetState,
     claudeReset: com.tether.app.ui.usage.ClaudeResetState,
-    onDismiss: () -> Unit,
+    onReturn: () -> Unit,
 ) {
     val preferences by remember(prefs, vm.client) { prefs.preferencesFor(vm.client.serverUrl) }.collectAsStateWithLifecycle(initialValue = com.tether.app.ui.prefs.TetherPreferences.Default)
     val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
@@ -1021,11 +1021,11 @@ private fun ShellSettings(
             add(com.tether.app.ui.settings.RuntimeDeskNavItem("usage:deepseek:${account.id}", com.tether.app.client.LabelText.label(account.identity).ifEmpty { "DeepSeek" }, "Balance"))
         }
     }
-    com.tether.app.ui.settings.SettingsDialog(
+    com.tether.app.ui.settings.SettingsScreen(
         vm.client,
         prefs,
         currentWorkspace = current.orEmpty(),
-        onDismiss = onDismiss,
+        onReturn = onReturn,
         initialRoute = route,
         accountLimitEntities = usageEntities,
         accountsLimits = {
