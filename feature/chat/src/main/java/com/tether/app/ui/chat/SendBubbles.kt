@@ -99,6 +99,7 @@ fun pendingSendLabel(row: PendingSendRow): String {
 
 /** chat-view.tsx 90fbb9f :1596-1600: the failed bubble's status line. */
 fun failedSendLabel(row: FailedSend): String {
+    if (row.reason == FailedSendReason.PhotoLost) return "Photo could not be recovered — send again."
     val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
     return if (row.reason == FailedSendReason.Link) {
         if (summary.isNotEmpty()) "Not sent — the link was down ($summary)" else "Not sent — the link was down"

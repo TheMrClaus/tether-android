@@ -44,8 +44,11 @@ data class FailedSend(
     val reason: FailedSendReason,
 )
 
-/** use-tether.ts :54 `reason: "expired" | "link"`: which copy the failed bubble shows. */
-enum class FailedSendReason { Expired, Link }
+/**
+ * use-tether.ts :54 `reason: "expired" | "link"`: which copy the failed bubble shows. [PhotoLost] is
+ * the app's own (ta-delivery A1): the record's spooled attachment files were gone at restore.
+ */
+enum class FailedSendReason { Expired, Link, PhotoLost }
 
 /** use-tether.ts :58 MAX_FAILED_SENDS: retained failed sends, oldest falling off first. */
 const val MAX_FAILED_SENDS = 30

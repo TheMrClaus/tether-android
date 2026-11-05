@@ -1814,11 +1814,16 @@ class RealTetherClient(
         val origin = target ?: return
         // A stop() whose disk wipe has not landed yet: what is there is dead.
         val raw = if (synchronized(lock) { wipeLanded != pendingWipe }) null else readQuietly { settings.readPendingInput(origin) }
+        var photoLost = GivenUp.NONE
         val expired = synchronized(lock) {
             if (pendingLoaded || pendingOrigin != origin || currentOriginLocked() != origin) return
-            givenUpLocked(restorePendingLocked(raw, setAside.remove(origin)))
+            val restore = restorePendingLocked(raw, setAside.remove(origin))
+            photoLost = givenUpLocked(restore.lost)
+            givenUpLocked(restore.expired)
         }
         if (expired.records.isNotEmpty()) emitError(undeliveredMessage(expired.records))
+        // A1: a record whose spooled photos are gone keeps its words as a failed bubble (never sent without them).
+        recordFailed(photoLost, FailedSendReason.PhotoLost)
         // ta-coik.19: as the web's first sweep would (use-tether.ts 90fbb9f :1300-1304), failed bubbles.
         recordFailed(expired)
         persistPending()
@@ -4670,7 +4675,9 @@ class RealTetherClient(
      * (sendableRecords itself has no age check). Caller holds [lock]; [raw] is
      * [pendingOrigin]'s slot. Returns the expired records, for the notice.
      */
-    private fun restorePendingLocked(raw: String?, overlay: SetAsideStore?): List<PendingRecord> {
+    private class Restore(val expired: List<PendingRecord>, val lost: List<PendingRecord>)
+
+    private fun restorePendingLocked(raw: String?, overlay: SetAsideStore?): Restore {
         val persistedCleared = PendingInput.clearedFromPersisted(raw)
         val cleared = LinkedHashSet(persistedCleared)
         overlay?.let { cleared.addAll(it.cleared) }
@@ -4678,13 +4685,15 @@ class RealTetherClient(
         clearedKeys = LinkedHashSet(cleared.toList().takeLast(PendingInput.MAX_TOMBSTONES))
         var mine = pendingStore
         if (overlay != null) mine = PendingInput.mergeStores(mine, overlay.store, clearedKeys)
-        val restored = PendingInput.restoredFromPreviousProcess(fromDisk(raw), clock())
+        val disk = fromDiskWithLost(raw)
+        forgetLocked(disk.lost.map { it.key })
+        val restored = PendingInput.restoredFromPreviousProcess(disk.store, clock())
         val expiry = PendingInput.expireRecords(PendingInput.mergeStores(mine, restored, clearedKeys), clock())
         // ta-coik.19: assigned once, so the expired records never show as pending first.
         pendingStore = expiry.store
         forgetLocked(expiry.unsent.map { it.key })
         pendingLoaded = true
-        return expiry.unsent
+        return Restore(expiry.unsent, disk.lost)
     }
 
     /** use-tether.ts:360 forget: tombstone removed keys, oldest falling off first. Caller holds [lock]. */
@@ -4736,6 +4745,11 @@ class RealTetherClient(
                 }
             }
         }
+    }
+
+    private fun fromDiskWithLost(raw: String?): PendingInput.Restored {
+        val spool = attachmentSpool ?: return PendingInput.Restored(PendingInput.fromPersisted(raw), emptyList())
+        return PendingInput.fromPersistedWithLost(raw, spool)
     }
 
     /** A persisted slot as a record may be delivered from: spooled attachments read back. */

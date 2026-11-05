@@ -173,21 +173,33 @@ object PendingInput {
      */
     fun fromPersisted(raw: String?): PendingStore = PendingStore(Web.fromPersisted(raw?.let(::js)))
 
+    /** A rehydrated slot: [store] is what may be delivered; [lost] are records whose spooled files could not be read back. */
+    class Restored(val store: PendingStore, val lost: List<PendingRecord>)
+
     /**
      * Rehydrate with the attachments of spooled records read back from [spool]. A record whose
-     * files are missing or changed is DROPPED, never delivered without its attachments.
+     * files are missing or changed is never delivered without its attachments; it comes back in
+     * [Restored.lost] (text only) so the caller can show it as a failed send instead of dropping it.
      */
-    fun fromPersisted(raw: String?, spool: AttachmentSpool): PendingStore {
+    fun fromPersistedWithLost(raw: String?, spool: AttachmentSpool): Restored {
         val base = fromPersisted(raw)
         val refsByKey = persistedRefs(raw)
-        if (refsByKey.isEmpty()) return base
+        if (refsByKey.isEmpty()) return Restored(base, emptyList())
+        val lost = ArrayList<PendingRecord>()
         val records = base.records.mapNotNull { record ->
             val refs = refsByKey[record.key] ?: return@mapNotNull record.tree
-            val attachments = spool.load(record.key, refs) ?: return@mapNotNull null
+            val attachments = spool.load(record.key, refs)
+            if (attachments == null) {
+                lost += record
+                return@mapNotNull null
+            }
             record.tree.put("attachments", JsArr.of(attachments.map(::attachmentTree)))
         }
-        return PendingStore(JsObj.of("records" to JsArr.of(records)))
+        return Restored(PendingStore(JsObj.of("records" to JsArr.of(records))), lost)
     }
+
+    /** [fromPersistedWithLost] without the lost records (a record whose files are gone is dropped). */
+    fun fromPersisted(raw: String?, spool: AttachmentSpool): PendingStore = fromPersistedWithLost(raw, spool).store
 
     /** Every record key a persisted payload names (any readable version), for the spool sweep. */
     fun persistedKeys(raw: String?): Set<String> {

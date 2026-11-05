@@ -559,6 +559,54 @@ class DurableSendTest {
         persistedMatches { it.records.isEmpty() }
     }
 
+    /** A first process files "two photos" and dies; returns the spool dir and the record key. */
+    private fun diedWithSpooledMessage(): Pair<java.io.File, String> {
+        val spool = java.io.File(java.nio.file.Files.createTempDirectory("a1-spool").toFile(), "spool")
+        val first = process(scheduler = ManualScheduler(), spool = spool)
+        val ws = startConnected(first)
+        first.attach("s1")
+        h.expectFrame("attach")
+        ws.send(snapshotFrame("s1", 1, turnState("s1")))
+        h.await(first.projections) { it.containsKey("s1") }
+        assertEquals(AttachmentSendResult.Sent, first.sendAttachments("s1", "two photos", listOf(pic, notes), null, first.consentOrigin.value))
+        val sent = key(h.expectFrame("send"))
+        h.await(disk().written) { it != null && it.contains("attachmentFiles") && it.contains(sent) }
+        awaitSpoolDirs(spool) { it == listOf(sent) }
+        h.serverBarrier(ws)
+        h.framesUntilBarrier()
+        kill(first, ws)
+        return spool to sent
+    }
+
+    private fun assertRestoredAsFailedPhotoLoss(spool: java.io.File, sent: String) {
+        val second = process(spool = spool)
+        val ws2 = startConnected(second)
+        // Nothing is pending, so there is no session to attach; and nothing is sent, with or without photos.
+        h.serverBarrier(ws2)
+        assertTrue(h.framesUntilBarrier().none { it.type() == "send" })
+        h.await(second.failedSends) { it.isNotEmpty() }
+        val failed = second.failedSends.value.single()
+        assertEquals(sent, failed.key)
+        assertEquals("two photos", failed.text)
+        assertEquals(FailedSendReason.PhotoLost, failed.reason)
+        awaitSpoolDirs(spool) { it.isEmpty() }
+        persistedMatches { it.records.isEmpty() }
+    }
+
+    @Test
+    fun aRecordWhoseSpooledFileIsMissingComesBackAsAFailedBubbleNotASilentDrop() {
+        val (spool, sent) = diedWithSpooledMessage()
+        java.io.File(spool, "$sent/1.bin").delete()
+        assertRestoredAsFailedPhotoLoss(spool, sent)
+    }
+
+    @Test
+    fun aRecordWhoseSpooledFileChangedSizeComesBackAsAFailedBubbleNotASilentDrop() {
+        val (spool, sent) = diedWithSpooledMessage()
+        java.io.File(spool, "$sent/0.bin").appendBytes(byteArrayOf(9))
+        assertRestoredAsFailedPhotoLoss(spool, sent)
+    }
+
     @Test
     fun theStartupSweepRemovesFilesNoRecordReferences() {
         val spool = java.io.File(java.nio.file.Files.createTempDirectory("a1-spool").toFile(), "spool")

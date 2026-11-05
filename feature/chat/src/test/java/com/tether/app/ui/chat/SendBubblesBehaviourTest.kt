@@ -114,6 +114,10 @@ class SendBubblesBehaviourTest {
         )
         assertEquals("Not delivered", failedSendLabel(SendFixtures.failed("a", "x")))
         assertEquals("Not delivered (2 images · 3.0 MB)", failedSendLabel(SendFixtures.failed("a", "x", 2, 2, SendFixtures.THREE_MB)))
+        assertEquals(
+            "Photo could not be recovered — send again.",
+            failedSendLabel(SendFixtures.failed("a", "x", reason = FailedSendReason.PhotoLost)),
+        )
         assertEquals("Not sent — the link was down", failedSendLabel(SendFixtures.failed("a", "x", reason = FailedSendReason.Link)))
         assertEquals(
             "Not sent — the link was down (1 file · 216 KB)",

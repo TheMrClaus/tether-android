@@ -29,6 +29,7 @@ enum class SendShot(val id: String) {
     Sending("send-sending"),
     Waiting("send-waiting"),
     Failed("send-failed"),
+    PhotoLost("send-photo-lost"),
 }
 
 private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
@@ -48,6 +49,10 @@ private fun sendsFor(shot: SendShot): SendBubbles = when (shot) {
     SendShot.Failed -> SendBubbles(
         emptyList(),
         listOf(SendFixtures.failed("k9", "Here are the two screenshots.", 2, 2, SendFixtures.THREE_MB)),
+    ) {}
+    SendShot.PhotoLost -> SendBubbles(
+        emptyList(),
+        listOf(SendFixtures.failed("k8", "Here are the two screenshots.", reason = com.tether.app.client.FailedSendReason.PhotoLost)),
     ) {}
 }
 
