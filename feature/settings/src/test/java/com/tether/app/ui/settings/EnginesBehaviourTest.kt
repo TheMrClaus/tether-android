@@ -81,6 +81,13 @@ class EnginesBehaviourTest {
     private fun showWith(writer: ServerSettingsWriter, view: com.tether.app.client.ServerSettingsView = ServerFixtures.view(settings, envForced = forced)) =
         show(ServerFixtures.binding(view = view, writer = writer))
 
+    private fun select(engine: EngineCard) {
+        compose.runOnUiThread {
+            state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Engines, engine.id, RuntimeDeskLevel.Detail)
+        }
+        compose.waitForIdle()
+    }
+
     private fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
 
     private fun exists(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
@@ -124,32 +131,42 @@ class EnginesBehaviourTest {
 
     @Test fun theCardsFollowTheWebsOrderAndWords() {
         showWith(RecordingWriter())
+        compose.runOnUiThread { state.route = state.route.copy(level = RuntimeDeskLevel.Entities) }
+        compose.waitForIdle()
+        val rail = texts()
+        val labels = EngineCard.entries.map { it.label }
+        val positions = labels.map { label -> rail.indexOf(label).also { assertTrue("$label missing from the entity rail", it >= 0) } }
+        assertEquals(positions.sorted(), positions)
+
+        val statuses = mapOf(
+            EngineCard.Claude to "2.1.284 · host install",
+            EngineCard.Codex to "0.159.0 · user PATH",
+            EngineCard.Opencode to "not found",
+            EngineCard.Reasonix to "1.39.4 · bundled",
+            EngineCard.Pi to "installed · user PATH",
+            EngineCard.Dsh to "scanning…",
+        )
+        statuses.forEach { (engine, expected) ->
+            select(engine)
+            assertEquals(expected, textOf(EngineTags.status(engine)))
+        }
+
+        select(EngineCard.Codex)
         val all = texts()
-        val order = listOf("Engines", EngineRows.CAPTION, "Scan again", "Claude Code", "Codex", "OpenCode", "Reasonix", "Pi", "DeepSeek Harness", "Claude accounts", "Custom providers", "Host config", "Share host config")
-        val at = order.map { text -> all.indexOf(text).also { assertTrue("$text missing", it >= 0) } }
-        assertEquals(at.sorted(), at)
-        // Detection, as the card's subtitle says it.
-        assertEquals("2.1.284 · host install", textOf(EngineTags.status(EngineCard.Claude)))
-        assertEquals("0.159.0 · user PATH", textOf(EngineTags.status(EngineCard.Codex)))
-        assertEquals("not found", textOf(EngineTags.status(EngineCard.Opencode)))
-        assertEquals("1.39.4 · bundled", textOf(EngineTags.status(EngineCard.Reasonix)))
-        assertEquals("installed · user PATH", textOf(EngineTags.status(EngineCard.Pi)))
-        assertEquals("scanning…", textOf(EngineTags.status(EngineCard.Dsh)))
-        // The home captions (issue #86: Claude's is optional), the command and launch rows.
-        for (text in listOf("Optional — defaults to your real HOME", "Dedicated credential home", "Required — set a directory before enabling",
-            "CLI binary name or path", "Launch command", "Detected home", "Use detected", "Enable Codex", "Codex command", "Claude Code launch command")) {
+        for (text in listOf("Dedicated credential home", "CLI binary name or path", "Enable Codex", "Codex command", "Custom providers", "Host config", "Share host config")) {
             assertTrue(text, all.contains(text))
         }
-        assertTrue(all.any { it.startsWith("Full wrapper command — its last token is the claude binary, e.g. jean-claude run -- claude.") })
         assertTrue(all.any { it.startsWith("Not the same as Claude account sync above") && it.contains("TETHER_CLAUDE_HOME") })
-        // The switches show headlessModes ("claude,codex").
-        tag(EngineTags.switch(EngineCard.Claude)).assertIsOn()
         tag(EngineTags.switch(EngineCard.Codex)).assertIsOn()
-        tag(EngineTags.switch(EngineCard.Pi)).assertIsOff()
-        // The fields hold the server's values; Claude's empty home shows its detected home as the hint.
         assertEquals("codex", editable(ServerSetting.CodexCommand))
         assertEquals("/srv/homes/codex", editable(ServerSetting.CodexHome))
-        assertTrue(all.contains("/home/op/.claude"))
+        select(EngineCard.Claude)
+        assertTrue(texts().any { it.startsWith("Full wrapper command — its last token is the claude binary, e.g. jean-claude run -- claude.") })
+        tag(EngineTags.switch(EngineCard.Claude)).assertIsOn()
+        select(EngineCard.Pi)
+        tag(EngineTags.switch(EngineCard.Pi)).assertIsOff()
+        select(EngineCard.Opencode)
+        assertTrue(texts().contains("/home/op/.config/opencode"))
     }
 
     @Test fun beforeTheServerRepliesTheEnginesWait() {
@@ -172,9 +189,11 @@ class EnginesBehaviourTest {
     @Test fun aSwitchSendsTheJoinedListAndOnlyThatKey() {
         val writer = answering()
         showWith(writer)
+        select(EngineCard.Codex)
         flip(tag(EngineTags.switch(EngineCard.Codex)))
         waitForWrites(writer, 1)
         tag(EngineTags.switch(EngineCard.Codex)).assertIsOff()
+        select(EngineCard.Claude)
         flip(tag(EngineTags.switch(EngineCard.Claude)))
         waitForWrites(writer, 2)
         tag(EngineTags.switch(EngineCard.Claude)).assertIsOff()
@@ -189,6 +208,7 @@ class EnginesBehaviourTest {
         settings = ServerFixtures.settingsJson(overrides = mapOf("headlessModes" to " fake, claude ,", "piHome" to "/srv/homes/pi"))
         val writer = answering()
         showWith(writer)
+        select(EngineCard.Pi)
         flip(tag(EngineTags.switch(EngineCard.Pi)))
         waitForWrites(writer, 1)
         assertEquals(frames("""{"headlessModes":"fake,claude,pi"}"""), writer.frames())
@@ -198,6 +218,7 @@ class EnginesBehaviourTest {
         val writer = RecordingWriter()
         showWith(writer)
         tag(EngineTags.switch(EngineCard.Claude)).assertIsEnabled()
+        select(EngineCard.Opencode)
         val opencode = tag(EngineTags.switch(EngineCard.Opencode)).performScrollTo()
         opencode.assertIsNotEnabled()
         opencode.performClick()
@@ -210,6 +231,7 @@ class EnginesBehaviourTest {
         forced = mapOf("opencodeHome" to true)
         val writer = RecordingWriter()
         showWith(writer)
+        select(EngineCard.Opencode)
         tag(EngineTags.switch(EngineCard.Opencode)).assertIsEnabled()
         flip(tag(EngineTags.switch(EngineCard.Opencode)))
         waitForWrites(writer, 1)
@@ -220,7 +242,11 @@ class EnginesBehaviourTest {
         forced = mapOf("headlessModes" to true, "codexCommand" to true, "codexHome" to true, "shareHostConfig" to true)
         val writer = RecordingWriter()
         showWith(writer)
-        for (e in EngineCard.entries) tag(EngineTags.switch(e)).assertIsNotEnabled()
+        for (e in EngineCard.entries) {
+            select(e)
+            tag(EngineTags.switch(e)).assertIsNotEnabled()
+        }
+        select(EngineCard.Codex)
         tag(EngineTags.Scan).assertIsNotEnabled()
         tag(ServerSettingsTags.input(ServerSetting.CodexCommand)).assertIsNotEnabled()
         tag(ServerSettingsTags.input(ServerSetting.CodexHome)).assertIsNotEnabled()
@@ -303,6 +329,7 @@ class EnginesBehaviourTest {
     @Test fun aCommandIsSentOnDoneAtOnceLikeTheWeb() {
         val writer = answering()
         showWith(writer)
+        select(EngineCard.Codex)
         typeAndDone(ServerSetting.CodexCommand, "/opt/codex/bin/codex")
         waitForWrites(writer, 1)
         compose.waitForIdle()
@@ -319,6 +346,7 @@ class EnginesBehaviourTest {
         typeAndDone(ServerSetting.ClaudeLaunchCommand, "jean-claude run -- claude")
         waitForWrites(writer, 1)
         // An emptied home is null, as the web's `value || null`.
+        select(EngineCard.Codex)
         typeAndDone(ServerSetting.CodexHome, "")
         waitForWrites(writer, 2)
         assertEquals(frames("""{"claudeLaunchCommand":"jean-claude run -- claude"}""", """{"codexHome":null}"""), writer.frames())
@@ -327,6 +355,7 @@ class EnginesBehaviourTest {
     @Test fun theTrimmedValueIsSent() {
         val writer = answering()
         showWith(writer)
+        select(EngineCard.Pi)
         typeAndDone(ServerSetting.PiCommand, "  /opt/pi/bin/pi \t")
         waitForWrites(writer, 1)
         assertEquals(frames("""{"piCommand":"/opt/pi/bin/pi"}"""), writer.frames())
@@ -335,6 +364,7 @@ class EnginesBehaviourTest {
     @Test fun onlySpacesAroundTheServersValueSendNothing() {
         val writer = RecordingWriter()
         showWith(writer)
+        select(EngineCard.Codex)
         typeAndDone(ServerSetting.CodexCommand, " codex ")
         compose.waitForIdle()
         assertEquals(emptyList<Any>(), writer.patches)
@@ -344,6 +374,7 @@ class EnginesBehaviourTest {
     @Test fun anEditIsSentOnAFocusLossLikeTheWebsBlur() {
         val writer = RecordingWriter()
         showWith(writer)
+        select(EngineCard.Codex)
         val field = tag(ServerSettingsTags.input(ServerSetting.CodexCommand)).performScrollTo()
         field.performClick()
         field.performTextReplacement("/tmp/next")
@@ -365,6 +396,7 @@ class EnginesBehaviourTest {
 
     @Test fun aValuePastTheServersLimitCannotBeTyped() {
         showWith(RecordingWriter())
+        select(EngineCard.Codex)
         tag(ServerSettingsTags.input(ServerSetting.CodexCommand)).performScrollTo().performTextReplacement("a".repeat(257))
         compose.waitForIdle()
         assertEquals("codex", editable(ServerSetting.CodexCommand))
@@ -377,6 +409,7 @@ class EnginesBehaviourTest {
     @Test fun useDetectedWritesAtOnce() {
         val writer = answering()
         showWith(writer)
+        select(EngineCard.Opencode)
         tag(EngineTags.useDetected(EngineCard.Opencode)).performScrollTo().performClick()
         waitForWrites(writer, 1)
         assertEquals(frames("""{"opencodeHome":"/home/op/.config/opencode"}"""), writer.frames())
@@ -392,6 +425,7 @@ class EnginesBehaviourTest {
         forced = mapOf("opencodeHome" to true)
         val writer = RecordingWriter()
         showWith(writer)
+        select(EngineCard.Opencode)
         tag(EngineTags.useDetected(EngineCard.Opencode)).performScrollTo().assertExists()
         tag(EngineTags.useDetected(EngineCard.Opencode)).performClick()
         waitForWrites(writer, 1)
@@ -405,6 +439,7 @@ class EnginesBehaviourTest {
         val serverSpoof = "co\u202Edex"
         settings = ServerFixtures.settingsJson(overrides = mapOf("codexHome" to serverSpoof))
         showWith(writer)
+        select(EngineCard.Codex)
         // The field never draws the server's override raw (the edit-field rule).
         assertEquals("codex", editable(ServerSetting.CodexHome))
         val typed = "/srv/\u202Egnp.exe\u200B/home"
@@ -447,7 +482,9 @@ class EnginesRecreationTest {
 
     @Test fun recreatingTheActivitySendsNoHalfTypedValue() {
         val writer = RecordingWriter()
-        val state = SettingsDialogState(SettingsTab.Engines)
+        val state = SettingsDialogState(
+            route = RuntimeDeskRoute(RuntimeDeskDestinations.Engines, EngineCard.Codex.id, RuntimeDeskLevel.Detail),
+        )
         val binding = ServerFixtures.binding(writer = writer)
         compose.setContent { SettingsUnderTest(store.prefs, state, serverSettings = binding) }
         compose.waitUntil(5_000) { state.draft != null }

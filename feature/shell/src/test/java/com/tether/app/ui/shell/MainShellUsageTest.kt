@@ -1,8 +1,6 @@
 package com.tether.app.ui.shell
 
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.assertDoesNotExist
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -48,6 +46,8 @@ class MainShellUsageTest : NavigationBase(1200, 1000) {
         rule.onNodeWithTag(ShellTags.AccountsKey).performClick()
         awaitTag(SettingsDialogTags.Dialog)
         rule.onNodeWithText("Limits & balance").assertExists()
+        awaitTag(AccountsTags.Refresh)
+        rule.onNodeWithTag(AccountsTags.Refresh).assertExists()
         rule.onNodeWithTag(AccountsTags.Dialog).assertDoesNotExist()
     }
 }

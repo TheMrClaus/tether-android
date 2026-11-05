@@ -79,6 +79,14 @@ class ServerSettingsBehaviourTest {
         compose.waitForIdle()
     }
 
+    private fun destination(id: String, entity: String? = null) {
+        compose.runOnUiThread { state.route = RuntimeDeskRoute(id, entity, RuntimeDeskLevel.Detail) }
+        compose.waitForIdle()
+    }
+
+    private fun sessions() = destination(RuntimeDeskDestinations.SessionsRouting)
+    private fun engines() = destination(RuntimeDeskDestinations.Engines, "claude")
+
     private fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
 
     /** A select's trigger is named by its row (tether-select's `ariaLabel`); tapping it opens the menu. */
@@ -135,26 +143,33 @@ class ServerSettingsBehaviourTest {
 
     @Test fun advancedDrawsTheWebsSectionsInOrder() {
         show(ServerFixtures.binding())
-        val all = texts()
-        val sections = listOf("Network", "Authentication", "Storage", "GitHub connection", "Session lifecycle", "Session defaults", "Claude CLI")
-        val at = sections.map { title -> all.indexOf(title).also { assertTrue("$title missing", it >= 0) } }
-        assertEquals(at.sorted(), at)
-        for (label in listOf("Host", "Port", "Password", "Proxy token", "State directory", "Workspace root", "Persistent mode", "Task telemetry",
-            "Max warm sessions", "Max concurrent turns", "Idle eviction (ms)", "Background hard cap (ms)", "Sweep interval (ms)", "Shutdown drain (ms)",
-            "Message while busy", "Claude model fallback", "Auto-archive idle sessions (days)", "Archive on merge", "Default permission mode", "Default sandbox tier",
-            "Default to isolated worktree", "Allowed folders", "Spawn extra writable roots", "Detached agent launches", "Claude CLI version")) {
-            assertTrue(label, all.contains(label))
+        fun ordered(vararg labels: String) {
+            val all = texts()
+            val at = labels.map { label -> all.indexOf(label).also { assertTrue("$label missing", it >= 0) } }
+            assertEquals(at.sorted(), at)
         }
+        ordered("Network", "Authentication", "Storage", "GitHub connection")
+        for (label in listOf("Host", "Port", "Password", "Proxy token", "State directory", "Workspace root")) assertTrue(label, texts().contains(label))
         // ta-coik.21: the GitHub connection is drawn in its place (its rows: GitHubConnectionBehaviourTest).
         tag(ServerSettingsTags.GitHub).assertExists()
-        assertTrue(all.contains("2 allowed folders"))
-        assertTrue(all.contains("Auto resolves to 2.1.225 (newest installed)"))
+        sessions()
+        ordered("Metadata generation", "Provider selection", "Session lifecycle", "Session defaults")
+        for (label in listOf("Persistent mode", "Task telemetry", "Max warm sessions", "Max concurrent turns", "Idle eviction (ms)",
+            "Background hard cap (ms)", "Sweep interval (ms)", "Shutdown drain (ms)", "Message while busy", "Claude model fallback",
+            "Auto-archive idle sessions (days)", "Archive on merge", "Default permission mode", "Default sandbox tier", "Default to isolated worktree",
+            "Allowed folders", "Spawn extra writable roots", "Detached agent launches")) assertTrue(label, texts().contains(label))
+        assertTrue(texts().contains("2 allowed folders"))
+        engines()
+        assertTrue(texts().contains("Claude CLI"))
+        assertTrue(texts().contains("Claude CLI version"))
+        assertTrue(texts().contains("Auto resolves to 2.1.225 (newest installed)"))
     }
 
     @Test fun beforeTheServerRepliesItSaysItIsLoadingAndTheCliPickerIsDisabled() {
         show(ServerFixtures.binding(view = null, advanced = null))
         tag(ServerSettingsTags.Loading).assertExists()
         tag(ServerSettingsTags.row(ServerSetting.Host)).assertDoesNotExist()
+        engines()
         tag(ServerSettingsTags.CliPicker).performScrollTo()
         compose.onNodeWithContentDescription(ClaudeCliCopy.PICKER_TITLE).assertIsNotEnabled()
         assertTrue(texts().contains("Applies to sessions started after the change"))
@@ -172,6 +187,7 @@ class ServerSettingsBehaviourTest {
         tag(ServerSettingsTags.input(ServerSetting.Port)).performTextReplacement("4174")
         tag(ServerSettingsTags.input(ServerSetting.Port)).performImeAction()
         // Toggle.
+        sessions()
         tag(ServerSettingsTags.row(ServerSetting.ClaudePersistent)).performScrollTo().performClick()
         // Roots: remove one, add one.
         tag(ServerSettingsTags.remove(ServerSetting.AllowedRoots, "/srv/scratch")).performScrollTo().performClick()
@@ -194,6 +210,7 @@ class ServerSettingsBehaviourTest {
     @Test fun aSelectSendsTheChosenOptionAndTheEmptyOptionAsNull() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("defaultSandboxPolicy" to "read-only"))), writer = writer))
+        sessions()
         openSelect("Message while busy")
         pick("End of turn")
         openSelect("Default sandbox tier")
@@ -216,6 +233,7 @@ class ServerSettingsBehaviourTest {
     @Test fun aNumberFieldCommitsAsTheBrowsersNumberInput() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(writer = writer))
+        sessions()
         val port = tag(ServerSettingsTags.input(ServerSetting.Port))
         for (bad in listOf("4 173", "١٢")) {
             port.performTextReplacement(bad)
@@ -256,6 +274,7 @@ class ServerSettingsBehaviourTest {
     @Test fun autoArchiveIdleDaysShowsTheServersValueAndEmptyingItWritesNull() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("autoArchiveIdleDays" to 30))), writer = writer))
+        sessions()
         val field = tag(ServerSettingsTags.input(ServerSetting.AutoArchiveIdleDays)).performScrollTo()
         assertTrue(allSemantics().contains("EditableText=30"))
         field.performTextReplacement("")
@@ -267,6 +286,7 @@ class ServerSettingsBehaviourTest {
     @Test fun autoArchiveIdleDaysSetByTheEnvironmentIsLockedAndSendsNothing() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(), envForced = mapOf("autoArchiveIdleDays" to true)), writer = writer))
+        sessions()
         tag(ServerSettingsTags.input(ServerSetting.AutoArchiveIdleDays)).performScrollTo().assertIsNotEnabled()
         assertEquals(emptyList<Any>(), writer.patches)
     }
@@ -309,6 +329,7 @@ class ServerSettingsBehaviourTest {
     @Test fun theCliPickerSendsSetAdvancedSettingsAtOnceLikeTheWeb() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(writer = writer))
+        engines()
         openSelect(ClaudeCliCopy.PICKER_TITLE)
         pick("2.1.220")
         assertEquals(listOf("""{"type":"set-advanced-settings","claudeCliVersion":"2.1.220"}"""), writer.cli.map { it.first.encode() })
@@ -320,6 +341,7 @@ class ServerSettingsBehaviourTest {
     @Test fun switchingBackToAutoSendsNull() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(advanced = ServerFixtures.ADVANCED.copy(claudeCliVersion = "2.1.220", effectiveSource = "picker", effectiveVersion = "2.1.220"), writer = writer))
+        engines()
         openSelect(ClaudeCliCopy.PICKER_TITLE)
         pick("Auto — newest installed")
         assertEquals(listOf("""{"type":"set-advanced-settings","claudeCliVersion":null}"""), writer.cli.map { it.first.encode() })
@@ -331,20 +353,22 @@ class ServerSettingsBehaviourTest {
         val writer = RecordingWriter()
         val forced = mapOf("host" to true, "password" to true, "claudePersistent" to true, "allowedRoots" to true, "messageInterruptMode" to true, "stateDir" to true)
         show(ServerFixtures.binding(view = ServerFixtures.view(envForced = forced), advanced = ServerFixtures.ADVANCED_FORCED, writer = writer))
-        // Each forced row: the lock (named "Set by environment") and the caption that says it.
-        assertEquals(forced.size, compose.onAllNodesWithTag(SettingsTags.EnvLock, useUnmergedTree = true).fetchSemanticsNodes().size)
-        assertEquals(2 * forced.size, texts().count { it == ServerRowCopy.SET_BY_ENV })
+        // Server & integrations owns the host, password, and state-directory locks.
+        assertEquals(3, compose.onAllNodesWithTag(SettingsTags.EnvLock, useUnmergedTree = true).fetchSemanticsNodes().size)
         tag(ServerSettingsTags.input(ServerSetting.Host)).assertIsNotEnabled()
         tag(ServerSettingsTags.input(ServerSetting.StateDir)).assertIsNotEnabled()
         // A forced secret has no key at all (the web hides them), the token (not forced) does.
         tag(ServerSecretTags.opener(ServerSetting.Password)).assertDoesNotExist()
         tag(ServerSecretTags.opener(ServerSetting.ProxyToken)).assertExists()
         // A forced toggle does nothing; a forced list has no remove or add.
+        sessions()
+        assertEquals(3, compose.onAllNodesWithTag(SettingsTags.EnvLock, useUnmergedTree = true).fetchSemanticsNodes().size)
         tag(ServerSettingsTags.row(ServerSetting.ClaudePersistent)).performScrollTo().performClick()
         tag(ServerSettingsTags.remove(ServerSetting.AllowedRoots, "/srv/work")).assertDoesNotExist()
         tag(ServerSettingsTags.add(ServerSetting.AllowedRoots)).assertDoesNotExist()
         compose.onNodeWithContentDescription("Message while busy").assertIsNotEnabled()
         // The CLI forced by env: its path, no picker.
+        engines()
         tag(ServerSettingsTags.CliForced).performScrollTo()
         tag(ServerSettingsTags.CliPicker).assertDoesNotExist()
         assertTrue(allSemantics().contains("Forced by env — /opt/claude/bin/claude"))
@@ -360,6 +384,7 @@ class ServerSettingsBehaviourTest {
             binding = binding.copy(settings = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("claudePersistent" to false)), restartRequired = "claudePersistent" in patch))
         }
         show(ServerFixtures.binding(writer = writer))
+        sessions()
         tag(SettingsDialogTags.RestartBanner).assertDoesNotExist()
         tag(ServerSettingsTags.row(ServerSetting.ClaudePersistent)).performScrollTo().performClick()
         compose.waitForIdle()
@@ -456,6 +481,7 @@ class ServerSettingsBehaviourTest {
     @Test fun serverTextIsDrawnSafely() {
         val bidi = "/srv/\u202Eevil"
         show(ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("allowedRoots" to listOf(bidi))))))
+        sessions()
         tag(ServerSettingsTags.entry(ServerSetting.AllowedRoots, bidi)).performScrollTo()
         // The path rule writes the override out as a token; the remove key names it by the value rule.
         assertFalse(texts().any { it.contains("\u202E") })

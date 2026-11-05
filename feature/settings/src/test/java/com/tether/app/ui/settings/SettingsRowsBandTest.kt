@@ -73,9 +73,10 @@ abstract class SettingsRowsBandBase(private val width: Int) {
         nodes: List<com.tether.app.protocol.NodeSummary>? = null,
         devices: DevicesSeed? = null,
         accounts: AccountsShot? = null,
+        routeOverride: RuntimeDeskRoute? = null,
     ) {
         val stored = runBlocking { store.prefs.preferences.first() }
-        val route = when {
+        val route = routeOverride ?: when {
             accounts == AccountsShot.Sync -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.AccountSync, RuntimeDeskLevel.Detail)
             accounts != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail)
             else -> RuntimeDeskRoute.fromLegacyTab(tab)
@@ -142,7 +143,11 @@ abstract class SettingsRowsBandBase(private val width: Int) {
     }
 
     @Test fun aServerRowStacksThrough640() {
-        show(SettingsTab.Engines, server = ServerShot.EnginesMissing.binding())
+        show(
+            SettingsTab.Engines,
+            server = ServerShot.EnginesMissing.binding(),
+            routeOverride = RuntimeDeskRoute(RuntimeDeskDestinations.Engines, EngineCard.Opencode.id, RuntimeDeskLevel.Detail),
+        )
         val title = text(EngineRows.DETECTED_HOME)
         val key = tag(EngineTags.useDetected(EngineCard.Opencode))
         if (narrow) {
@@ -159,7 +164,7 @@ abstract class SettingsRowsBandBase(private val width: Int) {
     }
 
     @Test fun theCliSelectIsCappedAtItsShareOfTheRow() {
-        show(SettingsTab.Advanced, server = ServerShot.Cli.binding())
+        show(SettingsTab.Engines, server = ServerShot.Cli.binding())
         val title = text(ClaudeCliCopy.PICKER_TITLE)
         val select = tag(ServerSettingsTags.CliPicker)
         val row = rowWidth()
@@ -234,7 +239,11 @@ abstract class SettingsRowsBandBase(private val width: Int) {
 
     /** ta-bnnz C1 (studio.css 975): a stacked server row sits 12 under its text; a plain row 16. */
     @Test fun aStackedServerRowIs12UnderItsTextAndAPlainRow16() {
-        show(SettingsTab.Engines, server = ServerShot.EnginesMissing.binding())
+        show(
+            SettingsTab.Engines,
+            server = ServerShot.EnginesMissing.binding(),
+            routeOverride = RuntimeDeskRoute(RuntimeDeskDestinations.Engines, EngineCard.Opencode.id, RuntimeDeskLevel.Detail),
+        )
         val key = tag(EngineTags.useDetected(EngineCard.Opencode))
         if (narrow) assertEquals("$width: server row gap", 12f, gapAbove(key), 0.5f)
         else assertTrue("641: beside the text", key.l >= text(EngineRows.DETECTED_HOME).r - 0.5f)

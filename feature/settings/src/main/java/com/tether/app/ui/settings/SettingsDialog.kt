@@ -56,9 +56,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.invisibleToUser
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -401,6 +401,21 @@ fun SettingsFrame(
     val narrow = layout == TetherLayoutClass.Phone
     val dirty = state.draft?.let { it != GeneralDraft.of(current) } == true
     val route = state.route
+    var lastEngineEntity by rememberSaveable { mutableStateOf(route.entity?.takeIf { it in RuntimeDeskRoute.ENGINE_IDS } ?: RuntimeDeskRoute.ENGINE_IDS.first()) }
+    var lastAccountEntity by rememberSaveable {
+        mutableStateOf(
+            route.entity?.takeIf {
+                it == RuntimeDeskEntities.Credentials || it == RuntimeDeskEntities.AccountSync || it == RuntimeDeskEntities.LimitsBalance ||
+                    it.startsWith("credential:") || it.startsWith("usage:")
+            } ?: RuntimeDeskEntities.Credentials,
+        )
+    }
+    LaunchedEffect(route.destination, route.entity) {
+        when (route.destination) {
+            RuntimeDeskDestinations.Engines -> route.entity?.takeIf { it in RuntimeDeskRoute.ENGINE_IDS }?.let { lastEngineEntity = it }
+            RuntimeDeskDestinations.Accounts -> route.entity?.let { lastAccountEntity = it }
+        }
+    }
     val engineEntities = com.tether.app.client.EngineCard.entries.map { engine ->
         RuntimeDeskNavItem(
             id = engine.id,
@@ -418,7 +433,6 @@ fun SettingsFrame(
             .semantics { paneTitle = "Settings" }
             .pointerInput(Unit) { detectTapGestures { } },
     ) {
-        LegacySettingsTabSemantics(state, onClose)
         ClaudeAccountsHostContent(claudeAccounts, narrow) { accountHost ->
             val accountEntities = accountHost.entities + accountLimitEntities
             val entities = when (route.destination) {
@@ -439,6 +453,8 @@ fun SettingsFrame(
                 serverSettings = serverSettings,
                 providers = providers,
                 accountHost = accountHost,
+                engineEntity = if (route.destination == RuntimeDeskDestinations.Engines) route.entity ?: lastEngineEntity else lastEngineEntity,
+                accountEntity = if (route.destination == RuntimeDeskDestinations.Accounts) route.entity ?: lastAccountEntity else lastAccountEntity,
                 accountsLimits = accountsLimits,
                 github = github,
             )
@@ -449,10 +465,23 @@ fun SettingsFrame(
                 RuntimeDeskScaffold(
                     items = RuntimeDeskDestinations.items,
                     selected = route.destination,
-                    onSelect = { state.route = state.route.selectDestination(it) },
+                    onSelect = { destination ->
+                        val selected = state.route.selectDestination(destination)
+                        state.route = when (destination) {
+                            RuntimeDeskDestinations.Engines -> selected.copy(entity = lastEngineEntity)
+                            RuntimeDeskDestinations.Accounts -> selected.copy(entity = lastAccountEntity)
+                            else -> selected
+                        }
+                    },
                     entities = entities,
                     selectedEntity = route.entity,
-                    onEntity = { state.route = state.route.selectEntity(it) },
+                    onEntity = { entity ->
+                        when (route.destination) {
+                            RuntimeDeskDestinations.Engines -> lastEngineEntity = entity
+                            RuntimeDeskDestinations.Accounts -> lastAccountEntity = entity
+                        }
+                        state.route = state.route.selectEntity(entity)
+                    },
                     entityTrailing = { id ->
                         if (route.destination == RuntimeDeskDestinations.Engines) {
                             com.tether.app.client.EngineCard.entries.firstOrNull { it.id == id }?.let { EngineEntityToggle(it, serverSettings) }
@@ -485,36 +514,6 @@ fun SettingsFrame(
     }
 }
 
-/** Zero-layout compatibility nodes for callers migrating from the former tab API. */
-@Composable
-private fun LegacySettingsTabSemantics(state: SettingsDialogState, onClose: () -> Unit) {
-    SettingsTab.entries.forEach { tab ->
-        Box(
-            Modifier
-                .size(0.dp)
-                .testTag(SettingsDialogTags.tab(tab))
-                .selectable(
-                    selected = state.tab == tab,
-                    role = Role.Tab,
-                    onClick = {
-                        state.route = when (tab) {
-                            SettingsTab.Devices -> RuntimeDeskRoute(RuntimeDeskDestinations.Preferences, level = RuntimeDeskLevel.Detail)
-                            else -> RuntimeDeskRoute.fromLegacyTab(tab)
-                        }
-                    },
-                )
-                .semantics { invisibleToUser() },
-        )
-    }
-    Box(
-        Modifier
-            .size(0.dp)
-            .testTag(SettingsDialogTags.Close)
-            .selectable(selected = false, role = Role.Button, onClick = onClose)
-            .semantics { invisibleToUser() },
-    )
-}
-
 private class RuntimeDeskDetailInputs(
     val route: RuntimeDeskRoute,
     val prefs: UiPrefs,
@@ -528,6 +527,8 @@ private class RuntimeDeskDetailInputs(
     val serverSettings: ServerSettingsBinding,
     val providers: ProvidersBinding,
     val accountHost: ClaudeAccountsHostScope,
+    val engineEntity: String,
+    val accountEntity: String,
     val accountsLimits: @Composable () -> Unit,
     val github: GitHubBinding,
 )
@@ -535,18 +536,46 @@ private class RuntimeDeskDetailInputs(
 @Composable
 private fun RuntimeDeskDetail(input: RuntimeDeskDetailInputs) {
     val route = input.route
+    // A destination is composed on its first visit and remains composed until Settings closes.
+    // This retains transient forms/controllers without starting reads for destinations never opened.
+    val mountedDestinations = remember { mutableSetOf<String>() }
+    mountedDestinations += route.destination
     Box(Modifier.fillMaxWidth().testTag(SettingsDialogTags.Body)) {
         Box(Modifier.fillMaxWidth().testTag(SettingsDialogTags.panel(input.state.tab))) {
-            when (route.destination) {
-                RuntimeDeskDestinations.Preferences -> RuntimePreferencesPanel(input.prefs, input.preferenceOrigin, input.current, input.state, input.currentWorkspace, input.narrow)
-                RuntimeDeskDestinations.AccessDevices -> RuntimeAccessDevicesPanel(input.narrow, input.devices)
-                RuntimeDeskDestinations.HostsNodes -> RuntimeHostsNodesPanel(input.narrow, input.nodes)
-                RuntimeDeskDestinations.Engines -> RuntimeEnginesPanel(route.entity, input.narrow, input.serverSettings, input.providers)
-                RuntimeDeskDestinations.SessionsRouting -> RuntimeSessionsRoutingPanel(input.narrow, input.serverSettings)
-                RuntimeDeskDestinations.ServerIntegrations -> RuntimeServerIntegrationsPanel(input.narrow, input.serverSettings, input.github)
+            if (RuntimeDeskDestinations.Preferences in mountedDestinations) {
+                Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.Preferences)) {
+                    RuntimePreferencesPanel(input.prefs, input.preferenceOrigin, input.current, input.state, input.currentWorkspace, input.narrow)
+                }
             }
-            Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.Accounts)) {
-                RuntimeAccountsPanel(input.accountHost, route.entity, input.accountsLimits)
+            if (RuntimeDeskDestinations.AccessDevices in mountedDestinations) {
+                Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.AccessDevices)) {
+                    RuntimeAccessDevicesPanel(input.narrow, input.devices)
+                }
+            }
+            if (RuntimeDeskDestinations.HostsNodes in mountedDestinations) {
+                Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.HostsNodes)) {
+                    RuntimeHostsNodesPanel(input.narrow, input.nodes)
+                }
+            }
+            if (RuntimeDeskDestinations.Engines in mountedDestinations) {
+                Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.Engines)) {
+                    RuntimeEnginesPanel(input.engineEntity, input.narrow, input.serverSettings, input.providers)
+                }
+            }
+            if (RuntimeDeskDestinations.Accounts in mountedDestinations) {
+                Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.Accounts)) {
+                    RuntimeAccountsPanel(input.accountHost, input.accountEntity, input.accountsLimits)
+                }
+            }
+            if (RuntimeDeskDestinations.SessionsRouting in mountedDestinations) {
+                Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.SessionsRouting)) {
+                    RuntimeSessionsRoutingPanel(input.narrow, input.serverSettings)
+                }
+            }
+            if (RuntimeDeskDestinations.ServerIntegrations in mountedDestinations) {
+                Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.ServerIntegrations)) {
+                    RuntimeServerIntegrationsPanel(input.narrow, input.serverSettings, input.github)
+                }
             }
         }
     }
@@ -559,11 +588,23 @@ private fun RuntimeAccountsPanel(
     accountsLimits: @Composable () -> Unit,
 ) {
     val credential = selected?.takeIf { it.startsWith("credential:") }?.removePrefix("credential:")
-    Box(Modifier.keepRuntimeDeskMounted(selected != RuntimeDeskEntities.AccountSync && selected != RuntimeDeskEntities.LimitsBalance && selected?.startsWith("usage:") != true)) {
-        androidx.compose.runtime.key(credential) { host.Credentials(credential) }
+    val credentialsVisible = selected != RuntimeDeskEntities.AccountSync && selected != RuntimeDeskEntities.LimitsBalance && selected?.startsWith("usage:") != true
+    val usageVisible = selected == RuntimeDeskEntities.LimitsBalance || selected?.startsWith("usage:") == true
+    val mountedEntities = remember { mutableSetOf<String>() }
+    mountedEntities += when {
+        credentialsVisible -> RuntimeDeskEntities.Credentials
+        selected == RuntimeDeskEntities.AccountSync -> RuntimeDeskEntities.AccountSync
+        else -> RuntimeDeskEntities.LimitsBalance
     }
-    Box(Modifier.keepRuntimeDeskMounted(selected == RuntimeDeskEntities.AccountSync)) { host.Sync() }
-    if (selected == RuntimeDeskEntities.LimitsBalance || selected?.startsWith("usage:") == true) accountsLimits()
+    if (RuntimeDeskEntities.Credentials in mountedEntities) {
+        Box(Modifier.keepRuntimeDeskMounted(credentialsVisible)) { host.Credentials(credential) }
+    }
+    if (RuntimeDeskEntities.AccountSync in mountedEntities) {
+        Box(Modifier.keepRuntimeDeskMounted(selected == RuntimeDeskEntities.AccountSync)) { host.Sync() }
+    }
+    if (RuntimeDeskEntities.LimitsBalance in mountedEntities) {
+        Box(Modifier.keepRuntimeDeskMounted(usageVisible)) { accountsLimits() }
+    }
 }
 
 private fun Modifier.keepRuntimeDeskMounted(visible: Boolean): Modifier = if (visible) {
@@ -574,7 +615,7 @@ private fun Modifier.keepRuntimeDeskMounted(visible: Boolean): Modifier = if (vi
             measurable.measure(Constraints.fixed(0, 0))
             layout(0, 0) {}
         }
-        .semantics { invisibleToUser() }
+        .clearAndSetSemantics { }
 }
 
 /** `.settings-dialog > header` (studio.css 522-537, 960-964): "Settings" and Close over a rule. */

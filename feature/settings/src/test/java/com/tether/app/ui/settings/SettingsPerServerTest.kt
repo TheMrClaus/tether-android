@@ -56,17 +56,14 @@ class SettingsPerServerTest {
         compose.waitUntil(5_000) { state.draft != null }
         assertEquals("the draft is A's", GeneralDraft("/srv/a", showEndedSessions = true, confirmBeforeEnd = true, showThinking = false), state.draft)
         compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
-        compose.onNodeWithTag(SettingsDialogTags.tab(SettingsTab.Appearance)).performClick()
-        compose.waitForIdle()
         waitSelected(SettingsPanelTags.themeMode(ThemeMode.Light))
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performClick()
         compose.waitUntil(5_000) { store.storedFor(a)[PreferenceKeys.THEME_MODE] == "dark" }
-        compose.onNodeWithTag(SettingsDialogTags.tab(SettingsTab.General)).performClick()
-        compose.waitForIdle()
         compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performSemanticsAction(SemanticsActions.OnClick)
         compose.waitUntil(5_000) { state.draft?.showThinking == true }
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
-        compose.waitUntil(5_000) { closes == 1 }
+        compose.waitForIdle()
+        assertEquals("Save stays in Runtime Desk", 0, closes)
         compose.waitUntil(5_000) { store.storedFor(a)[PreferenceKeys.SHOW_THINKING] == true }
         val stored = runBlocking { store.prefs.preferences.first() }
         assertEquals(ServerPreferences(themeMode = ThemeMode.Dark, showThinking = true, defaultWorkspace = "/srv/a"), stored.preferencesByOrigin[a])

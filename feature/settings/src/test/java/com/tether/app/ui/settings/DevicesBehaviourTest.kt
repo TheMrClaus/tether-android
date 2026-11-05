@@ -190,7 +190,7 @@ class DevicesBehaviourTest {
         assertTrue(source.calls.all { it.origin == ORIGIN })
         val all = texts()
         fun at(s: String) = all.indexOfFirst { it == s }.also { assertTrue("missing: $s", it >= 0) }
-        val order = listOf("Notifications", "Passkeys", "Laptop", "YubiKey", "Password sign-in", "Signed-in sessions", "Password", "Android app (passkey)", "Paired devices", "Pixel 8", "Galaxy Tab", DevicesCopy.PAIR).map(::at)
+        val order = listOf("Passkeys", "Laptop", "YubiKey", "Password sign-in", "Signed-in sessions", "Password", "Android app (passkey)", "Paired devices", "Pixel 8", "Galaxy Tab", DevicesCopy.PAIR).map(::at)
         assertEquals(order.sorted(), order)
         assertTrue(all.contains(DevicesCopy.SYNCED))
         assertTrue(all.any { it.startsWith("added ") && it.endsWith(" · last used 2h") })

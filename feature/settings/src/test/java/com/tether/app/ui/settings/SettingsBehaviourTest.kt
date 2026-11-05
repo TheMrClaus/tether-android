@@ -115,10 +115,19 @@ class SettingsBehaviourTest {
      */
     @Test fun everyDestinationHasAControlledDetail() {
         show()
+        val uniqueContent = mapOf(
+            RuntimeDeskDestinations.Preferences to "Startup",
+            RuntimeDeskDestinations.AccessDevices to "Passkeys",
+            RuntimeDeskDestinations.HostsNodes to NodesCopy.TITLE,
+            RuntimeDeskDestinations.Engines to EngineRows.TITLE,
+            RuntimeDeskDestinations.Accounts to ClaudeAccountsPresentation.TITLE,
+            RuntimeDeskDestinations.SessionsRouting to MetadataRows.GENERATION,
+            RuntimeDeskDestinations.ServerIntegrations to "Server settings",
+        )
         RuntimeDeskDestinations.items.forEach { item ->
             compose.runOnUiThread { state.route = state.route.selectDestination(item.id).let { if (it.level == RuntimeDeskLevel.Entities) it.copy(level = RuntimeDeskLevel.Detail) else it } }
             compose.waitForIdle()
-            compose.onNodeWithTag(SettingsDialogTags.Body).assertExists()
+            compose.onNodeWithText(uniqueContent.getValue(item.id)).assertExists()
         }
     }
 

@@ -204,20 +204,8 @@ private fun Header(narrow: Boolean, state: UsageAccountsState) {
                 style = cssText(type.ui, if (narrow) 1.25f else 1.375f, 700, trackingEm = -0.025f, lineHeight = 1.3f),
                 modifier = Modifier.weight(1f).semantics { heading() },
             )
+            RefreshUsageKey(state)
             val look = rememberIconLook(t.ink, t.radiusSm, enabled = !state.loading)
-            SpinningKey(spinning = state.loading) { angle ->
-                ChromeIconKey(
-                    { state.refresh("all") },
-                    TetherIcons.RefreshCw,
-                    "Refresh usage",
-                    look,
-                    44.dp,
-                    44.dp,
-                    16.dp,
-                    enabled = !state.loading,
-                    modifier = Modifier.testTag(AccountsTags.Refresh).rotate(angle),
-                )
-            }
             ChromeIconKey(state::close, TetherIcons.X, "Close", look, 44.dp, 44.dp, 19.dp, modifier = Modifier.testTag(AccountsTags.Close))
         }
         TetherSeam()
@@ -246,14 +234,42 @@ fun UsageAccountsContent(
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val narrow = maxWidth <= 640.dp
-        Body(
-            state = state,
-            narrow = narrow,
-            width = maxWidth,
-            onUseCredit = onUseCredit,
-            onUseGrant = onUseGrant,
-            modifier = Modifier.fillMaxWidth(),
-            scrollable = false,
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = if (narrow) 20.dp else 28.dp, top = 12.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                RefreshUsageKey(state)
+            }
+            Body(
+                state = state,
+                narrow = narrow,
+                width = maxWidth,
+                onUseCredit = onUseCredit,
+                onUseGrant = onUseGrant,
+                modifier = Modifier.fillMaxWidth(),
+                scrollable = false,
+            )
+        }
+    }
+}
+
+/** The same global force-all action in the dialog and the Runtime Desk adapter. */
+@Composable
+private fun RefreshUsageKey(state: UsageAccountsState) {
+    val t = LocalTetherTokens.current
+    val look = rememberIconLook(t.ink, t.radiusSm, enabled = !state.loading)
+    SpinningKey(spinning = state.loading) { angle ->
+        ChromeIconKey(
+            { state.refresh("all") },
+            TetherIcons.RefreshCw,
+            "Refresh usage",
+            look,
+            44.dp,
+            44.dp,
+            16.dp,
+            enabled = !state.loading,
+            modifier = Modifier.testTag(AccountsTags.Refresh).rotate(angle),
         )
     }
 }

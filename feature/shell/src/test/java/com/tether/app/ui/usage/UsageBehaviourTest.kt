@@ -2,8 +2,13 @@ package com.tether.app.ui.usage
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -195,6 +200,32 @@ abstract class UsageBehaviourBase {
         return harness!!
     }
 
+    private fun accountsEmbedded(source: UsageSource): Harness {
+        var harness: Harness? = null
+        setUp {
+            val scope = rememberCoroutineScope()
+            val h = remember {
+                Harness(
+                    UsageAccountsState(scope, { source }, { ORIGIN }),
+                    CodexResetState(scope, { source }, { ORIGIN }),
+                    ClaudeResetState(scope, { source }, { ORIGIN }, clock = { UsageFixtures.NOW }),
+                )
+            }
+            harness = h
+            LaunchedEffect(h.accounts) { h.accounts.refresh() }
+            UsageAccountsContent(
+                h.accounts,
+                onUseCredit = h.codex::open,
+                onUseGrant = h.claude::open,
+                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+            )
+            CodexResetDialog(h.codex)
+            ClaudeResetDialog(h.claude)
+        }
+        advance(100)
+        return harness!!
+    }
+
     @Test fun openingReadsCacheFirstThenRefreshesForceAllAndPerCard() {
         val source = FakeUsageSource()
         accountsDialog(source)
@@ -211,6 +242,27 @@ abstract class UsageBehaviourBase {
         rule.onNodeWithTag(AccountsTags.Done).performClick()
         advance(100)
         rule.onNodeWithTag(AccountsTags.Dialog).assertDoesNotExist()
+    }
+
+    @Test fun embeddedLimitsLoadRefreshAndResetThroughTheOneState() {
+        val source = FakeUsageSource().apply { consumeAnswers += UsageCall.Ok(CodexConsumeAnswer("reset"), ORIGIN) }
+        accountsEmbedded(source)
+        assertEquals(listOf<String?>(null), source.of("accounts").map { it.a })
+        rule.onNodeWithText("Host default").assertExists()
+        rule.onNodeWithText("Codex").assertExists()
+        rule.onNodeWithText("DeepSeek").assertExists()
+
+        rule.onNodeWithTag(AccountsTags.Refresh).performClick()
+        advance(100)
+        assertEquals("all", source.of("accounts").last().a)
+
+        rule.onNodeWithTag(AccountsTags.UseCredit).scrollIntoView().performClick()
+        advance(100)
+        val reads = source.of("accounts").size
+        rule.onNodeWithTag(ResetTags.Confirm).performClick()
+        advance(100)
+        assertEquals(listOf(FakeUsageSource.Call("consume", ORIGIN, "cr_1", null)), source.of("consume"))
+        assertEquals("a settled reset reuses and refreshes the same state", reads + 1, source.of("accounts").size)
     }
 
     @Test fun aFailedLoadRetriesThreeTimesThenGivesUp() {

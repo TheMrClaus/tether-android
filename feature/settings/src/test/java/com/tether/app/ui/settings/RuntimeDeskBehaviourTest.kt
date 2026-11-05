@@ -1,5 +1,6 @@
 package com.tether.app.ui.settings
 
+import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -8,7 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import com.tether.app.client.ServerSetting
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -24,7 +25,7 @@ import org.robolectric.annotation.Config
 class RuntimeDeskBehaviourTest {
     private val tmp = TemporaryFolder()
     private val store = PrefsStore(tmp)
-    private val compose = createComposeRule()
+    private val compose = createAndroidComposeRule<ComponentActivity>()
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
@@ -47,6 +48,22 @@ class RuntimeDeskBehaviourTest {
         compose.onNodeWithText("Accounts").assertExists()
     }
 
+    @Test fun nativeBackUsesTheSameHierarchyAndDismissesOnlyAtTheRoot() {
+        val state = SettingsDialogState(route = RuntimeDeskRoute.Root)
+        var closes = 0
+        compose.setContent { SettingsUnderTest(store.prefs, state, onClose = { closes++ }) }
+        compose.waitUntil(5_000) { state.draft != null }
+
+        compose.onNodeWithText("Engines").performClick()
+        compose.onNode(hasText("Codex") and hasClickAction()).performClick()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        assertEquals(RuntimeDeskLevel.Entities, state.route.level)
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        assertEquals(RuntimeDeskLevel.Destinations, state.route.level)
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        assertEquals(1, closes)
+    }
+
     @Test fun changingEngineSelectionRetainsTheUncommittedEditor() {
         val state = SettingsDialogState(
             draft = GeneralDraft.of(com.tether.app.ui.prefs.TetherPreferences.Default),
@@ -67,5 +84,22 @@ class RuntimeDeskBehaviourTest {
         val value = compose.onNodeWithTag(tag, useUnmergedTree = true)
             .fetchSemanticsNode().config[SemanticsProperties.EditableText].text
         assertEquals("claude-preview", value)
+    }
+
+    @Test fun returningToADestinationRestoresItsRealEntitySelection() {
+        val state = SettingsDialogState(route = RuntimeDeskRoute.Root)
+        compose.setContent { SettingsUnderTest(store.prefs, state) }
+        compose.waitUntil(5_000) { state.draft != null }
+
+        compose.onNodeWithText("Engines").performClick()
+        compose.onNode(hasText("Codex") and hasClickAction()).performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Preferences").performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Engines").performClick()
+
+        assertEquals("codex", state.route.entity)
+        compose.onNode(hasText("Codex") and hasClickAction()).assertExists()
     }
 }

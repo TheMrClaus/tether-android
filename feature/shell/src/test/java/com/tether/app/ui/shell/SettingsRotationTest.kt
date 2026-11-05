@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -89,10 +90,18 @@ class SettingsRotationTest {
         rule.onNodeWithTag(tag).performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(tag).assertIsOff()
+        rule.onNodeWithContentDescription("Back").performClick()
+        rule.onNodeWithText("Engines").performClick()
+        rule.onNodeWithText("Codex").performClick()
+        rule.waitForIdle()
 
         restorer.emulateSavedInstanceStateRestore()
         rule.waitForIdle()
         rule.onNodeWithTag(SettingsDialogTags.Dialog).assertExists()
+        rule.onNodeWithText("Codex").assertExists()
+        rule.onNodeWithContentDescription("Back").performClick()
+        rule.onNodeWithContentDescription("Back").performClick()
+        rule.onNodeWithText("Preferences").performClick()
         rule.onNodeWithText("Startup").assertExists()
         rule.onNodeWithTag(tag).assertIsOff()
         // Still a draft: the preference model was never saved (the shell's own last view aside).

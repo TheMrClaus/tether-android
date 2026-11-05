@@ -94,8 +94,7 @@ class GitHubConnectionBehaviourTest {
     private fun sectionTexts(): List<String> {
         val all = texts()
         val from = all.indexOf(AdvancedRows.GITHUB)
-        val to = all.indexOf(AdvancedRows.LIFECYCLE)
-        return all.subList(from, to).fold(mutableListOf()) { out, s -> if (out.lastOrNull() != s) out += s; out }
+        return all.drop(from).fold(mutableListOf()) { out, s -> if (out.lastOrNull() != s) out += s; out }
     }
 
     private fun allSemantics(): String {
