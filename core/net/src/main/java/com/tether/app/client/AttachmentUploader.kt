@@ -122,7 +122,7 @@ class AttachmentUploader(
         } catch (e: CancellationException) {
             throw e
         } catch (_: IOException) {
-            UploadOutcome.Transient("The connection dropped.")
+            UploadOutcome.Transient("The link was down.")
         }
     }
 

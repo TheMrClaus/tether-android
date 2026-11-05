@@ -51,6 +51,12 @@ data class FailedSend(
     val detail: String? = null,
     /** ta-delivery A2: a later Send again may work (a transient reason), as opposed to a refusal that would repeat. */
     val retryable: Boolean = false,
+    /**
+     * ta-delivery A9: [TetherClient.sendAgain] can re-dispatch this one: the client still holds ALL of its content (text
+     * only: no attachment bytes, no delegate mention) and it is not the app's own photo-lost case. False for any
+     * attachment record (the given-up record, with its bytes, is discarded), so no Send again key is drawn for it.
+     */
+    val canSendAgain: Boolean = false,
 )
 
 /**

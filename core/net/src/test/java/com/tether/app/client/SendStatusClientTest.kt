@@ -46,6 +46,13 @@ class SendStatusClientTest {
             """"turnsById":{"t1":{"turnId":"t1","status":"completed","idempotencyKey":"$key","blocks":[],"blocksById":{}}},""" +
             """"activeTurnId":null,"queuedMessages":[]}"""
 
+    /** Wire-order proof (a barrier frame): no send or queue-add went out. */
+    private fun noSends(): Boolean = h.framesUntilBarrier().none { it["type"]!!.toString().trim('"') in setOf("send", "queue-add") }
+
+    private fun runningState(): String =
+        """{"tetherSessionId":"s1","provider":"claude","cwd":"/w","status":"running","turnOrder":["t0"],""" +
+            """"turnsById":{"t0":{"turnId":"t0","status":"running","blocks":[],"blocksById":{}}},"activeTurnId":"t0","queuedMessages":[]}"""
+
     private fun connected(sweepIntervalMs: Long = 3_600_000): Pair<RealTetherClient, WebSocket> {
         val client = h.newClient(sweepIntervalMs = sweepIntervalMs)
         h.enqueueConnect()
@@ -169,7 +176,7 @@ class SendStatusClientTest {
     fun aSendGivenUpOnBecomesAFailedBubbleWithItsTextUntilDismissed() {
         val (client, key) = givenUp("lost words")
         val failed = client.failedSends.value.single()
-        assertEquals(FailedSend(key, "s1", PendingInput.KIND_SEND, "lost words", 0, 0, 0.0, FailedSendReason.Expired), failed)
+        assertEquals(FailedSend(key, "s1", PendingInput.KIND_SEND, "lost words", 0, 0, 0.0, FailedSendReason.Expired, canSendAgain = true), failed)
         assertTrue("the record is gone from the pending rows", client.pendingSends.value.isEmpty())
         client.dismissFailedSend("not-a-key")
         assertEquals(1, client.failedSends.value.size)
@@ -224,6 +231,73 @@ class SendStatusClientTest {
         val (client, _) = givenUp("signed out")
         client.stop()
         h.await(client.failedSends) { it.isEmpty() }
+    }
+
+    // --- A9: Send again ---------------------------------------------------------------------------
+
+    @Test
+    fun sendAgainFilesTheSameTextUnderTheOriginalKeyAndSendsExactlyOneFrame() {
+        val (client, key) = givenUp("say it again")
+        val ws = reconnect(client)
+        ws.send(snapshotFrame("s1", 5, idleState()))
+        h.serverBarrier(ws)
+        assertTrue("bar 3: the reconnect re-sent nothing", noSends())
+        client.sendAgain(key)
+        val frame = h.expectFrame("send")
+        assertEquals(key, (frame["idempotencyKey"] as JsonPrimitive).content)
+        assertEquals("say it again", (frame["text"] as JsonPrimitive).content)
+        assertTrue("the bubble left", client.failedSends.value.isEmpty())
+        assertEquals(key, client.pendingSends.value.single().key)
+        client.sendAgain(key) // a second tap finds nothing
+        assertTrue(noSends())
+    }
+
+    @Test
+    fun sendAgainWhileATurnRunsIsAQueueAddUnderTheSameKey() {
+        val (client, key) = givenUp("later then")
+        val ws = reconnect(client)
+        ws.send(snapshotFrame("s1", 5, runningState()))
+        h.serverBarrier(ws)
+        client.sendAgain(key)
+        val frame = h.expectFrame("queue-add")
+        assertEquals(key, (frame["queueId"] as JsonPrimitive).content)
+        assertEquals("later then", (frame["text"] as JsonPrimitive).content)
+    }
+
+    @Test
+    fun aFailedBubbleAndAReconnectSendNothingByThemselves() {
+        val (client, _) = givenUp("never on its own")
+        val ws = reconnect(client)
+        ws.send(snapshotFrame("s1", 5, idleState()))
+        h.serverBarrier(ws)
+        assertTrue(noSends())
+        assertEquals(1, client.failedSends.value.size)
+    }
+
+    @Test
+    fun theServersAckOfTheOriginalKeyClearsThePendingBubbleWithoutASecondOne() {
+        val (client, key) = givenUp("it did land")
+        val ws = reconnect(client)
+        ws.send(snapshotFrame("s1", 5, idleState()))
+        h.serverBarrier(ws)
+        client.sendAgain(key)
+        h.expectFrame("send")
+        ws.send(turnStartedEvent("s1", "t1", 6, key))
+        h.await(client.pendingSends) { it.isEmpty() }
+        assertTrue(client.failedSends.value.isEmpty())
+    }
+
+    @Test
+    fun anAttachmentFailureNeverOffersSendAgain() {
+        val (client, ws) = connected(sweepIntervalMs = 50)
+        assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "aged", listOf(picture), null, client.consentOrigin.value))
+        sentKey()
+        dropLink(client, ws)
+        h.now.addAndGet(Web.MAX_AGE_MS.toLong())
+        val failed = h.await(client.failedSends) { it.isNotEmpty() }.single()
+        assertEquals(false, failed.canSendAgain)
+        client.sendAgain(failed.key)
+        assertEquals(1, client.failedSends.value.size)
     }
 
     // --- the pure record (use-tether.ts :450-471) ----------------------------------------------

@@ -4761,6 +4761,29 @@ class RealTetherClient(
         failedSendsState.value = emptyList()
     }
 
+    /**
+     * ta-delivery A9: files the failed bubble's text again under its ORIGINAL key (T5 dedupes a key the server already
+     * accepted, a send and a queue-add alike) and drains. The failed row is taken out in the SAME locked step, so a second tap
+     * finds nothing. Kind is decided now, not at failure: a running turn queues.
+     */
+    override fun sendAgain(key: String) {
+        var evicted = GivenUp.NONE
+        val filed = synchronized(lock) {
+            if (!pendingLoaded || haltedLocked()) return@synchronized false
+            val row = failedSendsState.value.firstOrNull { it.key == key && it.canSendAgain } ?: return@synchronized false
+            if (pendingStore.records.any { it.key == key }) return@synchronized false
+            val kind = if (turnRunning(row.sessionId)) PendingInput.KIND_QUEUE else PendingInput.KIND_SEND
+            val result = PendingInput.addRecord(pendingStore, key, kind, row.sessionId, row.text, clock(), null, null)
+            pendingStore = result.store
+            clearedKeys.remove(key)
+            forgetLocked(result.evicted.map { it.key })
+            evicted = givenUpLocked(result.evicted)
+            failedSendsState.update { current -> current.filter { it.key != key } }
+            true
+        }
+        if (filed) afterRecord(evicted)
+    }
+
     override fun dismissFailedSend(key: String) {
         failedSendsState.update { current -> current.filter { it.key != key }.takeIf { it.size != current.size } ?: current }
     }

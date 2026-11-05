@@ -36,6 +36,13 @@ class ChatTestClient : TetherClient {
         failedRows.value = failedRows.value.filter { it.key != key }
     }
 
+    /** ta-delivery A9: every Send again tap, by the failed bubble's key; like the real client the bubble leaves. */
+    val sentAgain = java.util.concurrent.CopyOnWriteArrayList<String>()
+    override fun sendAgain(key: String) {
+        sentAgain += key
+        failedRows.value = failedRows.value.filter { it.key != key }
+    }
+
     /** T6.3: the link state the consent cards read. */
     val link = MutableStateFlow<ConnectionState>(ConnectionState.Connected)
     override val connection: StateFlow<ConnectionState> get() = link

@@ -139,9 +139,14 @@ object PendingInput {
         if (records.isEmpty()) return current
         val store = PendingStore(JsObj.of("records" to JsArr.of(records.map { it.tree })))
         val seen = current.mapTo(HashSet()) { it.key }
+        val held = records.associateBy { it.key }
         val additions = describePending(store, 0L, socketOpen = false, lastServerFrameAt = 0L)
             .filter { it.key !in seen }
-            .map { FailedSend(it.key, it.sessionId, it.kind, it.text, it.attachmentCount, it.imageCount, it.bytes, reason, details[it.key]?.first, details[it.key]?.second ?: false) }
+            .map {
+                // A9: Send again only where the whole content is still here: text alone (no attachment, no delegate mention).
+                val textOnly = it.attachmentCount == 0 && held[it.key]?.mention == null && reason != FailedSendReason.PhotoLost && reason != FailedSendReason.Upload
+                FailedSend(it.key, it.sessionId, it.kind, it.text, it.attachmentCount, it.imageCount, it.bytes, reason, details[it.key]?.first, details[it.key]?.second ?: false, textOnly)
+            }
         if (additions.isEmpty()) return current
         val next = current + additions
         return if (next.size > MAX_FAILED_SENDS) next.takeLast(MAX_FAILED_SENDS) else next

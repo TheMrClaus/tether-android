@@ -28,13 +28,18 @@ class UploadStateLabelsTest {
 
     @Test
     fun aFailedUploadSaysTheServersReason() {
+        // spec 4.1b B.1: sentence, then the reason, then " · {summary}"; an empty reason is no sentence.
         assertEquals(
-            "Not sent — the upload failed (An attachment is limited to 9 MiB.)",
+            "Not sent — the upload failed. An attachment is limited to 9 MiB. · 1 image · 1 KB",
             failedSendLabel(failed(FailedSendReason.Upload, "An attachment is limited to 9 MiB.")),
         )
         assertEquals(
-            "Not sent — the upload failed (the server did not take the photo)",
+            "Not sent — the upload failed. · 1 image · 1 KB",
             failedSendLabel(failed(FailedSendReason.Upload, null)),
+        )
+        assertEquals(
+            "Not sent — the upload failed. The link was down. · 1 image · 1 KB",
+            failedSendLabel(failed(FailedSendReason.Upload, "The link was down.")),
         )
     }
 }

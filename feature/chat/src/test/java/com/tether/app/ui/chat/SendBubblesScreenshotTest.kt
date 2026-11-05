@@ -32,6 +32,8 @@ enum class SendShot(val id: String) {
     PhotoLost("send-photo-lost"),
     Uploading("send-uploading"),
     UploadFailed("send-upload-failed"),
+    LinkAgain("send-link-again"),
+    UploadRetryable("send-upload-retryable"),
 }
 
 private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
@@ -63,6 +65,18 @@ private fun sendsFor(shot: SendShot): SendBubbles = when (shot) {
                 .copy(uploadPercent = 42),
         ),
         emptyList(),
+    ) {}
+    // A9: a text-only Link bubble offers Send again; a retryable upload failure whose bytes are not held does not.
+    SendShot.LinkAgain -> SendBubbles(
+        emptyList(),
+        listOf(SendFixtures.failed("k5", "Run the snapshot suite once more.", reason = com.tether.app.client.FailedSendReason.Link, canSendAgain = true)),
+    ) {}
+    SendShot.UploadRetryable -> SendBubbles(
+        emptyList(),
+        listOf(
+            SendFixtures.failed("k4", "Here are the two screenshots.", 2, 2, SendFixtures.THREE_MB, reason = com.tether.app.client.FailedSendReason.Upload)
+                .copy(detail = "The server could not take the upload right now.", retryable = true),
+        ),
     ) {}
     SendShot.UploadFailed -> SendBubbles(
         emptyList(),
