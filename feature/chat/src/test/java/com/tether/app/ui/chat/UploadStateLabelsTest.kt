@@ -57,4 +57,19 @@ class UploadStateLabelsTest {
             failedSendLabel(failed(FailedSendReason.Upload, null)),
         )
     }
+
+    @Test
+    fun aWaitingRecordTheDeviceDoesNotKeepSaysSoInTheStripAndTheBubble() {
+        val kept = row(null, SendStatus.Waiting)
+        val lost = row(null, SendStatus.Waiting, kept = false)
+        assertEquals("Waiting for link — kept on this device, sends when the connection returns", sendRowLabel(listOf(kept)))
+        assertEquals("Waiting for link — sends when the connection returns; may be lost if the app closes first", sendRowLabel(listOf(lost)))
+        // ANY waiting record not kept turns the whole line.
+        assertEquals(
+            "Waiting for link — sends when the connection returns; may be lost if the app closes first",
+            sendRowLabel(listOf(kept, lost)),
+        )
+        assertEquals("Waiting for link — reconnecting, your message will be sent automatically", pendingSendLabel(kept))
+        assertEquals("Waiting for link — reconnecting; may be lost if the app closes first", pendingSendLabel(lost))
+    }
 }

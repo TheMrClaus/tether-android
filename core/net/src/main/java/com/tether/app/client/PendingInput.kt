@@ -168,12 +168,7 @@ object PendingInput {
         carry: List<JsObj> = emptyList(),
     ): String {
         if (spool == null) return Web.toPersistable(store.tree, cleared.map(::js))
-        val records = store.records.map { record ->
-            val attachments = record.attachments
-            if (attachments.isNullOrEmpty()) return@map record.tree
-            val refs = spool.put(record.key, attachments) ?: return@map record.tree
-            record.tree.remove("attachments").put("attachmentFiles", JsArr.of(refs.map(::refTree)))
-        }
+        val records = spooledTrees(store, spool::put)
         val out = Web.toPersistable(JsObj.of("records" to JsArr.of(records)), cleared.map(::js))
         if (carry.isEmpty()) return out
         // Records this process could not read back (their spooled files are gone) stay in the slot
@@ -184,6 +179,31 @@ object PendingInput {
         val extra = carry.filter { (it["key"].str ?: return@filter false) !in skip }
         if (extra.isEmpty()) return out
         return JsCodec.stringify(payload.put("records", JsArr.of((payload["records"] as? JsArr).orEmpty().toList() + extra)))
+    }
+
+    /**
+     * Each record as the slot would hold it: its attachments swapped for the refs [hold] returns, or left in
+     * the tree when [hold] returns null (the web's rule then leaves the record out). ONE rule for the
+     * payload [toPersistable] writes and the keys [keptKeys] projects.
+     */
+    private fun spooledTrees(store: PendingStore, hold: (String, List<Attachment>) -> List<SpoolRef>?): List<JsObj> =
+        store.records.map { record ->
+            val attachments = record.attachments
+            if (attachments.isNullOrEmpty()) return@map record.tree
+            val refs = hold(record.key, attachments) ?: return@map record.tree
+            record.tree.remove("attachments").put("attachmentFiles", JsArr.of(refs.map(::refTree)))
+        }
+
+    /**
+     * ta-delivery §4.1d A.1: the keys of the records the slot would hold for [store] right now, with NO side
+     * effect (the spool is asked [AttachmentSpool.wouldHold], never written): a record whose attachments the
+     * spool would not take is out, and past MAX_PERSISTED_BYTES the OLDEST records are out, text-only ones
+     * included. Without a [spool] a record that carries attachments is out.
+     */
+    fun keptKeys(store: PendingStore, cleared: Collection<String> = emptyList(), spool: AttachmentSpool? = null): Set<String> {
+        val raw = if (spool == null) Web.toPersistable(store.tree, cleared.map(::js))
+        else Web.toPersistable(JsObj.of("records" to JsArr.of(spooledTrees(store) { key, atts -> if (spool.wouldHold(key, atts)) listOf(SpoolRef("", "", "0.bin", 0)) else null })), cleared.map(::js))
+        return persistedKeys(raw)
     }
 
     /**

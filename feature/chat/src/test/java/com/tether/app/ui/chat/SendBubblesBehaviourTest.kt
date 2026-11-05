@@ -2,6 +2,12 @@ package com.tether.app.ui.chat
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -159,7 +165,8 @@ class SendBubblesBehaviourTest {
         val words = "2 images · 3.0 MB · Uploading — kept on this device until it reaches the server"
         // The same words in the strip row and in the transcript bubble.
         rule.onAllNodesWithText(words).assertCountEquals(2)
-        rule.onAllNodesWithText("42%").assertCountEquals(2)
+        // §4.1d B item 4: the printed % is not exposed to accessibility (the bar's range info is the one place).
+        rule.onAllNodesWithText("42%").assertCountEquals(0)
         rule.onAllNodes(hasProgressBarRangeInfo(ProgressBarRangeInfo(0.42f, 0f..1f))).assertCountEquals(2)
     }
 
@@ -172,6 +179,63 @@ class SendBubblesBehaviourTest {
         rule.onNodeWithText("Waiting for link — reconnecting, your message will be sent automatically").assertIsDisplayed()
         rule.onAllNodesWithText("0%").assertCountEquals(0)
         rule.onAllNodesWithTag(UPLOAD_PROGRESS_TAG).assertCountEquals(0)
+    }
+
+    @Test
+    fun theStripsLiveRegionHoldsOnlyTheGlyphAndWordsNeverTheProgress() {
+        val c = client()
+        c.pendingRows.value = listOf(SendFixtures.pending("k1", "Ship it.", attachments = 2, images = 2, bytes = SendFixtures.THREE_MB, percent = 42))
+        host(c)
+        val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)
+        // The words are the live region; its subtree carries no range info and no percent.
+        val regions = rule.onAllNodes(live).fetchSemanticsNodes()
+        assertTrue(regions.isNotEmpty())
+        for (node in regions) {
+            val text = node.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString { it.text }
+            assertFalse("no % inside a live region: $text", text.contains('%'))
+            assertFalse(node.config.contains(SemanticsProperties.ProgressBarRangeInfo))
+            assertTrue(node.children.none { it.config.contains(SemanticsProperties.ProgressBarRangeInfo) })
+        }
+        // The progress node is the one that exposes the value, and it is not inside a live region.
+        rule.onAllNodes(hasProgressBarRangeInfo(ProgressBarRangeInfo(0.42f, 0f..1f))).assertCountEquals(2)
+        val stripWords = rule.onAllNodes(live).fetchSemanticsNodes().filter { n ->
+            n.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text.contains("Uploading") }
+        }
+        assertEquals(1, stripWords.size)
+    }
+
+    @Test
+    fun thePendingBubbleIsNotALiveRegionAndTheFailedBubbleIs() {
+        val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)
+        val c = client()
+        c.pendingRows.value = listOf(SendFixtures.pending("k1", "Ship it.", SendStatus.Waiting, keptOnDevice = false))
+        host(c)
+        rule.onNode(hasAnyAncestor(hasTestTag(PENDING_SEND_TAG)).and(live), useUnmergedTree = true).assertDoesNotExist()
+        rule.onNode(hasText("Waiting for link — reconnecting; may be lost if the app closes first"), useUnmergedTree = true).assertExists()
+        rule.onNode(hasTestTag(SEND_ROW_TAG).and(live), useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun aFailedBubblesStatusLineIsALiveRegion() {
+        val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)
+        val c = client()
+        c.failedRows.value = listOf(SendFixtures.failed("k9", "Ship it."))
+        host(c)
+        rule.onNode(hasAnyAncestor(hasTestTag(FAILED_SEND_TAG)).and(live), useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun anUploadingRowPlusASendingRowShowsOneV1RowThenCountsOnlyTheNonUploadingRows() {
+        val c = client()
+        c.pendingRows.value = listOf(
+            SendFixtures.pending("k1", "Ship it.", attachments = 1, images = 1, bytes = 8.0, percent = 42),
+            SendFixtures.pending("k2", "Next."),
+        )
+        host(c)
+        // One V1 row with its bar in the strip (the bubble repeats the words), then the V2 count of the one other row.
+        rule.onAllNodes(hasProgressBarRangeInfo(ProgressBarRangeInfo(0.42f, 0f..1f)), useUnmergedTree = true).assertCountEquals(2)
+        rule.onNodeWithText("Sending 1 message…").assertIsDisplayed()
+        rule.onAllNodesWithText("Sending 2 messages…").assertCountEquals(0)
     }
 
     // --- in the chat --------------------------------------------------------------------------

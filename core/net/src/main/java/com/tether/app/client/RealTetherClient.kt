@@ -4708,10 +4708,45 @@ class RealTetherClient(
     private fun publishPendingSends() {
         val rows = PendingInput.describePending(pendingStore, clock(), socketOpen, lastInboundAt)
         val hub = attachmentUploads
-        val onDevice = attachmentSpool != null
+        val kept = keptKeysLocked()
         pendingSendsState.value = rows.map { row ->
-            val withSpool = row.copy(keptOnDevice = onDevice)
-            hub?.percentFor(row.key)?.let { withSpool.copy(uploadPercent = it) } ?: withSpool
+            val withKept = row.copy(keptOnDevice = row.key in kept)
+            hub?.percentFor(row.key)?.let { withKept.copy(uploadPercent = it) } ?: withKept
+        }
+    }
+
+    // ta-delivery §4.1d A.1: the per-record fact "kept on this device". Guarded by [lock]. Recomputed only when the
+    // STORED messages change (the store's identity), never on an upload-progress tick or a link change.
+    private var keptCacheStore: PendingStore? = null
+    private var keptCacheFailed = false
+    private var keptCacheDropped: Set<String> = emptySet()
+    private var keptCacheKeys: Set<String> = emptySet()
+
+    // Set in both write catch blocks, cleared by a write that succeeds: after a failed write nothing is kept.
+    private var lastWriteFailed = false
+
+    // Keys the last SUCCESSFUL current-slot write left out although the projection had taken them (a spool I/O error).
+    private var droppedByWrite: Set<String> = emptySet()
+
+    /** Caller holds [lock]. The keys the slot holds or would hold now (empty after a failed write). */
+    private fun keptKeysLocked(): Set<String> {
+        if (lastWriteFailed) return emptySet()
+        if (keptCacheStore !== pendingStore || keptCacheFailed != lastWriteFailed || keptCacheDropped !== droppedByWrite) {
+            keptCacheKeys = PendingInput.keptKeys(pendingStore, clearedKeys, attachmentSpool) - droppedByWrite
+            keptCacheStore = pendingStore
+            keptCacheFailed = lastWriteFailed
+            keptCacheDropped = droppedByWrite
+        }
+        return keptCacheKeys
+    }
+
+    /** A slot write threw (true) or succeeded (false): the rows are re-published when the fact changed. */
+    private fun noteWrite(failed: Boolean, dropped: Set<String>? = null) {
+        synchronized(lock) {
+            val before = lastWriteFailed to droppedByWrite
+            lastWriteFailed = failed
+            if (dropped != null) droppedByWrite = dropped
+            if (before != (lastWriteFailed to droppedByWrite)) publishPendingSends()
         }
     }
 
@@ -4857,12 +4892,15 @@ class RealTetherClient(
                 }
                 if (snapshot.version <= (persistedVersions[snapshot.origin] ?: 0L)) return@withLock
                 try {
-                    settings.writePendingInput(snapshot.origin, PendingInput.toPersistable(snapshot.store, snapshot.cleared, attachmentSpool))
+                    val payload = PendingInput.toPersistable(snapshot.store, snapshot.cleared, attachmentSpool)
+                    settings.writePendingInput(snapshot.origin, payload)
                     persistedVersions[snapshot.origin] = snapshot.version
+                    noteWrite(false, snapshot.store.records.map { it.key }.toSet() - PendingInput.persistedKeys(payload))
                     sweepSpool()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
+                    noteWrite(true)
                     // A failed write must never break sending; the in-memory store
                     // still redelivers for the life of the process.
                 }
@@ -4934,10 +4972,12 @@ class RealTetherClient(
                     }
                     settings.writePendingInput(write.origin, PendingInput.toPersistable(store, cleared, attachmentSpool, carry))
                     persistedVersions[write.origin] = write.version
+                    noteWrite(false)
                     sweepSpool()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
+                    noteWrite(true)
                     // The set-aside copy in memory still holds for this process.
                 }
             }

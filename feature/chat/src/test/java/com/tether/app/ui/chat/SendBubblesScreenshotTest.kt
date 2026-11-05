@@ -23,7 +23,7 @@ import org.robolectric.annotation.Config
  * send in flight (dimmed, spinner, "Sending…" / "Sending — 2 images · 3.0 MB"); `send-waiting` =
  * the link down (full strength, alert, "Waiting for link — …"); `send-failed` = a send given up on
  * ("Not delivered (2 images · 3.0 MB)", brick edge, Dismiss). And the composer's send-status row:
- * `send-row-sending` (faint, spinner) and `send-row-waiting` (violet, alert).
+ * `send-row-sending` (faint, spinner) and `send-row-waiting` (warning, alert).
  */
 enum class SendShot(val id: String) {
     Sending("send-sending"),
@@ -105,6 +105,7 @@ enum class StripShot(val id: String) {
     Waiting("composer-send-row-waiting"),
     Uploading("composer-send-row-uploading"),
     UploadingNoSpool("composer-send-row-uploading-no-spool"),
+    WaitingNotKept("composer-send-row-waiting-not-kept"),
 }
 
 fun ComposeContentTestRule.snapSendRow(shot: StripShot, skin: TetherSkin, size: String = "phone", width: Dp? = null, suffix: String = "") {
@@ -112,6 +113,7 @@ fun ComposeContentTestRule.snapSendRow(shot: StripShot, skin: TetherSkin, size: 
     val rows = when (shot) {
         StripShot.Sending -> listOf(SendFixtures.pending("k1", "a"), SendFixtures.pending("k2", "b"))
         StripShot.Waiting -> listOf(SendFixtures.pending("k1", "a", SendStatus.Waiting), SendFixtures.pending("k2", "b"))
+        StripShot.WaitingNotKept -> listOf(SendFixtures.pending("k1", "a", SendStatus.Waiting, keptOnDevice = false))
         StripShot.Uploading -> listOf(SendFixtures.pending("k1", "a", attachments = 2, images = 2, bytes = SendFixtures.THREE_MB, percent = 42))
         StripShot.UploadingNoSpool ->
             listOf(SendFixtures.pending("k1", "a", attachments = 2, images = 2, bytes = SendFixtures.THREE_MB, percent = 42, keptOnDevice = false))
@@ -230,6 +232,8 @@ class SendRowFontScaleScreenshotTest(private val skin: TetherSkin) {
     @Test fun uploading() = rule.snapSendRow(StripShot.Uploading, skin, suffix = "-font-1.3x")
 
     @Test fun uploadingNoSpool() = rule.snapSendRow(StripShot.UploadingNoSpool, skin, suffix = "-font-1.3x")
+
+    @Test fun waitingNotKept() = rule.snapSendRow(StripShot.WaitingNotKept, skin, suffix = "-font-1.3x")
 
     companion object {
         @JvmStatic
