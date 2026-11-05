@@ -303,13 +303,14 @@ private fun Body(
             }
             EmptyNote(text, Modifier.testTag(AccountsTags.Error).semantics { liveRegion = LiveRegionMode.Polite })
         }
+        if (embedded) {
+            SectionTitle("Claude accounts", embedded = true) { RefreshUsageKey(state, 48.dp) }
+        }
         if (data != null) androidx.compose.runtime.CompositionLocalProvider(LocalCardPadding provides if (narrow) 18.dp else 20.dp) {
             // `.usage-accounts-grid`: auto-fill columns of at least 15rem (one ≤ 640).
             val inner = width - if (narrow) 40.dp else 56.dp
             val columns = if (narrow) 1 else maxOf(1, ((inner + 20.dp) / (240.dp + 20.dp)).toInt())
-            if (embedded) {
-                SectionTitle("Claude accounts", embedded = true) { RefreshUsageKey(state, 48.dp) }
-            } else {
+            if (!embedded) {
                 SectionTitle("Claude accounts")
             }
             Grid(columns) {

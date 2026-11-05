@@ -80,15 +80,16 @@ fun RuntimeDeskScaffold(
     val selectedDestination = items.firstOrNull { it.id == selected }?.label ?: "Settings"
     val selectedDetail = entities.firstOrNull { it.id == selectedEntity }?.label ?: selectedDestination
 
-    BackHandler { if (level == RuntimeDeskLevel.Destinations) onReturn() else onBack() }
-
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .background(t.graphite)
             .windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime)),
     ) {
-        if (maxWidth >= RuntimeDeskStyle.ExpandedBreakpoint) {
+        val expanded = maxWidth >= RuntimeDeskStyle.ExpandedBreakpoint
+        BackHandler { if (expanded || level == RuntimeDeskLevel.Destinations) onReturn() else onBack() }
+
+        if (expanded) {
             ExpandedRuntimeDesk(
                 items = items,
                 selected = selected,
@@ -268,7 +269,7 @@ private fun RuntimeDeskTopBar(title: String, canGoBack: Boolean, backLabel: Stri
             TetherKey(
                 onClick = onBack,
                 classes = KeyClasses.IconButton,
-                icon = TetherIcons.ArrowLeft,
+                icon = TetherIcons.ChevronLeft,
                 iconSize = 20.dp,
                 contentDescription = "Back to $backLabel",
                 modifier = Modifier.size(RuntimeDeskStyle.TouchTarget),
