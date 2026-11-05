@@ -6,7 +6,7 @@ import com.tether.app.protocol.model.QueuedMessage
  * Delivery UI words (delivery-composer-spec §1 V4/V5, §3.2, §4.1, §4.1a A/C). Pure, no clock reads. ta-ceo's
  * deferred-wait copy (formatWaited, liveWorkCopy, deferredWaitCopy, the 60 s choice) is RETIRED with the old row wait choice
  * (spec §3.2): a queued row now says V4 or V5, and the only client action is "Interrupt and send" (§4.2).
- * [stopCostCopy] only decides WHETHER the composer's Stop confirms (live visible work); the words are [interruptCostCopy] + [steeredStopCopy].
+ * [stopConfirms] only decides WHETHER the composer's Stop confirms (live visible work that Stop ends); the words are [interruptCostCopy] + [steeredStopCopy].
  */
 object QueueWait {
 
@@ -25,19 +25,36 @@ object QueueWait {
     private fun count(value: Int): Int = if (value > 0) value else 0
 
     /**
-     * lib/queue-wait.mjs:62 — the price of the composer's Stop, or "" when it would stop nothing but
-     * the turn itself (no confirmation needed).
+     * Whether the composer's Stop asks for a confirmation (spec §4.3, §4.1c A.3): an open tool call, or a visible background task
+     * that Stop ENDS. Background tasks that Stop spares ([backgroundSpared]) never open it. The words are [interruptCostCopy].
      */
-    fun stopCostCopy(work: LiveWork): String {
-        val tools = count(work.openTools)
-        val background = count(work.outstandingBackground)
-        val parts = ArrayList<String>(2)
-        if (tools > 0) parts.add("the ${if (tools == 1) "open tool call" else "${work.openTools} open tool calls"}")
-        if (background > 0) parts.add("kill ${plural(work.outstandingBackground, "background task", "background tasks")}")
-        if (parts.isEmpty()) return ""
-        if (tools > 0 && background > 0) return "Stop ends ${parts[0]} and will ${parts[1]}"
-        return if (tools > 0) "Stop ends ${parts[0]}" else "Stop will ${parts[0]}"
-    }
+    fun stopConfirms(work: LiveWork, backgroundSpared: Boolean = false): Boolean =
+        count(work.openTools) > 0 || (count(work.outstandingBackground) > 0 && !backgroundSpared)
+
+    /** First protocol version whose server declares the persistent Claude engine's Stop spares background work (D-L148-1 (1)). */
+    const val SPARED_PROTOCOL_MIN = 155
+
+    /**
+     * Spec §4.1c A.2 / D-L148-1 (1): background tasks are spared only for provider `claude`, when the connected server's protocol is
+     * >= [SPARED_PROTOCOL_MIN] AND the provider row's `capabilities.persistentSessions` is true. Anything else (an older server,
+     * the per-turn engine, an unknown version) keeps the §4.1 "may stop" words.
+     */
+    fun backgroundSpared(provider: String?, serverProtocol: Int?, persistentSessions: Boolean): Boolean =
+        provider == "claude" && persistentSessions && serverProtocol != null && serverProtocol >= SPARED_PROTOCOL_MIN
+
+    /**
+     * The screen-level input of [backgroundSpared] (ChatScreen's composer): the session's provider row is looked up in [providers] by
+     * id, and [serverProtocol] must be the CONNECTED SERVER's protocol (`serverProtocolVersion`), never a client constant. No session = false.
+     */
+    fun backgroundSparedFor(
+        session: com.tether.app.protocol.model.AgentSession?,
+        providers: List<com.tether.app.protocol.model.ProviderInfo>,
+        serverProtocol: Int?,
+    ): Boolean = session != null && backgroundSpared(
+        session.provider,
+        serverProtocol,
+        providers.firstOrNull { it.id == session.provider }?.capabilities?.persistentSessions == true,
+    )
 
     // ---- spec §4.1: the cost sentence ----------------------------------------------------------------
 
@@ -48,7 +65,13 @@ object QueueWait {
     fun backgroundVisible(provider: String?): Boolean = provider == "claude"
 
     /** Spec §4.1 `interruptCostCopy`, exactly. */
-    fun interruptCostCopy(work: LiveWork, foregroundCertain: Boolean, backgroundVisible: Boolean): String {
+    fun interruptCostCopy(
+        work: LiveWork,
+        foregroundCertain: Boolean,
+        backgroundVisible: Boolean,
+        backgroundSpared: Boolean = false,
+    ): String {
+        val spared = backgroundVisible && backgroundSpared
         val tools = count(work.openTools)
         val bg = count(work.outstandingBackground)
         val toolText = plural(tools, "running tool call", "running tool calls")
@@ -59,10 +82,11 @@ object QueueWait {
         }
         val maybe = ArrayList<String>(2).apply {
             if (!foregroundCertain && tools > 0) add(toolText)
-            if (backgroundVisible && bg > 0) add(bgText)
+            if (backgroundVisible && !spared && bg > 0) add(bgText)
         }
         return "Stops " + certain.joinToString(" and ") +
             (if (maybe.isNotEmpty()) ", and may stop " + maybe.joinToString(" and ") else "") + "." +
+            (if (spared && bg > 0) (if (bg == 1) " 1 background task keeps running." else " $bg background tasks keep running.") else "") +
             (if (!backgroundVisible) " It may also stop background work the agent started." else "")
     }
 

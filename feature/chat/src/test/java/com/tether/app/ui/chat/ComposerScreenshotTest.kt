@@ -27,7 +27,7 @@ import org.robolectric.annotation.Config
  * Delivery (spec §1, §4.1a C, §4.2): `queue-steer` = V5 rows (the engine can steer); `queue-steer-attachments` = the same engine, a row with attachments (V4); `held-open-failed`,
  * `held-steer-uncertain`, `held-attachment-missing` = a held row beside a live one; `interrupt-send-confirm` = the next
  * row's "Interrupt and send" tapped (heading, the cost sentence + the steered line, Keep queued + the danger commit);
- * `stop-confirm` = the composer's Stop tapped with live work (Keep running + the cost); `stop-confirm-steered` = the same with one steered message (Claude: the §4.1a line); `held-handover` = a held handover instruction row.
+ * `stop-confirm` = the composer's Stop tapped with live work (Keep running + the cost); `stop-confirm-steered` = the same with one steered message (Claude: the §4.1a line); `stop-confirm-spared` = Claude persistent on a >= 155 server (background tasks keep running); `held-handover` = a held handover instruction row.
  */
 enum class ComposerShot(val id: String) {
     Idle("idle"),
@@ -43,6 +43,7 @@ enum class ComposerShot(val id: String) {
     StopConfirm("stop-confirm"),
     HeldHandover("held-handover"),
     StopConfirmSteered("stop-confirm-steered"),
+    StopConfirmSpared("stop-confirm-spared"),
 }
 
 fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, name: String, size: String, width: Dp? = null) {
@@ -64,6 +65,8 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
         )
         // Spec §4.1a A: Claude, one message already sent into the turn, live work -> the Stop panel names it.
         ComposerShot.StopConfirmSteered -> ComposerFixtures.delivery(tools = 1, background = 3, steered = listOf("Also run lint."))
+        // Spec §4.1c A: Claude persistent on a >= 155 server: the tasks are spared, the tool call still opens the Stop panel.
+        ComposerShot.StopConfirmSpared -> ComposerFixtures.delivery(tools = 1, background = 3)
         ComposerShot.InterruptSendConfirm -> ComposerFixtures.delivery(
             QueueSpec("a", "Then fix the snapshot test and rerun only that suite."),
             QueueSpec("b", "Also bump the changelog."),
@@ -89,6 +92,7 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
                 onQueueRemove = {},
                 onRequestControls = {},
                 liveness = ComposerLiveness.Live,
+                backgroundSpared = shot == ComposerShot.StopConfirmSpared,
                 steerCapableEngine = shot == ComposerShot.QueueSteer || shot == ComposerShot.QueueSteerAttachments,
                 initialDraft = draft,
                 controlActions = SessionControlFixtures.Recorder().actions(),
@@ -105,7 +109,7 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
     }
     val tap = when (shot) {
         ComposerShot.InterruptSendConfirm -> QUEUE_INTERRUPT_TAG
-        ComposerShot.StopConfirm, ComposerShot.StopConfirmSteered -> INTERRUPT_KEY_TAG
+        ComposerShot.StopConfirm, ComposerShot.StopConfirmSteered, ComposerShot.StopConfirmSpared -> INTERRUPT_KEY_TAG
         else -> null
     }
     if (tap != null) {
@@ -144,7 +148,7 @@ class ComposerTabletScreenshotTest(private val shot: ComposerShot, private val s
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(ComposerShot.Idle, ComposerShot.Queue, ComposerShot.QueueSteer, ComposerShot.QueueSteerAttachments, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.InterruptSendConfirm, ComposerShot.StopConfirm, ComposerShot.HeldHandover, ComposerShot.StopConfirmSteered).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(ComposerShot.Idle, ComposerShot.Queue, ComposerShot.QueueSteer, ComposerShot.QueueSteerAttachments, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.InterruptSendConfirm, ComposerShot.StopConfirm, ComposerShot.HeldHandover, ComposerShot.StopConfirmSteered, ComposerShot.StopConfirmSpared).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -159,7 +163,7 @@ class ComposerFontScaleScreenshotTest(private val shot: ComposerShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(ComposerShot.Draft, ComposerShot.Queue, ComposerShot.QueueSteer, ComposerShot.QueueSteerAttachments, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.InterruptSendConfirm, ComposerShot.StopConfirm, ComposerShot.HeldHandover, ComposerShot.StopConfirmSteered).flatMap { s ->
+        fun params(): List<Array<Any>> = listOf(ComposerShot.Draft, ComposerShot.Queue, ComposerShot.QueueSteer, ComposerShot.QueueSteerAttachments, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.InterruptSendConfirm, ComposerShot.StopConfirm, ComposerShot.HeldHandover, ComposerShot.StopConfirmSteered, ComposerShot.StopConfirmSpared).flatMap { s ->
             listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }

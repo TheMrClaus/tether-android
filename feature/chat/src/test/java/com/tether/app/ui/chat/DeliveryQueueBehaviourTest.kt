@@ -47,6 +47,7 @@ class DeliveryQueueBehaviourTest {
     private var fixture by mutableStateOf(ComposerFixtures.deferred())
     private var liveness by mutableStateOf(ComposerLiveness.Live)
     private var steer = false
+    private var spared = false
     private var provider by mutableStateOf("claude")
 
     private fun show(folded: ChatFixtures.Folded) {
@@ -66,6 +67,7 @@ class DeliveryQueueBehaviourTest {
                     onRequestControls = {},
                     liveness = liveness,
                     steerCapableEngine = steer,
+                    backgroundSpared = spared,
                     tree = fixture.tree,
                 )
             }
@@ -305,11 +307,47 @@ class DeliveryQueueBehaviourTest {
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).performClick()
         frames()
         assertTrue("the first press only asks: $interrupts", interrupts.isEmpty())
-        rule.onNodeWithText("$cost — Stop").assertExists()
-        rule.onNodeWithContentDescription("Keep the turn running").assertExists()
+        rule.onNodeWithText("Stop — $cost").assertExists()
+        rule.onNodeWithContentDescription("Stop — $cost").assertExists()
+        // D-L148-1 (7): the safe key's accessible name is its label.
+        rule.onNodeWithContentDescription("Keep running").assertExists()
         rule.onNodeWithTag(STOP_ANYWAY_KEY_TAG).performClick()
         frames()
         assertEquals(listOf("t1"), interrupts)
+    }
+
+    /** §4.1c A.3: with spared background tasks alone Stop is ONE tap (no confirm); unspared, the tasks open the confirm. */
+    @Test
+    fun sparedBackgroundTasksAloneDoNotOpenTheStopConfirmation() {
+        spared = true
+        show(ComposerFixtures.delivery(tools = 0, background = 3))
+        arm()
+        rule.onNodeWithTag(INTERRUPT_KEY_TAG).performClick()
+        frames()
+        assertEquals("one tap stops", listOf("t1"), interrupts)
+        assertEquals("Stops the current response. 3 background tasks keep running.", restingDescription())
+    }
+
+    @Test
+    fun unsparedBackgroundTasksStillOpenTheStopConfirmation() {
+        spared = false
+        show(ComposerFixtures.delivery(tools = 0, background = 3))
+        arm()
+        rule.onNodeWithTag(INTERRUPT_KEY_TAG).performClick()
+        frames()
+        assertTrue("the first press only asks: $interrupts", interrupts.isEmpty())
+        rule.onNodeWithText("Stop — Stops the current response, and may stop 3 background tasks.").assertExists()
+    }
+
+    @Test
+    fun sparedWithAnOpenToolConfirmsAndSaysKeepsRunning() {
+        spared = true
+        show(ComposerFixtures.delivery(tools = 1, background = 3))
+        arm()
+        rule.onNodeWithTag(INTERRUPT_KEY_TAG).performClick()
+        frames()
+        assertTrue(interrupts.isEmpty())
+        rule.onNodeWithText("Stop — Stops the current response and 1 running tool call. 3 background tasks keep running.").assertExists()
     }
 
     private fun interruptCost(p: String) = QueueWait.interruptCostCopy(
@@ -346,7 +384,7 @@ class DeliveryQueueBehaviourTest {
             arm()
             rule.onNodeWithTag(INTERRUPT_KEY_TAG).performClick()
             frames()
-            rule.onNodeWithText("$expected — Stop").assertExists()
+            rule.onNodeWithText("Stop — $expected").assertExists()
         }
     }
 

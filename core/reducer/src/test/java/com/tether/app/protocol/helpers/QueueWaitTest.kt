@@ -6,7 +6,10 @@ import com.tether.app.protocol.helpers.QueueWait.interruptAndSendRowId
 import com.tether.app.protocol.helpers.QueueWait.interruptCostCopy
 import com.tether.app.protocol.helpers.QueueWait.queuedLabel
 import com.tether.app.protocol.helpers.QueueWait.steeredStopCopy
-import com.tether.app.protocol.helpers.QueueWait.stopCostCopy
+import com.tether.app.protocol.helpers.QueueWait.backgroundSpared
+import com.tether.app.protocol.helpers.QueueWait.stopConfirms
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import com.tether.app.protocol.model.QueuedMessage
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -35,12 +38,70 @@ class QueueWaitTest {
     // ---- the composer's own Stop (unchanged, ta-ceo) -------------------------------------------------
 
     @Test
-    fun stopCostCopyIsEmptyWhenStopDestroysNothingButTheTurn() {
-        assertEquals("", stopCostCopy(LiveWork.None))
-        assertEquals("Stop will kill 7 background tasks", stopCostCopy(LiveWork(outstandingBackground = 7)))
-        assertEquals("Stop ends the open tool call", stopCostCopy(LiveWork(openTools = 1)))
-        assertEquals("Stop ends the open tool call and will kill 1 background task", stopCostCopy(LiveWork(1, 1)))
-        assertEquals("Stop ends the 2 open tool calls and will kill 3 background tasks", stopCostCopy(LiveWork(2, 3)))
+    fun stopConfirmsOnlyForWorkStopEnds() {
+        assertFalse(stopConfirms(LiveWork.None))
+        assertTrue(stopConfirms(LiveWork(outstandingBackground = 7)))
+        assertTrue(stopConfirms(LiveWork(openTools = 1)))
+        assertTrue(stopConfirms(LiveWork(1, 1)))
+        // §4.1c A.3: spared background tasks alone never open the confirmation; an open tool still does.
+        assertFalse(stopConfirms(LiveWork(outstandingBackground = 3), backgroundSpared = true))
+        assertTrue(stopConfirms(LiveWork(2, 3), backgroundSpared = true))
+    }
+
+    // ---- §4.1c A + D-L148-1 (1): the gate -------------------------------------------------------------
+
+    @Test
+    fun backgroundSparedNeedsProtocol155AndPersistentClaude() {
+        assertFalse("a 154 server keeps the old words", backgroundSpared("claude", 154, true))
+        assertFalse("per-turn Claude (persistentSessions false)", backgroundSpared("claude", 155, false))
+        assertTrue(backgroundSpared("claude", 155, true))
+        assertTrue(backgroundSpared("claude", 160, true))
+        assertFalse("unknown version", backgroundSpared("claude", null, true))
+        assertFalse("another engine", backgroundSpared("codex", 155, true))
+    }
+
+    @Test
+    fun backgroundSparedForReadsSessionProviderRowAndServerProtocol() {
+        fun row(id: String, persistent: Boolean?) = com.tether.app.protocol.model.ProviderInfo(
+            id, id, "", true, persistent?.let { com.tether.app.protocol.model.ProviderCapabilities(persistentSessions = it) },
+        )
+        fun sess(provider: String) = com.tether.app.protocol.model.AgentSession(
+            id = "s", provider = provider, name = "n", cwd = "/", status = "idle", startedAt = 0, updatedAt = 0,
+        )
+        val all = listOf(row("claude", true), row("codex", true))
+        assertFalse("no session", QueueWait.backgroundSparedFor(null, all, 155))
+        assertFalse("154 server", QueueWait.backgroundSparedFor(sess("claude"), all, 154))
+        assertFalse("per-turn claude", QueueWait.backgroundSparedFor(sess("claude"), listOf(row("claude", false)), 155))
+        assertFalse("capabilities missing", QueueWait.backgroundSparedFor(sess("claude"), listOf(row("claude", null)), 155))
+        assertFalse("provider row missing", QueueWait.backgroundSparedFor(sess("claude"), emptyList(), 155))
+        assertFalse("row of another provider only", QueueWait.backgroundSparedFor(sess("claude"), listOf(row("codex", true)), 155))
+        assertFalse("codex", QueueWait.backgroundSparedFor(sess("codex"), all, 155))
+        assertFalse("unknown protocol", QueueWait.backgroundSparedFor(sess("claude"), all, null))
+        assertTrue(QueueWait.backgroundSparedFor(sess("claude"), all, 155))
+    }
+
+    @Test
+    fun interruptCostCopyWhenBackgroundIsSpared() {
+        fun c(w: LiveWork, spared: Boolean = true) = interruptCostCopy(w, true, true, backgroundSpared = spared)
+        assertEquals("Stops the current response.", c(LiveWork.None))
+        assertEquals("Stops the current response and 1 running tool call.", c(LiveWork(1, 0)))
+        assertEquals("Stops the current response. 1 background task keeps running.", c(LiveWork(0, 1)))
+        assertEquals("Stops the current response. 3 background tasks keep running.", c(LiveWork(0, 3)))
+        assertEquals(
+            "Stops the current response and 2 running tool calls. 3 background tasks keep running.",
+            c(LiveWork(2, 3)),
+        )
+        // Not spared (a 154 server / per-turn Claude): today's §4.1 words.
+        assertEquals("Stops the current response, and may stop 3 background tasks.", c(LiveWork(0, 3), spared = false))
+        assertEquals(
+            "Stops the current response and 1 running tool call, and may stop 3 background tasks.",
+            c(LiveWork(1, 3), spared = false),
+        )
+        // Spared on an engine that cannot see background work says nothing about it.
+        assertEquals(
+            "Stops the current response. It may also stop background work the agent started.",
+            interruptCostCopy(LiveWork(0, 3), foregroundCertain = false, backgroundVisible = false, backgroundSpared = true),
+        )
     }
 
     // ---- spec §4.1 the cost sentence ------------------------------------------------------------------
