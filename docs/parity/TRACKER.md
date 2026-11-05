@@ -19,14 +19,18 @@
 | Program status | IN PROGRESS |
 | Current phase | Phases 0-3 CLOSED; Phase 4+ shipped through the 1.5.x releases; see `bd` for live rows |
 | PARITY_BASE (tether SHA) | Protocol corpora at `19c56e25` (PROTOCOL 152, floor 129); tokens and web screenshots at `887c222`; Parity Matrix re-baselined at `29537e0` (PROTOCOL 143, T14.4). Detail: `parity-corpus/VENDORED.md`, archive L13 |
-| App version | Published: **1.5.7 (code 62)** at `1ee6bb4f` on 2026-11-05. The archived resume point predates this release. |
+| App version | Published: **1.5.8 (code 63)** at `75911d0b` on 2026-11-05. The archived resume point predates this release. |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches -> PR); S* work only in standalone clones/worktrees under `~/git/tether-wt/`, never the production checkout |
 | Digest condensed | 2026-11-05 (previous tracker header: last updated 2026-10-17 by claude-main) |
 
 ## ▶ RESUME HERE
 
-**Active overnight request: ta-h9g5 (2026-11-05).** Owner delegates routine decisions to Codex and authorizes commit/push/merge plus a new APK with human-readable notes. Starting from `bd ready`: ta-lg5l (saved panel settings on late first read), ta-0ax6 (create defaults/control parity). Confirm current bugs before fixes; independent reviews and full release gate remain required. Run plan: `/tmp/ta-h9g5/w1-plan.md`; durable completion evidence will be archived under `/home/marcelloc/ta-runs/ta-h9g5/`. PR #285 is already merged; v1.5.7 is already public.
+**Overnight request: ta-h9g5 — SHIPPED (2026-11-05).**
+- [v1.5.8 / code 63](https://github.com/TheMrClaus/tether-android/releases/tag/v1.5.8), tag and gated code `75911d0b`, merged to `main`; curated user-facing notes published.
+- Resizing a panel during startup preserves the other saved panel settings. Reasonix create permission defaults now match the web; the broader approval controls and protocol work remain open under ta-0ax6 / ta-d3tj.
+- Reproduced failures before fixing; focused checks 64/0/0 and full gate **9335/0/5**, no exclusions. Independent code review PASS. Signed APK installed against an isolated fake server: six resize/restart assertions passed, actual Reasonix create frame matched the web default, and the crash log was empty. Public APK bytes and signing certificate verified.
+- Own task branch, disposable AVD, fake server and Gradle daemon lifecycle cleaned up; unrelated worktrees and uploads preserved. Receipts: `/home/marcelloc/ta-runs/ta-h9g5/release-proof.md`; gate: `/home/marcelloc/ta-runs/gates/ta-h9g5-final-75911d0b.md`. Authoritative closure/verification: `bd show ta-h9g5`.
 
 **Current request: ta-y3dw — SHIPPED (2026-11-05).**
 - [v1.5.7 / code 62](https://github.com/TheMrClaus/tether-android/releases/tag/v1.5.7), tag and gated code `1ee6bb4f`, merged to `main`.
