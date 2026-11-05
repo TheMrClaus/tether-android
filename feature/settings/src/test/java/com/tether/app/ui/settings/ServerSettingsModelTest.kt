@@ -96,7 +96,7 @@ class ServerSettingsModelTest {
             AdvancedRows.host, AdvancedRows.port, AdvancedRows.password, AdvancedRows.proxyToken, AdvancedRows.stateDir, AdvancedRows.workspaceRoot,
             AdvancedRows.claudePersistent, AdvancedRows.claudeTaskTelemetry, AdvancedRows.warmMaxSessions, AdvancedRows.maxConcurrentTurns,
             AdvancedRows.warmIdleEvictionMs, AdvancedRows.warmBgHardCapMs, AdvancedRows.warmSweepMs, AdvancedRows.shutdownDrainMs,
-            AdvancedRows.messageInterruptMode, AdvancedRows.claudeModelFallback, AdvancedRows.autoArchiveIdleDays, AdvancedRows.archiveOnMerge, AdvancedRows.defaultPermissionMode,
+            AdvancedRows.claudeModelFallback, AdvancedRows.autoArchiveIdleDays, AdvancedRows.archiveOnMerge, AdvancedRows.defaultPermissionMode,
             AdvancedRows.defaultSandboxPolicy, AdvancedRows.defaultUseWorktree, AdvancedRows.preferSpawnAgent, MetadataRows.enabled, MetadataRows.mode,
         ).map { it.setting } + listOf(AdvancedRows.allowedRoots.setting, AdvancedRows.spawnExtraWritableRoots.setting, ServerSetting.MetadataGenerationProvider, ServerSetting.MetadataGenerationProviders)
         // ta-dh1: the Engines tab's keys: each card's home, command and launch command, the switches'

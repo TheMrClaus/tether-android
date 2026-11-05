@@ -132,7 +132,6 @@ object AdvancedRows {
     val warmBgHardCapMs = ServerRow(ServerSetting.WarmBgHardCapMs, "Background hard cap (ms)", "Force-evict regardless of background state", "Force-evict a warm session after this duration even if background tasks are still running. Safety net for runaway processes. Applies immediately. Default: 1800000 (30 min).", "1800000")
     val warmSweepMs = ServerRow(ServerSetting.WarmSweepMs, "Sweep interval (ms)", "How often the eviction sweeper runs", "How frequently Tether checks for idle or expired warm sessions. Lower values detect idle sessions faster but use more CPU. Requires restart. Default: 60000 (1 min).", "60000")
     val shutdownDrainMs = ServerRow(ServerSetting.ShutdownDrainMs, "Shutdown drain (ms)", "Grace period for background work on shutdown", "How long to wait for background tasks to finish during a graceful server shutdown. Set to 0 to shut down immediately. Requires restart. Default: 0.", "0")
-    val messageInterruptMode = ServerRow(ServerSetting.MessageInterruptMode, "Message while busy", "What happens when you send while the agent is working", "What happens when you send a message while the agent is still working. Interrupt stops the current turn and sends your message right away (the default). Next call queues it and delivers at the agent's next tool call. End queues it and delivers after the turn finishes. Applies immediately.")
     val claudeModelFallback = ServerRow(ServerSetting.ClaudeModelFallback, "Claude model fallback", "Whether the Claude CLI may switch a turn to a fallback model", "When the model you picked fails with a capacity or availability error, the Claude CLI can re-run the rest of that turn on the fallback model configured in your Claude settings (fallbackModel). 'Let the CLI decide' keeps that behaviour (the default); Tether shows a notice whenever it happens. 'Never — fail the turn' sets CLAUDE_CODE_NO_MODEL_FALLBACK so the turn fails visibly instead of being downgraded. Applies when a Claude engine next starts: a warm session keeps its current CLI until it is evicted or restarted. Issue #179.")
     val autoArchiveIdleDays = ServerRow(ServerSetting.AutoArchiveIdleDays, "Auto-archive idle sessions (days)", "Archive sessions idle longer than this (0 = off)", "Unattended version of Archive idle sessions. Skips pinned sessions and any with a turn in progress, a pending approval or question, or background work. Each archived session gets a journal notice and stays restorable. Archived sessions beyond the newest 100 are still pruned by retention.", "0")
     val archiveOnMerge = ServerRow(ServerSetting.ArchiveOnMerge, "Archive on merge", "Archive a session when its linked pull request is observed merged", "When on, a session whose linked pull request is observed MERGED (on open or an explicit refresh in the inspector) is archived automatically, and its worktree is removed if it is clean and merged — the same rule a manual archive already applies. Off by default. Never fires on an ambiguous read: a failed PR lookup stays unknown, never merged. Applies immediately. Issue #159.")
@@ -163,11 +162,6 @@ object AdvancedRows {
 
     // lib/protocol.ts option lists as the Settings rows map them (settings-dialog.tsx 90fbb9f :2354-2355
     // keep `value` and `label` only, so no option is drawn as danger here).
-    val messageInterruptModes = listOf(
-        ServerChoice("interrupt", "Interrupt"),
-        ServerChoice("next-call", "Next call"),
-        ServerChoice("end", "End of turn"),
-    )
     val claudeModelFallbacks = listOf(
         ServerChoice("cli", "Let the CLI decide"),
         ServerChoice("never", "Never — fail the turn"),
