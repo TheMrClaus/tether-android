@@ -548,11 +548,7 @@ fun ChatScreen(
                 onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
                 liveness = liveness,
                 steerCapableEngine = session != null && providers.firstOrNull { it.id == session.provider }?.capabilities?.steer == true,
-                backgroundSpared = session != null && com.tether.app.protocol.helpers.QueueWait.backgroundSpared(
-                    session.provider,
-                    chatProtocol,
-                    providers.firstOrNull { it.id == session.provider }?.capabilities?.persistentSessions == true,
-                ),
+                backgroundSpared = com.tether.app.protocol.helpers.QueueWait.backgroundSparedFor(session, providers, chatProtocol),
                 attachments = attachments,
                 // A plain read, not a subscription: only the opening value matters here.
                 initialDraft = session?.let { vm.loadedDraft(it.id) },

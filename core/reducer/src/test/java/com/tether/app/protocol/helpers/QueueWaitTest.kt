@@ -61,6 +61,26 @@ class QueueWaitTest {
     }
 
     @Test
+    fun backgroundSparedForReadsSessionProviderRowAndServerProtocol() {
+        fun row(id: String, persistent: Boolean?) = com.tether.app.protocol.model.ProviderInfo(
+            id, id, "", true, persistent?.let { com.tether.app.protocol.model.ProviderCapabilities(persistentSessions = it) },
+        )
+        fun sess(provider: String) = com.tether.app.protocol.model.AgentSession(
+            id = "s", provider = provider, name = "n", cwd = "/", status = "idle", startedAt = 0, updatedAt = 0,
+        )
+        val all = listOf(row("claude", true), row("codex", true))
+        assertFalse("no session", QueueWait.backgroundSparedFor(null, all, 155))
+        assertFalse("154 server", QueueWait.backgroundSparedFor(sess("claude"), all, 154))
+        assertFalse("per-turn claude", QueueWait.backgroundSparedFor(sess("claude"), listOf(row("claude", false)), 155))
+        assertFalse("capabilities missing", QueueWait.backgroundSparedFor(sess("claude"), listOf(row("claude", null)), 155))
+        assertFalse("provider row missing", QueueWait.backgroundSparedFor(sess("claude"), emptyList(), 155))
+        assertFalse("row of another provider only", QueueWait.backgroundSparedFor(sess("claude"), listOf(row("codex", true)), 155))
+        assertFalse("codex", QueueWait.backgroundSparedFor(sess("codex"), all, 155))
+        assertFalse("unknown protocol", QueueWait.backgroundSparedFor(sess("claude"), all, null))
+        assertTrue(QueueWait.backgroundSparedFor(sess("claude"), all, 155))
+    }
+
+    @Test
     fun interruptCostCopyWhenBackgroundIsSpared() {
         fun c(w: LiveWork, spared: Boolean = true) = interruptCostCopy(w, true, true, backgroundSpared = spared)
         assertEquals("Stops the current response.", c(LiveWork.None))

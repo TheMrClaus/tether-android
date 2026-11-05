@@ -42,6 +42,20 @@ object QueueWait {
     fun backgroundSpared(provider: String?, serverProtocol: Int?, persistentSessions: Boolean): Boolean =
         provider == "claude" && persistentSessions && serverProtocol != null && serverProtocol >= SPARED_PROTOCOL_MIN
 
+    /**
+     * The screen-level input of [backgroundSpared] (ChatScreen's composer): the session's provider row is looked up in [providers] by
+     * id, and [serverProtocol] must be the CONNECTED SERVER's protocol (`serverProtocolVersion`), never a client constant. No session = false.
+     */
+    fun backgroundSparedFor(
+        session: com.tether.app.protocol.model.AgentSession?,
+        providers: List<com.tether.app.protocol.model.ProviderInfo>,
+        serverProtocol: Int?,
+    ): Boolean = session != null && backgroundSpared(
+        session.provider,
+        serverProtocol,
+        providers.firstOrNull { it.id == session.provider }?.capabilities?.persistentSessions == true,
+    )
+
     // ---- spec §4.1: the cost sentence ----------------------------------------------------------------
 
     /** Spec §4.1: foreground tool calls are certain to stop only on Claude and Pi (probed); every other engine is not. */
