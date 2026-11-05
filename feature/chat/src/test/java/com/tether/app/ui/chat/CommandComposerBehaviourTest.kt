@@ -310,32 +310,39 @@ class CommandComposerBehaviourTest {
         rule.waitForIdle()
     }
 
+    /** ta-y3dw: a real hardware Enter (no FLAG_SOFT_KEYBOARD) dispatched to the focused view, in the caller's UI-thread step. */
+    private fun hardwareEnter(view: View) {
+        view.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
+        view.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_ENTER))
+    }
+
     @Test
-    fun aSlashCommittedAndImeSentInOneStepAcceptsTheLiveMenuNotTheStaleOne() {
-        // "/" settled: the composition-time menu lists /compact first. "mo" and IME Send land in the
+    fun aSlashCommittedAndHardwareEnterInOneStepAcceptsTheLiveMenuNotTheStaleOne() {
+        // "/" settled: the composition-time menu lists /compact first. "mo" and the hardware Enter land in the
         // same step, before the recomposition: the live field is "/mo", whose menu is /model alone.
-        // Reading the stale menu would complete "/compact " instead (mutation O6).
+        // Reading the stale menu would complete "/compact " instead (mutation O6). The soft keyboard's Enter
+        // is a newline now (ta-y3dw), so the accept/send path under test is the hardware Enter.
         show(ComposerFixtures.idle, controls = modelAndCompact)
-        typeThen("/") { ic, _ ->
+        typeThen("/") { ic, view ->
             ic.commitText("mo", 1)
-            ic.performEditorAction(EditorInfo.IME_ACTION_SEND)
+            hardwareEnter(view)
         }
         assertEquals("/model ", inputText())
         assertEquals("accepting a command is not a send", emptyList<String>(), sends)
     }
 
     @Test
-    fun aSlashCommittedAndImeSentInOneStepWithNoLiveMatchSendsTheLiveText() {
-        // Live "/zz" matches nothing here (the palette always carries /model, so /mo cannot be used), so there is no menu and IME Send submits the field. The
+    fun aSlashCommittedAndHardwareEnterInOneStepWithNoLiveMatchSendsTheLiveText() {
+        // Live "/zz" matches nothing here (the palette always carries /model, so /mo cannot be used), so there is no menu and hardware Enter submits the field. The
         // stale "/" menu (open, /compact first) would swallow the Send and complete "/compact ".
         show(ComposerFixtures.idle, controls = ServerMessage.SessionControls(
             "sess-0001", emptyList(),
             listOf(SessionCommandOption("compact", "Clear history but keep a summary", null, null, true)),
             model = null,
         ))
-        typeThen("/") { ic, _ ->
+        typeThen("/") { ic, view ->
             ic.commitText("zz", 1)
-            ic.performEditorAction(EditorInfo.IME_ACTION_SEND)
+            hardwareEnter(view)
         }
         assertEquals(listOf("/zz"), sends)
         assertEquals("", inputText())

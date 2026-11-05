@@ -108,7 +108,7 @@ abstract class DraftHeaderAndRowBase {
     @Test
     fun theHeaderIs29dp() {
         show()
-        assertWithin("header height", bounds(DraftComposerTags.Header).height, 29.dp)
+        assertWithin("header height", bounds(DraftComposerTags.Header).let { it.bottom - it.top }, 29.dp)
     }
 
     @Test
@@ -116,7 +116,9 @@ abstract class DraftHeaderAndRowBase {
         show()
         val node = rule.onNodeWithTag(DraftComposerTags.Close, useUnmergedTree = true)
         val box = node.getUnclippedBoundsInRoot()
-        assertTrue("target ${box.width} x ${box.height}", box.width >= 47.5.dp && box.height >= 47.5.dp)
+        val boxWidth = box.right - box.left
+        val boxHeight = box.bottom - box.top
+        assertTrue("target $boxWidth x $boxHeight", boxWidth >= 47.5.dp && boxHeight >= 47.5.dp)
         // 4dp inside the lower edge: below the 29dp header, answered by the sheet's own tap handler.
         node.performTouchInput { click(Offset(width / 2f, height - 4.dp.toPx())) }
         rule.waitForIdle()
@@ -139,7 +141,7 @@ abstract class DraftHeaderAndRowBase {
         assertTrue("workspace then isolation", ws.left < iso.left || ws.top < iso.top)
         assertTrue("issues then PRs", issues.left < prs.left)
         for ((name, b) in listOf("workspace" to ws, "isolation" to iso, "issues" to issues, "prs" to prs)) {
-            assertTrue("$name right edge ${b.right} within ${sheet.right}", b.right <= sheet.right - 12.dp + 0.6.dp || sheet.width > 640.dp)
+            assertTrue("$name right edge ${b.right} within ${sheet.right}", b.right <= sheet.right - 12.dp + 0.6.dp || sheet.right - sheet.left > 640.dp)
             assertTrue("$name left edge ${b.left}", b.left >= sheet.left)
         }
         // No overlap on a shared line.

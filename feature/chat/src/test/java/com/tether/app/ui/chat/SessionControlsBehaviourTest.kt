@@ -64,7 +64,7 @@ import org.robolectric.annotation.Config
  * ta-y3dw: the soft keyboard's Enter is now a newline (the Send key sends), so these tests, which mean "Enter
  * submits / accepts the open menu", press the hardware Enter.
  */
-private fun SemanticsNodeInteraction.performImeAction(): SemanticsNodeInteraction = performKeyInput { pressKey(Key.Enter) }
+private fun SemanticsNodeInteraction.pressHardwareEnter(): SemanticsNodeInteraction = performKeyInput { pressKey(Key.Enter) }
 
 /** Frames for a window to open. */
 internal const val NAV_SETTLE_MS = 200L
@@ -388,13 +388,13 @@ class SessionControlsPhoneBehaviourTest {
         h.show()
         rule.onNodeWithContentDescription("Message the agent").performTextInput("/model claude-haiku-9")
         h.settle()
-        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        rule.onNodeWithContentDescription("Message the agent").pressHardwareEnter()
         h.settle()
         assertEquals(listOf<SessionControl>(SessionControl.Model("claude-haiku-9", typed = true)), h.recorder.sent)
         rule.onNodeWithText("Model set to claude-haiku-9 — not in the known list, so the CLI validates it on the next turn.").assertExists()
         rule.onNodeWithContentDescription("Message the agent").performTextInput("/model fix the tests")
         h.settle()
-        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        rule.onNodeWithContentDescription("Message the agent").pressHardwareEnter()
         h.settle()
         assertEquals(1, h.recorder.sent.size)
         rule.onNodeWithText("“fix the tests” doesn’t look like a model id. Try /model to see what the CLI offers.").assertExists()
@@ -406,7 +406,7 @@ class SessionControlsPhoneBehaviourTest {
         h.show()
         rule.onNodeWithContentDescription("Message the agent").performTextInput("/model claude-haiku-9")
         h.settle()
-        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        rule.onNodeWithContentDescription("Message the agent").pressHardwareEnter()
         h.settle()
         rule.onNodeWithText("“claude-haiku-9” wasn’t accepted as a model id for this session — the model was not changed.").assertExists()
         rule.onNodeWithText("That option is no longer offered — the setting was not changed.").assertDoesNotExist()
@@ -420,7 +420,7 @@ class SessionControlsPhoneBehaviourTest {
         h.show()
         rule.onNodeWithContentDescription("Message the agent").performTextInput("/model gpt-9-preview")
         h.settle()
-        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        rule.onNodeWithContentDescription("Message the agent").pressHardwareEnter()
         h.settle()
         assertEquals(listOf<SessionControl>(SessionControl.Model("gpt-9-preview", typed = true)), h.recorder.sent)
     }
@@ -433,11 +433,11 @@ class SessionControlsPhoneBehaviourTest {
         rule.onNodeWithContentDescription("Message the agent").performTextInput("/model")
         h.settle()
         // Enter on the open slash menu completes the name (acceptCommand), leaving `/model `; the next Enter sends.
-        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        rule.onNodeWithContentDescription("Message the agent").pressHardwareEnter()
         h.settle()
         rule.onNodeWithContentDescription("Message the agent").assertTextEquals("/model ")
         assertTrue(h.prompts.isEmpty())
-        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        rule.onNodeWithContentDescription("Message the agent").pressHardwareEnter()
         h.settle()
         assertEquals(listOf("/model"), h.prompts)
         assertTrue("no control sent: ${h.recorder.sent}", h.recorder.sent.isEmpty())
@@ -467,7 +467,7 @@ class SessionControlsPhoneBehaviourTest {
         h.show()
         rule.onNodeWithContentDescription("Message the agent").performTextInput("/model gpt-9")
         h.settle()
-        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        rule.onNodeWithContentDescription("Message the agent").pressHardwareEnter()
         h.settle()
         assertTrue("no model control for Codex", h.recorder.sent.isEmpty())
         assertEquals(listOf("/model gpt-9"), h.prompts)
@@ -510,7 +510,7 @@ class SessionControlsPhoneBehaviourTest {
         h.show()
         rule.onNodeWithContentDescription("Message the agent").performTextInput("/model sonnet")
         h.settle()
-        rule.onNodeWithContentDescription("Message the agent").performImeAction()
+        rule.onNodeWithContentDescription("Message the agent").pressHardwareEnter()
         h.settle()
         assertEquals(listOf<SessionControl>(SessionControl.Model("claude-sonnet-5")), h.recorder.sent)
     }
