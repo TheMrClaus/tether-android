@@ -9,6 +9,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.tether.app.client.AesGcmCredentialCipher
 import com.tether.app.client.AttachmentSpool
+import com.tether.app.client.AttachmentUploads
+import com.tether.app.client.UploadRuntime
+import com.tether.app.client.WorkManagerUploadScheduler
 import com.tether.app.client.DataStoreSettings
 import com.tether.app.client.KeystoreCredentialKeySource
 import com.tether.app.client.RealTetherClient
@@ -137,12 +140,17 @@ class TetherApp : Application() {
                 mirror = mirror,
                 // ta-delivery A1: a pending message's attachments survive process death (backup-excluded).
                 attachmentSpool = AttachmentSpool(File(context.noBackupFilesDir, "pending-attachments")),
+                // ta-delivery A2: a picked photo uploads in the background (WorkManager) and survives process death.
+                attachmentUploads = AttachmentUploads(File(context.noBackupFilesDir, "pending-uploads"), WorkManagerUploadScheduler(context)),
                 timing = { Log.i(TIMING_TAG, it) },
                 // ta-2vm7: the sessions kept in memory weigh at most a quarter of the app's heap class.
                 retentionBudgetBytes = ((context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)
                     ?.memoryClass?.toLong()?.times(1L shl 20) ?: Runtime.getRuntime().maxMemory()) / 4,
             )
         }
+
+        // ta-delivery A2: a WorkManager upload worker reaches the ledger through the client (which loads the sign-in).
+        UploadRuntime.provider = { context -> ClientLocator.obtain(context).uploads }
 
         // Process foreground/background ≈ the web's visibilitychange: the client
         // re-checks the link on return and lets the socket go after a grace

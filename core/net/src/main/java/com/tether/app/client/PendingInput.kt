@@ -129,13 +129,19 @@ object PendingInput {
      * use-tether.ts 90fbb9f :450-471 recordFailed: [records] given up on, as failed bubbles, appended
      * to [current] unless a key is already there, capped at [MAX_FAILED_SENDS] (oldest off first).
      */
-    fun recordFailed(current: List<FailedSend>, records: List<PendingRecord>, reason: FailedSendReason): List<FailedSend> {
+    fun recordFailed(
+        current: List<FailedSend>,
+        records: List<PendingRecord>,
+        reason: FailedSendReason,
+        /** A2: per record key, the failure's words and whether a later Send again may work. */
+        details: Map<String, Pair<String, Boolean>> = emptyMap(),
+    ): List<FailedSend> {
         if (records.isEmpty()) return current
         val store = PendingStore(JsObj.of("records" to JsArr.of(records.map { it.tree })))
         val seen = current.mapTo(HashSet()) { it.key }
         val additions = describePending(store, 0L, socketOpen = false, lastServerFrameAt = 0L)
             .filter { it.key !in seen }
-            .map { FailedSend(it.key, it.sessionId, it.kind, it.text, it.attachmentCount, it.imageCount, it.bytes, reason) }
+            .map { FailedSend(it.key, it.sessionId, it.kind, it.text, it.attachmentCount, it.imageCount, it.bytes, reason, details[it.key]?.first, details[it.key]?.second ?: false) }
         if (additions.isEmpty()) return current
         val next = current + additions
         return if (next.size > MAX_FAILED_SENDS) next.takeLast(MAX_FAILED_SENDS) else next

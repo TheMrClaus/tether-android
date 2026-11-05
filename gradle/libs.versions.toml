@@ -40,6 +40,8 @@ roborazzi = "1.75.0"
 # T13.1 journal mirror (SYNC_DESIGN §2.2). KSP2 (2.3.x) is versioned independently of Kotlin
 # and supports AGP 9 built-in Kotlin. Latest stable on Maven Central / Google as of 2026-09.
 room = "2.8.5"
+# ta-delivery A2: the background photo upload (expedited work, no foreground service at minSdk 34).
+work = "2.11.0"
 ksp = "2.3.12"
 # ta-1u4: the workspace file browser's SVG preview. AndroidSVG is a pure-Java renderer (Apache-2.0): no
 # scripts, no WebView, no network of its own (an external reference is fetched only when an
@@ -97,6 +99,8 @@ roborazzi = { group = "io.github.takahirom.roborazzi", name = "roborazzi", versi
 roborazzi-compose = { group = "io.github.takahirom.roborazzi", name = "roborazzi-compose", version.ref = "roborazzi" }
 roborazzi-junit-rule = { group = "io.github.takahirom.roborazzi", name = "roborazzi-junit-rule", version.ref = "roborazzi" }
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+androidx-work-testing = { group = "androidx.work", name = "work-testing", version.ref = "work" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
 androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "baselineprofile" }

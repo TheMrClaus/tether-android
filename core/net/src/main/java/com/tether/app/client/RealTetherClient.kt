@@ -137,6 +137,9 @@ private const val INSPECT_REQUEST_ID_MAX = 64
 private const val CREATE_REPLIES_REMEMBERED = 32
 
 /** T7.4: a message with attachments offered to the durable path (never used for them). */
+/** A2: how long a background upload waits for the stored sign-in to be read before it tries again later. */
+internal const val UPLOAD_SETTINGS_WAIT_MS = 10_000L
+
 internal const val ATTACHMENTS_NOT_SENT_COPY = "Not connected — the message and its attachments were not sent."
 
 /** use-tether.ts:1169: a failed `interrupt_result` without the server's own words. */
@@ -350,7 +353,14 @@ class RealTetherClient(
      * web's rule).
      */
     private val attachmentSpool: AttachmentSpool? = null,
+    /**
+     * ta-delivery A2: the ledger of photos uploaded in the background at pick (WorkManager). Null = off: every
+     * attachment goes inline on the `send` frame, as before.
+     */
+    private val attachmentUploads: AttachmentUploads? = null,
 ) : TetherClient {
+
+    override val uploads: AttachmentUploads? get() = attachmentUploads
 
     private val trace = TimingTrace(timing)
 
@@ -1767,6 +1777,9 @@ class RealTetherClient(
     /** The outside-the-lock half of an origin switch: views, the set-aside write, the notice. */
     private fun completeOriginSwitch(switch: OriginSwitch) {
         clearServerViews()
+        // A2 (R4): background uploads for the server just left are cancelled (a set-aside record's photos with them:
+        // it is kept as text and, if its server is signed in to again, said to have failed to upload).
+        attachmentUploads?.cancelOtherOrigins(switch.target)
         switch.write?.let { write ->
             persistSetAside(write)
             val count = write.store.records.size
@@ -2458,6 +2471,8 @@ class RealTetherClient(
             socketGone
         }
         ws?.cancel()
+        // A2 (R4): a sign-out cancels every background upload and deletes the photos' spooled bytes.
+        attachmentUploads?.cancelAll()
         clearSignInViews()
         wipeMirror()
         connectionState.value = ConnectionState.Disconnected
@@ -4248,13 +4263,41 @@ class RealTetherClient(
         mention: com.tether.app.protocol.DelegateMention?,
         expectedOrigin: String?,
         expectedEpoch: Long?,
+    ): AttachmentSendResult = sendWithUploads(sessionId, text, attachments, emptyList(), mention, expectedOrigin, expectedEpoch)
+
+    override fun sendUploaded(
+        sessionId: String,
+        text: String,
+        attachments: List<Attachment>,
+        uploadIds: List<String>,
+        mention: com.tether.app.protocol.DelegateMention?,
+        expectedOrigin: String?,
+        expectedEpoch: Long?,
+    ): AttachmentSendResult = sendWithUploads(sessionId, text, attachments, uploadIds, mention, expectedOrigin, expectedEpoch)
+
+    private fun sendWithUploads(
+        sessionId: String,
+        text: String,
+        attachments: List<Attachment>,
+        requestedUploadIds: List<String>,
+        mention: com.tether.app.protocol.DelegateMention?,
+        expectedOrigin: String?,
+        expectedEpoch: Long?,
     ): AttachmentSendResult {
         if (attachments.isEmpty()) return AttachmentSendResult.Empty
         if (sessionId.isEmpty()) return AttachmentSendResult.Locked
+        // A2: ids only when there is a ledger and every attachment was uploaded at pick (the ledger re-checks the
+        // origin and session when it binds them below); anything else is the inline frame, never both.
+        val hub = attachmentUploads
+        val uploadIds = if (hub != null && requestedUploadIds.size == attachments.size) requestedUploadIds else emptyList()
         // The frame is built and measured before the lock is taken (it can be megabytes); nothing in
         // it depends on the state the lock guards, and the key is fresh.
         val key = PendingInput.newKey()
-        val frame = ClientMessage.Send(sessionId, text, key, attachments, mention).encode()
+        val frame = if (uploadIds.isEmpty()) {
+            ClientMessage.Send(sessionId, text, key, attachments, mention).encode()
+        } else {
+            ClientMessage.Send(sessionId, text, key, null, mention, uploadIds).encode()
+        }
         val frameBytes = AttachmentFrame.utf8Length(frame)
         if (frameBytes > AttachmentFrame.MAX_SEND_FRAME_BYTES) return AttachmentSendResult.TooLarge
         var evicted = GivenUp.NONE
@@ -4291,8 +4334,13 @@ class RealTetherClient(
             // redelivered like any record: after its session's snapshot is reconciled on a new
             // connection, under the same key, until MAX_TRIES / MAX_AGE_MS (expireRecords).
             val added = PendingInput.addRecord(pendingStore, key, PendingInput.KIND_SEND, sessionId, text, clock(), attachments, mention)
-            val drain = PendingInput.sendableRecords(added.store, reconciledSessions).map { record ->
-                record.key to if (record.key == key) frame else recordFrame(record).encode()
+            // A2: bind the uploaded photos to this record (a refusal = they are not this message's: it goes inline).
+            val bound = uploadIds.isNotEmpty() && hub!!.bind(uploadIds, key, PendingInput.KIND_SEND, expectedOrigin ?: socketOrigin, sessionId)
+            val inlineFrame = if (uploadIds.isEmpty()) frame else ClientMessage.Send(sessionId, text, key, attachments, mention).encode()
+            val drain = PendingInput.sendableRecords(added.store, reconciledSessions).mapNotNull { record ->
+                // Not bound to uploads: the inline frame built above. Bound: whatever its uploads allow now.
+                if (record.key == key && !bound) return@mapNotNull record.key to inlineFrame
+                frameForRecord(record)?.let { record.key to it.encode() }
             }
             // The socket closes rather than queue past its bound (TetherWebSocket.MAX_QUEUE_BYTES):
             // frames that would pass it now are not handed over, and nothing is filed. Frames sent
@@ -4309,7 +4357,11 @@ class RealTetherClient(
             // ta-coik.19: the store is assigned once, so the chat never shows a bubble for a send
             // the rollback below withdraws (use-tether.ts 90fbb9f :677-683: no bubble for it).
             val marked = PendingInput.markSent(added.store, sent, clock())
-            if (key !in sent) {
+            // A2: this message's photos are still uploading: it is held in the store (never sent half-way), and
+            // goes out by id when they are stored (or is given up on if one fails).
+            val held = bound && key !in sent && hub!!.gate(key).let { it is UploadGate.Waiting }
+            if (key !in sent && !held) {
+                if (bound) hub!!.unbind(key)
                 // The web's rollback: a record with attachments that did not reach the wire is
                 // withdrawn (the composer keeps the text and the files), never left to deliver later.
                 pendingStore = PendingInput.discardKey(marked, key).store
@@ -4456,29 +4508,71 @@ class RealTetherClient(
      * whatever socket is live next (ta-s8q).
      */
     private fun drainPending() {
+        failUploads()
         val ws: WebSocket
         val frames: List<ClientMessage>
         synchronized(lock) {
             if (!pendingLoaded || !socketOpen || !handshakeDone) return
             if (pendingOrigin == null || pendingOrigin != socketOrigin) return
             ws = socket ?: return
+            // A2: a record whose photos are still uploading is held (no frame), not marked as tried.
             val sendable = PendingInput.sendableRecords(pendingStore, reconciledSessions)
+                .mapNotNull { record -> frameForRecord(record)?.let { record to it } }
             if (sendable.isEmpty()) return
-            pendingStore = PendingInput.markSent(pendingStore, sendable.map { it.key }, clock())
-            frames = sendable.map(::recordFrame)
+            pendingStore = PendingInput.markSent(pendingStore, sendable.map { it.first.key }, clock())
+            frames = sendable.map { it.second }
         }
         raceHook?.invoke(RacePoint.DrainComputed, frames)
         for (frame in frames) sendFrameOn(ws, frame)
         persistPending()
     }
 
-    /** The frame a pending record goes out as, under its own key (a redelivery is the SAME key). */
-    private fun recordFrame(record: PendingRecord): ClientMessage =
-        if (record.kind == PendingInput.KIND_SEND) {
-            ClientMessage.Send(record.sessionId, record.text, record.key, record.attachments, record.mention)
-        } else {
-            ClientMessage.QueueAdd(record.sessionId, record.key, record.text)
+    /**
+     * The frame a pending record goes out as, under its own key (a redelivery is the SAME key), or null while it
+     * must be held: its photos are still uploading (A2), or one failed (that record is given up on by
+     * [failUploads], never sent). A record whose uploads are all stored carries `attachmentIds` and NO inline
+     * bytes; one whose server has no upload route (R2, an idle send only) goes inline as it always did.
+     */
+    private fun frameForRecord(record: PendingRecord): ClientMessage? {
+        val gate = attachmentUploads?.gate(record.key) ?: UploadGate.None
+        return when (gate) {
+            UploadGate.Waiting, is UploadGate.Failed -> null
+            is UploadGate.Ready ->
+                if (record.kind == PendingInput.KIND_SEND) ClientMessage.Send(record.sessionId, record.text, record.key, null, record.mention, gate.ids)
+                else ClientMessage.QueueAdd(record.sessionId, record.key, record.text, gate.ids)
+            UploadGate.Inline, UploadGate.None ->
+                if (record.kind == PendingInput.KIND_SEND) {
+                    ClientMessage.Send(record.sessionId, record.text, record.key, record.attachments, record.mention)
+                } else {
+                    ClientMessage.QueueAdd(record.sessionId, record.key, record.text)
+                }
         }
+    }
+
+    /**
+     * A2: a record whose photo failed to upload for good is withdrawn from the store (never sent without its
+     * photos, never retried automatically) and shown as a failed bubble that says why; the composer's text is
+     * in the bubble. Nothing is sent. Cheap when no upload is bound.
+     */
+    private fun failUploads() {
+        val hub = attachmentUploads ?: return
+        val details = HashMap<String, Pair<String, Boolean>>()
+        val gone = synchronized(lock) {
+            if (!pendingLoaded) return
+            val bad = pendingStore.records.mapNotNull { r -> (hub.gate(r.key) as? UploadGate.Failed)?.let { r to it } }
+            if (bad.isEmpty()) return
+            var store = pendingStore
+            for ((record, failed) in bad) {
+                store = PendingInput.discardKey(store, record.key).store
+                details[record.key] = failed.reason to failed.retryable
+            }
+            pendingStore = store
+            forgetLocked(bad.map { it.first.key })
+            givenUpLocked(bad.map { it.first })
+        }
+        recordFailed(gone, FailedSendReason.Upload, details)
+        persistPending()
+    }
 
     private suspend fun sweeperLoop() {
         while (scope.isActive) {
@@ -4595,7 +4689,9 @@ class RealTetherClient(
      * from the store and the link (open socket, last inbound frame). Equal rows publish nothing.
      */
     private fun publishPendingSends() {
-        pendingSendsState.value = PendingInput.describePending(pendingStore, clock(), socketOpen, lastInboundAt)
+        val rows = PendingInput.describePending(pendingStore, clock(), socketOpen, lastInboundAt)
+        val hub = attachmentUploads
+        pendingSendsState.value = if (hub == null) rows else rows.map { row -> hub.percentFor(row.key)?.let { row.copy(uploadPercent = it) } ?: row }
     }
 
     /**
@@ -4618,12 +4714,16 @@ class RealTetherClient(
      * (or a sign-out) after they were computed, and before this runs, moves [failedGeneration] and
      * they are never shown on the next server's chat.
      */
-    private fun recordFailed(givenUp: GivenUp, reason: FailedSendReason = FailedSendReason.Expired) {
+    private fun recordFailed(
+        givenUp: GivenUp,
+        reason: FailedSendReason = FailedSendReason.Expired,
+        details: Map<String, Pair<String, Boolean>> = emptyMap(),
+    ) {
         if (givenUp.records.isEmpty()) return
         raceHook?.invoke(RacePoint.FailedComputed, givenUp.records)
         synchronized(lock) {
             if (givenUp.generation != failedGeneration) return
-            failedSendsState.update { PendingInput.recordFailed(it, givenUp.records, reason) }
+            failedSendsState.update { PendingInput.recordFailed(it, givenUp.records, reason, details) }
         }
     }
 
@@ -4761,8 +4861,9 @@ class RealTetherClient(
      * no persist can land a slot between the read and the delete.
      */
     private suspend fun sweepSpool() {
-        val spool = attachmentSpool ?: return
-        if (spool.isEmpty()) return
+        val spool = attachmentSpool
+        val hub = attachmentUploads
+        if ((spool == null || spool.isEmpty()) && (hub == null || hub.isEmpty())) return
         try {
             val keys = HashSet<String>()
             for (origin in settings.pendingInputOrigins()) keys += PendingInput.persistedKeys(settings.readPendingInput(origin))
@@ -4771,7 +4872,10 @@ class RealTetherClient(
                 pendingStore.records.mapTo(keys) { it.key }
                 for (aside in setAside.values) aside.store.records.mapTo(keys) { it.key }
             }
-            spool.sweep(keys)
+            spool?.sweep(keys)
+            // A2: an upload lives exactly as long as the record that owns it (deleted after the server acknowledged
+            // the send / queue-add, or the record was given up on), never when the upload merely ended.
+            hub?.sweepBound(keys)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -4836,6 +4940,31 @@ class RealTetherClient(
             else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
         }
     })
+
+    /** A2: the background upload's network half: [authHttp] (never follows a redirect) and the same per-call (server, credential) read as [files]. */
+    private suspend fun uploadAuthority(): UploadAuthority {
+        if (!storedSettingsLoadedState.value) {
+            withTimeoutOrNull(UPLOAD_SETTINGS_WAIT_MS) { storedSettingsLoadedState.first { it } } ?: return UploadAuthority.NotReady
+        }
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        return when {
+            base == null || credential == null -> UploadAuthority.SignedOut
+            blockedBeforeConnect(base) -> UploadAuthority.LocalNetworkBlocked
+            else -> serverOrigin(base.toString())?.let { origin -> UploadAuthority.Paired(origin, base) { request -> request.authorize(credential, base) } } ?: UploadAuthority.SignedOut
+        }
+    }
+
+    init {
+        attachmentUploads?.let { hub ->
+            hub.bind(
+                uploader = AttachmentUploader(authHttp),
+                authority = ::uploadAuthority,
+                onChange = { scope.launch { drainPending(); synchronized(lock) { publishPendingSends() } } },
+            )
+            // The percent shown on a held message follows the upload.
+            scope.launch { hub.progress.collect { synchronized(lock) { publishPendingSends() } } }
+        }
+    }
 
     /** T6.2: `/api/tool-media/…`, over [authHttp] with the same per-call (server, credential) read as [files]. */
     override val toolMedia: ToolMediaSource = HttpToolMedia(authHttp, authority = {

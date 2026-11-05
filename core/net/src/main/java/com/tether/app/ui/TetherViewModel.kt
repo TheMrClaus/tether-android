@@ -331,6 +331,51 @@ class TetherViewModel(
      */
     val stagedAttachments = StagedAttachments()
 
+    /**
+     * ta-delivery A2: a picked photo uploads in the background the moment it is staged ([AttachmentUploads], run by
+     * WorkManager so it survives backgrounding and process death). Staged id -> upload id; a photo removed from the
+     * composer cancels its upload and deletes its bytes; a Send hands the ids to the client, whose pending record then
+     * owns them. No ledger on the client (the demo) = nothing uploads and a send goes inline as it always did.
+     */
+    private val stagedUploadIds = java.util.concurrent.ConcurrentHashMap<Long, String>()
+    private val stagedUploadsStarting: MutableSet<Long> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    init {
+        client.uploads?.let { hub ->
+            viewModelScope.launch { stagedAttachments.current.collect { set -> syncStagedUploads(hub, set) } }
+        }
+    }
+
+    private fun syncStagedUploads(hub: com.tether.app.client.AttachmentUploads, set: StagedAttachments.Set?) {
+        val present = set?.items?.map { it.id }?.toSet().orEmpty()
+        for ((stagedId, uploadId) in stagedUploadIds.entries.toList()) {
+            if (stagedId in present) continue
+            stagedUploadIds.remove(stagedId)
+            hub.cancelStaged(uploadId, viewModelScope)
+        }
+        if (set == null) return
+        for (item in set.items) {
+            if (stagedUploadIds.containsKey(item.id) || !stagedUploadsStarting.add(item.id)) continue
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val bytes = try {
+                        java.util.Base64.getDecoder().decode(item.attachment.data)
+                    } catch (_: IllegalArgumentException) {
+                        null
+                    }
+                    val uploadId = bytes?.let { hub.begin(set.origin, set.sessionId, item.attachment.name, item.attachment.mediaType, it) }
+                    if (uploadId != null) {
+                        // Removed while its bytes were being spooled: nothing is left to upload.
+                        if (stagedAttachments.items(set.origin, set.sessionId).any { it.id == item.id }) stagedUploadIds[item.id] = uploadId
+                        else hub.cancelStaged(uploadId, viewModelScope)
+                    }
+                } finally {
+                    stagedUploadsStarting.remove(item.id)
+                }
+            }
+        }
+    }
+
     /** The link origin last seen (T7.4 r2: a move to another server drops what is staged or being read). */
     private var lastLinkOrigin: String? = null
 
@@ -1075,8 +1120,20 @@ class TetherViewModel(
         }
         if (client.connection.value != ConnectionState.Connected) return AttachmentSendResult.NotConnected
         val files = staged?.items?.map { it.attachment }.orEmpty()
-        val result = client.sendAttachments(sessionId, text, files + extra, mention, expectedOrigin)
-        if (result == AttachmentSendResult.Sent && staged != null) stagedAttachments.clear()
+        // A2: ids only when every staged photo has an upload and nothing inline rides along (the element screenshots
+        // [extra] are not uploaded): the frame carries ids OR bytes, never both.
+        val ids = staged?.items?.map { stagedUploadIds[it.id] }.orEmpty()
+        val byId = client.uploads != null && extra.isEmpty() && ids.isNotEmpty() && ids.all { it != null }
+        val result = if (byId) {
+            client.sendUploaded(sessionId, text, files, ids.filterNotNull(), mention, expectedOrigin)
+        } else {
+            client.sendAttachments(sessionId, text, files + extra, mention, expectedOrigin)
+        }
+        if (result == AttachmentSendResult.Sent && staged != null) {
+            // The pending record owns the uploads now: the staged set going away must not cancel them.
+            staged.items.forEach { stagedUploadIds.remove(it.id) }
+            stagedAttachments.clear()
+        }
         return result
     }
 

@@ -24,6 +24,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     // T10.5: passkey registration and sign-in (Credential Manager), behind the PasskeyAuthenticator seam.
     implementation(libs.androidx.credentials)
+    // ta-delivery A2: photos upload in the background (WorkManager) and survive process death.
+    implementation(libs.androidx.work.runtime.ktx)
 
     testImplementation(testFixtures(project(":core:reducer")))
     testImplementation(libs.junit)
@@ -32,6 +34,7 @@ dependencies {
     testImplementation(libs.okhttp.tls)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.work.testing)
 }
 
 // T1.3: PendingInputTest replays parity-corpus/helpers/pending-input.json through the typed facade.

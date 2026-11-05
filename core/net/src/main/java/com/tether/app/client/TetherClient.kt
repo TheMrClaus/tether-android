@@ -256,6 +256,25 @@ interface TetherClient {
         expectedEpoch: Long? = null,
     ): AttachmentSendResult = AttachmentSendResult.NotConnected
 
+    /**
+     * ta-delivery A2: [sendAttachments] for photos that were uploaded at pick ([uploads]; [uploadIds] in the same
+     * order as [attachments], whose inline bytes stay as the fallback and the durable spool's source). The frame
+     * carries `attachmentIds` and never the inline bytes; a message whose photos are still uploading is held, not
+     * sent, until they are stored. A client with no upload ledger sends inline, as [sendAttachments] does.
+     */
+    fun sendUploaded(
+        sessionId: String,
+        text: String,
+        attachments: List<Attachment>,
+        uploadIds: List<String>,
+        mention: com.tether.app.protocol.DelegateMention?,
+        expectedOrigin: String?,
+        expectedEpoch: Long? = null,
+    ): AttachmentSendResult = sendAttachments(sessionId, text, attachments, mention, expectedOrigin, expectedEpoch)
+
+    /** ta-delivery A2: the background upload ledger, or null when this client uploads nothing (it sends inline). */
+    val uploads: AttachmentUploads? get() = null
+
     fun queueAdd(sessionId: String, text: String)
     fun queueEdit(sessionId: String, queueId: String, text: String)
     fun queueRemove(sessionId: String, queueId: String)

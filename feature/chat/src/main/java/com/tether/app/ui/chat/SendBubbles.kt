@@ -91,6 +91,8 @@ fun attachmentSummary(attachmentCount: Int, imageCount: Int, bytes: Double): Str
 fun pendingSendLabel(row: PendingSendRow): String {
     val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
     return when {
+        // ta-delivery A2: the photos are still uploading in the background; nothing has been sent yet.
+        row.uploadPercent != null -> "Uploading ${row.uploadPercent}% — kept on this device until it reaches the server"
         row.status == SendStatus.Waiting -> "Waiting for link — reconnecting, your message will be sent automatically"
         summary.isNotEmpty() -> "Sending — $summary"
         else -> "Sending…"
@@ -100,6 +102,8 @@ fun pendingSendLabel(row: PendingSendRow): String {
 /** chat-view.tsx 90fbb9f :1596-1600: the failed bubble's status line. */
 fun failedSendLabel(row: FailedSend): String {
     if (row.reason == FailedSendReason.PhotoLost) return "Photo could not be recovered — send again."
+    // ta-delivery A2: the upload failed; the server's own reason follows (never the bytes, never a path).
+    if (row.reason == FailedSendReason.Upload) return "Not sent — the upload failed (${row.detail ?: "the server did not take the photo"})"
     val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
     return if (row.reason == FailedSendReason.Link) {
         if (summary.isNotEmpty()) "Not sent — the link was down ($summary)" else "Not sent — the link was down"
