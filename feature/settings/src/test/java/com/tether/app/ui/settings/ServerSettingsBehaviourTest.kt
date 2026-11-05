@@ -228,6 +228,7 @@ class ServerSettingsBehaviourTest {
     @Test fun aSelectSendsTheChosenOptionAndTheEmptyOptionAsNull() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("defaultSandboxPolicy" to "read-only"))), writer = writer))
+        sessions()
         openSelect("Default sandbox tier")
         pick("Provider default")
         compose.waitForIdle()
