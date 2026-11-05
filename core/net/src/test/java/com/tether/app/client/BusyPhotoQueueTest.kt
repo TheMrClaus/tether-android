@@ -156,6 +156,11 @@ class BusyPhotoQueueTest {
         assertEquals(AttachmentSendResult.Sent, r.client.sendUploaded("s1", "later", listOf(photo), listOf(id), null, r.client.consentOrigin.value))
         h.server.enqueue(MockResponse().setResponseCode(status).setBody(if (status == 404 || status == 405) "Not found" else """{"error":"no","code":"c"}"""))
         runBlocking { r.hub.run(id) }
+        // A refusal (and a missing route, for a queued message) ends in the failed `upload` bubble; a 5xx is retried later.
+        if (status != 500) {
+            h.await(r.client.failedSends) { it.isNotEmpty() }
+            assertEquals(FailedSendReason.Upload, r.client.failedSends.value.single().reason)
+        }
         val frames = framesOf("send", "queue-add")
         assertTrue("status $status: no frame at all, in particular no inline one: $frames", frames.isEmpty())
     }
