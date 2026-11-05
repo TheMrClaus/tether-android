@@ -230,7 +230,7 @@ class ChatSyncTest {
     }
 
     /**
-     * ta-coik.22: the web leaves Interrupt and "Interrupt now" live on a copy that is not live
+     * ta-coik.22: the web leaves Interrupt and "Interrupt and send" live on a copy that is not live
      * (chat-view.tsx 90fbb9f :4559-4573, :1495-1506). Each tap goes to the client, bound to the server
      * and the turn the key was drawn for; the client re-checks the link and the live set.
      */
@@ -249,6 +249,8 @@ class ChatSyncTest {
             rule.onNodeWithContentDescription("Interrupt the current turn").assertIsEnabled()
             rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsEnabled().performClick()
             rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsEnabled().performClick()
+            arm()
+            rule.onNodeWithTag(QUEUE_INTERRUPT_COMMIT_TAG).assertIsEnabled().performClick()
             rule.waitForIdle()
             assertEquals("$name: both taps reach the client", 2, client.interruptCalls.size)
             client.interruptCalls.clear()
@@ -257,6 +259,8 @@ class ChatSyncTest {
         arm()
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsEnabled().performClick()
         rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsEnabled().performClick()
+        arm()
+        rule.onNodeWithTag(QUEUE_INTERRUPT_COMMIT_TAG).assertIsEnabled().performClick()
         rule.waitForIdle()
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t1", "${busy.id}@$TEST_ORIGIN#t1"), client.interruptCalls)
     }
