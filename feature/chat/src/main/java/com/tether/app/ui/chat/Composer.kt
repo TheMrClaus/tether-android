@@ -180,9 +180,8 @@ class ComposerLiveness(
  * while a turn runs).
  *
  * Send / queue rules (chat-view.tsx:3104-3188): an idle session sends; a busy one QUEUES the
- * text (`queue-add`, flushed by the server at the next turn boundary); attachments ride only an
- * idle send, so while busy the operator is asked to wait instead of losing the files; a refused
- * send keeps the draft. Enter sends (Shift+Enter breaks the line; never mid-IME-composition),
+ * text (`queue-add`, flushed by the server at the next turn boundary); staged photos ride the
+ * Queue key as uploaded ids (A3: one `queue-add`, never inline bytes); a refused send keeps the draft. Enter sends (Shift+Enter breaks the line; never mid-IME-composition),
  * and the soft keyboard's action key is Send, as the phone web's Enter is.
  *
  * T2.3/T7.1 drafts: the editor keeps its own state (no async round-trip under the cursor). It
@@ -814,14 +813,13 @@ fun Composer(
             return
         }
         if (busy && hasAttachments) {
-            // Attachments only ride an idle send — ask the operator to wait
-            // rather than silently dropping the files (web submit()).
-            flash("Wait for the current turn to finish before sending attachments.")
+            // A3: the photos queue with the message: the client files ONE queue-add carrying their upload ids.
+            val result = attachments.send(text, null)
+            if (result == com.tether.app.client.AttachmentSendResult.Sent) setDraft("") else attachmentRefusalCopy(result)?.let(::flash)
             return
         }
         if (busy || handoverHolding) {
-            // Queue path is text-only; attachments are only attachable while
-            // idle, so none are pending here.
+            // Text-only queue path: the staged photos (none here) go through the branch above.
             if (text.isNotEmpty() && onSend(text, emptyList())) setDraft("")
         } else if (hasAttachments) {
             // T7.4: this tap is the send. Like the web (use-tether.ts filePending), one that never reached
@@ -1184,7 +1182,7 @@ fun Composer(
                             busy = busy,
                             handoverQueue = handoverHolding,
                             interruptDescription = handoverStage?.takeIf { handoverHolding }?.let { com.tether.app.client.Handover.interruptTitle(it.underlyingKey) },
-                            canQueue = draft.isNotBlank(),
+                            canQueue = draft.isNotBlank() || (busy && !handoverHolding && picked.isNotEmpty()), // A3: the Queue key carries staged photos
                             canSend = session != null && (draft.isNotBlank() || picked.isNotEmpty()),
                             onSubmit = ::submit,
                             sessionId = session?.id,

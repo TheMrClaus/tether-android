@@ -196,10 +196,12 @@ class AttachmentTransmissionTest {
     }
 
     @Test
-    fun aRunningTurnSendsNothing() {
+    fun aRunningTurnNeverTakesInlineBytesNotAsASendNotAsAQueueAdd() {
+        // A3 (R2): inline bytes cannot be queued, and a `send` into a running turn is never made.
         val (client, _) = connected(state = busyState())
-        assertEquals(AttachmentSendResult.Busy, client.sendAttachments("s1", "x", listOf(picture), null, client.consentOrigin.value))
+        assertEquals(AttachmentSendResult.NotQueueable, client.sendAttachments("s1", "x", listOf(picture), null, client.consentOrigin.value))
         assertTrue(frames("send").isEmpty())
+        assertTrue(frames("queue-add").isEmpty())
     }
 
     /**

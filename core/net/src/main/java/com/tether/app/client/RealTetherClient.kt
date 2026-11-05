@@ -4293,7 +4293,13 @@ class RealTetherClient(
         // The frame is built and measured before the lock is taken (it can be megabytes); nothing in
         // it depends on the state the lock guards, and the key is fresh.
         val key = PendingInput.newKey()
-        val frame = if (uploadIds.isEmpty()) {
+        // A3: a running turn QUEUES the photos (one `queue-add` carrying ids, never a `send`, never inline bytes: R2).
+        // This is read once here to build the frame and decided again under the lock below.
+        val queueHint = turnRunning(sessionId)
+        if (queueHint && (uploadIds.isEmpty() || mention != null)) return AttachmentSendResult.NotQueueable
+        val frame = if (queueHint) {
+            ClientMessage.QueueAdd(sessionId, key, text, uploadIds).encode()
+        } else if (uploadIds.isEmpty()) {
             ClientMessage.Send(sessionId, text, key, attachments, mention).encode()
         } else {
             ClientMessage.Send(sessionId, text, key, null, mention, uploadIds).encode()
@@ -4322,8 +4328,10 @@ class RealTetherClient(
             // is the projection's activeTurnId (chat-view.tsx :1968, :3238-3241), and a delegate
             // mention must still be offered (T7.3).
             val session = sessionsState.value.firstOrNull { it.id == sessionId }
-            val tree = sessionStore.tree(sessionId)
-            if (tree?.get("activeTurnId") is JsStr) return@synchronized AttachmentSendResult.Busy
+            val queue = turnRunning(sessionId)
+            // A3: a queued message needs ids (R2: no inline queue-add, an old server cannot take them) and carries no mention.
+            if (queue && (uploadIds.isEmpty() || mention != null)) return@synchronized AttachmentSendResult.NotQueueable
+            val kind = if (queue) PendingInput.KIND_QUEUE else PendingInput.KIND_SEND
             if (mention != null && session != null && !CommandGuard.mentionOffered(session, mention, providerCatalogState.value)) return@synchronized AttachmentSendResult.NotOffered
             // ta-coik.3 (use-tether.ts filePending :643-695): filed in the pending store under the key
             // the frame carries, then ONE drain puts every sendable record on the wire oldest-first, so
@@ -4333,9 +4341,15 @@ class RealTetherClient(
             // web's does; with one their bytes are spooled to app-private storage by the next persist), and it is
             // redelivered like any record: after its session's snapshot is reconciled on a new
             // connection, under the same key, until MAX_TRIES / MAX_AGE_MS (expireRecords).
-            val added = PendingInput.addRecord(pendingStore, key, PendingInput.KIND_SEND, sessionId, text, clock(), attachments, mention)
+            val added = PendingInput.addRecord(pendingStore, key, kind, sessionId, text, clock(), attachments, mention)
             // A2: bind the uploaded photos to this record (a refusal = they are not this message's: it goes inline).
-            val bound = uploadIds.isNotEmpty() && hub!!.bind(uploadIds, key, PendingInput.KIND_SEND, expectedOrigin ?: socketOrigin, sessionId)
+            val bound = uploadIds.isNotEmpty() && hub!!.bind(uploadIds, key, kind, expectedOrigin ?: socketOrigin, sessionId)
+            // A3: a queue-add whose photos could not be bound is withdrawn, never sent inline.
+            if (queue && !bound) {
+                pendingStore = PendingInput.discardKey(added.store, key).store
+                forgetLocked(listOf(key))
+                return@synchronized AttachmentSendResult.NotLive
+            }
             val inlineFrame = if (uploadIds.isEmpty()) frame else ClientMessage.Send(sessionId, text, key, attachments, mention).encode()
             val drain = PendingInput.sendableRecords(added.store, reconciledSessions).mapNotNull { record ->
                 // Not bound to uploads: the inline frame built above. Bound: whatever its uploads allow now.
@@ -4380,6 +4394,9 @@ class RealTetherClient(
         if (result == AttachmentSendResult.Sent) probeLink()
         return result
     }
+
+    /** A3: the session's projection has an open turn (the web's `busy`: chat-view.tsx :1968). */
+    private fun turnRunning(sessionId: String): Boolean = sessionStore.tree(sessionId)?.get("activeTurnId") is JsStr
 
     override fun queueAdd(sessionId: String, text: String) {
         recordAndDrain(PendingInput.KIND_QUEUE, sessionId, text)

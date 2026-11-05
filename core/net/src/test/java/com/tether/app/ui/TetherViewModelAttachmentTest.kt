@@ -203,8 +203,8 @@ class TetherViewModelAttachmentTest {
     fun aSentMessageClearsTheSetARefusedOneKeepsIt() = runTest(dispatcher) {
         val (vm, client) = vm()
         vm.stage()
-        client.answer = AttachmentSendResult.Busy
-        assertEquals(AttachmentSendResult.Busy, vm.sendAttachments("s1", "x", null, A))
+        client.answer = AttachmentSendResult.LinkBusy
+        assertEquals(AttachmentSendResult.LinkBusy, vm.sendAttachments("s1", "x", null, A))
         assertEquals(1, vm.staged().size)
         client.answer = AttachmentSendResult.Sent
         val m = DelegateMention("claude", "review")
