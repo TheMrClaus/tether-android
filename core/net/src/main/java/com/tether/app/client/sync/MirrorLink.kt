@@ -25,16 +25,19 @@ import kotlinx.coroutines.CompletableDeferred
  * PROTOCOL_VERSION is defined as TARGET, so the two cannot split again): the v133 fold keeps queued-message `origin` / `noticeKind`, so a checkpoint folded by the v132
  * port must not be reused, although the corpus did not move. T15.8: the corpus moved to 887c222.
  */
-const val REDUCER_CORPUS_SHA = "19c56e25eab4fdf75fb34bdf3e6962b9fc0ab074"
+const val REDUCER_CORPUS_SHA = "dc1bc720441ad1f129a7cc92fe5a9513eb2d76ea"
 
 /**
+ * delivery A4a: the fold now folds v155's `queued_message_delivered` (steered `user:<turnId>:<queueId>` block), `heldReason` and the queued attachments
+ * (dc1bc720, delivery L1), so a checkpoint folded by the v152 port is not reused.
+ *
  * ta-m7ef: the protocol the vendored REDUCER corpus (and so the fold) models: 19c56e25, v152 (ta-d3tj.10, R1: the fold now
  * writes sessionErrors / errorAt / endedAt, clears lastError at turn start, folds withdrawnQueueIds, queued held and peer
  * sender, task reopen/terminal dedupe and summary/outputFile, the spawned-run summary and the pi-dialog replace). The app's
  * TARGET_PROTOCOL_VERSION stays 143 until ta-d3tj.7. The bump clears the cursors of local checkpoints, which re-base from
  * the server. A change to the fold bumps this, with the corpus.
  */
-const val REDUCER_PROTOCOL_VERSION = 152
+const val REDUCER_PROTOCOL_VERSION = 155
 val REDUCER_VERSION: String = "$REDUCER_CORPUS_SHA/v$REDUCER_PROTOCOL_VERSION"
 
 /**

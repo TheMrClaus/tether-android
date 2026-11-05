@@ -16,9 +16,9 @@ class CorpusIntegrityTest {
     private val files = (manifest["files"] as JsArr).map { it as JsObj }
 
     @Test
-    fun protocolVersionIs152() {
-        // ta-d3tj.10 (R1): the reducer + helpers corpora moved to tether 19c56e25 (v152).
-        assertEquals(152.0, manifest["protocolVersion"].num)
+    fun protocolVersionIs155() {
+        // ta-d3tj.10 (R1): the reducer + helpers corpora moved to tether dc1bc720 (v155, delivery A4a).
+        assertEquals(155.0, manifest["protocolVersion"].num)
     }
 
     @Test
@@ -32,7 +32,7 @@ class CorpusIntegrityTest {
         }
         assertTrue(mismatches.joinToString("\n"), mismatches.isEmpty())
         val reducerFiles = files.count { it["path"].str!!.startsWith("reducer/") }
-        assertEquals(70, reducerFiles)
+        assertEquals(71, reducerFiles)
     }
 
     /** Parse every corpus file and write it back canonically: byte-for-byte identical. */
@@ -81,6 +81,6 @@ class CorpusIntegrityTest {
         val dir = File(CanonicalJson.corpusDir, "reference")
         val recorded = File(dir, "SHA256").readText().trim().substringBefore(' ')
         assertEquals(recorded, CanonicalJson.sha256Hex(File(dir, "events.ts").readBytes()))
-        assertTrue(recorded.startsWith("64fd00e52ecd1f9f")) // engines/events.ts @ 19c56e25 (events.mjs was renamed to .ts upstream)
+        assertTrue(recorded.startsWith("eaab37534c837b43")) // engines/events.ts @ dc1bc720 (v155, delivery L1; A4a)
     }
 }

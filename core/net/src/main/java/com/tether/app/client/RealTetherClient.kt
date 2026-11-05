@@ -4114,6 +4114,8 @@ class RealTetherClient(
         val ackedKey = when (event.type) {
             "turn_started" -> event.raw.str("idempotencyKey")
             "queued_message_added" -> event.raw.str("queueId")
+            // v155 (delivery L1, D-L141-6 (2)): a steered delivery is the row's acceptance — key alone, same rule.
+            "queued_message_delivered" -> event.raw.str("queueId")
             else -> null
         }
         if (ackedKey != null) {

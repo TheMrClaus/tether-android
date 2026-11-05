@@ -336,6 +336,8 @@ data class ProviderCapabilities(
      * offers command mode unless the server says so.
      */
     val commandRunner: Boolean = false,
+    /** v155 (delivery L1, w1:104): the engine can take a message into the RUNNING turn (steer). Absent = false. */
+    val steer: Boolean = false,
 )
 
 @Serializable

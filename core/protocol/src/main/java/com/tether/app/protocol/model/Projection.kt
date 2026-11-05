@@ -171,6 +171,10 @@ data class TurnBlock(
      * operator's own words.
      */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val from: MessageSource? = null,
+    /** v155 (delivery L1, w4:464): literal true on a `user:<turnId>:<queueId>` block a queued message was STEERED in as. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val steered: Boolean? = null,
+    /** v155: the id of the queue row a steered block came from. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val queueId: String? = null,
 )
 
 /** v149 `from`: the sending session of a peer message. */
@@ -349,7 +353,15 @@ data class QueuedMessage(
     /** v149 (GH #265): the sending session of a "peer" row; absent on every other row. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val fromSessionId: String? = null,
     @EncodeDefault(EncodeDefault.Mode.NEVER) val fromSessionName: String? = null,
+    /** v155 (delivery L1, D-L141-7 B2): why a held row is held, "open_failed" | "steer_uncertain"; absent = open_failed. Read [heldReasonValue]. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val heldReason: String? = null,
+    /** v155 (delivery L1): descriptors of the files/photos queued with the row, and the ids of the server-staged attachments. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val attachments: List<AttachmentMeta>? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val attachmentIds: List<String>? = null,
 ) {
+    /** v155: a held row's reason; absent (every pre-155 row) reads "open_failed". Meaningful only when [held]. */
+    val heldReasonValue: String get() = heldReason ?: "open_failed"
+
     /** v149 (queued-message.ts isPeerQueuedMessage): a row another session sent (origin "system", noticeKind "peer"). */
     val isPeer: Boolean get() = originKind == QueuedOrigin.SYSTEM && noticeKindValue == QueuedOrigin.PEER
 

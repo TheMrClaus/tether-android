@@ -14,9 +14,10 @@ class MirrorVersionTest {
         assertEquals("re-synced corpus: bump REDUCER_CORPUS_SHA (it invalidates local checkpoints)", sha, REDUCER_CORPUS_SHA)
         assertEquals("$sha/v$REDUCER_PROTOCOL_VERSION", REDUCER_VERSION)
         // ta-d3tj.10 (R1): the reducer + helpers re-vendored at web 19c56e25 (v152); every fold hunk is ported, so no revision suffix.
-        assertEquals("19c56e25eab4fdf75fb34bdf3e6962b9fc0ab074/v152", REDUCER_VERSION)
-        // The hello/advertised protocol stays 143 (ta-d3tj.7 bumps it last); the FOLD is v152's, so older checkpoints re-base.
-        assertEquals(152, REDUCER_PROTOCOL_VERSION)
+        // delivery A4a: re-vendored at tether dc1bc720 (v155, delivery L1): queued_message_delivered, heldReason, queued attachments.
+        assertEquals("dc1bc720441ad1f129a7cc92fe5a9513eb2d76ea/v155", REDUCER_VERSION)
+        // The hello/advertised protocol stays 143 (ta-d3tj.7 bumps it last); the FOLD is v155's, so older checkpoints re-base.
+        assertEquals(155, REDUCER_PROTOCOL_VERSION)
         assertEquals(143, TARGET_PROTOCOL_VERSION)
     }
 }

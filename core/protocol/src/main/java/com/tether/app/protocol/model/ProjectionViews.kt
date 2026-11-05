@@ -155,6 +155,12 @@ value class QueuedMessageView(val obj: JsObj) {
 
     /** v136 (issue #229): when a deferred ("next-call") message was queued (epoch ms); null otherwise. */
     val queuedAt: Double? get() = obj.number("queuedAt")
+
+    /** v147: a row that never sends automatically. */
+    val held: Boolean get() = obj.boolean("held") == true
+
+    /** v155: twin of [QueuedMessage.heldReasonValue]; absent = "open_failed". */
+    val heldReason: String get() = obj.string("heldReason") ?: "open_failed"
 }
 
 private fun JsObj.string(key: String): String? = (this[key] as? JsStr)?.value

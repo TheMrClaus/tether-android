@@ -422,6 +422,59 @@ class DurableSendTest {
         assertTrue(h.framesUntilBarrier().isEmpty())
     }
 
+    /**
+     * delivery A4a (v155, D-L141-6 (2)): the steered delivery IS the queue-add's acceptance. Its `queued_message_delivered`
+     * acks the record by `queueId` alone, exactly like `queued_message_added`; the reconnect re-sends nothing.
+     */
+    @Test
+    fun aSteeredDeliveryAcksTheQueueAddByItsQueueId() {
+        val (client, ws) = connectedProcess()
+        client.queueAdd("s1", "steered into the running turn")
+        val queued = key(h.expectFrame("queue-add"), "queueId")
+        ws.send(
+            """{"type":"event","sessionId":"s1","event":{"type":"queued_message_delivered","turnId":"t1",
+               "queueId":"$queued","text":"steered into the running turn","via":"steer","seq":2,"ts":2}}""",
+        )
+        persistedMatches { it.records.isEmpty() }
+
+        val ws2 = reconnectAfterDrop(ws, h.scheduler)
+        assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        ws2.send(snapshotFrame("s1", 2, turnState("s1")))
+        h.serverBarrier(ws2)
+        assertTrue("re-sent a delivered queue item", h.framesUntilBarrier().isEmpty())
+    }
+
+    /**
+     * delivery A6 (T5, D-L141-4): a record the server already journaled is answered with NO new frame, so the pending record
+     * resolves only through the snapshot reconcile. Each place the server may hold it ends the record with no duplicate send
+     * and no failed bubble: the queued row, a delivered/flushed id in `removedQueueIds`.
+     */
+    @Test
+    fun aRestartRedeliveryOfARecordTheServerStillQueuesEndsWithNoDuplicate() = redeliveryEnds("queued")
+
+    @Test
+    fun aRestartRedeliveryOfARecordTheServerDeliveredOrFlushedEndsWithNoDuplicate() = redeliveryEnds("removed")
+
+    private fun redeliveryEnds(held: String) {
+        run {
+            val (client, ws) = connectedProcess()
+            client.queueAdd("s1", "journaled before the link dropped")
+            val queued = key(h.expectFrame("queue-add"), "queueId")
+            val ws2 = reconnectAfterDrop(ws, h.scheduler)
+            assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+            val state = if (held == "queued") {
+                turnState("s1").replace(""""queuedMessages":[]""", """"queuedMessages":[{"queueId":"$queued","text":"x"}]""")
+            } else {
+                stateWithRemovedQueueIds("s1", queued)
+            }
+            ws2.send(snapshotFrame("s1", 3, state))
+            h.serverBarrier(ws2)
+            assertTrue("$held: duplicate send", h.framesUntilBarrier().isEmpty())
+            persistedMatches { it.records.isEmpty() }
+            assertTrue("$held: failed bubble", client.failedSends.value.isEmpty())
+        }
+    }
+
     /** [turnState] with a v130 (S13.1-C) `removedQueueIds` list. */
     private fun stateWithRemovedQueueIds(sessionId: String, vararg removed: String): String =
         turnState(sessionId).trimEnd().removeSuffix("}") +
