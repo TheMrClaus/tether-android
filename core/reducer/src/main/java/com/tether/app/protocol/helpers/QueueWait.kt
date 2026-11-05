@@ -4,9 +4,9 @@ import com.tether.app.protocol.model.QueuedMessage
 
 /**
  * Delivery UI words (delivery-composer-spec §1 V4/V5, §3.2, §4.1, §4.1a A/C). Pure, no clock reads. ta-ceo's
- * deferred-wait copy (formatWaited, liveWorkCopy, deferredWaitCopy, the 60 s choice) is RETIRED with "Interrupt now"
+ * deferred-wait copy (formatWaited, liveWorkCopy, deferredWaitCopy, the 60 s choice) is RETIRED with the old row wait choice
  * (spec §3.2): a queued row now says V4 or V5, and the only client action is "Interrupt and send" (§4.2).
- * [stopCostCopy] stays for the composer's own Stop key (CLI parity, unchanged by this lane).
+ * [stopCostCopy] only decides WHETHER the composer's Stop confirms (live visible work); the words are [interruptCostCopy] + [steeredStopCopy].
  */
 object QueueWait {
 

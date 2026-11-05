@@ -57,6 +57,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
@@ -153,7 +154,7 @@ internal const val STALE_RUN_TAG = "composer-run-stale"
 @androidx.compose.runtime.Immutable
 class ComposerLiveness(
     /**
-     * Why Interrupt (the key and a queued row's "Interrupt now") and the command keys cannot send
+     * Why Interrupt (the key and a queued row's Interrupt and send) and the command keys cannot send
      * ([stopLockCopy]'s words); null = they can. ta-coik.22: the screen leaves a saved or catching-up
      * copy unlocked, as the web does ([commandKeyLock]); the client refuses off a live link.
      */
@@ -199,7 +200,7 @@ fun Composer(
     onSend: (String, List<Attachment>) -> Boolean,
     /**
      * T6.7: interrupt the turn the tapped key was drawn for (its id): the ONE way an Interrupt (the
-     * key or a queued row's "Interrupt now") reaches the client, which re-checks it all.
+     * key or a queued row's Interrupt and send) reaches the client, which re-checks it all.
      */
     onInterrupt: (turnId: String) -> InterruptResult,
     onQueueEdit: (queueId: String, text: String) -> Unit,
@@ -338,10 +339,16 @@ fun Composer(
     // confirmation belongs to the turn it was asked for (a new turn or another session drops it), and
     // lapses when there is no price left to confirm or the copy cannot interrupt at all.
     val liveWork = remember(tree) { QueueWait.LiveWork(openToolCount(tree), liveBackgroundTaskCount(tree)) }
+    // The RULE (does Stop need a confirmation) is unchanged: live visible work only ([QueueWait.stopCostCopy] non-empty).
     val stopCost = QueueWait.stopCostCopy(liveWork)
     // Delivery (spec §1 V5, §4.1a A): the engine can steer; and how many queued messages already went INTO this turn.
     val steerCapable = steerCapableEngine
     val steeredInTurn = remember(activeTurn?.blocksById) { activeTurn?.blocksById?.values?.count { it.steered == true } ?: 0 }
+    // Spec §4.1a A + §4.1: what the confirmation and the resting key's description SAY: `{cost} {line}`.
+    val stopCopy = listOf(
+        QueueWait.interruptCostCopy(liveWork, QueueWait.foregroundCertain(session?.provider), QueueWait.backgroundVisible(session?.provider)),
+        QueueWait.steeredStopCopy(session?.provider, steeredInTurn),
+    ).filter { it.isNotEmpty() }.joinToString(" ")
     var confirmStop by remember(session?.id, interruptTurnId) { mutableStateOf(false) }
     LaunchedEffect(stopCost.isEmpty(), interruptLock != null, commandRunning) {
         if (stopCost.isEmpty() || interruptLock != null || commandRunning) confirmStop = false
@@ -1192,6 +1199,7 @@ fun Composer(
                             onInterrupt = ::interruptTurn,
                             interruptLock = interruptLock,
                             stopCost = stopCost,
+                            stopCopy = stopCopy,
                             confirmingStop = confirmingStop,
                             onConfirmStop = { confirmStop = it },
                             commandMode = commandMode,
@@ -1374,9 +1382,11 @@ private fun RowScope.ComposerActions(
     onInterrupt: (turnId: String) -> Unit,
     /** T13.2 r2: why Interrupt cannot send (a copy that is not live); null = it can. */
     interruptLock: String?,
-    /** ta-ceo (#229): what Stop would destroy ([QueueWait.stopCostCopy]); "" = nothing but the turn. */
+    /** ta-ceo (#229): what Stop would destroy ([QueueWait.stopCostCopy]); "" = nothing but the turn. It only decides WHETHER to confirm. */
     stopCost: String = "",
-    /** ta-ceo: the first Interrupt tap asked for the second, informed one (Keep running · Stop anyway). */
+    /** Spec §4.1 + §4.1a A: the sentences the Stop confirmation and the key's description show (`{cost} {line}`). */
+    stopCopy: String = "",
+    /** ta-ceo: the first Stop tap asked for the second, informed one (Keep running · Stop). */
     confirmingStop: Boolean = false,
     onConfirmStop: (Boolean) -> Unit = {},
     /** T7.3: the draft is a `!` command (idle: Send to agent + Background). */
@@ -1472,7 +1482,7 @@ private fun RowScope.ComposerActions(
         if (confirmingStop && drawnFor != null) {
             // ta-ceo (chat-view.tsx:4543-4558): Stop is turn-wide — with live work the second tap
             // names the price. The pair is always labelled (a phone's icon-only key would hide the
-            // price). ta-coik.13: "Stop anyway" acts on its first tap, as on the web (:4552-4558).
+            // price). ta-coik.13: the confirming Stop acts on its first tap, as on the web (:4552-4558).
             TetherKey(
                 onClick = { onConfirmStop(false) },
                 classes = KeyClasses.ChatSend,
@@ -1492,7 +1502,7 @@ private fun RowScope.ComposerActions(
                         }
                     },
                     classes = KeyClasses.ChatInterrupt,
-                    label = "$stopCost — Stop anyway",
+                    label = "$stopCopy — Stop",
                     icon = TetherIcons.CircleStop,
                     iconSize = 18.dp,
                     fontSize = fontSize,
@@ -1504,7 +1514,7 @@ private fun RowScope.ComposerActions(
                         .then(guard)
                         .testTag(STOP_ANYWAY_KEY_TAG),
                     contentPadding = 16.dp,
-                    contentDescription = "$stopCost — stop anyway",
+                    contentDescription = "$stopCopy — Stop",
                     // The price is never cut: the key grows a line instead.
                     maxLines = Int.MAX_VALUE,
                 )
@@ -1521,7 +1531,7 @@ private fun RowScope.ComposerActions(
                     }
                 },
                 classes = KeyClasses.ChatInterrupt,
-                label = if (labelled) "Interrupt" else null,
+                label = if (labelled) "Stop" else null,
                 icon = TetherIcons.CircleStop,
                 iconSize = 18.dp,
                 fontSize = fontSize,
@@ -1530,10 +1540,14 @@ private fun RowScope.ComposerActions(
                 modifier = keyModifier
                     .then(guard)
                     // No turn to bind it to: drawn as the key, but it does nothing.
-                    .semantics { if (!live) disabled() }
+                    .semantics {
+                        if (!live) disabled()
+                        // The web's aria-describedby: the name stays `Stop the current turn`, the cost + line ride alongside.
+                        if (stopCopy.isNotEmpty()) stateDescription = stopCopy
+                    }
                     .testTag(INTERRUPT_KEY_TAG),
                 contentPadding = padding,
-                contentDescription = (interruptDescription ?: "Interrupt the current turn").let { if (interruptLock == null) it else "$it, unavailable: $interruptLock" },
+                contentDescription = (interruptDescription ?: "Stop the current turn").let { if (interruptLock == null) it else "$it, unavailable: $interruptLock" },
             )
         }
     } else if (commandMode) {
