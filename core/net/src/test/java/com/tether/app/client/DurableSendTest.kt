@@ -119,7 +119,7 @@ class DurableSendTest {
     }
 
     /** A new app process over the same disk. The last one started is [ConnectionHarness.client]. */
-    private fun process(scheduler: ManualScheduler = h.scheduler): RealTetherClient {
+    private fun process(scheduler: ManualScheduler = h.scheduler, spool: java.io.File? = null): RealTetherClient {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val client = RealTetherClient(
             settings = disk(),
@@ -129,6 +129,7 @@ class DurableSendTest {
             backoff = testBackoff(),
             sweepIntervalMs = 3_600_000,
             scheduler = scheduler,
+            attachmentSpool = spool?.let(::AttachmentSpool),
         )
         processes[client] = scope
         h.client = client
@@ -506,5 +507,65 @@ class DurableSendTest {
         h.serverBarrier(ws2)
         assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
         assertTrue("approvals/questions never enter the durable store", persisted().records.isEmpty())
+    }
+
+    // ------------------------------------------------------------------
+    // ta-delivery A1: a pending message's attachments survive process death
+    // ------------------------------------------------------------------
+
+    private val pic = com.tether.app.protocol.Attachment("pic.png", "image/png", "iVBORw0KGgo=")
+    private val notes = com.tether.app.protocol.Attachment("notes.txt", "text/plain", "aGVsbG8=")
+
+    private fun awaitSpoolDirs(dir: java.io.File, predicate: (List<String>) -> Boolean) {
+        val deadline = System.currentTimeMillis() + 20_000
+        while (System.currentTimeMillis() < deadline) {
+            if (predicate(dir.list()?.toList().orEmpty())) return
+            Thread.sleep(10)
+        }
+        throw AssertionError("spool dir never matched: ${dir.list()?.toList()}")
+    }
+
+    @Test
+    fun aMessageWithTwoAttachmentsSurvivesProcessDeathAndIsRedeliveredWholeUnderItsKey() {
+        val spool = java.io.File(java.nio.file.Files.createTempDirectory("a1-spool").toFile(), "spool")
+        val first = process(scheduler = ManualScheduler(), spool = spool)
+        val ws = startConnected(first)
+        first.attach("s1")
+        h.expectFrame("attach")
+        ws.send(snapshotFrame("s1", 1, turnState("s1")))
+        h.await(first.projections) { it.containsKey("s1") }
+        assertEquals(AttachmentSendResult.Sent, first.sendAttachments("s1", "two photos", listOf(pic, notes), null, first.consentOrigin.value))
+        val original = h.expectFrame("send")
+        val sent = key(original)
+        // On disk before the process dies: the slot names the files, holds no bytes.
+        h.await(disk().written) { it != null && it.contains("attachmentFiles") && it.contains(sent) }
+        assertTrue("bytes in the slot", !disk().disk!!.contains(pic.data))
+        awaitSpoolDirs(spool) { it == listOf(sent) }
+        h.serverBarrier(ws)
+        h.framesUntilBarrier() // the half-open probe's ping, sent right after the message
+        kill(first, ws)
+
+        val second = process(spool = spool)
+        val ws2 = startConnected(second)
+        assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        ws2.send(snapshotFrame("s1", 1, turnState("s1")))
+        h.serverBarrier(ws2)
+        val resent = h.framesUntilBarrier().single()
+        assertEquals("send", resent.type())
+        assertEquals(original, resent) // same key, same text, the same two attachments
+        // The live ack clears the record, and its files with it.
+        ws2.send(turnStartedEvent("s1", "t1", 2, sent))
+        awaitSpoolDirs(spool) { it.isEmpty() }
+        persistedMatches { it.records.isEmpty() }
+    }
+
+    @Test
+    fun theStartupSweepRemovesFilesNoRecordReferences() {
+        val spool = java.io.File(java.nio.file.Files.createTempDirectory("a1-spool").toFile(), "spool")
+        java.io.File(spool, "orphan-key").mkdirs()
+        java.io.File(spool, "orphan-key/0.bin").writeBytes(byteArrayOf(1, 2, 3))
+        val client = process(spool = spool)
+        startConnected(client)
+        awaitSpoolDirs(spool) { it.isEmpty() }
     }
 }

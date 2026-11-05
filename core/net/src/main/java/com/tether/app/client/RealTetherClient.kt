@@ -344,6 +344,12 @@ class RealTetherClient(
     private val retentionBudgetBytes: Long = Runtime.getRuntime().maxMemory() / 4,
     /** ta-2vm7: how many sessions stay in memory besides the open one. */
     retainedOthers: Int = SessionRetention.DEFAULT_OTHERS,
+    /**
+     * ta-delivery A1: app-private storage for the bytes of a pending message's attachments, so the
+     * message survives process death. Null = off (a record with attachments is memory-only, the
+     * web's rule).
+     */
+    private val attachmentSpool: AttachmentSpool? = null,
 ) : TetherClient {
 
     private val trace = TimingTrace(timing)
@@ -1922,6 +1928,7 @@ class RealTetherClient(
                         continue // told again next time: a repeat, never a loss
                     }
                 }
+                sweepSpool() // startup sweep: files no record references, and the pruned slots' files
             }
         }
     }
@@ -2466,6 +2473,7 @@ class RealTetherClient(
                     // clear that returned is a landed wipe: until then the disk slots stay dead.
                     if (clearSettingsQuietly() || clearSettingsQuietly()) {
                         synchronized(lock) { if (wipe > wipeLanded) wipeLanded = wipe }
+                        sweepSpool()
                     }
                 }
             } finally {
@@ -4271,7 +4279,8 @@ class RealTetherClient(
             // the frame carries, then ONE drain puts every sendable record on the wire oldest-first, so
             // an earlier message to this session that may go now goes ahead of it (no app-only
             // refusal while one waits). The record keeps its attachments in memory only
-            // (toPersistable leaves out every record that carries them, as the web's does), and it is
+            // (without an [attachmentSpool] toPersistable leaves out every record that carries them, as the
+            // web's does; with one their bytes are spooled to app-private storage by the next persist), and it is
             // redelivered like any record: after its session's snapshot is reconciled on a new
             // connection, under the same key, until MAX_TRIES / MAX_AGE_MS (expireRecords).
             val added = PendingInput.addRecord(pendingStore, key, PendingInput.KIND_SEND, sessionId, text, clock(), attachments, mention)
@@ -4669,7 +4678,7 @@ class RealTetherClient(
         clearedKeys = LinkedHashSet(cleared.toList().takeLast(PendingInput.MAX_TOMBSTONES))
         var mine = pendingStore
         if (overlay != null) mine = PendingInput.mergeStores(mine, overlay.store, clearedKeys)
-        val restored = PendingInput.restoredFromPreviousProcess(PendingInput.fromPersisted(raw), clock())
+        val restored = PendingInput.restoredFromPreviousProcess(fromDisk(raw), clock())
         val expiry = PendingInput.expireRecords(PendingInput.mergeStores(mine, restored, clearedKeys), clock())
         // ta-coik.19: assigned once, so the expired records never show as pending first.
         pendingStore = expiry.store
@@ -4716,8 +4725,9 @@ class RealTetherClient(
                 }
                 if (snapshot.version <= (persistedVersions[snapshot.origin] ?: 0L)) return@withLock
                 try {
-                    settings.writePendingInput(snapshot.origin, PendingInput.toPersistable(snapshot.store, snapshot.cleared))
+                    settings.writePendingInput(snapshot.origin, PendingInput.toPersistable(snapshot.store, snapshot.cleared, attachmentSpool))
                     persistedVersions[snapshot.origin] = snapshot.version
+                    sweepSpool()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
@@ -4725,6 +4735,37 @@ class RealTetherClient(
                     // still redelivers for the life of the process.
                 }
             }
+        }
+    }
+
+    /** A persisted slot as a record may be delivered from: spooled attachments read back. */
+    private fun fromDisk(raw: String?): PendingStore {
+        val spool = attachmentSpool ?: return PendingInput.fromPersisted(raw)
+        return PendingInput.fromPersisted(raw, spool)
+    }
+
+    /**
+     * Delete every spooled file no record references (delivered, discarded, expired, wiped, or left by
+     * a crash). Referenced = any record in a disk slot, in memory, or in a set-aside store; an
+     * unreadable slot aborts the sweep (kept, never deleted unseen). Caller holds [persistMutex], so
+     * no persist can land a slot between the read and the delete.
+     */
+    private suspend fun sweepSpool() {
+        val spool = attachmentSpool ?: return
+        if (spool.isEmpty()) return
+        try {
+            val keys = HashSet<String>()
+            for (origin in settings.pendingInputOrigins()) keys += PendingInput.persistedKeys(settings.readPendingInput(origin))
+            keys += PendingInput.persistedKeys(settings.readUnattributedPendingInput())
+            synchronized(lock) {
+                pendingStore.records.mapTo(keys) { it.key }
+                for (aside in setAside.values) aside.store.records.mapTo(keys) { it.key }
+            }
+            spool.sweep(keys)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Unreadable: nothing is deleted; the next sweep tries again.
         }
     }
 
@@ -4749,10 +4790,11 @@ class RealTetherClient(
                         val raw = settings.readPendingInput(write.origin)
                         cleared = (PendingInput.clearedFromPersisted(raw) + cleared).distinct()
                             .takeLast(PendingInput.MAX_TOMBSTONES)
-                        store = PendingInput.mergeStores(store, PendingInput.fromPersisted(raw), cleared)
+                        store = PendingInput.mergeStores(store, fromDisk(raw), cleared)
                     }
-                    settings.writePendingInput(write.origin, PendingInput.toPersistable(store, cleared))
+                    settings.writePendingInput(write.origin, PendingInput.toPersistable(store, cleared, attachmentSpool))
                     persistedVersions[write.origin] = write.version
+                    sweepSpool()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {

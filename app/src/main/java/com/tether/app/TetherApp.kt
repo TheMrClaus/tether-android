@@ -8,6 +8,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.tether.app.client.AesGcmCredentialCipher
+import com.tether.app.client.AttachmentSpool
 import com.tether.app.client.DataStoreSettings
 import com.tether.app.client.KeystoreCredentialKeySource
 import com.tether.app.client.RealTetherClient
@@ -134,6 +135,8 @@ class TetherApp : Application() {
                 // with the one that was in force (device tokens only).
                 onLogout = { baseUrl, credential -> push.unregisterAfterLogout(baseUrl, credential) },
                 mirror = mirror,
+                // ta-delivery A1: a pending message's attachments survive process death (backup-excluded).
+                attachmentSpool = AttachmentSpool(File(context.noBackupFilesDir, "pending-attachments")),
                 timing = { Log.i(TIMING_TAG, it) },
                 // ta-2vm7: the sessions kept in memory weigh at most a quarter of the app's heap class.
                 retentionBudgetBytes = ((context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)

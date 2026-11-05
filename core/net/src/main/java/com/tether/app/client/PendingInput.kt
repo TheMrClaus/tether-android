@@ -149,12 +149,80 @@ object PendingInput {
     fun forgetSession(store: PendingStore, sessionId: String): PendingStore =
         storeOf(Web.forgetSession(store.tree, js(sessionId)), store)
 
-    /** `tether:pendingInput`'s payload: `{v:2, records (no attachments), cleared}`, ≤ MAX_PERSISTED_BYTES. */
-    fun toPersistable(store: PendingStore, cleared: Collection<String> = emptyList()): String =
-        Web.toPersistable(store.tree, cleared.map(::js))
+    /**
+     * `tether:pendingInput`'s payload: `{v:2, records, cleared}`, ≤ MAX_PERSISTED_BYTES. Without a
+     * [spool] a record that carries attachments is left out (the web's rule). With one, its bytes
+     * are written to the spool and the record is kept, carrying `attachmentFiles` (refs, no bytes);
+     * a record the spool cannot take is left out as before.
+     */
+    fun toPersistable(store: PendingStore, cleared: Collection<String> = emptyList(), spool: AttachmentSpool? = null): String {
+        if (spool == null) return Web.toPersistable(store.tree, cleared.map(::js))
+        val records = store.records.map { record ->
+            val attachments = record.attachments
+            if (attachments.isNullOrEmpty()) return@map record.tree
+            val refs = spool.put(record.key, attachments) ?: return@map record.tree
+            record.tree.remove("attachments").put("attachmentFiles", JsArr.of(refs.map(::refTree)))
+        }
+        return Web.toPersistable(JsObj.of("records" to JsArr.of(records)), cleared.map(::js))
+    }
 
-    /** Rehydrate (malformed records dropped, nothing in flight); any unreadable payload is empty. */
+    /**
+     * Rehydrate (malformed records dropped, nothing in flight); any unreadable payload is empty.
+     * A record that was spooled comes back TEXT-ONLY here: use this for counts and expiry only,
+     * and the [spool] overload wherever a record may be delivered.
+     */
     fun fromPersisted(raw: String?): PendingStore = PendingStore(Web.fromPersisted(raw?.let(::js)))
+
+    /**
+     * Rehydrate with the attachments of spooled records read back from [spool]. A record whose
+     * files are missing or changed is DROPPED, never delivered without its attachments.
+     */
+    fun fromPersisted(raw: String?, spool: AttachmentSpool): PendingStore {
+        val base = fromPersisted(raw)
+        val refsByKey = persistedRefs(raw)
+        if (refsByKey.isEmpty()) return base
+        val records = base.records.mapNotNull { record ->
+            val refs = refsByKey[record.key] ?: return@mapNotNull record.tree
+            val attachments = spool.load(record.key, refs) ?: return@mapNotNull null
+            record.tree.put("attachments", JsArr.of(attachments.map(::attachmentTree)))
+        }
+        return PendingStore(JsObj.of("records" to JsArr.of(records)))
+    }
+
+    /** Every record key a persisted payload names (any readable version), for the spool sweep. */
+    fun persistedKeys(raw: String?): Set<String> {
+        val parsed = parseOrNull(raw) as? JsObj ?: return emptySet()
+        return (parsed["records"] as? JsArr).orEmpty().mapNotNull { (it as? JsObj)?.get("key").str }.toSet()
+    }
+
+    private fun parseOrNull(raw: String?): JsValue? {
+        if (raw.isNullOrEmpty()) return null
+        return try {
+            JsCodec.parse(raw)
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+    }
+
+    private fun persistedRefs(raw: String?): Map<String, List<SpoolRef>> {
+        val parsed = parseOrNull(raw) as? JsObj ?: return emptyMap()
+        val out = HashMap<String, List<SpoolRef>>()
+        for (value in (parsed["records"] as? JsArr).orEmpty()) {
+            val record = value as? JsObj ?: continue
+            val key = record["key"].str ?: continue
+            val files = record["attachmentFiles"] as? JsArr ?: continue
+            val refs = files.mapNotNull { f ->
+                val o = f as? JsObj ?: return@mapNotNull null
+                SpoolRef(o["name"].str ?: return@mapNotNull null, o["mediaType"].str ?: return@mapNotNull null, o["file"].str ?: return@mapNotNull null, (o["bytes"].num ?: return@mapNotNull null).toLong())
+            }
+            // A ref that did not parse makes the record unloadable (empty refs fail load): never a partial set.
+            out[key] = if (refs.size == files.size) refs else emptyList()
+        }
+        return out
+    }
+
+    private fun refTree(r: SpoolRef): JsObj =
+        JsObj.of("name" to js(r.name), "mediaType" to js(r.mediaType), "file" to js(r.file), "bytes" to js(r.bytes.toDouble()))
 
     fun clearedFromPersisted(raw: String?): Set<String> = Web.clearedFromPersisted(raw?.let(::js))
 
@@ -244,7 +312,7 @@ class PendingRecord internal constructor(val tree: JsObj) {
     val tries: Int get() = (tree["tries"].num ?: 0.0).toInt()
     val firstQueuedAt: Long get() = (tree["firstQueuedAt"].num ?: 0.0).toLong()
 
-    /** In-memory only: records carrying attachments are never persisted (toPersistable). */
+    /** In memory; persisted only through an [AttachmentSpool] (toPersistable with a spool), else never. */
     val attachments: List<Attachment>? get() = (tree["attachments"] as? JsArr)?.mapNotNull { value ->
         val obj = value as? JsObj ?: return@mapNotNull null
         Attachment(obj["name"].str.orEmpty(), obj["mediaType"].str.orEmpty(), obj["data"].str.orEmpty())
