@@ -94,14 +94,10 @@ class DraftComposerSheetBehaviourTest {
         override val containerSize: IntSize get() = IntSize(412, 915)
     }
 
-    /** The Compose host view: ta-y3dw drives `dispatchKeyEventPreIme` on it, the path Gboard-bound hardware keys take. */
-    private var host: android.view.View? = null
-
     @After fun closeStore() = runBlocking { job.cancel() }
 
     private fun launch(restorer: StateRestorationTester? = null, keyboard: KeyboardInset? = null) {
         val content: @Composable () -> Unit = {
-            host = androidx.compose.ui.platform.LocalView.current
             TetherTheme {
                 CompositionLocalProvider(LocalWindowInfo provides window) {
                     if (keyboard != null) CompositionLocalProvider(LocalKeyboardInset provides keyboard) { MainShell(vm, prefs) } else MainShell(vm, prefs)
@@ -274,9 +270,19 @@ class DraftComposerSheetBehaviourTest {
         assertTrue(client.creates.isEmpty())
     }
 
+    /**
+     * ta-y3dw: the view that hosts the input node. The sheet is a [androidx.compose.ui.window.Dialog], so the node lives in the
+     * dialog's own Compose host, not the activity's (what `LocalView` in the outer content would give).
+     */
+    @OptIn(androidx.compose.ui.InternalComposeUiApi::class)
+    private fun inputHost(): android.view.View =
+        (rule.onNodeWithTag(DraftComposerTags.Input).fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+
+    /** Drives `dispatchKeyEventPreIme` on the input's own host view, the path Gboard-bound hardware keys take. */
     private fun preIme(code: Int, meta: Int = 0, action: Int = android.view.KeyEvent.ACTION_DOWN): Boolean {
         var consumed = false
-        rule.runOnUiThread { consumed = host!!.dispatchKeyEventPreIme(android.view.KeyEvent(0, 0, action, code, 0, meta)) }
+        val host = inputHost()
+        rule.runOnUiThread { consumed = host.dispatchKeyEventPreIme(android.view.KeyEvent(0, 0, action, code, 0, meta)) }
         return consumed
     }
 
