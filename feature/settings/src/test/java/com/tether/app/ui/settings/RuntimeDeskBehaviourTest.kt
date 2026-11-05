@@ -12,6 +12,9 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isHeading
@@ -184,7 +187,12 @@ class RuntimeDeskBehaviourTest {
         ).assertExists()
         compose.onNode(hasText("Preferences") and isHeading()).assertExists()
         compose.onNodeWithText("Startup").assertExists()
-        compose.onNodeWithTag(EngineTags.Section, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag(EngineTags.Section).assertDoesNotExist()
+        compose.onNodeWithTag(EngineTags.Section, useUnmergedTree = true)
+            .assertExists()
+            .assertIsNotDisplayed()
+            .assertWidthIsEqualTo(0.dp)
+            .assertHeightIsEqualTo(0.dp)
 
         compose.runOnUiThread {
             state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Engines, "claude", RuntimeDeskLevel.Detail)
