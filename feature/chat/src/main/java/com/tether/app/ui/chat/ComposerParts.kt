@@ -300,6 +300,8 @@ internal fun QueuedMessages(
     provider: String? = null,
     /** Spec §4.1a A: messages already sent INTO the running turn (n of them). */
     steeredInTurn: Int = 0,
+    /** Spec §4.1c A: Stop spares background tasks (server >= 155 AND claude persistent). */
+    backgroundSpared: Boolean = false,
     /** W34 (v151): the handover stage underway; rows then say where they go and the instruction row has no X. */
     handoverStage: com.tether.app.client.Handover.StageView? = null,
     /** W34: v151: the instruction row has no X, whatever the stage (chat-view.tsx:1632 `!handoverRequest`). */
@@ -308,7 +310,7 @@ internal fun QueuedMessages(
     val t = LocalTetherTokens.current
     val instructionIndex = queued.indexOfFirst { it.isHandoverRequest }
     val confirmation = listOf(
-        QueueWait.interruptCostCopy(liveWork, QueueWait.foregroundCertain(provider), QueueWait.backgroundVisible(provider)),
+        QueueWait.interruptCostCopy(liveWork, QueueWait.foregroundCertain(provider), QueueWait.backgroundVisible(provider), backgroundSpared),
         QueueWait.steeredStopCopy(provider, steeredInTurn),
         QUEUE_INTERRUPT_THEN_SENT,
     ).filter { it.isNotEmpty() }.joinToString(" ")

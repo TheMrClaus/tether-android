@@ -209,6 +209,8 @@ fun Composer(
     liveness: ComposerLiveness,
     /** v155 (spec §1 V5): the session's provider says `capabilities.steer`; queued rows then read "goes into this turn". */
     steerCapableEngine: Boolean = false,
+    /** Spec §4.1c A / D-L148-1 (1): Stop spares background tasks here ([QueueWait.backgroundSpared]: server >= 155 AND claude persistent). */
+    backgroundSpared: Boolean = false,
     modifier: Modifier = Modifier,
     /**
      * T7.4: the staged attachments of this session, staging picks, and the ONE send that carries
@@ -338,21 +340,21 @@ fun Composer(
     // confirmation belongs to the turn it was asked for (a new turn or another session drops it), and
     // lapses when there is no price left to confirm or the copy cannot interrupt at all.
     val liveWork = remember(tree) { QueueWait.LiveWork(openToolCount(tree), liveBackgroundTaskCount(tree)) }
-    // The RULE (does Stop need a confirmation) is unchanged: live visible work only ([QueueWait.stopCostCopy] non-empty).
-    val stopCost = QueueWait.stopCostCopy(liveWork)
+    // The RULE (does Stop need a confirmation): live visible work that Stop ENDS (§4.1c A.3; spared background tasks never count).
+    val stopConfirms = QueueWait.stopConfirms(liveWork, backgroundSpared)
     // Delivery (spec §1 V5, §4.1a A): the engine can steer; and how many queued messages already went INTO this turn.
     val steerCapable = steerCapableEngine
     val steeredInTurn = remember(activeTurn?.blocksById) { activeTurn?.blocksById?.values?.count { it.steered == true } ?: 0 }
     // Spec §4.1a A + §4.1: what the confirmation and the resting key's description SAY: `{cost} {line}`.
     val stopCopy = listOf(
-        QueueWait.interruptCostCopy(liveWork, QueueWait.foregroundCertain(session?.provider), QueueWait.backgroundVisible(session?.provider)),
+        QueueWait.interruptCostCopy(liveWork, QueueWait.foregroundCertain(session?.provider), QueueWait.backgroundVisible(session?.provider), backgroundSpared),
         QueueWait.steeredStopCopy(session?.provider, steeredInTurn),
     ).filter { it.isNotEmpty() }.joinToString(" ")
     var confirmStop by remember(session?.id, interruptTurnId) { mutableStateOf(false) }
-    LaunchedEffect(stopCost.isEmpty(), interruptLock != null, commandRunning) {
-        if (stopCost.isEmpty() || interruptLock != null || commandRunning) confirmStop = false
+    LaunchedEffect(stopConfirms, interruptLock != null, commandRunning) {
+        if (!stopConfirms || interruptLock != null || commandRunning) confirmStop = false
     }
-    val confirmingStop = confirmStop && stopCost.isNotEmpty() && interruptLock == null && !commandRunning
+    val confirmingStop = confirmStop && stopConfirms && interruptLock == null && !commandRunning
     val commandMode = runActions.commandMode && draft.startsWith("!")
     // ta-coik.22: the same lock as Interrupt ([commandKeyLock]: read-only / handed off, never a stale copy).
     val commandLock = liveness.interruptLock
@@ -1071,6 +1073,7 @@ fun Composer(
                         steerCapable = steerCapable,
                         provider = session?.provider,
                         steeredInTurn = steeredInTurn,
+                        backgroundSpared = backgroundSpared,
                         handoverStage = handoverStage.takeIf { handoverHolding },
                         handoverV151 = handoverV151,
                     )
@@ -1196,7 +1199,7 @@ fun Composer(
                             interruptTurnId = interruptTurnId,
                             onInterrupt = ::interruptTurn,
                             interruptLock = interruptLock,
-                            stopCost = stopCost,
+                            stopConfirms = stopConfirms,
                             stopCopy = stopCopy,
                             confirmingStop = confirmingStop,
                             onConfirmStop = { confirmStop = it },
@@ -1380,8 +1383,8 @@ private fun RowScope.ComposerActions(
     onInterrupt: (turnId: String) -> Unit,
     /** T13.2 r2: why Interrupt cannot send (a copy that is not live); null = it can. */
     interruptLock: String?,
-    /** ta-ceo (#229): what Stop would destroy ([QueueWait.stopCostCopy]); "" = nothing but the turn. It only decides WHETHER to confirm. */
-    stopCost: String = "",
+    /** ta-ceo (#229): Stop would end live work ([QueueWait.stopConfirms]); it only decides WHETHER to confirm. */
+    stopConfirms: Boolean = false,
     /** Spec §4.1 + §4.1a A: the sentences the Stop confirmation and the key's description show (`{cost} {line}`). */
     stopCopy: String = "",
     /** ta-ceo: the first Stop tap asked for the second, informed one (Keep running · Stop). */
@@ -1489,7 +1492,7 @@ private fun RowScope.ComposerActions(
                 minHeight = height,
                 modifier = Modifier.heightIn(min = height).widthIn(min = 44.dp).testTag(KEEP_RUNNING_KEY_TAG),
                 contentPadding = 16.dp,
-                contentDescription = "Keep the turn running",
+                contentDescription = "Keep running",
             )
             StaleTapGuard(Triple("interrupt-confirm", sessionId, drawnFor)) { guard ->
                 TetherKey(
@@ -1500,7 +1503,7 @@ private fun RowScope.ComposerActions(
                         }
                     },
                     classes = KeyClasses.ChatInterrupt,
-                    label = "$stopCopy — Stop",
+                    label = "Stop — $stopCopy",
                     icon = TetherIcons.CircleStop,
                     iconSize = 18.dp,
                     fontSize = fontSize,
@@ -1512,7 +1515,7 @@ private fun RowScope.ComposerActions(
                         .then(guard)
                         .testTag(STOP_ANYWAY_KEY_TAG),
                     contentPadding = 16.dp,
-                    contentDescription = "$stopCopy — Stop",
+                    contentDescription = "Stop — $stopCopy",
                     // The price is never cut: the key grows a line instead.
                     maxLines = Int.MAX_VALUE,
                 )
@@ -1525,7 +1528,7 @@ private fun RowScope.ComposerActions(
                 onClick = {
                     if (live && drawnFor != null) {
                         // issue #229: with live work the first tap asks; without, it interrupts at once.
-                        if (stopCost.isNotEmpty()) onConfirmStop(true) else onInterrupt(drawnFor)
+                        if (stopConfirms) onConfirmStop(true) else onInterrupt(drawnFor)
                     }
                 },
                 classes = KeyClasses.ChatInterrupt,
