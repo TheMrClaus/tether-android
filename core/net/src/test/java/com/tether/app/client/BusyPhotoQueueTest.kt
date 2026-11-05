@@ -154,7 +154,7 @@ class BusyPhotoQueueTest {
         val r = rig()
         val id = uploaded(r)
         assertEquals(AttachmentSendResult.Sent, r.client.sendUploaded("s1", "later", listOf(photo), listOf(id), null, r.client.consentOrigin.value))
-        h.server.enqueue(MockResponse().setResponseCode(status).setBody("""{"error":"no","code":"c"}"""))
+        h.server.enqueue(MockResponse().setResponseCode(status).setBody(if (status == 404 || status == 405) "Not found" else """{"error":"no","code":"c"}"""))
         runBlocking { r.hub.run(id) }
         val frames = framesOf("send", "queue-add")
         assertTrue("status $status: no frame at all, in particular no inline one: $frames", frames.isEmpty())
