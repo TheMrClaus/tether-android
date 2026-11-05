@@ -42,6 +42,7 @@
              is ever needed. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
+            tools:ignore="MissingClass"
             tools:node="remove" />
 
         <!-- singleTop, deliberately not singleTask (T4.4 round 2): a launcher
