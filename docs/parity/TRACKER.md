@@ -26,6 +26,8 @@
 
 ## ▶ RESUME HERE
 
+**Active overnight request: ta-h9g5 (2026-11-05).** Owner delegates routine decisions to Codex and authorizes commit/push/merge plus a new APK with human-readable notes. Starting from `bd ready`: ta-lg5l (saved panel settings on late first read), ta-0ax6 (create defaults/control parity). Confirm current bugs before fixes; independent reviews and full release gate remain required. Run plan: `/tmp/ta-h9g5/w1-plan.md`; durable completion evidence will be archived under `/home/marcelloc/ta-runs/ta-h9g5/`. PR #285 is already merged; v1.5.7 is already public.
+
 **Current request: ta-y3dw — SHIPPED (2026-11-05).**
 - [v1.5.7 / code 62](https://github.com/TheMrClaus/tether-android/releases/tag/v1.5.7), tag and gated code `1ee6bb4f`, merged to `main`.
 - New session opens without a keyboard; header is 29.3dp versus 77.3dp (62.1% smaller). Workspace, isolation, GH issues and PR share a phone row; the GitHub mark follows the theme. Soft Return and Shift+Enter insert newlines in both composers; hardware Enter sends.
