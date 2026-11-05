@@ -131,6 +131,7 @@ class OriginKeyedPendingTest {
     private val scopes = mutableListOf<CoroutineScope>()
     private lateinit var disk: DiskSettings
     private lateinit var client: RealTetherClient
+    private var uploadsHub: AttachmentUploads? = null
 
     @After
     fun tearDown() {
@@ -153,6 +154,7 @@ class OriginKeyedPendingTest {
             sweepIntervalMs = 3_600_000,
             scheduler = ManualScheduler(),
             attachmentSpool = spool?.let(::AttachmentSpool),
+            attachmentUploads = uploadsHub,
         )
         // A UI subscribes to errors before it starts the client; a headless start has nobody.
         if (collectErrors) scope.launch(start = CoroutineStart.UNDISPATCHED) { client.errors.collect { errors += it } }
@@ -274,6 +276,30 @@ class OriginKeyedPendingTest {
     // ------------------------------------------------------------------
     // 1. Filed for A, then a sign-in to B: B gets nothing of A's
     // ------------------------------------------------------------------
+
+    @Test
+    fun aSignInToAnotherServerCancelsTheFirstServersBackgroundUploadsAndKeepsTheNewOnes() {
+        val root = java.nio.file.Files.createTempDirectory("a2-switch").toFile()
+        try {
+            val scheduler = FakeUploadScheduler()
+            val hub = AttachmentUploads(java.io.File(root, "u"), scheduler)
+            uploadsHub = hub
+            val c = processOnA()
+            c.start()
+            handshake(a, a.nextSocket())
+            val bytes = ByteArray(64) { it.toByte() }
+            val onA = hub.begin(a.origin(), "s-a", "p.png", "image/png", bytes)!!
+            val onB = hub.begin(b.origin(), "s-b", "q.png", "image/png", bytes)!!
+            loginTo(b)
+            awaitCondition("the server just left has no upload left") { hub.state(onA) == null }
+            assertTrue("its worker was cancelled too", scheduler.cancelled.contains(onA))
+            assertNotNull("the server signed in to keeps its own", hub.state(onB))
+            assertFalse(scheduler.cancelled.contains(onB))
+        } finally {
+            uploadsHub = null
+            root.deleteRecursively()
+        }
+    }
 
     @Test
     fun aSignInToAnotherServerNeverReplaysTheFirstServersInputThere() {

@@ -141,13 +141,51 @@ class AttachmentUploadsTest {
         server.start()
         val hub = hub(root())
         val id = hub.begin(origin, "s1", "p.png", "image/png", bytes)!!
-        server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error":"That attachment id already holds different bytes.","code":"attachment_conflict"}"""))
+        server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error":"That attachment id already holds different bytes.","code":"attachment_id_conflict"}"""))
         assertEquals("Done, not Retry: no automatic retry", UploadRunResult.Done, runBlocking { hub.run(id) })
         val state = hub.state(id)!!
         assertEquals(UploadPhase.Failed, state.phase)
         assertEquals("That attachment id already holds different bytes.", state.reason)
         assertFalse(state.retryable)
         assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun a409UploadInProgressIsTransientAndRetriesTheSameIdWhileAnIdConflictStaysFinal() {
+        server.start()
+        val hub = hub(root())
+        val id = hub.begin(origin, "s1", "p.png", "image/png", bytes)!!
+        // tether lib/attachment-store.ts: a same-id PUT already in flight is 409 upload_in_progress ("retry in a moment").
+        server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error":"That attachment is already being uploaded; retry in a moment.","code":"upload_in_progress"}"""))
+        assertEquals(UploadRunResult.Retry, runBlocking { hub.run(id) })
+        assertNotNull("not failed: the ledger row is still pending", hub.state(id))
+        assertEquals(UploadPhase.Pending, hub.state(id)!!.phase)
+        server.enqueue(MockResponse().setBody(storedJson(id, bytes.size)))
+        assertEquals(UploadRunResult.Done, runBlocking { hub.run(id) })
+        assertEquals(UploadPhase.Stored, hub.state(id)!!.phase)
+        assertEquals("the SAME id both times", id, put().requestUrl!!.queryParameter("id"))
+        assertEquals(id, put().requestUrl!!.queryParameter("id"))
+        // The cap still ends it.
+        val other = hub.begin(origin, "s1", "q.png", "image/png", bytes)!!
+        repeat(AttachmentUploads.MAX_ATTEMPTS) {
+            server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error":"retry in a moment","code":"upload_in_progress"}"""))
+        }
+        repeat(AttachmentUploads.MAX_ATTEMPTS - 1) { assertEquals(UploadRunResult.Retry, runBlocking { hub.run(other) }) }
+        assertEquals(UploadRunResult.Done, runBlocking { hub.run(other) })
+        assertEquals(UploadPhase.Failed, hub.state(other)!!.phase)
+        assertTrue(hub.state(other)!!.retryable)
+    }
+
+    @Test
+    fun theUploaderItselfRefusesAnotherOriginAndASignedOutAuthorityBeforeAnyRequest() {
+        server.start()
+        val file = File(root().also { it.mkdirs() }, "f.bin").also { it.writeBytes(bytes) }
+        val uploader = AttachmentUploader(OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build())
+        val paired = UploadAuthority.Paired("http://third.test", server.url("/")) { it.header("Authorization", "Bearer tok") }
+        fun up(a: UploadAuthority) = uploader.upload(a, origin, "s1", "id-1", "p.png", "image/png", file, { _, _ -> })
+        assertEquals(UploadOutcome.WrongServer, up(paired))
+        assertEquals(UploadOutcome.WrongServer, up(UploadAuthority.SignedOut))
+        assertEquals("no request, so no credential, left the device", 0, server.requestCount)
     }
 
     @Test
