@@ -396,7 +396,7 @@ class InterruptErrorBehaviourTest {
         rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG)[0].assertIsNotEnabled().performClick()
         arm()
         assertTrue("an interrupt after the turn was already being interrupted: ${client.interruptCalls}", client.interruptCalls.isEmpty())
-        rule.onNodeWithContentDescription("Interrupt the current turn, unavailable: $INTERRUPTING_LOCK_COPY").assertExists()
+        rule.onNodeWithContentDescription("Stop the current turn, unavailable: $INTERRUPTING_LOCK_COPY").assertExists()
         rule.onAllNodesWithContentDescription(
             "Interrupt and send — stops the current turn, then sends this message, unavailable: $INTERRUPTING_LOCK_COPY",
         ).assertCountEquals(1)

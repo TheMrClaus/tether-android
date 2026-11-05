@@ -26,9 +26,10 @@ class QueueWaitTest {
         origin: String? = null,
         kind: String? = null,
         attachmentIds: List<String>? = null,
+        flushMode: String? = null,
     ) = QueuedMessage(
         queueId = id, text = "t-$id", held = held, heldReason = reason,
-        origin = origin?.let(::JsonPrimitive), noticeKind = kind?.let(::JsonPrimitive), attachmentIds = attachmentIds,
+        origin = origin?.let(::JsonPrimitive), noticeKind = kind?.let(::JsonPrimitive), attachmentIds = attachmentIds, flushMode = flushMode,
     )
 
     // ---- the composer's own Stop (unchanged, ta-ceo) -------------------------------------------------
@@ -95,6 +96,13 @@ class QueueWaitTest {
         assertEquals("Queued on the server · goes into this turn at the agent’s next step", queuedLabel(true, row()))
         // A row carrying attachments is never steered in the first ship (D-L143-3 item 5): it reads V4.
         assertEquals(QueueWait.QUEUED_TURN_END_COPY, queuedLabel(true, row(attachmentIds = listOf("a1"))))
+    }
+
+    @Test
+    fun aLegacyNextCallRowReadsV4EvenOnASteerEngine() {
+        assertEquals(QueueWait.QUEUED_TURN_END_COPY, queuedLabel(true, row(flushMode = "next-call")))
+        assertEquals(false, QueueWait.isSteered(true, row(flushMode = "next-call")))
+        assertEquals(true, QueueWait.isSteered(true, row()))
     }
 
     // ---- spec §4.1a C: held rows ----------------------------------------------------------------------

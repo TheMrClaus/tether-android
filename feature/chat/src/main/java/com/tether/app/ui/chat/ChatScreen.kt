@@ -187,7 +187,7 @@ fun ChatScreen(
         val drawnFor = consentOrigin
         if (s == null) CommandActions.Unavailable else CommandActions(null, onOpenCommand, { commandId -> vm.client.stopCommand(s.id, commandId, drawnFor) })
     }
-    // T13.2 r2: Interrupt (the key and a queued row's "Interrupt now") follows the Stop keys' lock.
+    // T13.2 r2: Interrupt (the key and a queued row's Interrupt and send) follows the Stop keys' lock.
     // ta-coik.22: like the web's, they stay live on a copy that is not live; bound to the server the
     // key was drawn for and to its turn, the client re-checks it all under its lock.
     // T6.7 r3: a failed interrupt of the turn that is still cancelling unlocks the keys for a retry.

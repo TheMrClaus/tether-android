@@ -177,7 +177,7 @@ class MidBandComposerRowsTest {
         rule.onNodeWithContentDescription("Queue message").assertIsDisplayed()
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsDisplayed()
         rule.onNodeWithText("Queue").assertIsDisplayed()
-        rule.onNodeWithText("Interrupt").assertIsDisplayed()
+        rule.onNodeWithText("Stop").assertIsDisplayed()
         near("Queue height", 44.0, dp(queue.height), 0.5)
         near("Interrupt height", 44.0, dp(interrupt.height), 0.5)
         assertTrue("Queue and Interrupt sit side by side: $queue $interrupt", queue.right <= interrupt.left + 0.5f && kotlin.math.abs(queue.top - interrupt.top) < 0.5f)
@@ -214,7 +214,7 @@ class MidBandComposerRowsTest {
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsDisplayed()
         rule.onNodeWithTag(BrowserPaneTags.Toggle).assertIsDisplayed()
         rule.onNodeWithText("Queue").assertIsDisplayed()
-        rule.onNodeWithText("Interrupt").assertIsDisplayed()
+        rule.onNodeWithText("Stop").assertIsDisplayed()
         println("W19-MEASURE approval h359: composer=${dp(composer.height)} transcript=${dp(transcript.height)}")
     }
 }

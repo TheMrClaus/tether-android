@@ -161,7 +161,7 @@ class ComposerBehaviourTest {
         // Phone: an empty Queue key is hidden (globals.css:11944), Interrupt stays.
         rule.onAllNodesWithContentDescription("Queue message").assertCountEquals(0)
         // T6.7: bound to the turn it is drawn for; ta-coik.13: the first tap interrupts.
-        rule.onNodeWithContentDescription("Interrupt the current turn").performClick()
+        rule.onNodeWithContentDescription("Stop the current turn").performClick()
         assertEquals(listOf("t1"), interrupts)
         input().performTextInput("after this turn")
         rule.onNodeWithContentDescription("Queue message").assertIsEnabled()

@@ -139,7 +139,7 @@ class MidBandSmallWindowTest {
         rule.onNodeWithTag(INTERRUPT_KEY_TAG).assertIsDisplayed()
         rule.onNodeWithTag(BrowserPaneTags.Toggle).assertIsDisplayed()
         rule.onNodeWithText("Queue").assertIsDisplayed()
-        rule.onNodeWithText("Interrupt").assertIsDisplayed()
+        rule.onNodeWithText("Stop").assertIsDisplayed()
         println("W20-MEASURE approval w780h360: composer=${dp(composer.height)} transcript=${dp(transcript.height)} footer=${dp(footer.height)} bottomOfFooter=${dp(footer.bottom)}")
     }
 

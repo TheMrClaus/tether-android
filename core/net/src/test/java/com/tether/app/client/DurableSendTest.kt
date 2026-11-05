@@ -475,6 +475,92 @@ class DurableSendTest {
         }
     }
 
+    /**
+     * delivery A4a NOTE 1 (negative B5): ONLY `queued_message_added` and a steered `queued_message_delivered` accept a queue-add.
+     * A `queued_message_removed` (flushed or withdrawn) proves nothing about THIS client's record, so it never acks it: the
+     * reconnect snapshot without `removedQueueIds` (the pre-v130 residual) re-sends it once, same key.
+     */
+    @Test
+    fun aFlushedRemovalEventNeverAcksAPendingQueueAdd() = removalNeverAcks("flushed")
+
+    @Test
+    fun aWithdrawnRemovalEventNeverAcksAPendingQueueAdd() = removalNeverAcks("withdrawn")
+
+    private fun removalNeverAcks(reason: String) {
+        run {
+            val (client, ws) = connectedProcess()
+            client.queueAdd("s1", "not acked by a removal ($reason)")
+            val queued = key(h.expectFrame("queue-add"), "queueId")
+            ws.send(
+                """{"type":"event","sessionId":"s1","event":{"type":"queued_message_removed","turnId":null,
+                   "queueId":"$queued","reason":"$reason","seq":2,"ts":2}}""",
+            )
+            h.serverBarrier(ws)
+            assertEquals("$reason: the record survives the removal event", listOf(queued), persisted().records.map { it.key })
+            val ws2 = reconnectAfterDrop(ws, h.scheduler)
+            assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+            ws2.send(snapshotFrame("s1", 3, turnState("s1")))
+            h.serverBarrier(ws2)
+            assertEquals("$reason: re-sent once, same key", listOf(queued), h.framesUntilBarrier().map { key(it, "queueId") })
+        }
+    }
+
+    /**
+     * delivery A6 (A4a NOTE 2): the same two endings after a COLD START: a NEW client over the same persisted store, no in-memory
+     * state of the first (the first process is cancelled; a JVM test never kills a process). Queued row, `removedQueueIds`:
+     * no resend, the record cleared, no failed bubble.
+     */
+    @Test
+    fun aColdStartOverAQueuedRecordTheServerStillQueuesEndsWithNoDuplicate() = coldStartRedeliveryEnds("queued")
+
+    @Test
+    fun aColdStartOverARecordTheServerDeliveredOrFlushedEndsWithNoDuplicate() = coldStartRedeliveryEnds("removed")
+
+    private fun coldStartRedeliveryEnds(held: String) {
+        val (first, ws) = firstProcess()
+        first.queueAdd("s1", "journaled before the process died")
+        val queued = key(h.expectFrame("queue-add"), "queueId")
+        persistedMatches { s -> s.records.any { it.key == queued && it.tries == 1 } }
+        kill(first, ws)
+
+        val second = process()
+        val ws2 = startConnected(second)
+        assertEquals("nothing is re-sent before the snapshot", listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        val state = if (held == "queued") {
+            turnState("s1").replace(""""queuedMessages":[]""", """"queuedMessages":[{"queueId":"$queued","text":"x"}]""")
+        } else {
+            stateWithRemovedQueueIds("s1", queued)
+        }
+        ws2.send(snapshotFrame("s1", 3, state))
+        h.serverBarrier(ws2)
+        assertTrue("$held: duplicate send", h.framesUntilBarrier().isEmpty())
+        persistedMatches { it.records.isEmpty() }
+        assertTrue("$held: failed bubble", second.failedSends.value.isEmpty())
+    }
+
+    /** A cold start whose snapshot does not hold the record re-sends it once, same key; its live ack then clears it. */
+    @Test
+    fun aColdStartResendsAnUnjournaledQueueAddOnceAndItsLiveAckClearsIt() {
+        val (first, ws) = firstProcess()
+        first.queueAdd("s1", "never reached the journal")
+        val queued = key(h.expectFrame("queue-add"), "queueId")
+        persistedMatches { s -> s.records.any { it.key == queued && it.tries == 1 } }
+        kill(first, ws)
+
+        val second = process()
+        val ws2 = startConnected(second)
+        assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        ws2.send(snapshotFrame("s1", 1, turnState("s1")))
+        h.serverBarrier(ws2)
+        assertEquals(listOf(queued), h.framesUntilBarrier().map { key(it, "queueId") })
+        ws2.send(
+            """{"type":"event","sessionId":"s1","event":{"type":"queued_message_added","turnId":null,
+               "queueId":"$queued","text":"never reached the journal","seq":2,"ts":2}}""",
+        )
+        persistedMatches { it.records.isEmpty() }
+        assertTrue(second.failedSends.value.isEmpty())
+    }
+
     /** [turnState] with a v130 (S13.1-C) `removedQueueIds` list. */
     private fun stateWithRemovedQueueIds(sessionId: String, vararg removed: String): String =
         turnState(sessionId).trimEnd().removeSuffix("}") +
