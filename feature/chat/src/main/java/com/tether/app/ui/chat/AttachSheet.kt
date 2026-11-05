@@ -358,7 +358,8 @@ internal fun attachmentRefusalCopy(result: AttachmentSendResult): String? = when
     // web sends on any open link, a session still catching up included.
     AttachmentSendResult.NotLive -> OTHER_SERVER_NOT_SENT
     AttachmentSendResult.Locked -> "This session can’t take messages from here — the attachments were not sent."
-    AttachmentSendResult.Busy -> "Wait for the current turn to finish before sending attachments."
+    // A3: only a photo that cannot ride a queue-add (no upload, or a delegation); a busy session otherwise queues them.
+    AttachmentSendResult.NotQueueable -> "Attachments that were not uploaded can’t be queued while the agent is working — nothing was sent. Send when this turn ends."
     AttachmentSendResult.TooLarge -> "This message is too large to send in one piece (at most ${AttachmentCopy.size(com.tether.app.client.AttachmentFrame.MAX_SEND_FRAME_BYTES)} encoded). Remove an attachment and try again."
     AttachmentSendResult.LinkBusy -> "Still sending your previous attachments — try again when that finishes."
     AttachmentSendResult.NotOffered -> "That agent isn’t offered for this session any more — nothing was sent."

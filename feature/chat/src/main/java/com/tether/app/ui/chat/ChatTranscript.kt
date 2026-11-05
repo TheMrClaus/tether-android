@@ -522,7 +522,7 @@ private fun ChatTranscriptBody(
             }
             items(sends.failed, key = { "failed-send:${it.key}" }, contentType = { "failed-send" }) { row ->
                 val first = host.rows.size + leading == 0 && sends.pending.isEmpty() && row === sends.failed.first()
-                FailedSendBubble(row, { sends.onDismiss(row.key) }, Modifier.padding(top = if (first) 0.dp else spacing.scrollGap))
+                FailedSendBubble(row, { sends.onDismiss(row.key) }, Modifier.padding(top = if (first) 0.dp else spacing.scrollGap), onSendAgain = { sends.onSendAgain(row.key) })
             }
         }
         }

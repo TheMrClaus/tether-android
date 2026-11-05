@@ -383,6 +383,11 @@ sealed interface ClientMessage {
         val idempotencyKey: String,
         val attachments: List<Attachment>? = null,
         val mention: DelegateMention? = null,
+        /**
+         * v155 (delivery L1): ids of attachments already uploaded (`PUT /api/attachments`). Never sent together with
+         * [attachments]: the server refuses a frame that carries both, so the builder of the frame picks one.
+         */
+        val attachmentIds: List<String>? = null,
     ) : ClientMessage {
         override fun toJsonObject() = frame("send") {
             put("sessionId", sessionId)
@@ -403,6 +408,7 @@ sealed interface ClientMessage {
                 )
             }
             if (mention != null) put("mention", mention.toJsonObject())
+            putIds(attachmentIds)
         }
     }
 
@@ -431,11 +437,18 @@ sealed interface ClientMessage {
         }
     }
 
-    data class QueueAdd(val sessionId: String, val queueId: String, val text: String) : ClientMessage {
+    data class QueueAdd(
+        val sessionId: String,
+        val queueId: String,
+        val text: String,
+        /** v155 (delivery L1): ids of attachments already uploaded; omitted when null or empty. */
+        val attachmentIds: List<String>? = null,
+    ) : ClientMessage {
         override fun toJsonObject() = frame("queue-add") {
             put("sessionId", sessionId)
             put("queueId", queueId)
             put("text", text)
+            putIds(attachmentIds)
         }
     }
 
@@ -1055,6 +1068,11 @@ private inline fun frame(type: String, body: JsonObjectBuilder.() -> Unit): Json
     body()
 }
 
+private fun JsonObjectBuilder.putIds(ids: List<String>?) {
+    if (ids.isNullOrEmpty()) return
+    put("attachmentIds", buildJsonArray { for (id in ids) add(kotlinx.serialization.json.JsonPrimitive(id)) })
+}
+
 private fun JsonObjectBuilder.opt(key: String, value: String?) {
     if (value != null) put(key, value)
 }
@@ -1181,6 +1199,7 @@ private object ClientDecoders {
                     Attachment(ar.str("name"), ar.str("mediaType"), ar.str("data"))
                 },
                 mention = r.nested("mention")?.let(DelegateMention::from),
+                attachmentIds = r.o.strList("attachmentIds"),
             )
         },
         "run-command" to { r ->
@@ -1188,7 +1207,7 @@ private object ClientDecoders {
         },
         "background-command" to { r -> ClientMessage.BackgroundCommand(r.str("sessionId")) },
         "stop-command" to { r -> ClientMessage.StopCommand(r.str("sessionId"), r.str("commandId")) },
-        "queue-add" to { r -> ClientMessage.QueueAdd(r.str("sessionId"), r.str("queueId"), r.str("text")) },
+        "queue-add" to { r -> ClientMessage.QueueAdd(r.str("sessionId"), r.str("queueId"), r.str("text"), r.o.strList("attachmentIds")) },
         "queue-edit" to { r -> ClientMessage.QueueEdit(r.str("sessionId"), r.str("queueId"), r.str("text")) },
         "handover-request" to { r ->
             ClientMessage.HandoverRequest(r.str("sessionId"), r.o.obj("successor"), r.o.str("requestId"))

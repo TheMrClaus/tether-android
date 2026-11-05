@@ -17,7 +17,7 @@ class ConformanceUnitsTest {
         assertTrue("listed more than once: $duplicated", duplicated.isEmpty())
         assertEquals("corpus cases missing from units.txt", emptySet<String>(), corpus - listed.keys)
         assertEquals("units.txt names cases the corpus does not have", emptySet<String>(), listed.keys - corpus)
-        assertEquals(70, corpus.size)
+        assertEquals(71, corpus.size)
     }
 
     @Test

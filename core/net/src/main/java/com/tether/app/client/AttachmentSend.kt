@@ -115,8 +115,11 @@ enum class AttachmentSendResult {
     /** No session id to send to (ta-coik.25: never read-only, handed off, archived or unlisted: the server decides). */
     Locked,
 
-    /** A turn is running: attachments ride an idle send only (the server never queues them). */
-    Busy,
+    /**
+     * A3: a turn is running and these photos cannot be queued: a queue-add carries uploaded ids only (never inline
+     * bytes: R2) and no delegate mention. Nothing was sent; the composer keeps the draft and the chips.
+     */
+    NotQueueable,
 
     /** The encoded frame is over [AttachmentFrame.MAX_SEND_FRAME_BYTES] (the server's own bound). */
     TooLarge,

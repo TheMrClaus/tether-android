@@ -256,13 +256,32 @@ interface TetherClient {
         expectedEpoch: Long? = null,
     ): AttachmentSendResult = AttachmentSendResult.NotConnected
 
+    /**
+     * ta-delivery A2: [sendAttachments] for photos that were uploaded at pick ([uploads]; [uploadIds] in the same
+     * order as [attachments], whose inline bytes stay as the fallback and the durable spool's source). The frame
+     * carries `attachmentIds` and never the inline bytes; a message whose photos are still uploading is held, not
+     * sent, until they are stored. A client with no upload ledger sends inline, as [sendAttachments] does.
+     */
+    fun sendUploaded(
+        sessionId: String,
+        text: String,
+        attachments: List<Attachment>,
+        uploadIds: List<String>,
+        mention: com.tether.app.protocol.DelegateMention?,
+        expectedOrigin: String?,
+        expectedEpoch: Long? = null,
+    ): AttachmentSendResult = sendAttachments(sessionId, text, attachments, mention, expectedOrigin, expectedEpoch)
+
+    /** ta-delivery A2: the background upload ledger, or null when this client uploads nothing (it sends inline). */
+    val uploads: AttachmentUploads? get() = null
+
     fun queueAdd(sessionId: String, text: String)
     fun queueEdit(sessionId: String, queueId: String, text: String)
     fun queueRemove(sessionId: String, queueId: String)
 
     /**
      * T13.2 r2: INTERRUPT the session's current turn (`interrupt`). An operator control: call it ONLY
-     * from a tap on the composer's Interrupt key or a queued row's "Interrupt now", never in answer to
+     * from a tap on the composer's Stop key or a queued row's "Interrupt and send", never in answer to
      * anything received. Sent only on a live, handshaken socket of the server that drew the key
      * ([expectedOrigin], the [consentOrigin] the key was composed with), for a session confirmed live
      * on it ([liveSessions]) that is neither read-only nor handed off. Otherwise nothing is sent or
@@ -274,7 +293,7 @@ interface TetherClient {
      * [expectedTurnId] as its open active turn: it never stops a turn the client has already seen
      * replace it. It cannot know of a turn the server started that has not reached it yet (a queued
      * message flushed at the boundary): that window is the server's to close (ta-yw0); until then
-     * "Interrupt now" stays locked while its turn is already being interrupted.
+     * the Stop and "Interrupt and send" keys stay locked while its turn is already being interrupted.
      */
     fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): InterruptResult = InterruptResult.NotConnected
 
@@ -302,6 +321,14 @@ interface TetherClient {
 
     /** ta-coik.19 (use-tether.ts 90fbb9f :473-478): drop one failed bubble. Local only; nothing is sent. */
     fun dismissFailedSend(key: String) {}
+
+    /**
+     * ta-delivery A9 (spec 5.4 "Send again"): re-dispatch a failed bubble's text as a NEW send, under the SAME key (the
+     * server dedupes a key it already accepted, so it can never become a second turn), as ONE explicit act: a tap, never
+     * an automatic retry. A running turn (at tap time) makes it a `queue-add`, an idle session a `send`. Only a
+     * [FailedSend.canSendAgain] bubble: anything else is a no-op. The bubble leaves and a pending one takes its place.
+     */
+    fun sendAgain(key: String) {}
 
     /**
      * T6.3: the operator's decision on a pending approval. Call it ONLY from a UI tap (I2: nothing

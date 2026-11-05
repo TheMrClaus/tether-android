@@ -126,7 +126,9 @@ class ComposerFooterFitTest(private val windowDp: Int, private val fontScale: Fl
         val natural = ref.fetchSemanticsNode().children.fold(0f) { acc, n -> maxOf(acc, n.boundsInRoot.right) } - ref.rect().left
         assertTrue("the readout has a natural width: $natural", natural > 0f)
         if (windowDp == 845 && fontScale == 2.0f) {
-            assertTrue("at 845 x2.0 the readout (${natural / d} dp) is wider than its strip (${totals.width / d} dp)", natural > totals.width + 0.5f)
+            // "Stop" (was "Interrupt", spec §4.1a B) is a narrower key: at 845 x2.0 the readout, once clipped, now fits whole.
+            // (The clipped-readout case this pin used to hold has no window in this matrix any more: open item.)
+            assertTrue("at 845 x2.0 the readout (${natural / d} dp) is whole in its strip (${totals.width / d} dp)", natural <= totals.width + 0.5f)
         } else if (fontScale == 1.0f && windowDp >= 845) {
             assertTrue("at x1.0 the readout is whole: ${natural / d} dp in ${totals.width / d} dp", natural <= totals.width + 0.5f)
         }

@@ -96,13 +96,14 @@ class ServerSettingsModelTest {
             AdvancedRows.host, AdvancedRows.port, AdvancedRows.password, AdvancedRows.proxyToken, AdvancedRows.stateDir, AdvancedRows.workspaceRoot,
             AdvancedRows.claudePersistent, AdvancedRows.claudeTaskTelemetry, AdvancedRows.warmMaxSessions, AdvancedRows.maxConcurrentTurns,
             AdvancedRows.warmIdleEvictionMs, AdvancedRows.warmBgHardCapMs, AdvancedRows.warmSweepMs, AdvancedRows.shutdownDrainMs,
-            AdvancedRows.messageInterruptMode, AdvancedRows.claudeModelFallback, AdvancedRows.autoArchiveIdleDays, AdvancedRows.archiveOnMerge, AdvancedRows.defaultPermissionMode,
+            AdvancedRows.claudeModelFallback, AdvancedRows.autoArchiveIdleDays, AdvancedRows.archiveOnMerge, AdvancedRows.defaultPermissionMode,
             AdvancedRows.defaultSandboxPolicy, AdvancedRows.defaultUseWorktree, AdvancedRows.preferSpawnAgent, MetadataRows.enabled, MetadataRows.mode,
         ).map { it.setting } + listOf(AdvancedRows.allowedRoots.setting, AdvancedRows.spawnExtraWritableRoots.setting, ServerSetting.MetadataGenerationProvider, ServerSetting.MetadataGenerationProviders)
         // ta-dh1: the Engines tab's keys: each card's home, command and launch command, the switches'
         // list, and Host config's toggle.
         val engines = com.tether.app.client.EngineCard.entries.flatMap { listOfNotNull(it.home, it.command, it.launch) } +
             listOf(ServerSetting.HeadlessModes, HostConfigRows.shareHostConfig.setting)
-        assertEquals(ServerSetting.entries.toSet(), (rows + engines).toSet())
+        // A7: MessageInterruptMode stays in the enum (an old server reply still decodes) but has no row.
+        assertEquals(ServerSetting.entries.toSet(), (rows + engines + ServerSetting.MessageInterruptMode).toSet())
     }
 }

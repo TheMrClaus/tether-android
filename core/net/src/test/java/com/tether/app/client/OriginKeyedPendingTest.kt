@@ -131,6 +131,7 @@ class OriginKeyedPendingTest {
     private val scopes = mutableListOf<CoroutineScope>()
     private lateinit var disk: DiskSettings
     private lateinit var client: RealTetherClient
+    private var uploadsHub: AttachmentUploads? = null
 
     @After
     fun tearDown() {
@@ -141,7 +142,7 @@ class OriginKeyedPendingTest {
     }
 
     /** A process over [settings]; the errors (notices) it emits are collected from the start. */
-    private fun process(settings: SettingsStore, collectErrors: Boolean = true): RealTetherClient {
+    private fun process(settings: SettingsStore, collectErrors: Boolean = true, spool: java.io.File? = null): RealTetherClient {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scopes += scope
         client = RealTetherClient(
@@ -152,6 +153,8 @@ class OriginKeyedPendingTest {
             backoff = testBackoff(),
             sweepIntervalMs = 3_600_000,
             scheduler = ManualScheduler(),
+            attachmentSpool = spool?.let(::AttachmentSpool),
+            attachmentUploads = uploadsHub,
         )
         // A UI subscribes to errors before it starts the client; a headless start has nobody.
         if (collectErrors) scope.launch(start = CoroutineStart.UNDISPATCHED) { client.errors.collect { errors += it } }
@@ -275,6 +278,30 @@ class OriginKeyedPendingTest {
     // ------------------------------------------------------------------
 
     @Test
+    fun aSignInToAnotherServerCancelsTheFirstServersBackgroundUploadsAndKeepsTheNewOnes() {
+        val root = java.nio.file.Files.createTempDirectory("a2-switch").toFile()
+        try {
+            val scheduler = FakeUploadScheduler()
+            val hub = AttachmentUploads(java.io.File(root, "u"), scheduler)
+            uploadsHub = hub
+            val c = processOnA()
+            c.start()
+            handshake(a, a.nextSocket())
+            val bytes = ByteArray(64) { it.toByte() }
+            val onA = hub.begin(a.origin(), "s-a", "p.png", "image/png", bytes)!!
+            val onB = hub.begin(b.origin(), "s-b", "q.png", "image/png", bytes)!!
+            loginTo(b)
+            awaitCondition("the server just left has no upload left") { hub.state(onA) == null }
+            assertTrue("its worker was cancelled too", scheduler.cancelled.contains(onA))
+            assertNotNull("the server signed in to keeps its own", hub.state(onB))
+            assertFalse(scheduler.cancelled.contains(onB))
+        } finally {
+            uploadsHub = null
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun aSignInToAnotherServerNeverReplaysTheFirstServersInputThere() {
         val onA = writeOnA()
         loginTo(b)
@@ -337,6 +364,46 @@ class OriginKeyedPendingTest {
             assertTrue(b.allFrames.none { it.contains("s-a") || it.contains("private") })
         } finally {
             gated!!.release.complete(Unit)
+        }
+    }
+
+    @Test
+    fun aSwitchBeforeTheSlotIsLoadedKeepsARecordWhosePhotosAreGoneInItsSlotAndItsOwnRestoreShowsIt() {
+        val spoolDir = java.io.File(java.nio.file.Files.createTempDirectory("a1-spool").toFile(), "spool")
+        disk = DiskSettings(InMemorySettings(a.url(), initialCookie = "parity-fake-cookie-a"), a.url())
+        // A's slot, as a dead process left it: one record whose single photo is spooled, then the file vanishes.
+        val seeded = PendingInput.addRecord(PendingInput.emptyStore(), "k-lost", PendingInput.KIND_SEND, "s-a", "lost words", now.get(), listOf(picture)).store
+        disk.slots[a.origin()] = PendingInput.toPersistable(seeded, emptyList(), AttachmentSpool(spoolDir))
+        assertTrue(java.io.File(spoolDir, "k-lost/0.bin").delete())
+        // The first slot read (start's) is held, so the store is still unloaded when the sign-in switches.
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val held = java.util.concurrent.atomic.AtomicBoolean(false)
+        disk.beforeRead = { if (held.compareAndSet(false, true)) gate.await() }
+        val c = process(disk, spool = spoolDir)
+        c.start()
+        awaitCondition("start's read is held") { held.get() }
+        c.send("s-a", "filed before the slot loaded")
+        loginTo(b)
+        gate.complete(Unit) // the held read sits inside the persist lock, which the set-aside write needs
+        handshake(b, b.nextSocket())
+        // The merge write of A's slot ran without the record's photos: it must still be there, whole.
+        awaitCondition("A's slot kept the record and its photo refs") {
+            val raw = disk.slots[a.origin()].orEmpty()
+            raw.contains("k-lost") && raw.contains("attachmentFiles") && raw.contains("filed before the slot loaded")
+        }
+        assertTrue("its spool dir stays", java.io.File(spoolDir, "k-lost").exists())
+        // Back on A: its own restore turns the record into the failed bubble; its words never go out.
+        a.down = false
+        loginTo(a)
+        handshake(a, a.nextSocket())
+        awaitCondition("failed bubble") { client.failedSends.value.any { it.key == "k-lost" } }
+        val failed = client.failedSends.value.single { it.key == "k-lost" }
+        assertEquals("lost words", failed.text)
+        assertEquals(FailedSendReason.PhotoLost, failed.reason)
+        framesUntilBarrier(a)
+        assertTrue("sent without its photos", a.allFrames.none { it.contains("lost words") })
+        awaitCondition("slot and spool settle") {
+            "k-lost" !in PendingInput.persistedKeys(disk.slots[a.origin()]) && !java.io.File(spoolDir, "k-lost").exists()
         }
     }
 

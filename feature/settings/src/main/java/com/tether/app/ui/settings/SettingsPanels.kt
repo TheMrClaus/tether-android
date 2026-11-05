@@ -393,7 +393,6 @@ private fun SessionSettingsPanel(narrow: Boolean, binding: ServerSettingsBinding
             ServerNumberRow(AdvancedRows.warmBgHardCapMs, view, binding, narrow)
             ServerNumberRow(AdvancedRows.warmSweepMs, view, binding, narrow)
             ServerNumberRow(AdvancedRows.shutdownDrainMs, view, binding, narrow)
-            ServerSelectRow(AdvancedRows.messageInterruptMode, AdvancedRows.messageInterruptModes, view, binding, narrow)
             ServerSelectRow(AdvancedRows.claudeModelFallback, AdvancedRows.claudeModelFallbacks, view, binding, narrow)
             ServerNumberRow(AdvancedRows.autoArchiveIdleDays, view, binding, narrow)
             ServerToggleRow(AdvancedRows.archiveOnMerge, view, binding, narrow)

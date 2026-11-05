@@ -59,9 +59,9 @@ class FoldSourceChecksTest {
         return (start..end).mapNotNull { label.find(lines[it])?.groupValues?.get(1) }
     }
 
-    /** ta-d3tj.10 (R1): events.mjs became events.ts upstream; the label set is exactly the one the 887c222 reference had (74). */
+    /** ta-d3tj.10 (R1): events.mjs became events.ts upstream; the label set is the 887c222 reference's (74) plus delivery L1's `queued_message_delivered` (75, A4a). */
     @Test
-    fun theTsReferenceHasExactlyTheLabelSetOfTheOldMjsReference() {
+    fun theTsReferenceHasTheOldLabelSetPlusQueuedMessageDelivered() {
         val old = setOf(
             "native_session_id", "cli_inventory_reset", "cli_commands_changed", "api_retry",
             "rate_limit", "fast_mode", "limit_hit", "rate_limit_resume_scheduled",
@@ -84,7 +84,7 @@ class FoldSourceChecksTest {
             "queued_message_updated", "queued_message_removed",
         )
         assertEquals(74, old.size)
-        assertEquals(old, jsLabels().toSet())
+        assertEquals(old + "queued_message_delivered", jsLabels().toSet())
     }
 
     /** Reduce.kt's dispatch: label → family function name. */
@@ -97,7 +97,7 @@ class FoldSourceChecksTest {
     @Test
     fun reduceKtDispatchesEveryReduceEventLabelExplicitly() {
         val js = jsLabels()
-        assertEquals("reference reduceEvent should have 74 case labels", 74, js.size)
+        assertEquals("reference reduceEvent should have 75 case labels", 75, js.size)
         val dispatch = kotlinDispatch()
         assertEquals("labels missing from Reduce.kt's when", emptyList<String>(), js.filter { it !in dispatch })
         assertEquals("Reduce.kt dispatches labels events.ts does not have", emptyList<String>(), dispatch.keys.filter { it !in js })
@@ -120,7 +120,7 @@ class FoldSourceChecksTest {
         }
         val unported = kotlinDispatch().filter { (label, fn) -> fn in familyFiles && label !in ported.getValue(fn) }
         val byFamily = unported.entries.groupBy({ familyFiles.getValue(it.value) }, { it.key })
-        val report = "event-type labels dispatched but not yet ported (${unported.size}/74):\n" +
+        val report = "event-type labels dispatched but not yet ported (${unported.size}/75):\n" +
             byFamily.entries.joinToString("\n") { (file, labels) -> "  $file (${labels.size}): ${labels.joinToString()}" }
         println(report)
         File("build/parity/label-coverage.txt").apply { parentFile.mkdirs() }.writeText(report + "\n")

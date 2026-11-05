@@ -187,7 +187,7 @@ fun ChatScreen(
         val drawnFor = consentOrigin
         if (s == null) CommandActions.Unavailable else CommandActions(null, onOpenCommand, { commandId -> vm.client.stopCommand(s.id, commandId, drawnFor) })
     }
-    // T13.2 r2: Interrupt (the key and a queued row's "Interrupt now") follows the Stop keys' lock.
+    // T13.2 r2: Interrupt (the key and a queued row's Interrupt and send) follows the Stop keys' lock.
     // ta-coik.22: like the web's, they stay live on a copy that is not live; bound to the server the
     // key was drawn for and to its turn, the client re-checks it all under its lock.
     // T6.7 r3: a failed interrupt of the turn that is still cancelling unlocks the keys for a retry.
@@ -351,7 +351,7 @@ fun ChatScreen(
     val pendingSends by vm.client.pendingSends.collectAsStateWithLifecycle()
     val failedSends by vm.client.failedSends.collectAsStateWithLifecycle()
     val sends = remember(session?.id, pendingSends, failedSends, vm) {
-        SendBubbles.forSession(session?.id, pendingSends, failedSends) { key -> vm.client.dismissFailedSend(key) }
+        SendBubbles.forSession(session?.id, pendingSends, failedSends, { key -> vm.client.sendAgain(key) }) { key -> vm.client.dismissFailedSend(key) }
     }
 
     // T5.3 in-chat find (chat-view.tsx:2013-2120): per conversation, reset on a session switch.
@@ -547,6 +547,8 @@ fun ChatScreen(
                 onQueueRemove = { queueId -> session?.let { vm.client.queueRemove(it.id, queueId) } },
                 onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
                 liveness = liveness,
+                steerCapableEngine = session != null && providers.firstOrNull { it.id == session.provider }?.capabilities?.steer == true,
+                backgroundSpared = com.tether.app.protocol.helpers.QueueWait.backgroundSparedFor(session, providers, chatProtocol),
                 attachments = attachments,
                 // A plain read, not a subscription: only the opening value matters here.
                 initialDraft = session?.let { vm.loadedDraft(it.id) },

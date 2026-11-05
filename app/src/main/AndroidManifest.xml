@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -16,6 +17,11 @@
          declaration is inert. -->
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
+    <!-- ta-delivery A2 (R4): WorkManager's own manifest adds the foreground-service permission; photo uploads are
+         expedited work at minSdk 34 and never start a foreground service, so the permission is removed from the
+         merged manifest (UploadManifestTest proves it). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
+
     <!-- Backup stays on for UI preferences, but credentials never leave the
          device: see res/xml/data_extraction_rules.xml (Auto Backup + device
          transfer, API 31+) and res/xml/backup_rules.xml (fullBackupContent). -->
@@ -30,6 +36,14 @@
         android:fullBackupContent="@xml/backup_rules"
         android:theme="@style/Theme.Tether"
         android:supportsRtl="true">
+
+        <!-- ta-delivery A2: photo uploads run as expedited WorkManager work (minSdk 34: no foreground service). The
+             library's own foreground service is removed so none is declared and no foreground-service permission
+             is ever needed. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            tools:ignore="MissingClass"
+            tools:node="remove" />
 
         <!-- singleTop, deliberately not singleTask (T4.4 round 2): a launcher
              relaunch must bring the task forward as it was, keeping a Custom

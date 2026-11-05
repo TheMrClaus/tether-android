@@ -182,6 +182,20 @@ class AttachmentComposerBehaviourTest {
     }
 
     @Test
+    fun aBusyRefusalToQueuePhotosSaysTheApprovedCopyAndKeepsTheDraft() {
+        staged = listOf(pic)
+        answer = AttachmentSendResult.NotQueueable
+        show(ComposerFixtures.busy)
+        input().performTextInput("later")
+        rule.onNodeWithContentDescription("Queue message").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Attachments that were not uploaded can’t be queued while the agent is working — nothing was sent. Send when this turn ends.").assertExists()
+        rule.onNodeWithText("Wait for the current turn to finish before sending attachments.").assertDoesNotExist()
+        assertEquals("later", inputText())
+        rule.onAllNodesWithTag("staged-attachment").assertCountEquals(1)
+    }
+
+    @Test
     fun offlineTheSendIsRefusedAndTheDraftAndChipsStay() {
         staged = listOf(pic)
         answer = AttachmentSendResult.NotConnected
@@ -219,15 +233,17 @@ class AttachmentComposerBehaviourTest {
     }
 
     @Test
-    fun whileATurnRunsAttachmentsWaitWithTheWebsCopy() {
+    fun whileATurnRunsAttachmentsGoThroughTheGuardedPathAndNothingSaysWait() {
         staged = listOf(pic)
         show(ComposerFixtures.busy)
         input().performTextInput("later")
         input().performKeyInput { pressKey(Key.Enter) }
         rule.waitForIdle()
-        rule.onNodeWithText("Wait for the current turn to finish before sending attachments.").assertExists()
-        assertTrue(attachmentSends.isEmpty() && textSends.isEmpty())
-        assertEquals("later", inputText())
+        // A3: the photos queue with the message (the client files the queue-add); no text-only send, no wait copy.
+        assertEquals(listOf("later" to null), attachmentSends)
+        assertTrue(textSends.isEmpty())
+        rule.onNodeWithText("Wait for the current turn to finish before sending attachments.").assertDoesNotExist()
+        assertEquals("", inputText())
     }
 
     @Test

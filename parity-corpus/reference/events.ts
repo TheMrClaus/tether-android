@@ -435,6 +435,10 @@ interface ClaudeAdapterState {
   streamTextByIndex: Record<number, number>;
   streamThinkingOrdinal: number;
   streamThinkingByIndex: Record<number, number>;
+  // FINAL (assistant-record) text/thinking blocks already numbered for one API
+  // message. The CLI may split one message across several records; the stream
+  // numbers per MESSAGE, so the final ordinals must continue across records.
+  finalOrdinals: { messageId: string | null; text: number; thinking: number };
   permissionDeniedToolIds: string[];
   toolParentsById: Record<string, string | null>;
   toolProgressMilestones: Record<string, number>;
@@ -1052,17 +1056,38 @@ export function openToolCount(state: Readonly<SessionProjection>, excludeToolId:
 //     this process has seen one) wins outright;
 //   * otherwise a task whose task_started has no terminal task_completed.
 // A task launched by a call already counted as a running tool is not counted twice.
-export function liveBackgroundTaskCount(state: Readonly<SessionProjection> | null | undefined, { levelTaskIds = null, excludeToolIds = new Set<string>() }: { levelTaskIds?: Iterable<string> | null; excludeToolIds?: Set<string> } = {}): number {
+//
+// #278: a level set is a membership list, not a liveness proof. The CLI can leave an id in
+// `backgroundTaskIds` after the task's own terminal record has landed (and an engine that died
+// mid-task leaves a `running` row behind with `live:false`), so counting the set's size parked
+// handovers in `waiting_background` forever. A projection row with a TERMINAL status is the
+// stronger evidence and wins over set membership. On the projection branch `requireLive` drops
+// `live:false` rows, but `live` is only ever written by an engine's level and nothing clears it at
+// engine death, so it is no proof of a live task: the handover caller passes `startedTaskIds` instead
+// (the ids the CURRENT engine incarnation saw task_started for); `requireLive` has no caller.
+export function liveBackgroundTaskCount(state: Readonly<SessionProjection> | null | undefined, { levelTaskIds = null, excludeToolIds = new Set<string>(), requireLive = false, startedTaskIds = null }: { levelTaskIds?: Iterable<string> | null; excludeToolIds?: Set<string>; requireLive?: boolean; startedTaskIds?: Iterable<string> | null } = {}): number {
   const tasks = Array.isArray(state?.backgroundTasks) ? state.backgroundTasks : [];
   const excluded = (task: BackgroundTaskProjection | undefined) => Boolean(task?.toolUseId) && excludeToolIds.has((task as BackgroundTaskProjection).toolUseId as string);
   if (levelTaskIds) {
     let count = 0;
     for (const taskId of levelTaskIds) {
-      if (!excluded(tasks.find((task) => task.taskId === taskId))) count += 1;
+      const task = tasks.find((row) => row.taskId === taskId);
+      if (excluded(task)) continue;
+      // A terminal record ends the task whatever the set still says (#278).
+      if (task && task.status !== "running") continue;
+      count += 1;
     }
     return count;
   }
-  return tasks.filter((task) => task.status === "running" && !excluded(task)).length;
+  // #278 (handover caller): on the projection branch the ONLY running rows that count are the ids the CURRENT engine incarnation
+  // started - a row left by an earlier incarnation (`live` included: nothing clears it at death) is a phantom.
+  const started = startedTaskIds ? new Set(startedTaskIds) : null;
+  return tasks.filter((task) => task.status === "running" && (!requireLive || task.live !== false) && (!started || started.has(task.taskId)) && !excluded(task)).length;
+}
+
+// The bounded id the task fold keys rows on (callers that track ids outside the projection must key the same way).
+export function backgroundTaskId(value: unknown): string | null {
+  return taskIdentifier(value);
 }
 
 // Issue #17: the sidebar's "Last Active" sort must reflect real conversation
@@ -1079,7 +1104,7 @@ export function liveBackgroundTaskCount(state: Readonly<SessionProjection> | nul
 // exactly the timestamp callers need. Returns null when no turn has ever
 // landed in this state (a brand-new session), so callers can fall back to
 // their own seed (e.g. the session's createdAt/startedAt).
-export function lastMessageActivityAt(state: Readonly<SessionProjection>): number | null {
+export function lastMessageActivityAt(state: Readonly<{ turnOrder: readonly string[]; turnsById: Readonly<Record<string, { startedAt?: number | null } | undefined>> }>): number | null {
   const lastTurnId = state.turnOrder.length ? state.turnOrder[state.turnOrder.length - 1] : null;
   const startedAt = lastTurnId ? state.turnsById[lastTurnId]?.startedAt : null;
   return typeof startedAt === "number" ? startedAt : null;
@@ -3719,6 +3744,9 @@ function reduceEvent(state: Readonly<SessionProjection>, event: ReducerInput): S
           { queueId: event.queueId, text: event.text, ...(event.flushMode ? { flushMode: event.flushMode } : {}),
             ...(event.origin ? { origin: event.origin } : {}),
             ...(event.noticeKind ? { noticeKind: event.noticeKind } : {}),
+            // v155 (delivery L1): the queued attachments' descriptors and the staged ids that carry their bytes.
+            ...(Array.isArray(event.attachments) && event.attachments.length ? { attachments: event.attachments } : {}),
+            ...(Array.isArray(event.attachmentIds) && event.attachmentIds.length ? { attachmentIds: event.attachmentIds } : {}),
             // v149 (GH #265): the sending session of a "peer" row, bounded like `from`.
             ...(peerSender ? { fromSessionId: peerSender.sessionId, fromSessionName: peerSender.name } : {}),
             // v136 (issue #229): for a deferred ("next-call") message, the
@@ -3743,8 +3771,14 @@ function reduceEvent(state: Readonly<SessionProjection>, event: ReducerInput): S
         queuedMessages: state.queuedMessages.map((m) => {
           if (m.queueId !== event.queueId) return m;
           const next = { ...m, text: event.text };
-          if (event.held === true) next.held = true;
-          else if (event.held === false) delete next.held;
+          if (event.held === true) {
+            next.held = true;
+            // v155 (delivery L1, D-L141-7 B2): why it is held; absent keeps the pre-155 (open failure) reading.
+            if (event.heldReason !== undefined) next.heldReason = event.heldReason;
+          } else if (event.held === false) {
+            delete next.held;
+            delete next.heldReason;
+          }
           return next;
         }),
       };
@@ -3782,6 +3816,38 @@ function reduceEvent(state: Readonly<SessionProjection>, event: ReducerInput): S
       };
     }
 
+    case "queued_message_delivered": {
+      // v155 (delivery L1, D-L141-6 (2)): a queued message was steered into the RUNNING turn. Unlike the other queued_message_*
+      // arms this one belongs to a turn, so a closed or non-current turn takes nothing (a late/replayed delivery for a turn that
+      // already ended must not grow a finished turn; the row's own queued_message_removed already settled the queue).
+      if (!isOpenCurrentTurn(state, event.turnId)) return state;
+      const blockId = `user:${event.turnId}:${event.queueId}`;
+      // Idempotent: the same delivery twice is the same state (no new block, no queue/removed churn).
+      if (state.turnsById[event.turnId]?.blocksById[blockId] !== undefined) return state;
+      const afterTurn = updateTurn(state, (turn) =>
+        upsertBlock(turn, blockId, () => ({
+          blockId,
+          kind: "user_message",
+          text: event.text,
+          steered: true,
+          queueId: event.queueId,
+          ...blockEventTs(event),
+          ...(Array.isArray(event.attachments) && event.attachments.length ? { attachments: event.attachments } : {}),
+        })),
+      );
+      // The row is leaving the queue as a delivery (accepted, not withdrawn): same bookkeeping as a "flushed" removal.
+      const alreadyRemoved = (afterTurn.removedQueueIds ?? []).includes(event.queueId);
+      const rowPresent = afterTurn.queuedMessages.some((m) => m.queueId === event.queueId);
+      if (!rowPresent && alreadyRemoved) return afterTurn;
+      const removed = (afterTurn.removedQueueIds ?? []).filter((id) => id !== event.queueId);
+      removed.push(event.queueId);
+      return {
+        ...afterTurn,
+        queuedMessages: rowPresent ? afterTurn.queuedMessages.filter((m) => m.queueId !== event.queueId) : afterTurn.queuedMessages,
+        removedQueueIds: removed.length > MAX_REMOVED_QUEUE_IDS ? removed.slice(-MAX_REMOVED_QUEUE_IDS) : removed,
+      };
+    }
+
     // background_pending stays a journal-only reduce()-NO-OP (falls through to
     // default): it's the transition breadcrumb the boot reconciler reads to DERIVE
     // background_interrupted, never surfaced directly. Keeping it a no-op is also
@@ -3808,6 +3874,7 @@ export function createClaudeAdapterState(turnId: string): ClaudeAdapterState {
     streamTextByIndex: {},
     streamThinkingOrdinal: 0,
     streamThinkingByIndex: {},
+    finalOrdinals: { messageId: null, text: 0, thinking: 0 },
     // tool_use ids whose standalone permission_denied advisory already emitted.
     // Result.permission_denials repeats the same facts at turn end; the threaded
     // list lets the pure adapter deterministically emit each denial once.
@@ -4093,6 +4160,19 @@ function mainClaudeModelUsage(modelUsages: ModelUsageEntry[], servedRawModel: st
   return modelUsages.length === 1 ? modelUsages[0] : null;
 }
 
+type FinalOrdinals = ClaudeAdapterState["finalOrdinals"];
+
+// The ordinals after `content`'s text/thinking blocks, continuing `base` when it
+// is for the same message (a new message restarts at zero). Pure: new object.
+function advanceFinalOrdinals(base: FinalOrdinals, messageId: string, content: ClaudeContentBlock[]): FinalOrdinals {
+  const same = base.messageId === messageId;
+  return {
+    messageId,
+    text: (same ? base.text : 0) + content.filter((block) => block?.type === "text").length,
+    thinking: (same ? base.thinking : 0) + content.filter((block) => block?.type === "thinking").length,
+  };
+}
+
 // Text blocks are keyed `${messageId}:t${textOrdinal}`, where the ordinal
 // counts only TEXT blocks in content order; thinking blocks are keyed
 // `${messageId}:th${thinkingOrdinal}` in their OWN ordinal namespace. The
@@ -4115,10 +4195,17 @@ function mainClaudeModelUsage(modelUsages: ModelUsageEntry[], servedRawModel: st
 // a non-empty thinking block emits a self-contained `thinking_completed`
 // (text + done). Either way the block is keyed identically, so if both a
 // streamed build AND a full final record occur they collapse into one block.
-function claudeContentEvents(turnId: string, messageId: string, content: ClaudeContentBlock[], aborted = false): AgentEvent[] {
+function claudeContentEvents(
+  turnId: string,
+  messageId: string,
+  content: ClaudeContentBlock[],
+  aborted = false,
+  base: FinalOrdinals = { messageId: null, text: 0, thinking: 0 },
+): AgentEvent[] {
   const events: AgentEvent[] = [];
-  let textOrdinal = 0;
-  let thinkingOrdinal = 0;
+  let textOrdinal = base.messageId === messageId ? base.text : 0;
+  let thinkingOrdinal = base.messageId === messageId ? base.thinking : 0;
+  const textBase = textOrdinal;
   const textCount = content.filter((block) => block?.type === "text").length;
   for (let index = 0; index < content.length; index += 1) {
     const block = content[index];
@@ -4131,7 +4218,7 @@ function claudeContentEvents(turnId: string, messageId: string, content: ClaudeC
         // SDKAssistantMessage.aborted belongs to the whole wrapper. Attach it
         // once, to the wrapper's final text block, so a multi-block response
         // gets one marker rather than one per bubble.
-        ...(aborted === true && textOrdinal === textCount - 1 ? { aborted: true } : {}),
+        ...(aborted === true && textOrdinal - textBase === textCount - 1 ? { aborted: true } : {}),
       });
       textOrdinal += 1;
     } else if (block.type === "tool_use") {
@@ -4861,11 +4948,15 @@ export function claudeToEvents(record: ClaudeRecord, state: ClaudeAdapterState):
         return { events: [{ type: "unknown_event", turnId, raw: record }], state };
       }
       return {
-        events: claudeContentEvents(turnId, record.message.id, record.message.content, record.aborted === true),
+        events: claudeContentEvents(turnId, record.message.id, record.message.content, record.aborted === true, state.finalOrdinals),
         state: withKnownClaudeTools(
-          typeof record.message.model === "string" && record.message.model
-            ? { ...state, servedRawModel: record.message.model }
-            : state,
+          {
+            ...state,
+            finalOrdinals: advanceFinalOrdinals(state.finalOrdinals, record.message.id, record.message.content),
+            ...(typeof record.message.model === "string" && record.message.model
+              ? { servedRawModel: record.message.model }
+              : {}),
+          },
           record.message.content,
           null,
         ),
@@ -5129,6 +5220,7 @@ export function claudeTranscriptToEvents(records: ClaudeRecord[], { turnIdPrefix
   const events: AgentEvent[] = [];
   let turnCount = 0;
   let turnId: string = null as never; // the currently-open replay turn, or null between turns
+  let replayOrdinals: FinalOrdinals = { messageId: null, text: 0, thinking: 0 };
 
   const closeTurn = () => {
     if (turnId) {
@@ -5241,9 +5333,10 @@ export function claudeTranscriptToEvents(records: ClaudeRecord[], { turnIdPrefix
       // An assistant message with no preceding user text (e.g. a transcript that
       // begins mid-turn) still needs a turn to hang on.
       if (!turnId) startTurn(null);
-      for (const event of claudeContentEvents(turnId, record.message.id, record.message.content, record.aborted === true)) {
+      for (const event of claudeContentEvents(turnId, record.message.id, record.message.content, record.aborted === true, replayOrdinals)) {
         events.push(event);
       }
+      replayOrdinals = advanceFinalOrdinals(replayOrdinals, record.message.id, record.message.content);
     }
     // Every other record type (mode, permission-mode, file-history-*,
     // last-prompt, attachment, queue-operation, system, summary) is control/
@@ -7411,14 +7504,20 @@ export function dshTranscriptReplay(records: DshRecord[] | null | undefined, { t
   const events: AgentEvent[] = [];
   const list = Array.isArray(records) ? records : [];
   let adapterState = createDshAdapterState(turnIdPrefix);
+  let openTurnId: string | null = null;
   for (const record of list) {
     const { events: produced, state } = dshTranscriptToEvents(record, adapterState);
     adapterState = state;
     for (const event of produced) {
       // Replay turns carry no native id — the resume picker keys on historyId.
       if (event.type === "native_session_id") continue;
+      if (event.type === "turn_started") openTurnId = event.turnId;
+      else if (event.type === "turn_end") openTurnId = null;
       events.push(event);
     }
   }
+  // #275: a transcript cut off mid-turn has no terminal record; close the synthesized turn like every other replay converter
+  // does (closeTurn), or an adopted session projects status "active" with a turn no engine will ever settle.
+  if (openTurnId !== null) events.push({ type: "turn_end", turnId: openTurnId, outcome: TURN_OUTCOMES.OK });
   return dropEmptyReplayTurns(events);
 }

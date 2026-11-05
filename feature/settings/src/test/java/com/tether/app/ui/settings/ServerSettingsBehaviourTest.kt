@@ -91,10 +91,10 @@ class ServerSettingsBehaviourTest {
 
     private fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
 
-    private fun assertThreeEnvLocksFor(vararg settings: ServerSetting) {
-        assertEquals(3, settings.size)
+    private fun assertEnvLocksFor(vararg settings: ServerSetting) {
+        assertTrue(settings.isNotEmpty())
         assertEquals(
-            listOf(1, 1, 1),
+            List(settings.size) { 1 },
             settings.map { setting ->
                 compose.onAllNodes(
                     hasTestTag(SettingsTags.EnvLock) and
@@ -171,9 +171,11 @@ class ServerSettingsBehaviourTest {
         sessions()
         ordered("Metadata generation", "Provider selection", "Session lifecycle", "Session defaults")
         for (label in listOf("Persistent mode", "Task telemetry", "Max warm sessions", "Max concurrent turns", "Idle eviction (ms)",
-            "Background hard cap (ms)", "Sweep interval (ms)", "Shutdown drain (ms)", "Message while busy", "Claude model fallback",
+            "Background hard cap (ms)", "Sweep interval (ms)", "Shutdown drain (ms)", "Claude model fallback",
             "Auto-archive idle sessions (days)", "Archive on merge", "Default permission mode", "Default sandbox tier", "Default to isolated worktree",
             "Allowed folders", "Spawn extra writable roots", "Detached agent launches")) assertTrue(label, texts().contains(label))
+        // A7: the "Message while busy" row is gone (the server always queues), though the fixture's reply still carries the key.
+        assertFalse(texts().contains("Message while busy"))
         assertTrue(texts().contains("2 allowed folders"))
         engines()
         assertTrue(texts().contains("Claude CLI"))
@@ -226,19 +228,16 @@ class ServerSettingsBehaviourTest {
     @Test fun aSelectSendsTheChosenOptionAndTheEmptyOptionAsNull() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("defaultSandboxPolicy" to "read-only"))), writer = writer))
-        sessions()
-        openSelect("Message while busy")
-        pick("End of turn")
         openSelect("Default sandbox tier")
         pick("Provider default")
         compose.waitForIdle()
         assertEquals(
             listOf(
-                json("""{"type":"set-server-settings","settings":{"messageInterruptMode":"end"}}"""),
                 json("""{"type":"set-server-settings","settings":{"defaultSandboxPolicy":null}}"""),
             ),
             writer.frames(),
         )
+        assertTrue(writer.frames().none { it.toString().contains("messageInterruptMode") })
     }
 
     /**
@@ -363,10 +362,10 @@ class ServerSettingsBehaviourTest {
 
     @Test fun anEnvForcedValueIsLockedAndNeverWritten() {
         val writer = RecordingWriter()
-        val forced = mapOf("host" to true, "password" to true, "claudePersistent" to true, "allowedRoots" to true, "messageInterruptMode" to true, "stateDir" to true)
+        val forced = mapOf("host" to true, "password" to true, "claudePersistent" to true, "allowedRoots" to true, "stateDir" to true)
         show(ServerFixtures.binding(view = ServerFixtures.view(envForced = forced), advanced = ServerFixtures.ADVANCED_FORCED, writer = writer))
         // Server & integrations owns the host, password, and state-directory locks.
-        assertThreeEnvLocksFor(ServerSetting.Host, ServerSetting.Password, ServerSetting.StateDir)
+        assertEnvLocksFor(ServerSetting.Host, ServerSetting.Password, ServerSetting.StateDir)
         tag(ServerSettingsTags.input(ServerSetting.Host)).assertIsNotEnabled()
         tag(ServerSettingsTags.input(ServerSetting.StateDir)).assertIsNotEnabled()
         // A forced secret has no key at all (the web hides them), the token (not forced) does.
@@ -374,11 +373,10 @@ class ServerSettingsBehaviourTest {
         tag(ServerSecretTags.opener(ServerSetting.ProxyToken)).assertExists()
         // A forced toggle does nothing; a forced list has no remove or add.
         sessions()
-        assertThreeEnvLocksFor(ServerSetting.ClaudePersistent, ServerSetting.AllowedRoots, ServerSetting.MessageInterruptMode)
+        assertEnvLocksFor(ServerSetting.ClaudePersistent, ServerSetting.AllowedRoots)
         tag(ServerSettingsTags.row(ServerSetting.ClaudePersistent)).performScrollTo().performClick()
         tag(ServerSettingsTags.remove(ServerSetting.AllowedRoots, "/srv/work")).assertDoesNotExist()
         tag(ServerSettingsTags.add(ServerSetting.AllowedRoots)).assertDoesNotExist()
-        compose.onNodeWithContentDescription("Message while busy").assertIsNotEnabled()
         // The CLI forced by env: its path, no picker.
         engines()
         tag(ServerSettingsTags.CliForced).performScrollTo()

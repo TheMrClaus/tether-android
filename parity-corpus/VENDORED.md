@@ -6,7 +6,7 @@ was generated from (TRACKER.md's PARITY_BASE line says which base each layer is 
 
 | Corpus | Source branch @ sha | Manifest tetherSha |
 |---|---|---|
-| reducer+helpers | `(detached)` @ `19c56e25` | `19c56e25eab4fdf75fb34bdf3e6962b9fc0ab074` |
+| reducer+helpers | `(detached)` @ `dc1bc720` | `dc1bc720441ad1f129a7cc92fe5a9513eb2d76ea` |
 | wire | `(detached)` @ `19c56e25` | `19c56e25eab4fdf75fb34bdf3e6962b9fc0ab074` |
 | tokens | `(detached)` @ `887c222` | `887c222` |
 | screens (PNGs gitignored) | `android-parity/ta-lx3` @ `97af028` | `97af028a88a99588af5db8f350e2a43aacf53935` |
@@ -35,3 +35,8 @@ exporter run again. The screens were captured on the PR head `97af028` (parent `
 code is `887c222`'s), and that head is tree-identical to its squash merge on tether main `4b05be7`
 (`git diff 97af028 4b05be7` is empty). Two full runs gave 120/120 byte-identical PNGs: 27 scenarios x
 the two Studio skins x phone/tablet. This replaces the 3f69e4f corpus, which had six skins.
+
+delivery A4a (lead #143): reducer+helpers, `corpus-manifest.json` and `reference/events.ts` re-vendored at tether `dc1bc720` (v155, delivery L1;
+generated from a clean clone of that sha, `sync-corpus.sh <wt> - - -`). `events.ts` sha256 `eaab37534c837b4317e9df6928f12bcc4a6cae0b2f65a87ddb496b9077917134`.
+New: reducer case `queued-message-delivered-steer.json`; the `reduceEvent` label set is 75 (adds `queued_message_delivered`). The wire corpus stays at
+`19c56e25` (hello stays 143, ruling R1).

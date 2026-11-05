@@ -199,7 +199,7 @@ class ComposerSubmitRaceTest {
     }
 
     @Test
-    fun attachmentsWhileATurnRunsAreRefusedAndKept() {
+    fun attachmentsWhileATurnRunsRideTheQueueKeyAndAreNeverRefused() {
         val file = File(tmp.root, "notes.txt").apply { writeText("hello") }
         picks = listOf(ForeignPicks.uriFor(file))
         show(ComposerFixtures.busy)
@@ -207,11 +207,11 @@ class ComposerSubmitRaceTest {
         input().performTextInput("with the file")
         rule.onNodeWithContentDescription("Queue message").performClick()
         rule.waitForIdle()
-        assertEquals("nothing sent, nothing queued", emptyList<Pair<String, List<Attachment>>>(), sends)
-        assertEquals(emptyList<Pair<String, List<Attachment>>>(), attachmentSends)
-        rule.onNodeWithText("Wait for the current turn to finish before sending attachments.").assertExists()
-        assertEquals("the text stays", "with the file", inputText())
-        assertEquals("the file stays", 1, rule.onAllNodesWithRemove().size)
+        // A3: ONE guarded send carrying the staged file (the client files a queue-add with ids); never the text-only path.
+        assertEquals("nothing on the text path", emptyList<Pair<String, List<Attachment>>>(), sends)
+        assertEquals(1, attachmentSends.size)
+        assertEquals("with the file", attachmentSends.single().first)
+        rule.onNodeWithText("Wait for the current turn to finish before sending attachments.").assertDoesNotExist()
     }
 
     @Test

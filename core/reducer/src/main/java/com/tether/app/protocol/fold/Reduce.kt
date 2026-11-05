@@ -99,6 +99,7 @@ internal fun reduceEvent(state: JsObj, event: JsObj): JsObj {
         "queued_message_added" -> foldInteraction(state, event, type) // events.mjs:2863
         "queued_message_updated" -> foldInteraction(state, event, type) // events.mjs:2878
         "queued_message_removed" -> foldInteraction(state, event, type) // events.mjs:2888
+        "queued_message_delivered" -> foldInteraction(state, event, type) // events.ts:3819 (v155)
         // events.mjs:2899 — background_pending (a journal-only breadcrumb) and any type this
         // reducer does not know.
         else -> state

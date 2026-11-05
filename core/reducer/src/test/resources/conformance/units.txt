@@ -69,6 +69,7 @@ case approval-legacy-decision-and-expiry  B  ready
 case question-flow                        B  ready
 case permission-denials                   B  ready
 case queued-messages                      B  ready
+case queued-message-delivered-steer     B  ready
 case turn-interrupted-cap                 B  ready
 case dismissed-notices-cap                B  ready
 case session-notices-and-dismiss          B  ready

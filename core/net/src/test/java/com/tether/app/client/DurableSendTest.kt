@@ -119,7 +119,7 @@ class DurableSendTest {
     }
 
     /** A new app process over the same disk. The last one started is [ConnectionHarness.client]. */
-    private fun process(scheduler: ManualScheduler = h.scheduler): RealTetherClient {
+    private fun process(scheduler: ManualScheduler = h.scheduler, spool: java.io.File? = null): RealTetherClient {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val client = RealTetherClient(
             settings = disk(),
@@ -129,6 +129,7 @@ class DurableSendTest {
             backoff = testBackoff(),
             sweepIntervalMs = 3_600_000,
             scheduler = scheduler,
+            attachmentSpool = spool?.let(::AttachmentSpool),
         )
         processes[client] = scope
         h.client = client
@@ -421,6 +422,145 @@ class DurableSendTest {
         assertTrue(h.framesUntilBarrier().isEmpty())
     }
 
+    /**
+     * delivery A4a (v155, D-L141-6 (2)): the steered delivery IS the queue-add's acceptance. Its `queued_message_delivered`
+     * acks the record by `queueId` alone, exactly like `queued_message_added`; the reconnect re-sends nothing.
+     */
+    @Test
+    fun aSteeredDeliveryAcksTheQueueAddByItsQueueId() {
+        val (client, ws) = connectedProcess()
+        client.queueAdd("s1", "steered into the running turn")
+        val queued = key(h.expectFrame("queue-add"), "queueId")
+        ws.send(
+            """{"type":"event","sessionId":"s1","event":{"type":"queued_message_delivered","turnId":"t1",
+               "queueId":"$queued","text":"steered into the running turn","via":"steer","seq":2,"ts":2}}""",
+        )
+        persistedMatches { it.records.isEmpty() }
+
+        val ws2 = reconnectAfterDrop(ws, h.scheduler)
+        assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        ws2.send(snapshotFrame("s1", 2, turnState("s1")))
+        h.serverBarrier(ws2)
+        assertTrue("re-sent a delivered queue item", h.framesUntilBarrier().isEmpty())
+    }
+
+    /**
+     * delivery A6 (T5, D-L141-4): a record the server already journaled is answered with NO new frame, so the pending record
+     * resolves only through the snapshot reconcile. Each place the server may hold it ends the record with no duplicate send
+     * and no failed bubble: the queued row, a delivered/flushed id in `removedQueueIds`.
+     */
+    @Test
+    fun aRestartRedeliveryOfARecordTheServerStillQueuesEndsWithNoDuplicate() = redeliveryEnds("queued")
+
+    @Test
+    fun aRestartRedeliveryOfARecordTheServerDeliveredOrFlushedEndsWithNoDuplicate() = redeliveryEnds("removed")
+
+    private fun redeliveryEnds(held: String) {
+        run {
+            val (client, ws) = connectedProcess()
+            client.queueAdd("s1", "journaled before the link dropped")
+            val queued = key(h.expectFrame("queue-add"), "queueId")
+            val ws2 = reconnectAfterDrop(ws, h.scheduler)
+            assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+            val state = if (held == "queued") {
+                turnState("s1").replace(""""queuedMessages":[]""", """"queuedMessages":[{"queueId":"$queued","text":"x"}]""")
+            } else {
+                stateWithRemovedQueueIds("s1", queued)
+            }
+            ws2.send(snapshotFrame("s1", 3, state))
+            h.serverBarrier(ws2)
+            assertTrue("$held: duplicate send", h.framesUntilBarrier().isEmpty())
+            persistedMatches { it.records.isEmpty() }
+            assertTrue("$held: failed bubble", client.failedSends.value.isEmpty())
+        }
+    }
+
+    /**
+     * delivery A4a NOTE 1 (negative B5): ONLY `queued_message_added` and a steered `queued_message_delivered` accept a queue-add.
+     * A `queued_message_removed` (flushed or withdrawn) proves nothing about THIS client's record, so it never acks it: the
+     * reconnect snapshot without `removedQueueIds` (the pre-v130 residual) re-sends it once, same key.
+     */
+    @Test
+    fun aFlushedRemovalEventNeverAcksAPendingQueueAdd() = removalNeverAcks("flushed")
+
+    @Test
+    fun aWithdrawnRemovalEventNeverAcksAPendingQueueAdd() = removalNeverAcks("withdrawn")
+
+    private fun removalNeverAcks(reason: String) {
+        run {
+            val (client, ws) = connectedProcess()
+            client.queueAdd("s1", "not acked by a removal ($reason)")
+            val queued = key(h.expectFrame("queue-add"), "queueId")
+            ws.send(
+                """{"type":"event","sessionId":"s1","event":{"type":"queued_message_removed","turnId":null,
+                   "queueId":"$queued","reason":"$reason","seq":2,"ts":2}}""",
+            )
+            h.serverBarrier(ws)
+            assertEquals("$reason: the record survives the removal event", listOf(queued), persisted().records.map { it.key })
+            val ws2 = reconnectAfterDrop(ws, h.scheduler)
+            assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+            ws2.send(snapshotFrame("s1", 3, turnState("s1")))
+            h.serverBarrier(ws2)
+            assertEquals("$reason: re-sent once, same key", listOf(queued), h.framesUntilBarrier().map { key(it, "queueId") })
+        }
+    }
+
+    /**
+     * delivery A6 (A4a NOTE 2): the same two endings after a COLD START: a NEW client over the same persisted store, no in-memory
+     * state of the first (the first process is cancelled; a JVM test never kills a process). Queued row, `removedQueueIds`:
+     * no resend, the record cleared, no failed bubble.
+     */
+    @Test
+    fun aColdStartOverAQueuedRecordTheServerStillQueuesEndsWithNoDuplicate() = coldStartRedeliveryEnds("queued")
+
+    @Test
+    fun aColdStartOverARecordTheServerDeliveredOrFlushedEndsWithNoDuplicate() = coldStartRedeliveryEnds("removed")
+
+    private fun coldStartRedeliveryEnds(held: String) {
+        val (first, ws) = firstProcess()
+        first.queueAdd("s1", "journaled before the process died")
+        val queued = key(h.expectFrame("queue-add"), "queueId")
+        persistedMatches { s -> s.records.any { it.key == queued && it.tries == 1 } }
+        kill(first, ws)
+
+        val second = process()
+        val ws2 = startConnected(second)
+        assertEquals("nothing is re-sent before the snapshot", listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        val state = if (held == "queued") {
+            turnState("s1").replace(""""queuedMessages":[]""", """"queuedMessages":[{"queueId":"$queued","text":"x"}]""")
+        } else {
+            stateWithRemovedQueueIds("s1", queued)
+        }
+        ws2.send(snapshotFrame("s1", 3, state))
+        h.serverBarrier(ws2)
+        assertTrue("$held: duplicate send", h.framesUntilBarrier().isEmpty())
+        persistedMatches { it.records.isEmpty() }
+        assertTrue("$held: failed bubble", second.failedSends.value.isEmpty())
+    }
+
+    /** A cold start whose snapshot does not hold the record re-sends it once, same key; its live ack then clears it. */
+    @Test
+    fun aColdStartResendsAnUnjournaledQueueAddOnceAndItsLiveAckClearsIt() {
+        val (first, ws) = firstProcess()
+        first.queueAdd("s1", "never reached the journal")
+        val queued = key(h.expectFrame("queue-add"), "queueId")
+        persistedMatches { s -> s.records.any { it.key == queued && it.tries == 1 } }
+        kill(first, ws)
+
+        val second = process()
+        val ws2 = startConnected(second)
+        assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        ws2.send(snapshotFrame("s1", 1, turnState("s1")))
+        h.serverBarrier(ws2)
+        assertEquals(listOf(queued), h.framesUntilBarrier().map { key(it, "queueId") })
+        ws2.send(
+            """{"type":"event","sessionId":"s1","event":{"type":"queued_message_added","turnId":null,
+               "queueId":"$queued","text":"never reached the journal","seq":2,"ts":2}}""",
+        )
+        persistedMatches { it.records.isEmpty() }
+        assertTrue(second.failedSends.value.isEmpty())
+    }
+
     /** [turnState] with a v130 (S13.1-C) `removedQueueIds` list. */
     private fun stateWithRemovedQueueIds(sessionId: String, vararg removed: String): String =
         turnState(sessionId).trimEnd().removeSuffix("}") +
@@ -506,5 +646,113 @@ class DurableSendTest {
         h.serverBarrier(ws2)
         assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
         assertTrue("approvals/questions never enter the durable store", persisted().records.isEmpty())
+    }
+
+    // ------------------------------------------------------------------
+    // ta-delivery A1: a pending message's attachments survive process death
+    // ------------------------------------------------------------------
+
+    private val pic = com.tether.app.protocol.Attachment("pic.png", "image/png", "iVBORw0KGgo=")
+    private val notes = com.tether.app.protocol.Attachment("notes.txt", "text/plain", "aGVsbG8=")
+
+    private fun awaitSpoolDirs(dir: java.io.File, predicate: (List<String>) -> Boolean) {
+        val deadline = System.currentTimeMillis() + 20_000
+        while (System.currentTimeMillis() < deadline) {
+            if (predicate(dir.list()?.toList().orEmpty())) return
+            Thread.sleep(10)
+        }
+        throw AssertionError("spool dir never matched: ${dir.list()?.toList()}")
+    }
+
+    @Test
+    fun aMessageWithTwoAttachmentsSurvivesProcessDeathAndIsRedeliveredWholeUnderItsKey() {
+        val spool = java.io.File(java.nio.file.Files.createTempDirectory("a1-spool").toFile(), "spool")
+        val first = process(scheduler = ManualScheduler(), spool = spool)
+        val ws = startConnected(first)
+        first.attach("s1")
+        h.expectFrame("attach")
+        ws.send(snapshotFrame("s1", 1, turnState("s1")))
+        h.await(first.projections) { it.containsKey("s1") }
+        assertEquals(AttachmentSendResult.Sent, first.sendAttachments("s1", "two photos", listOf(pic, notes), null, first.consentOrigin.value))
+        val original = h.expectFrame("send")
+        val sent = key(original)
+        // On disk before the process dies: the slot names the files, holds no bytes.
+        h.await(disk().written) { it != null && it.contains("attachmentFiles") && it.contains(sent) }
+        assertTrue("bytes in the slot", !disk().disk!!.contains(pic.data))
+        awaitSpoolDirs(spool) { it == listOf(sent) }
+        h.serverBarrier(ws)
+        h.framesUntilBarrier() // the half-open probe's ping, sent right after the message
+        kill(first, ws)
+
+        val second = process(spool = spool)
+        val ws2 = startConnected(second)
+        assertEquals(listOf("attach"), h.framesUntilBarrier().map { it.type() })
+        ws2.send(snapshotFrame("s1", 1, turnState("s1")))
+        h.serverBarrier(ws2)
+        val resent = h.framesUntilBarrier().single()
+        assertEquals("send", resent.type())
+        assertEquals(original, resent) // same key, same text, the same two attachments
+        // The live ack clears the record, and its files with it.
+        ws2.send(turnStartedEvent("s1", "t1", 2, sent))
+        awaitSpoolDirs(spool) { it.isEmpty() }
+        persistedMatches { it.records.isEmpty() }
+    }
+
+    /** A first process files "two photos" and dies; returns the spool dir and the record key. */
+    private fun diedWithSpooledMessage(): Pair<java.io.File, String> {
+        val spool = java.io.File(java.nio.file.Files.createTempDirectory("a1-spool").toFile(), "spool")
+        val first = process(scheduler = ManualScheduler(), spool = spool)
+        val ws = startConnected(first)
+        first.attach("s1")
+        h.expectFrame("attach")
+        ws.send(snapshotFrame("s1", 1, turnState("s1")))
+        h.await(first.projections) { it.containsKey("s1") }
+        assertEquals(AttachmentSendResult.Sent, first.sendAttachments("s1", "two photos", listOf(pic, notes), null, first.consentOrigin.value))
+        val sent = key(h.expectFrame("send"))
+        h.await(disk().written) { it != null && it.contains("attachmentFiles") && it.contains(sent) }
+        awaitSpoolDirs(spool) { it == listOf(sent) }
+        h.serverBarrier(ws)
+        h.framesUntilBarrier()
+        kill(first, ws)
+        return spool to sent
+    }
+
+    private fun assertRestoredAsFailedPhotoLoss(spool: java.io.File, sent: String) {
+        val second = process(spool = spool)
+        val ws2 = startConnected(second)
+        // Nothing is pending, so there is no session to attach; and nothing is sent, with or without photos.
+        h.serverBarrier(ws2)
+        assertTrue(h.framesUntilBarrier().none { it.type() == "send" })
+        h.await(second.failedSends) { it.isNotEmpty() }
+        val failed = second.failedSends.value.single()
+        assertEquals(sent, failed.key)
+        assertEquals("two photos", failed.text)
+        assertEquals(FailedSendReason.PhotoLost, failed.reason)
+        awaitSpoolDirs(spool) { it.isEmpty() }
+        persistedMatches { it.records.isEmpty() }
+    }
+
+    @Test
+    fun aRecordWhoseSpooledFileIsMissingComesBackAsAFailedBubbleNotASilentDrop() {
+        val (spool, sent) = diedWithSpooledMessage()
+        java.io.File(spool, "$sent/1.bin").delete()
+        assertRestoredAsFailedPhotoLoss(spool, sent)
+    }
+
+    @Test
+    fun aRecordWhoseSpooledFileChangedSizeComesBackAsAFailedBubbleNotASilentDrop() {
+        val (spool, sent) = diedWithSpooledMessage()
+        java.io.File(spool, "$sent/0.bin").appendBytes(byteArrayOf(9))
+        assertRestoredAsFailedPhotoLoss(spool, sent)
+    }
+
+    @Test
+    fun theStartupSweepRemovesFilesNoRecordReferences() {
+        val spool = java.io.File(java.nio.file.Files.createTempDirectory("a1-spool").toFile(), "spool")
+        java.io.File(spool, "orphan-key").mkdirs()
+        java.io.File(spool, "orphan-key/0.bin").writeBytes(byteArrayOf(1, 2, 3))
+        val client = process(spool = spool)
+        startConnected(client)
+        awaitSpoolDirs(spool) { it.isEmpty() }
     }
 }

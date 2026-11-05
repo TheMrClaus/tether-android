@@ -204,7 +204,26 @@ internal fun UserBubble(block: TurnBlock, modifier: Modifier = Modifier, timeLab
         }
         val attachments = block.attachments
         if (!attachments.isNullOrEmpty()) BubbleAttachments(attachments, look)
+        if (block.steered == true) SteeredStamp(look.ink)
         if (timeLabel.isNotEmpty()) MessageTime(timeLabel, look.ink)
+    }
+}
+
+/** Spec §1 V6: a queued message delivered INTO the running turn says so: `CornerDownRight` + [STEERED_STAMP]. A turn-end delivery has no stamp. */
+internal const val STEERED_STAMP = "Sent during the turn"
+internal const val STEERED_STAMP_TAG = "steered-stamp"
+
+@Composable
+private fun SteeredStamp(ink: Color) {
+    val type = LocalTetherTypography.current
+    Spacer(Modifier.height(4.8.dp))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.8.dp),
+        modifier = Modifier.alpha(0.75f).semantics(mergeDescendants = true) {}.testTag(STEERED_STAMP_TAG),
+    ) {
+        Icon(TetherIcons.CornerDownRight, contentDescription = null, tint = ink, modifier = Modifier.size(12.dp))
+        Text(STEERED_STAMP, style = type.chatBody.copy(fontSize = 10.88.sp, fontWeight = FontWeight(600), lineHeight = 1.25.em), color = ink)
     }
 }
 

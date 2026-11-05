@@ -226,7 +226,7 @@ internal fun stopLockCopy(lock: ConsentLock?): String? = when (lock) {
 
 /**
  * ta-coik.22: the lock the composer's keys honour (Send to agent / Background / Stop, Interrupt and a
- * queued row's "Interrupt now"). The web leaves every one of them live on a copy that is not live
+ * queued row's Interrupt and send). The web leaves every one of them live on a copy that is not live
  * (chat-view.tsx 90fbb9f :4535-4596): a tap goes to the socket, which sends whenever it is open. So
  * offline and catching up lock nothing here (the client refuses only a closed link and says so).
  * Read-only and a handed-off session keep their lock: the web draws no composer there. The running

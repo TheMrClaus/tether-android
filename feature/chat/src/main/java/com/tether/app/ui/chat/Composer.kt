@@ -57,6 +57,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
@@ -153,7 +154,7 @@ internal const val STALE_RUN_TAG = "composer-run-stale"
 @androidx.compose.runtime.Immutable
 class ComposerLiveness(
     /**
-     * Why Interrupt (the key and a queued row's "Interrupt now") and the command keys cannot send
+     * Why Interrupt (the key and a queued row's Interrupt and send) and the command keys cannot send
      * ([stopLockCopy]'s words); null = they can. ta-coik.22: the screen leaves a saved or catching-up
      * copy unlocked, as the web does ([commandKeyLock]); the client refuses off a live link.
      */
@@ -180,9 +181,8 @@ class ComposerLiveness(
  * while a turn runs).
  *
  * Send / queue rules (chat-view.tsx:3104-3188): an idle session sends; a busy one QUEUES the
- * text (`queue-add`, flushed by the server at the next turn boundary); attachments ride only an
- * idle send, so while busy the operator is asked to wait instead of losing the files; a refused
- * send keeps the draft. Enter sends (Shift+Enter breaks the line; never mid-IME-composition),
+ * text (`queue-add`, flushed by the server at the next turn boundary); staged photos ride the
+ * Queue key as uploaded ids (A3: one `queue-add`, never inline bytes); a refused send keeps the draft. Enter sends (Shift+Enter breaks the line; never mid-IME-composition),
  * and the soft keyboard's action key is Send, as the phone web's Enter is.
  *
  * T2.3/T7.1 drafts: the editor keeps its own state (no async round-trip under the cursor). It
@@ -199,7 +199,7 @@ fun Composer(
     onSend: (String, List<Attachment>) -> Boolean,
     /**
      * T6.7: interrupt the turn the tapped key was drawn for (its id): the ONE way an Interrupt (the
-     * key or a queued row's "Interrupt now") reaches the client, which re-checks it all.
+     * key or a queued row's Interrupt and send) reaches the client, which re-checks it all.
      */
     onInterrupt: (turnId: String) -> InterruptResult,
     onQueueEdit: (queueId: String, text: String) -> Unit,
@@ -207,6 +207,10 @@ fun Composer(
     onRequestControls: () -> Unit,
     /** T13.2 r2: whether the copy is live (Interrupt's lock, the run row's freshness). Required. */
     liveness: ComposerLiveness,
+    /** v155 (spec §1 V5): the session's provider says `capabilities.steer`; queued rows then read "goes into this turn". */
+    steerCapableEngine: Boolean = false,
+    /** Spec §4.1c A / D-L148-1 (1): Stop spares background tasks here ([QueueWait.backgroundSpared]: server >= 155 AND claude persistent). */
+    backgroundSpared: Boolean = false,
     modifier: Modifier = Modifier,
     /**
      * T7.4: the staged attachments of this session, staging picks, and the ONE send that carries
@@ -336,12 +340,21 @@ fun Composer(
     // confirmation belongs to the turn it was asked for (a new turn or another session drops it), and
     // lapses when there is no price left to confirm or the copy cannot interrupt at all.
     val liveWork = remember(tree) { QueueWait.LiveWork(openToolCount(tree), liveBackgroundTaskCount(tree)) }
-    val stopCost = QueueWait.stopCostCopy(liveWork)
+    // The RULE (does Stop need a confirmation): live visible work that Stop ENDS (§4.1c A.3; spared background tasks never count).
+    val stopConfirms = QueueWait.stopConfirms(liveWork, backgroundSpared)
+    // Delivery (spec §1 V5, §4.1a A): the engine can steer; and how many queued messages already went INTO this turn.
+    val steerCapable = steerCapableEngine
+    val steeredInTurn = remember(activeTurn?.blocksById) { activeTurn?.blocksById?.values?.count { it.steered == true } ?: 0 }
+    // Spec §4.1a A + §4.1: what the confirmation and the resting key's description SAY: `{cost} {line}`.
+    val stopCopy = listOf(
+        QueueWait.interruptCostCopy(liveWork, QueueWait.foregroundCertain(session?.provider), QueueWait.backgroundVisible(session?.provider), backgroundSpared),
+        QueueWait.steeredStopCopy(session?.provider, steeredInTurn),
+    ).filter { it.isNotEmpty() }.joinToString(" ")
     var confirmStop by remember(session?.id, interruptTurnId) { mutableStateOf(false) }
-    LaunchedEffect(stopCost.isEmpty(), interruptLock != null, commandRunning) {
-        if (stopCost.isEmpty() || interruptLock != null || commandRunning) confirmStop = false
+    LaunchedEffect(stopConfirms, interruptLock != null, commandRunning) {
+        if (!stopConfirms || interruptLock != null || commandRunning) confirmStop = false
     }
-    val confirmingStop = confirmStop && stopCost.isNotEmpty() && interruptLock == null && !commandRunning
+    val confirmingStop = confirmStop && stopConfirms && interruptLock == null && !commandRunning
     val commandMode = runActions.commandMode && draft.startsWith("!")
     // ta-coik.22: the same lock as Interrupt ([commandKeyLock]: read-only / handed off, never a stale copy).
     val commandLock = liveness.interruptLock
@@ -809,14 +822,13 @@ fun Composer(
             return
         }
         if (busy && hasAttachments) {
-            // Attachments only ride an idle send — ask the operator to wait
-            // rather than silently dropping the files (web submit()).
-            flash("Wait for the current turn to finish before sending attachments.")
+            // A3: the photos queue with the message: the client files ONE queue-add carrying their upload ids.
+            val result = attachments.send(text, null)
+            if (result == com.tether.app.client.AttachmentSendResult.Sent) setDraft("") else attachmentRefusalCopy(result)?.let(::flash)
             return
         }
         if (busy || handoverHolding) {
-            // Queue path is text-only; attachments are only attachable while
-            // idle, so none are pending here.
+            // Text-only queue path: the staged photos (none here) go through the branch above.
             if (text.isNotEmpty() && onSend(text, emptyList())) setDraft("")
         } else if (hasAttachments) {
             // T7.4: this tap is the send. Like the web (use-tether.ts filePending), one that never reached
@@ -1067,8 +1079,11 @@ fun Composer(
                         onInterruptNow = ::interruptTurn,
                         interruptLock = interruptLock,
                         liveWork = liveWork,
-                        serverNow = serverNow,
-                        stale = liveness.stale != null,
+                        interruptSendId = QueueWait.interruptAndSendRowId(projection?.queuedMessages.orEmpty()),
+                        steerCapable = steerCapable,
+                        provider = session?.provider,
+                        steeredInTurn = steeredInTurn,
+                        backgroundSpared = backgroundSpared,
                         handoverStage = handoverStage.takeIf { handoverHolding },
                         handoverV151 = handoverV151,
                     )
@@ -1119,7 +1134,7 @@ fun Composer(
                         },
                         placeholder = when {
                             handoverHolding -> if (metrics.phone) com.tether.app.client.Handover.PLACEHOLDER_COARSE else com.tether.app.client.Handover.PLACEHOLDER_FINE
-                            busy -> PLACEHOLDER_BUSY
+                            busy -> if (steerCapable) PLACEHOLDER_BUSY_STEER else PLACEHOLDER_BUSY
                             else -> PLACEHOLDER_IDLE
                         },
                         enabled = session != null,
@@ -1178,14 +1193,15 @@ fun Composer(
                             busy = busy,
                             handoverQueue = handoverHolding,
                             interruptDescription = handoverStage?.takeIf { handoverHolding }?.let { com.tether.app.client.Handover.interruptTitle(it.underlyingKey) },
-                            canQueue = draft.isNotBlank(),
+                            canQueue = draft.isNotBlank() || (busy && !handoverHolding && picked.isNotEmpty()), // A3: the Queue key carries staged photos
                             canSend = session != null && (draft.isNotBlank() || picked.isNotEmpty()),
                             onSubmit = ::submit,
                             sessionId = session?.id,
                             interruptTurnId = interruptTurnId,
                             onInterrupt = ::interruptTurn,
                             interruptLock = interruptLock,
-                            stopCost = stopCost,
+                            stopConfirms = stopConfirms,
+                            stopCopy = stopCopy,
                             confirmingStop = confirmingStop,
                             onConfirmStop = { confirmStop = it },
                             commandMode = commandMode,
@@ -1368,9 +1384,11 @@ private fun RowScope.ComposerActions(
     onInterrupt: (turnId: String) -> Unit,
     /** T13.2 r2: why Interrupt cannot send (a copy that is not live); null = it can. */
     interruptLock: String?,
-    /** ta-ceo (#229): what Stop would destroy ([QueueWait.stopCostCopy]); "" = nothing but the turn. */
-    stopCost: String = "",
-    /** ta-ceo: the first Interrupt tap asked for the second, informed one (Keep running · Stop anyway). */
+    /** ta-ceo (#229): Stop would end live work ([QueueWait.stopConfirms]); it only decides WHETHER to confirm. */
+    stopConfirms: Boolean = false,
+    /** Spec §4.1 + §4.1a A: the sentences the Stop confirmation and the key's description show (`{cost} {line}`). */
+    stopCopy: String = "",
+    /** ta-ceo: the first Stop tap asked for the second, informed one (Keep running · Stop). */
     confirmingStop: Boolean = false,
     onConfirmStop: (Boolean) -> Unit = {},
     /** T7.3: the draft is a `!` command (idle: Send to agent + Background). */
@@ -1466,7 +1484,7 @@ private fun RowScope.ComposerActions(
         if (confirmingStop && drawnFor != null) {
             // ta-ceo (chat-view.tsx:4543-4558): Stop is turn-wide — with live work the second tap
             // names the price. The pair is always labelled (a phone's icon-only key would hide the
-            // price). ta-coik.13: "Stop anyway" acts on its first tap, as on the web (:4552-4558).
+            // price). ta-coik.13: the confirming Stop acts on its first tap, as on the web (:4552-4558).
             TetherKey(
                 onClick = { onConfirmStop(false) },
                 classes = KeyClasses.ChatSend,
@@ -1475,7 +1493,7 @@ private fun RowScope.ComposerActions(
                 minHeight = height,
                 modifier = Modifier.heightIn(min = height).widthIn(min = 44.dp).testTag(KEEP_RUNNING_KEY_TAG),
                 contentPadding = 16.dp,
-                contentDescription = "Keep the turn running",
+                contentDescription = "Keep running",
             )
             StaleTapGuard(Triple("interrupt-confirm", sessionId, drawnFor)) { guard ->
                 TetherKey(
@@ -1486,7 +1504,7 @@ private fun RowScope.ComposerActions(
                         }
                     },
                     classes = KeyClasses.ChatInterrupt,
-                    label = "$stopCost — Stop anyway",
+                    label = "Stop — $stopCopy",
                     icon = TetherIcons.CircleStop,
                     iconSize = 18.dp,
                     fontSize = fontSize,
@@ -1498,7 +1516,7 @@ private fun RowScope.ComposerActions(
                         .then(guard)
                         .testTag(STOP_ANYWAY_KEY_TAG),
                     contentPadding = 16.dp,
-                    contentDescription = "$stopCost — stop anyway",
+                    contentDescription = "Stop — $stopCopy",
                     // The price is never cut: the key grows a line instead.
                     maxLines = Int.MAX_VALUE,
                 )
@@ -1511,11 +1529,11 @@ private fun RowScope.ComposerActions(
                 onClick = {
                     if (live && drawnFor != null) {
                         // issue #229: with live work the first tap asks; without, it interrupts at once.
-                        if (stopCost.isNotEmpty()) onConfirmStop(true) else onInterrupt(drawnFor)
+                        if (stopConfirms) onConfirmStop(true) else onInterrupt(drawnFor)
                     }
                 },
                 classes = KeyClasses.ChatInterrupt,
-                label = if (labelled) "Interrupt" else null,
+                label = if (labelled) "Stop" else null,
                 icon = TetherIcons.CircleStop,
                 iconSize = 18.dp,
                 fontSize = fontSize,
@@ -1524,10 +1542,14 @@ private fun RowScope.ComposerActions(
                 modifier = keyModifier
                     .then(guard)
                     // No turn to bind it to: drawn as the key, but it does nothing.
-                    .semantics { if (!live) disabled() }
+                    .semantics {
+                        if (!live) disabled()
+                        // The web's aria-describedby: the name stays `Stop the current turn`, the cost + line ride alongside.
+                        if (stopCopy.isNotEmpty()) stateDescription = stopCopy
+                    }
                     .testTag(INTERRUPT_KEY_TAG),
                 contentPadding = padding,
-                contentDescription = (interruptDescription ?: "Interrupt the current turn").let { if (interruptLock == null) it else "$it, unavailable: $interruptLock" },
+                contentDescription = (interruptDescription ?: "Stop the current turn").let { if (interruptLock == null) it else "$it, unavailable: $interruptLock" },
             )
         }
     } else if (commandMode) {

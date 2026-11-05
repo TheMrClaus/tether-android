@@ -233,7 +233,7 @@ class CommandComposerBehaviourTest {
     fun whileAForegroundCommandRunsInterruptReadsStopAndBackgroundReplacesQueue() {
         show(CommandFixtures.running)
         arm()
-        rule.onAllNodesWithContentDescription("Interrupt the current turn").assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("Stop the current turn").assertCountEquals(0)
         rule.onAllNodesWithContentDescription("Queue message").assertCountEquals(0)
         rule.onNodeWithContentDescription("Stop the command").performClick()
         assertEquals("Stop is the turn-bound interrupt", listOf("t1"), interrupts)
@@ -248,7 +248,7 @@ class CommandComposerBehaviourTest {
         arm()
         rule.onAllNodesWithTag(BACKGROUND_KEY_TAG).assertCountEquals(0)
         rule.onAllNodesWithContentDescription("Stop the command").assertCountEquals(0)
-        rule.onNodeWithContentDescription("Interrupt the current turn").assertExists()
+        rule.onNodeWithContentDescription("Stop the current turn").assertExists()
     }
 
     @Test

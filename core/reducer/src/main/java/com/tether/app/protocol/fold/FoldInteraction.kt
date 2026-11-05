@@ -36,6 +36,7 @@ internal fun foldInteraction(state: JsObj, event: JsObj, type: String): JsObj = 
     "queued_message_added" -> foldQueuedAdded(state, event)
     "queued_message_updated" -> foldQueuedUpdated(state, event)
     "queued_message_removed" -> foldQueuedRemoved(state, event)
+    "queued_message_delivered" -> foldQueuedDelivered(state, event) // events.ts:3819 (v155)
     else -> state
 }
 
@@ -208,6 +209,9 @@ private fun foldQueuedAdded(state: JsObj, event: JsObj): JsObj {
         "flushMode" to (if (deferred) event["flushMode"] else null),
         "origin" to (if (truthy(event["origin"])) event["origin"] else null),
         "noticeKind" to (if (truthy(event["noticeKind"])) event["noticeKind"] else null),
+        // events.ts v155 (delivery L1): the queued attachments' descriptors and the staged ids that carry their bytes.
+        "attachments" to event["attachments"].let { if (it is JsArr && it.isNotEmpty()) it else null },
+        "attachmentIds" to event["attachmentIds"].let { if (it is JsArr && it.isNotEmpty()) it else null },
         "fromSessionId" to peerSender?.get("sessionId"),
         "fromSessionName" to peerSender?.get("name"),
         "queuedAt" to (if (deferred) nonNegativeFiniteNumber(event["ts"]) else null),
@@ -226,12 +230,49 @@ private fun foldQueuedUpdated(state: JsObj, event: JsObj): JsObj {
             // explicit `held: false` clears it; absent leaves the flag as it is.
             var next = m.obj!!.put("text", event["text"])
             val held = event["held"]
-            if (held is JsBool && held.value) next = next.put("held", JsBool.TRUE)
-            else if (held is JsBool && !held.value) next = next.remove("held")
+            if (held is JsBool && held.value) {
+                next = next.put("held", JsBool.TRUE)
+                // events.ts v155 (D-L141-7 B2): why it is held; absent keeps the pre-155 (open failure) reading.
+                event["heldReason"]?.let { next = next.put("heldReason", it) }
+            } else if (held is JsBool && !held.value) {
+                next = next.remove("held").remove("heldReason")
+            }
             queued = queued.set(i, next)
         }
     }
     return state.put("queuedMessages", queued)
+}
+
+// events.ts:3819 (v155, delivery L1, D-L141-6 (2)): a queued message was STEERED into the running turn. It belongs to a
+// turn, so a closed or non-current turn takes nothing; the same delivery twice is the same state; the row leaves the queue
+// as an acceptance (same bookkeeping as a "flushed" removal, never `withdrawnQueueIds`).
+private fun foldQueuedDelivered(state: JsObj, event: JsObj): JsObj {
+    if (!isOpenCurrentTurn(state, event["turnId"])) return state
+    val blockId = JsStr("user:${jsToString(event["turnId"])}:${jsToString(event["queueId"])}")
+    if (state["turnsById"].obj?.prop(event["turnId"]).obj?.get("blocksById").obj?.get(blockId.value) != null) return state
+    val attachments = event["attachments"]
+    val afterTurn = updateTurn(state) { turn ->
+        upsertBlock(turn, blockId) {
+            JsObj.of(
+                "blockId" to blockId,
+                "kind" to js("user_message"),
+                "text" to event["text"],
+                "steered" to JsBool.TRUE,
+                "queueId" to event["queueId"],
+            ).spread(blockEventTs(event))
+                .spread(if (attachments is JsArr && attachments.isNotEmpty()) JsObj.of("attachments" to attachments) else JsObj.EMPTY)
+        }
+    }
+    val queueId = event["queueId"] ?: JsNull
+    val priorRemoved = afterTurn["removedQueueIds"].let { if (it == null || it is JsNull) JsArr.EMPTY else it.arr!! }
+    val alreadyRemoved = priorRemoved.any { strictEquals(it, queueId) }
+    val rowPresent = afterTurn["queuedMessages"].arr!!.any { strictEquals(it.obj?.get("queueId"), queueId) }
+    if (!rowPresent && alreadyRemoved) return afterTurn
+    val removed = priorRemoved.filterKeep { !strictEquals(it, queueId) }.add(queueId)
+    return afterTurn.with(
+        "queuedMessages" to (if (rowPresent) afterTurn["queuedMessages"].arr!!.filterKeep { !strictEquals(it.obj?.get("queueId"), queueId) } else afterTurn["queuedMessages"]),
+        "removedQueueIds" to (if (removed.size > Limits.MAX_REMOVED_QUEUE_IDS) removed.slice(-Limits.MAX_REMOVED_QUEUE_IDS) else removed),
+    )
 }
 
 // events.mjs:2912 (79c3d37)

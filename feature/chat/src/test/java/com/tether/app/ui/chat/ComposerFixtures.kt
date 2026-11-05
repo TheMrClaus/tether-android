@@ -82,6 +82,56 @@ object ComposerFixtures {
         },
     )
 
+    /** One queued row for [delivery]; [held] marks it via `queued_message_updated` as the server does. */
+    data class QueueSpec(
+        val id: String,
+        val text: String = "Message $id",
+        val held: Boolean = false,
+        val reason: String? = null,
+        val origin: String? = null,
+        val kind: String? = null,
+        val attachmentIds: List<String>? = null,
+        val flushMode: String? = null,
+    )
+
+    /**
+     * Delivery (spec §1): turn [turnId] owns [tools] running Bash calls and [background] background tasks, [rows] wait in the
+     * queue (journal order), and [steered] texts were already delivered INTO the turn (`queued_message_delivered`, steer).
+     */
+    fun delivery(
+        vararg rows: QueueSpec,
+        tools: Int = 1,
+        background: Int = 0,
+        turnId: String = "t1",
+        steered: List<String> = emptyList(),
+    ): ChatFixtures.Folded = ChatFixtures.fold(
+        ev("turn_started", turnId, ts = T_START) { put("idempotencyKey", "k-$turnId") },
+        ev("user_message_accepted", turnId, ts = T_START) { put("text", "Run the test suite and tell me what fails.") },
+        ev("token_progress", turnId, ts = T_START) { put("tokens", 960) },
+        *liveWork(turnId, tools, background),
+        *steered.mapIndexed { i, text ->
+            ev("queued_message_delivered", turnId, ts = T_START + 1_000) { put("queueId", "sent-$i"); put("text", text); put("via", "steer") }
+        }.toTypedArray(),
+        *rows.flatMap { r ->
+            listOfNotNull(
+                ev("queued_message_added", null, ts = T_START) {
+                    put("queueId", r.id)
+                    put("text", r.text)
+                    r.origin?.let { put("origin", it) }
+                    r.kind?.let { put("noticeKind", it) }
+                    r.flushMode?.let { put("flushMode", it) }
+                    r.attachmentIds?.let { ids -> put("attachmentIds", kotlinx.serialization.json.buildJsonArray { ids.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }) }
+                },
+                if (r.held) {
+                    evNullTurn("queued_message_updated") {
+                        put("queueId", r.id); put("text", r.text); put("held", true)
+                        r.reason?.let { put("heldReason", it) }
+                    }
+                } else null,
+            )
+        }.toTypedArray(),
+    )
+
     private fun liveWork(turnId: String, tools: Int, background: Int): Array<AgentEvent> = buildList {
         repeat(tools) { i ->
             add(ev("tool_start", turnId, ts = T_START) { put("toolId", "tool-$turnId-$i"); put("name", "Bash"); put("input", kotlinx.serialization.json.buildJsonObject { put("command", "npm test") }) })

@@ -74,12 +74,17 @@ private object GitHubFixtureReads : com.tether.app.client.GitHubWorkSource {
     )
 }
 
-private fun AndroidComposeTestRule<*, ComponentActivity>.showStaged(skin: TetherSkin, width: androidx.compose.ui.unit.Dp? = null) {
+private fun AndroidComposeTestRule<*, ComponentActivity>.showStaged(
+    skin: TetherSkin,
+    width: androidx.compose.ui.unit.Dp? = null,
+    busy: Boolean = false,
+    sendResult: AttachmentSendResult = AttachmentSendResult.Sent,
+) {
     setContent {
         ComposerHost(skin, width) {
             Composer(
                 session = ComposerFixtures.session,
-                projection = ComposerFixtures.idle.projection,
+                projection = (if (busy) ComposerFixtures.busy else ComposerFixtures.idle).projection,
                 controls = SessionControlFixtures.claudeIdleControls,
                 serverNow = { ComposerFixtures.BUSY_NOW },
                 onSend = { _, _ -> true },
@@ -88,9 +93,11 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.showStaged(skin: Tether
                 onQueueRemove = {},
                 onRequestControls = {},
                 liveness = ComposerLiveness.Live,
-                initialDraft = "What changed between these two runs?",
+                // A3: the busy shots have an EMPTY draft: the photos alone enable the Queue key.
+                initialDraft = if (busy) "" else "What changed between these two runs?",
                 controlActions = SessionControlFixtures.Recorder().actions(),
-                attachments = ComposerAttachments(stagedFixture, { emptyList() }, {}, { _, _ -> AttachmentSendResult.Sent }),
+                attachments = ComposerAttachments(stagedFixture, { emptyList() }, {}, { _, _ -> sendResult }),
+                tree = if (busy) ComposerFixtures.busy.tree else null,
                 github = ComposerGitHub(GitHubFixtureReads, "https://tether.test:443"),
             )
         }
@@ -100,6 +107,18 @@ private fun AndroidComposeTestRule<*, ComponentActivity>.showStaged(skin: Tether
     mainClock.autoAdvance = false
     mainClock.advanceTimeBy(600)
     waitForIdle()
+}
+
+/** A3: the BUSY composer holding staged photos (the Queue key enabled by the photos alone); [flash] taps it to the NotQueueable refusal. */
+private fun AndroidComposeTestRule<*, ComponentActivity>.snapBusyStaged(skin: TetherSkin, size: String, flash: Boolean, width: androidx.compose.ui.unit.Dp? = null, suffix: String = "") {
+    showStaged(skin, width, busy = true, sendResult = if (flash) AttachmentSendResult.NotQueueable else AttachmentSendResult.Sent)
+    if (flash) {
+        onNodeWithContentDescription("Queue message").performClick()
+        mainClock.advanceTimeBy(600)
+        waitForIdle()
+    }
+    val dir = if (flash) "composer-attachments-busy-flash" else "composer-attachments-busy"
+    onNodeWithTag(ComposerTag).captureRoboImage("src/test/screenshots/$dir/${skin.id}-$size$suffix.png", roborazziOptions = exact)
 }
 
 private fun AndroidComposeTestRule<*, ComponentActivity>.snapSheet(skin: TetherSkin, size: String, width: androidx.compose.ui.unit.Dp? = null) {
@@ -221,6 +240,55 @@ class BubbleAttachmentsFailedScreenshotTest(private val skin: TetherSkin) {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
     @Test fun bubble() = rule.snapBubble(skin, ToolFixtures.FakeLoader(MediaImage.Failed), "bubble-attachments-failed")
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(it) }
+    }
+}
+
+/** A3: busy + staged photos (Queue enabled) and the NotQueueable flash: phone every skin, tablet and 1.3x font Studio light and dark. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class AttachBusyPhoneScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun busyChips() = rule.snapBusyStaged(skin, "phone", flash = false)
+
+    @Test fun notQueueableFlash() = rule.snapBusyStaged(skin, "phone", flash = true)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
+    }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi")
+class AttachBusyTabletScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun busyChips() = rule.snapBusyStaged(skin, "tablet", flash = false, width = WellWidthTablet)
+
+    @Test fun notQueueableFlash() = rule.snapBusyStaged(skin, "tablet", flash = true, width = WellWidthTablet)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(it) }
+    }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
+class AttachBusyFontScaleScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun busyChips() = rule.snapBusyStaged(skin, "phone", flash = false, suffix = "-font-1.3x")
+
+    @Test fun notQueueableFlash() = rule.snapBusyStaged(skin, "phone", flash = true, suffix = "-font-1.3x")
 
     companion object {
         @JvmStatic
