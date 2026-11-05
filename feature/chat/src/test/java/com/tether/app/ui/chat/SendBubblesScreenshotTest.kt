@@ -33,6 +33,8 @@ enum class SendShot(val id: String) {
     Uploading("send-uploading"),
     UploadingNoSpool("send-uploading-no-spool"),
     UploadFailed("send-upload-failed"),
+    /** One golden only (phone, Studio): the not-kept waiting bubble in the warning tone (§4.1d A.2). */
+    WaitingNotKept("send-waiting-not-kept"),
 }
 
 private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
@@ -47,6 +49,10 @@ private fun sendsFor(shot: SendShot): SendBubbles = when (shot) {
     ) {}
     SendShot.Waiting -> SendBubbles(
         listOf(SendFixtures.pending("k1", "Now rerun only the snapshot suite.", SendStatus.Waiting)),
+        emptyList(),
+    ) {}
+    SendShot.WaitingNotKept -> SendBubbles(
+        listOf(SendFixtures.pending("k1", "Now rerun only the snapshot suite.", SendStatus.Waiting, keptOnDevice = false)),
         emptyList(),
     ) {}
     SendShot.Failed -> SendBubbles(
@@ -151,7 +157,7 @@ class SendBubblesPhoneScreenshotTest(private val shot: SendShot, private val ski
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = SendShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -165,7 +171,7 @@ class SendBubblesTabletScreenshotTest(private val shot: SendShot, private val sk
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = SendShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -180,7 +186,7 @@ class SendBubblesFontScaleScreenshotTest(private val shot: SendShot, private val
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = SendShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -240,4 +246,12 @@ class SendRowFontScaleScreenshotTest(private val skin: TetherSkin) {
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
         fun params(): List<Array<Any>> = listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(it) }
     }
+}
+
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class SendBubblesNotKeptScreenshotTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun waitingNotKept() = rule.snapSends(SendShot.WaitingNotKept, TetherSkin.Studio, "chat-${SendShot.WaitingNotKept.id}", "phone", WellHeightPhone)
 }

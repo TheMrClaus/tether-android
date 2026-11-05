@@ -31,7 +31,7 @@ class KeptOnDeviceTest {
         dirs.forEach { it.deleteRecursively() }
     }
 
-    private fun connected(spool: Boolean = false): RealTetherClient {
+    private fun connected(spool: Boolean = false, spoolRoot: File? = null): RealTetherClient {
         h.server.start()
         val url = h.server.url("/").toString().trimEnd('/')
         settings = DiskSettings(InMemorySettings(url, initialCookie = "cookie"), url)
@@ -45,7 +45,7 @@ class KeptOnDeviceTest {
             backoff = testBackoff(),
             sweepIntervalMs = 3_600_000,
             scheduler = ManualScheduler(),
-            attachmentSpool = if (spool) AttachmentSpool(File(dir, "spool")) else null,
+            attachmentSpool = if (spoolRoot != null) AttachmentSpool(spoolRoot) else if (spool) AttachmentSpool(File(dir, "spool")) else null,
         )
         h.client = client
         h.enqueueConnect()
@@ -103,5 +103,17 @@ class KeptOnDeviceTest {
         assertTrue(client.pendingSends.value.single().keptOnDevice)
         settings.beforeWrite = null
         gate.complete(Unit)
+    }
+
+    @Test
+    fun aSpoolIoErrorOnWriteLeavesTheRecordOutAndItFlipsToNotKept() {
+        // The spool's root is a regular file, so its per-record directory cannot be made: put() hits an I/O error.
+        val root = File.createTempFile("spool-root", "").also { dirs += it }
+        val client = connected(spoolRoot = root)
+        val photo = com.tether.app.protocol.Attachment("pic.png", "image/png", java.util.Base64.getEncoder().encodeToString(ByteArray(300) { it.toByte() }))
+        client.sendAttachments("s1", "look", listOf(photo), null)
+        h.await(client.pendingSends) { it.size == 1 }
+        // The write dropped the record (nothing on disk): the row ends not kept.
+        h.await(client.pendingSends) { it.size == 1 && !it.single().keptOnDevice }
     }
 }
