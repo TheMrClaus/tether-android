@@ -163,7 +163,7 @@ internal fun limitClockTime(epochMs: Long, locale: Locale = Locale.getDefault(),
     val formatter = DateTimeFormatter.ofPattern("$pattern z", locale)
     // A bare UTC offset prints its id ("Z"); Intl names it "UTC".
     val shown = if (zone == java.time.ZoneOffset.UTC) ZoneId.of("UTC") else zone
-    return formatter.format(Instant.ofEpochMilli(epochMs).atZone(shown))
+    return formatter.format(Instant.ofEpochMilli(epochMs).atZone(shown)).replace('\u202F', ' ')
 }
 
 /**
