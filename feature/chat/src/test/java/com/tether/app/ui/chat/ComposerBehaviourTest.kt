@@ -15,6 +15,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -47,7 +48,7 @@ import org.robolectric.annotation.Config
  * action sends; an idle session sends and a busy one goes the queue path with the busy
  * placeholder; the phone hides an empty Queue key; a send clears the draft (and the stored copy
  * through onDraftChange). The queue rows (:1402-1489): Enter or leaving the field commits, a
- * blank row is removed, Escape restores the server text, the remove key, "Interrupt now" only on
+ * blank row is removed, Escape restores the server text, the remove key, "Interrupt and send" only on
  * a next-call row, and the row follows the server's text while it is not being edited.
  */
 @OptIn(ExperimentalTestApi::class)
@@ -252,14 +253,15 @@ class ComposerBehaviourTest {
     @Test
     fun theRemoveKeyAndInterruptNow() {
         show(ComposerFixtures.queued)
-        // Only the next-call row offers "Interrupt now"; each row says when it sends, in words
-        // (ta-ceo, #229: the visible line under the row; this composer is shown no live work).
-        rule.onAllNodesWithText("Queued — sends after the current turn").assertCountEquals(1)
-        rule.onAllNodesWithText("Queued — sends at the next tool call or when the turn ends", substring = true).assertCountEquals(1)
-        val interruptNow = "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this"
-        rule.onAllNodesWithContentDescription(interruptNow).assertCountEquals(1)
-        // ta-coik.13: the first tap interrupts (chat-view.tsx 90fbb9f :1495-1506).
-        rule.onNodeWithContentDescription(interruptNow).performClick()
+        // Both rows say when they send (V4; the second is a legacy next-call row and reads the same), and only the FIRST
+        // row (the next to deliver) offers "Interrupt and send", which always asks first.
+        rule.onAllNodesWithText("Queued on the server · sends when this turn ends").assertCountEquals(2)
+        val interruptAndSend = "Interrupt and send — stops the current turn, then sends this message"
+        rule.onAllNodesWithContentDescription(interruptAndSend).assertCountEquals(1)
+        rule.onNodeWithContentDescription(interruptAndSend).performClick()
+        rule.waitForIdle()
+        assertEquals(emptyList<String>(), interrupts)
+        rule.onNodeWithTag(QUEUE_INTERRUPT_COMMIT_TAG).performClick()
         assertEquals(listOf("t1"), interrupts)
         rule.onAllNodesWithContentDescription("Remove queued message").onLast().performClick()
         assertEquals(listOf("parity-queue-2"), removes)

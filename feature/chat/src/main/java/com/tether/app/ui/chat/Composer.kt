@@ -207,6 +207,8 @@ fun Composer(
     onRequestControls: () -> Unit,
     /** T13.2 r2: whether the copy is live (Interrupt's lock, the run row's freshness). Required. */
     liveness: ComposerLiveness,
+    /** v155 (spec §1 V5): the session's provider says `capabilities.steer`; queued rows then read "goes into this turn". */
+    steerCapableEngine: Boolean = false,
     modifier: Modifier = Modifier,
     /**
      * T7.4: the staged attachments of this session, staging picks, and the ONE send that carries
@@ -337,6 +339,9 @@ fun Composer(
     // lapses when there is no price left to confirm or the copy cannot interrupt at all.
     val liveWork = remember(tree) { QueueWait.LiveWork(openToolCount(tree), liveBackgroundTaskCount(tree)) }
     val stopCost = QueueWait.stopCostCopy(liveWork)
+    // Delivery (spec §1 V5, §4.1a A): the engine can steer; and how many queued messages already went INTO this turn.
+    val steerCapable = steerCapableEngine
+    val steeredInTurn = remember(activeTurn?.blocksById) { activeTurn?.blocksById?.values?.count { it.steered == true } ?: 0 }
     var confirmStop by remember(session?.id, interruptTurnId) { mutableStateOf(false) }
     LaunchedEffect(stopCost.isEmpty(), interruptLock != null, commandRunning) {
         if (stopCost.isEmpty() || interruptLock != null || commandRunning) confirmStop = false
@@ -1057,8 +1062,10 @@ fun Composer(
                         onInterruptNow = ::interruptTurn,
                         interruptLock = interruptLock,
                         liveWork = liveWork,
-                        serverNow = serverNow,
-                        stale = liveness.stale != null,
+                        interruptSendId = QueueWait.interruptAndSendRowId(projection?.queuedMessages.orEmpty()),
+                        steerCapable = steerCapable,
+                        provider = session?.provider,
+                        steeredInTurn = steeredInTurn,
                         handoverStage = handoverStage.takeIf { handoverHolding },
                         handoverV151 = handoverV151,
                     )
@@ -1109,7 +1116,7 @@ fun Composer(
                         },
                         placeholder = when {
                             handoverHolding -> if (metrics.phone) com.tether.app.client.Handover.PLACEHOLDER_COARSE else com.tether.app.client.Handover.PLACEHOLDER_FINE
-                            busy -> PLACEHOLDER_BUSY
+                            busy -> if (steerCapable) PLACEHOLDER_BUSY_STEER else PLACEHOLDER_BUSY
                             else -> PLACEHOLDER_IDLE
                         },
                         enabled = session != null,

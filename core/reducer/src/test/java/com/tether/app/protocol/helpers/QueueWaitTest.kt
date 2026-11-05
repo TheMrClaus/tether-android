@@ -1,109 +1,143 @@
 package com.tether.app.protocol.helpers
 
-import com.tether.app.protocol.helpers.QueueWait.DEFERRAL_CHOICE_AFTER_MS
-import com.tether.app.protocol.helpers.QueueWait.DeferredWait
 import com.tether.app.protocol.helpers.QueueWait.LiveWork
-import com.tether.app.protocol.helpers.QueueWait.deferredWaitCopy
-import com.tether.app.protocol.helpers.QueueWait.formatWaited
-import com.tether.app.protocol.helpers.QueueWait.interruptStopsCopy
-import com.tether.app.protocol.helpers.QueueWait.liveWorkCopy
+import com.tether.app.protocol.helpers.QueueWait.heldLabel
+import com.tether.app.protocol.helpers.QueueWait.interruptAndSendRowId
+import com.tether.app.protocol.helpers.QueueWait.interruptCostCopy
+import com.tether.app.protocol.helpers.QueueWait.queuedLabel
+import com.tether.app.protocol.helpers.QueueWait.steeredStopCopy
 import com.tether.app.protocol.helpers.QueueWait.stopCostCopy
+import com.tether.app.protocol.model.QueuedMessage
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * ta-ceo: lib/queue-wait.mjs at tether 887c222. The first block of each test is
- * tests/queue-wait.test.mjs hand-ported case for case; the rest ("edges") were produced by running
- * the real web module (Node 22) on the same inputs.
+ * Delivery UI words, delivery-composer-spec §1 V4/V5, §4.1, §4.1a A/C and §4.2: every string is the spec's, verbatim.
+ * (ta-ceo's deferred-wait / formatWaited / 60 s choice copy is retired with "Interrupt now" and its tests with it.)
  */
 class QueueWaitTest {
 
-    @Test
-    fun theThresholdIsSixtySeconds() = assertEquals(60_000L, DEFERRAL_CHOICE_AFTER_MS)
+    private fun row(
+        id: String = "q",
+        held: Boolean = false,
+        reason: String? = null,
+        origin: String? = null,
+        kind: String? = null,
+        attachmentIds: List<String>? = null,
+    ) = QueuedMessage(
+        queueId = id, text = "t-$id", held = held, heldReason = reason,
+        origin = origin?.let(::JsonPrimitive), noticeKind = kind?.let(::JsonPrimitive), attachmentIds = attachmentIds,
+    )
 
-    @Test
-    fun formatWaitedRoundsDownToTheSecondAndScalesUnits() {
-        // tests/queue-wait.test.mjs:8
-        assertEquals("0s", formatWaited(0.0))
-        assertEquals("45s", formatWaited(45_900.0))
-        assertEquals("14m 43s", formatWaited(14 * 60_000.0 + 43_000))
-        assertEquals("1h 02m", formatWaited(62 * 60_000.0))
-        assertEquals("", formatWaited(-1.0))
-        assertEquals("", formatWaited(Double.NaN))
-        // edges
-        assertEquals("0s", formatWaited(999.0))
-        assertEquals("1s", formatWaited(1_000.0))
-        assertEquals("59s", formatWaited(59_999.0))
-        assertEquals("1m 00s", formatWaited(60_000.0))
-        assertEquals("1m 01s", formatWaited(61_000.0))
-        assertEquals("59m 59s", formatWaited(3_599_999.0))
-        assertEquals("1h 00m", formatWaited(3_600_000.0))
-        assertEquals("1h 01m", formatWaited(3_660_000.0))
-        assertEquals("72h 00m", formatWaited(259_200_000.0))
-        assertEquals("416666666h 40m", formatWaited(1.5e15))
-        assertEquals("", formatWaited(Double.POSITIVE_INFINITY))
-        assertEquals("", formatWaited(null))
-    }
-
-    @Test
-    fun liveWorkCopyNamesToolsAndBackgroundTasksEmptyWhenIdle() {
-        // tests/queue-wait.test.mjs:17
-        assertEquals("", liveWorkCopy(LiveWork(0, 0)))
-        assertEquals("1 tool running · 7 background tasks live", liveWorkCopy(LiveWork(1, 7)))
-        assertEquals("1 background task live", liveWorkCopy(LiveWork(outstandingBackground = 1)))
-        // edges
-        assertEquals("", liveWorkCopy(LiveWork.None))
-        assertEquals("2 tools running", liveWorkCopy(LiveWork(openTools = 2)))
-        assertEquals("2 tools running · 3 background tasks live", liveWorkCopy(LiveWork(2, 3)))
-        assertEquals("1 background task live", liveWorkCopy(LiveWork(-1, 1)))
-    }
-
-    @Test
-    fun deferredWaitCopySaysWhatItWaitsForAndHowLongAndAsksAfterTheThreshold() {
-        // tests/queue-wait.test.mjs:23
-        val early = deferredWaitCopy(LiveWork(outstandingBackground = 7), 5_000.0)
-        assertEquals("Queued — waiting for a safe boundary (7 background tasks live · waiting 5s)", early.label)
-        assertFalse(early.needsChoice)
-        assertTrue(deferredWaitCopy(LiveWork(outstandingBackground = 7), DEFERRAL_CHOICE_AFTER_MS.toDouble()).needsChoice)
-        // Nothing live any more: no wait reason, and never a choice to make.
-        val clear = deferredWaitCopy(LiveWork.None, 10.0 * DEFERRAL_CHOICE_AFTER_MS)
-        assertTrue(clear.label.contains("next tool call or when the turn ends"))
-        assertFalse(clear.needsChoice)
-        // No stamp (older journal): still renders, never asks for a choice.
-        assertFalse(deferredWaitCopy(LiveWork(outstandingBackground = 2), null).needsChoice)
-        // edges
-        assertEquals(DeferredWait("Queued — waiting for a safe boundary (1 tool running · waiting 59s)", false), deferredWaitCopy(LiveWork(openTools = 1), 59_999.0))
-        assertEquals(DeferredWait("Queued — waiting for a safe boundary (1 tool running · waiting 1m 00s)", true), deferredWaitCopy(LiveWork(openTools = 1), 60_000.0))
-        assertEquals(DeferredWait("Queued — sends at the next tool call or when the turn ends (waiting 5s)", false), deferredWaitCopy(LiveWork.None, 5_000.0))
-        assertEquals(DeferredWait("Queued — sends at the next tool call or when the turn ends", false), deferredWaitCopy(LiveWork.None, null))
-        assertEquals(
-            DeferredWait("Queued — waiting for a safe boundary (2 tools running · 3 background tasks live · waiting 1h 02m)", true),
-            deferredWaitCopy(LiveWork(2, 3), 3_725_000.0),
-        )
-        assertEquals(DeferredWait("Queued — waiting for a safe boundary (1 background task live)", false), deferredWaitCopy(LiveWork(outstandingBackground = 1), -5.0))
-    }
+    // ---- the composer's own Stop (unchanged, ta-ceo) -------------------------------------------------
 
     @Test
     fun stopCostCopyIsEmptyWhenStopDestroysNothingButTheTurn() {
-        // tests/queue-wait.test.mjs:38
         assertEquals("", stopCostCopy(LiveWork.None))
         assertEquals("Stop will kill 7 background tasks", stopCostCopy(LiveWork(outstandingBackground = 7)))
         assertEquals("Stop ends the open tool call", stopCostCopy(LiveWork(openTools = 1)))
         assertEquals("Stop ends the open tool call and will kill 1 background task", stopCostCopy(LiveWork(1, 1)))
-        // edges
-        assertEquals("Stop ends the 2 open tool calls", stopCostCopy(LiveWork(openTools = 2)))
         assertEquals("Stop ends the 2 open tool calls and will kill 3 background tasks", stopCostCopy(LiveWork(2, 3)))
-        assertEquals("Stop will kill 1 background task", stopCostCopy(LiveWork(-1, 1)))
     }
 
-    /** chat-view.tsx:1537 `cost.replace(/^Stop (will |ends )?/, "")` — the choice line's object. */
+    // ---- spec §4.1 the cost sentence ------------------------------------------------------------------
+
     @Test
-    fun theChoiceLineDropsTheLeadingVerb() {
-        assertEquals("kill 7 background tasks", interruptStopsCopy("Stop will kill 7 background tasks"))
-        assertEquals("the open tool call", interruptStopsCopy("Stop ends the open tool call"))
-        assertEquals("the open tool call and will kill 1 background task", interruptStopsCopy("Stop ends the open tool call and will kill 1 background task"))
-        assertEquals("", interruptStopsCopy(""))
+    fun interruptCostCopyIsTheSpecTable() {
+        assertEquals("Stops the current response.", interruptCostCopy(LiveWork.None, true, true))
+        assertEquals(
+            "Stops the current response and 1 running tool call, and may stop 3 background tasks.",
+            interruptCostCopy(LiveWork(1, 3), foregroundCertain = true, backgroundVisible = true),
+        )
+        assertEquals(
+            "Stops the current response and 1 running tool call. It may also stop background work the agent started.",
+            interruptCostCopy(LiveWork(1, 0), foregroundCertain = true, backgroundVisible = false),
+        )
+        assertEquals(
+            "Stops the current response, and may stop 1 running tool call. It may also stop background work the agent started.",
+            interruptCostCopy(LiveWork(1, 0), foregroundCertain = false, backgroundVisible = false),
+        )
+        assertEquals(
+            "Stops the current response. It may also stop background work the agent started.",
+            interruptCostCopy(LiveWork.None, foregroundCertain = false, backgroundVisible = false),
+        )
+        assertEquals(
+            "Stops the current response, and may stop 2 running tool calls and 3 background tasks.",
+            interruptCostCopy(LiveWork(2, 3), foregroundCertain = false, backgroundVisible = true),
+        )
+        // The engine facts: foreground certain on Claude and Pi only; background visible on Claude only; an unknown engine neither.
+        assertEquals(listOf(true, true, false, false, false), listOf("claude", "pi", "codex", "opencode", null).map(QueueWait::foregroundCertain))
+        assertEquals(listOf(true, false, false, false), listOf("claude", "pi", "codex", null).map(QueueWait::backgroundVisible))
+    }
+
+    // ---- spec §4.1a A ---------------------------------------------------------------------------------
+
+    @Test
+    fun steeredStopCopyIsPerEngineAndSaysMay() {
+        assertEquals("The message you sent into this turn may still run after Stop.", steeredStopCopy("claude", 1))
+        assertEquals("The 2 messages you sent into this turn may still run after Stop.", steeredStopCopy("claude", 2))
+        assertEquals("The message you sent into this turn may wait and go with your next message.", steeredStopCopy("opencode", 1))
+        assertEquals("The 3 messages you sent into this turn may wait and go with your next message.", steeredStopCopy("opencode", 3))
+        assertEquals("The message you sent into this turn may go back to the queue, after any newer messages.", steeredStopCopy("codex", 1))
+        assertEquals("The 2 messages you sent into this turn may go back to the queue, after any newer messages.", steeredStopCopy("pi", 2))
+        // n = 0 and engines with no row below say nothing.
+        assertEquals("", steeredStopCopy("claude", 0))
+        for (p in listOf("reasonix", "acp", "dsh", "claude-per-turn", null)) assertEquals("", steeredStopCopy(p, 2))
+    }
+
+    // ---- spec §1 V4 / V5 ------------------------------------------------------------------------------
+
+    @Test
+    fun queuedLabelIsV5OnlyWhenTheEngineCanSteer() {
+        assertEquals("Queued on the server · sends when this turn ends", queuedLabel(false, row()))
+        assertEquals("Queued on the server · goes into this turn at the agent’s next step", queuedLabel(true, row()))
+        // A row carrying attachments is never steered in the first ship (D-L143-3 item 5): it reads V4.
+        assertEquals(QueueWait.QUEUED_TURN_END_COPY, queuedLabel(true, row(attachmentIds = listOf("a1"))))
+    }
+
+    // ---- spec §4.1a C: held rows ----------------------------------------------------------------------
+
+    @Test
+    fun heldLabelIsTheReasonLeadPlusTheKindHintVerbatim() {
+        // open_failed (and absent) = today's web strings byte for byte.
+        val failed = "Not sent: the session failed to open."
+        assertEquals("$failed Edit to send it again, or remove it.", heldLabel(row(held = true, reason = "open_failed")))
+        assertEquals("$failed Edit to send it again, or remove it.", heldLabel(row(held = true, reason = null)))
+        assertEquals(
+            "$failed This message from another session cannot be edited; remove it.",
+            heldLabel(row(held = true, origin = "system", kind = "peer")),
+        )
+        assertEquals(
+            "$failed Stop handover in the Session links menu (⋯) cancels it.",
+            heldLabel(row(held = true, origin = "system", kind = "handover-request")),
+        )
+        assertEquals(
+            "May not have reached the agent; it was not sent again. Edit to resend it, or remove it.",
+            heldLabel(row(held = true, reason = "steer_uncertain")),
+        )
+        assertEquals(
+            "Not sent: an attachment was missing when it was time to send. Edit to send the text without it, or remove this message.",
+            heldLabel(row(held = true, reason = "attachment_missing")),
+        )
+        // A newer server's reason (decoded as a string): "Not sent." + the kind hint, never "failed to open".
+        assertEquals("Not sent. Edit to send it again, or remove it.", heldLabel(row(held = true, reason = "zzz")))
+        assertEquals("Not sent. This message from another session cannot be edited; remove it.", heldLabel(row(held = true, reason = "zzz", origin = "system", kind = "peer")))
+    }
+
+    // ---- spec §4.2: the one row that may Interrupt and send --------------------------------------------
+
+    @Test
+    fun interruptAndSendIsOnTheFirstNonHeldOperatorRowOnly() {
+        assertEquals("a", interruptAndSendRowId(listOf(row("a"), row("b"), row("c"))))
+        // Held rows are skipped (they never send by themselves); the next live operator row is the one.
+        assertEquals("b", interruptAndSendRowId(listOf(row("a", held = true), row("b"), row("c"))))
+        // A peer / handover row first = none, even with an operator row behind it.
+        assertNull(interruptAndSendRowId(listOf(row("p", origin = "system", kind = "peer"), row("b"))))
+        assertNull(interruptAndSendRowId(listOf(row("h", origin = "system", kind = "handover-request"), row("b"))))
+        // Nothing live to deliver.
+        assertNull(interruptAndSendRowId(listOf(row("a", held = true))))
+        assertNull(interruptAndSendRowId(emptyList()))
     }
 }

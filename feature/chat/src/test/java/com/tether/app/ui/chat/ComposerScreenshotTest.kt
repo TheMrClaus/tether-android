@@ -9,6 +9,7 @@ import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.unit.Dp
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.tether.app.ui.chat.ComposerFixtures.QueueSpec
 import com.tether.app.ui.theme.TetherSkin
 import org.junit.Rule
 import org.junit.Test
@@ -22,19 +23,22 @@ import org.robolectric.annotation.Config
  * streaming deck (the run row above the well, the busy placeholder, Interrupt alone because an
  * empty Queue key is hidden on a phone); `draft` = a three-line draft, focused (the well's violet
  * edge and focus glow, the auto-grown field, Send enabled); `queue` = two queued messages (the
- * second waiting for a tool boundary, with "Interrupt now") and a typed draft, so Queue shows.
- * ta-ceo (issue #229): `deferred-choice` = a next-call message waiting 7 minutes behind one running
- * tool and seven live background tasks (the wait line, and the choice it asks for after 60 s);
- * `deferred-confirm` = its "Interrupt now" tapped (the cost, Stop anyway, Keep waiting);
- * `stop-confirm` = the composer's Interrupt tapped with that live work (Keep running + the cost).
+ * second a legacy next-call row, both V4, the first with "Interrupt and send") and a typed draft, so Queue shows.
+ * Delivery (spec §1, §4.1a C, §4.2): `queue-steer` = V5 rows (the engine can steer); `held-open-failed`,
+ * `held-steer-uncertain`, `held-attachment-missing` = a held row beside a live one; `interrupt-send-confirm` = the next
+ * row's "Interrupt and send" tapped (heading, the cost sentence + the steered line, Keep queued + the danger commit);
+ * `stop-confirm` = the composer's Interrupt tapped with live work (Keep running + the cost).
  */
 enum class ComposerShot(val id: String) {
     Idle("idle"),
     Busy("busy"),
     Draft("draft"),
     Queue("queue"),
-    DeferredChoice("deferred-choice"),
-    DeferredConfirm("deferred-confirm"),
+    QueueSteer("queue-steer"),
+    HeldOpenFailed("held-open-failed"),
+    HeldSteerUncertain("held-steer-uncertain"),
+    HeldAttachmentMissing("held-attachment-missing"),
+    InterruptSendConfirm("interrupt-send-confirm"),
     StopConfirm("stop-confirm"),
 }
 
@@ -44,7 +48,16 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
         ComposerShot.Idle, ComposerShot.Draft -> ComposerFixtures.idle
         ComposerShot.Busy -> ComposerFixtures.busy
         ComposerShot.Queue -> ComposerFixtures.queued
-        ComposerShot.DeferredChoice, ComposerShot.DeferredConfirm, ComposerShot.StopConfirm -> ComposerFixtures.deferred()
+        ComposerShot.StopConfirm -> ComposerFixtures.deferred()
+        ComposerShot.QueueSteer -> ComposerFixtures.delivery(QueueSpec("a", "Then fix the snapshot test and rerun only that suite."), QueueSpec("b", "Also bump the changelog."))
+        ComposerShot.HeldOpenFailed -> ComposerFixtures.delivery(QueueSpec("h", "Then fix the snapshot test.", held = true, reason = "open_failed"), QueueSpec("b", "Also bump the changelog."))
+        ComposerShot.HeldSteerUncertain -> ComposerFixtures.delivery(QueueSpec("h", "Then fix the snapshot test.", held = true, reason = "steer_uncertain"), QueueSpec("b", "Also bump the changelog."))
+        ComposerShot.HeldAttachmentMissing -> ComposerFixtures.delivery(QueueSpec("h", "Here are the screenshots.", held = true, reason = "attachment_missing"))
+        ComposerShot.InterruptSendConfirm -> ComposerFixtures.delivery(
+            QueueSpec("a", "Then fix the snapshot test and rerun only that suite."),
+            QueueSpec("b", "Also bump the changelog."),
+            tools = 1, background = 3, steered = listOf("Also run lint."),
+        )
     }
     val draft = when (shot) {
         ComposerShot.Draft -> ComposerFixtures.DRAFT
@@ -65,6 +78,7 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
                 onQueueRemove = {},
                 onRequestControls = {},
                 liveness = ComposerLiveness.Live,
+                steerCapableEngine = shot == ComposerShot.QueueSteer,
                 initialDraft = draft,
                 controlActions = SessionControlFixtures.Recorder().actions(),
                 tree = fixture.tree,
@@ -79,7 +93,7 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
         waitForIdle()
     }
     val tap = when (shot) {
-        ComposerShot.DeferredConfirm -> QUEUE_INTERRUPT_TAG
+        ComposerShot.InterruptSendConfirm -> QUEUE_INTERRUPT_TAG
         ComposerShot.StopConfirm -> INTERRUPT_KEY_TAG
         else -> null
     }
@@ -119,7 +133,7 @@ class ComposerTabletScreenshotTest(private val shot: ComposerShot, private val s
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(ComposerShot.Idle, ComposerShot.Queue, ComposerShot.DeferredChoice, ComposerShot.StopConfirm).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(ComposerShot.Idle, ComposerShot.Queue, ComposerShot.QueueSteer, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.InterruptSendConfirm, ComposerShot.StopConfirm).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -134,7 +148,7 @@ class ComposerFontScaleScreenshotTest(private val shot: ComposerShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(ComposerShot.Draft, ComposerShot.Queue, ComposerShot.DeferredChoice, ComposerShot.StopConfirm).flatMap { s ->
+        fun params(): List<Array<Any>> = listOf(ComposerShot.Draft, ComposerShot.Queue, ComposerShot.QueueSteer, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.InterruptSendConfirm, ComposerShot.StopConfirm).flatMap { s ->
             listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }

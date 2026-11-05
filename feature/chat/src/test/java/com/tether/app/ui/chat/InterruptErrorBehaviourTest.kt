@@ -146,24 +146,18 @@ class InterruptErrorBehaviourTest {
     }
 
     @Test
-    fun interruptNowActsOnTheFirstTapAndIsBoundToItsTurnToo() {
-        // ta-coik.13: chat-view.tsx 90fbb9f :1495-1506, the web's "Interrupt now" acts on the first click.
+    fun interruptAndSendAsksThenActsOnTheCommitBoundToItsTurn() {
+        // Spec §4.2: the row action always confirms; only the commit sends, and it sends exactly one interrupt.
         val client = liveClient(busy, queuedOn("t1"))
         rule.mainClock.autoAdvance = false
         host(client)
         frames()
         rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).performClick()
         frames()
+        assertTrue("the first tap only asks: ${client.interruptCalls}", client.interruptCalls.isEmpty())
+        rule.onNodeWithTag(QUEUE_INTERRUPT_COMMIT_TAG).performClick()
+        frames()
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t1"), client.interruptCalls)
-        // A press that began while t1 ran never interrupts t2.
-        client.interruptCalls.clear()
-        rule.runOnIdle { client.show(busy, queuedOn("t1")) }
-        frames()
-        rule.pressAcross({ rule.onNodeWithTag(QUEUE_INTERRUPT_TAG) }, settle = { frames() }) { client.show(busy, queuedOn("t2")) }
-        assertTrue("Interrupt now pressed for t1 never interrupts t2: ${client.interruptCalls}", client.interruptCalls.isEmpty())
-        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).performClick()
-        frames()
-        assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t2"), client.interruptCalls)
     }
 
     @Test
@@ -387,7 +381,7 @@ class InterruptErrorBehaviourTest {
      * r2/r3 (security, until ta-yw0): while the turn is already being interrupted, the queue's head
      * message flushes into a new turn the moment it stops, which this client may not have seen when
      * a second tap lands. Every interrupt control of the session is locked (the composer's key and
-     * each row's "Interrupt now"), says why, and sends nothing, until the server reports that
+     * the next row's "Interrupt and send"), says why, and sends nothing, until the server reports that
      * interrupt failed: then they unlock for a retry. A failure of some other turn unlocks nothing.
      */
     @Test
@@ -396,16 +390,16 @@ class InterruptErrorBehaviourTest {
         rule.mainClock.autoAdvance = false
         host(client)
         arm()
-        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(2)
+        // Only the next row (the first) offers "Interrupt and send" (spec §4.2).
+        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(1)
         interruptKey().assertIsNotEnabled().performClick()
         rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG)[0].assertIsNotEnabled().performClick()
-        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG)[1].assertIsNotEnabled().performClick()
         arm()
         assertTrue("an interrupt after the turn was already being interrupted: ${client.interruptCalls}", client.interruptCalls.isEmpty())
         rule.onNodeWithContentDescription("Interrupt the current turn, unavailable: $INTERRUPTING_LOCK_COPY").assertExists()
         rule.onAllNodesWithContentDescription(
-            "Interrupt now — stops the current turn, its open tool call and its background tasks, then sends this, unavailable: $INTERRUPTING_LOCK_COPY",
-        ).assertCountEquals(2)
+            "Interrupt and send — stops the current turn, then sends this message, unavailable: $INTERRUPTING_LOCK_COPY",
+        ).assertCountEquals(1)
 
         // Another turn's failure is not this one's.
         rule.runOnIdle { client.failed.value = mapOf(busy.id to "t0") }
@@ -417,8 +411,10 @@ class InterruptErrorBehaviourTest {
         arm()
         interruptKey().assertIsEnabled().performClick()
         rule.waitForIdle()
-        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG)[1].assertIsEnabled().performClick()
-        rule.waitForIdle()
+        rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG)[0].assertIsEnabled().performClick()
+        arm()
+        rule.onNodeWithTag(QUEUE_INTERRUPT_COMMIT_TAG).performClick()
+        arm()
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t1", "${busy.id}@$TEST_ORIGIN#t1"), client.interruptCalls)
     }
 
@@ -428,14 +424,21 @@ class InterruptErrorBehaviourTest {
      * on t1's row sends nothing for t2; a fresh tap interrupts t2 at once (ta-coik.13: no re-arm).
      */
     @Test
-    fun theSameQueuedRowDropsAPressAcrossATurnChange() {
+    fun theSameQueuedRowDropsAConfirmationAcrossATurnChange() {
         val client = liveClient(busy, queuedOn("t1", queueId = "q-same"))
         rule.mainClock.autoAdvance = false
         host(client)
         frames()
-        rule.pressAcross({ rule.onNodeWithTag(QUEUE_INTERRUPT_TAG) }, settle = { frames() }) { client.show(busy, queuedOn("t2", queueId = "q-same")) }
-        assertTrue("the row pressed for t1 sent for t2: ${client.interruptCalls}", client.interruptCalls.isEmpty())
+        rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).performClick()
+        frames()
+        rule.onNodeWithTag(QUEUE_INTERRUPT_COMMIT_TAG).assertExists()
+        rule.runOnIdle { client.show(busy, queuedOn("t2", queueId = "q-same")) }
+        frames()
+        rule.onAllNodesWithTag(QUEUE_INTERRUPT_COMMIT_TAG).assertCountEquals(0)
+        assertTrue("the row asked for t1 sent for t2: ${client.interruptCalls}", client.interruptCalls.isEmpty())
         rule.onNodeWithTag(QUEUE_INTERRUPT_TAG).assertIsEnabled().performClick()
+        frames()
+        rule.onNodeWithTag(QUEUE_INTERRUPT_COMMIT_TAG).performClick()
         frames()
         assertEquals(listOf("${busy.id}@$TEST_ORIGIN#t2"), client.interruptCalls)
     }

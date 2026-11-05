@@ -547,6 +547,7 @@ fun ChatScreen(
                 onQueueRemove = { queueId -> session?.let { vm.client.queueRemove(it.id, queueId) } },
                 onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
                 liveness = liveness,
+                steerCapableEngine = session != null && providers.firstOrNull { it.id == session.provider }?.capabilities?.steer == true,
                 attachments = attachments,
                 // A plain read, not a subscription: only the opening value matters here.
                 initialDraft = session?.let { vm.loadedDraft(it.id) },
