@@ -94,7 +94,7 @@ class SendStatusClientTest {
         client.send("s1", "hello")
         val key = sentKey()
         val row = h.await(client.pendingSends) { it.isNotEmpty() }.single()
-        assertEquals(PendingSendRow(key, "s1", PendingInput.KIND_SEND, "hello", SendStatus.Sending, 0, 0, 0.0), row)
+        assertEquals(PendingSendRow(key, "s1", PendingInput.KIND_SEND, "hello", SendStatus.Sending, 0, 0, 0.0, null, true), row)
         // use-tether.ts :1050-1063: the live ack clears it; the real turn bubble takes its place.
         ws.send(turnStartedEvent("s1", "t1", 6, key))
         h.await(client.pendingSends) { it.isEmpty() }
