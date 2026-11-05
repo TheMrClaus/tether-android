@@ -1,9 +1,11 @@
 package com.tether.app.ui.chat
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -19,6 +21,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -87,17 +91,37 @@ fun attachmentSummary(attachmentCount: Int, imageCount: Int, bytes: Double): Str
     return "$attachmentCount $noun · ${AttachmentDraft.humanSize(bytes)}"
 }
 
+/**
+ * ta-delivery V1 (spec 1, 5.1): `{summary} · Uploading — kept on this device until it reaches the server`, the same
+ * words in the strip row and the transcript bubble; the percent is printed beside the bar, never in these words.
+ * A record whose photos are held only in memory (no attachment spool) must not claim the device keeps them
+ * (spec 4.1b I item 4).
+ */
+fun uploadingLabel(row: PendingSendRow): String {
+    val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
+    val tail = if (row.keptOnDevice) "Uploading — kept on this device until it reaches the server"
+    else "Uploading — may be lost if the app closes before it reaches the server"
+    return if (summary.isEmpty()) tail else "$summary · $tail"
+}
+
+/** The link state wins over an upload percent (V3): nothing is uploading while there is no link. */
+private fun PendingSendRow.isUploading(): Boolean = uploadPercent != null && status != SendStatus.Waiting
+
 /** chat-view.tsx 90fbb9f :1571-1576: the pending bubble's status line. */
 fun pendingSendLabel(row: PendingSendRow): String {
     val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
     return when {
-        // ta-delivery A2: the photos are still uploading in the background; nothing has been sent yet.
-        row.uploadPercent != null -> "Uploading ${row.uploadPercent}% — kept on this device until it reaches the server"
+        // V3 first: with no link the percent stays out until the link is back.
         row.status == SendStatus.Waiting -> "Waiting for link — reconnecting, your message will be sent automatically"
+        // ta-delivery A2: the photos are still uploading in the background; nothing has been sent yet.
+        row.uploadPercent != null -> uploadingLabel(row)
         summary.isNotEmpty() -> "Sending — $summary"
         else -> "Sending…"
     }
 }
+
+const val UPLOAD_PROGRESS_TAG = "upload-progress"
+const val STRIP_WAITING_LABEL = "Waiting for link — kept on this device, sends when the connection returns"
 
 /** chat-view.tsx 90fbb9f :1596-1600: the failed bubble's status line. */
 fun failedSendLabel(row: FailedSend): String {
@@ -121,7 +145,7 @@ fun sendRowLabel(rows: List<PendingSendRow>): String? {
     val waiting = rows.count { it.status == SendStatus.Waiting }
     val sending = rows.size - waiting
     return if (waiting > 0) {
-        "Waiting for link — $waiting message${if (waiting > 1) "s" else ""} will send automatically when the connection returns."
+        STRIP_WAITING_LABEL
     } else {
         "Sending $sending message${if (sending > 1) "s" else ""}…"
     }
@@ -148,6 +172,10 @@ internal fun PendingSendBubble(row: PendingSendRow, modifier: Modifier = Modifie
     BubbleBox(look, alignEnd = true, modifier.alpha(if (waiting) 1f else 0.82f).testTag(PENDING_SEND_TAG)) {
         if (row.text.isNotEmpty()) Text(proseText(row.text), style = look.style, color = look.ink)
         SendStatusLine(pendingSendLabel(row), look.style, look.ink, spinning = !waiting)
+        if (row.isUploading()) {
+            Spacer(Modifier.height(4.8.dp))
+            UploadProgressBar(row.uploadPercent ?: 0, look.style.copy(fontSize = 10.88.sp, lineHeight = 1.25.em), look.ink)
+        }
     }
 }
 
@@ -234,20 +262,61 @@ internal fun ComposerSendRow(rows: List<PendingSendRow>, modifier: Modifier = Mo
     val type = LocalTetherTypography.current
     val waiting = rows.any { it.status == SendStatus.Waiting }
     val color = if (waiting) t.violet else t.faint
-    Row(
-        modifier.padding(horizontal = 4.dp).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }.testTag(SEND_ROW_TAG),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
-    ) {
-        if (waiting) {
-            Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
-        } else {
-            SpinningIcon(TetherIcons.Loader, tint = color, size = 14.dp)
+    val textStyle = TextStyle(fontFamily = type.body.fontFamily, fontSize = (0.8f * TetherTypography.SP_PER_REM).sp, fontWeight = FontWeight(620))
+    // V3 wins over everything; otherwise every uploading row says V1 with its bar, and the rest is the V2 count.
+    val uploading = if (waiting) emptyList() else rows.filter { it.isUploading() }
+    val others = rows.size - uploading.size
+    androidx.compose.foundation.layout.Column(modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        uploading.forEach { row ->
+            androidx.compose.runtime.key("u:${row.key}") {
+                androidx.compose.foundation.layout.Column(
+                    Modifier.semantics(mergeDescendants = false) { liveRegion = LiveRegionMode.Polite }.testTag(SEND_ROW_TAG),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
+                        Icon(TetherIcons.Upload, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
+                        Text(uploadingLabel(row), style = textStyle, color = color)
+                    }
+                    UploadProgressBar(row.uploadPercent ?: 0, textStyle, color)
+                }
+            }
         }
-        Text(
-            label,
-            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = (0.8f * TetherTypography.SP_PER_REM).sp, fontWeight = FontWeight(620)),
-            color = color,
-        )
+        if (uploading.isEmpty() || others > 0) {
+            val text = if (uploading.isEmpty()) label else sendRowLabel(rows.filterNot { it.isUploading() }) ?: label
+            Row(
+                Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }.testTag(SEND_ROW_TAG),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+            ) {
+                if (waiting) {
+                    Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
+                } else {
+                    SpinningIcon(TetherIcons.Loader, tint = color, size = 14.dp)
+                }
+                Text(text, style = textStyle, color = color)
+            }
+        }
+    }
+}
+
+/**
+ * Spec 5.1: a determinate 3dp bar (track `--line`, fill `--muted`) and the printed `{n}%`; never colour alone. The
+ * progress role carries the same number the text prints.
+ */
+@Composable
+internal fun UploadProgressBar(percent: Int, style: TextStyle, ink: Color, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val shown = percent.coerceIn(0, 100)
+    Row(
+        modifier
+            .semantics(mergeDescendants = true) { progressBarRangeInfo = ProgressBarRangeInfo(shown / 100f, 0f..1f) }
+            .testTag(UPLOAD_PROGRESS_TAG),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.weight(1f).height(3.dp).background(t.line)) {
+            Box(Modifier.fillMaxWidth(shown / 100f).height(3.dp).background(t.muted))
+        }
+        Text("$shown%", style = style, color = ink)
     }
 }

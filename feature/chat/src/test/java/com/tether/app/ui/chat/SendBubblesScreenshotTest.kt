@@ -31,6 +31,7 @@ enum class SendShot(val id: String) {
     Failed("send-failed"),
     PhotoLost("send-photo-lost"),
     Uploading("send-uploading"),
+    UploadingNoSpool("send-uploading-no-spool"),
     UploadFailed("send-upload-failed"),
 }
 
@@ -60,7 +61,13 @@ private fun sendsFor(shot: SendShot): SendBubbles = when (shot) {
     SendShot.Uploading -> SendBubbles(
         listOf(
             SendFixtures.pending("k7", "Here are the two screenshots.", attachments = 2, images = 2, bytes = SendFixtures.THREE_MB)
-                .copy(uploadPercent = 42),
+                .copy(uploadPercent = 42, keptOnDevice = true),
+        ),
+        emptyList(),
+    ) {}
+    SendShot.UploadingNoSpool -> SendBubbles(
+        listOf(
+            SendFixtures.pending("k7", "Here are the two screenshots.", attachments = 2, images = 2, bytes = SendFixtures.THREE_MB, percent = 42, keptOnDevice = false),
         ),
         emptyList(),
     ) {}
@@ -93,14 +100,24 @@ fun ComposeContentTestRule.snapSends(shot: SendShot, skin: TetherSkin, name: Str
     onNodeWithTag(WellTag).captureRoboImage("src/test/screenshots/$name/${skin.id}-$size.png", roborazziOptions = exact)
 }
 
-fun ComposeContentTestRule.snapSendRow(waiting: Boolean, skin: TetherSkin, name: String) {
+enum class StripShot(val id: String) {
+    Sending("composer-send-row-sending"),
+    Waiting("composer-send-row-waiting"),
+    Uploading("composer-send-row-uploading"),
+    UploadingNoSpool("composer-send-row-uploading-no-spool"),
+}
+
+fun ComposeContentTestRule.snapSendRow(shot: StripShot, skin: TetherSkin, size: String = "phone", width: Dp? = null, suffix: String = "") {
     mainClock.autoAdvance = false
-    val rows = listOf(
-        SendFixtures.pending("k1", "a", if (waiting) SendStatus.Waiting else SendStatus.Sending),
-        SendFixtures.pending("k2", "b"),
-    )
+    val rows = when (shot) {
+        StripShot.Sending -> listOf(SendFixtures.pending("k1", "a"), SendFixtures.pending("k2", "b"))
+        StripShot.Waiting -> listOf(SendFixtures.pending("k1", "a", SendStatus.Waiting), SendFixtures.pending("k2", "b"))
+        StripShot.Uploading -> listOf(SendFixtures.pending("k1", "a", attachments = 2, images = 2, bytes = SendFixtures.THREE_MB, percent = 42))
+        StripShot.UploadingNoSpool ->
+            listOf(SendFixtures.pending("k1", "a", attachments = 2, images = 2, bytes = SendFixtures.THREE_MB, percent = 42, keptOnDevice = false))
+    }
     setContent {
-        ComposerHost(skin) {
+        ComposerHost(skin, width) {
             Composer(
                 session = ComposerFixtures.session,
                 projection = ComposerFixtures.idle.projection,
@@ -119,7 +136,7 @@ fun ComposeContentTestRule.snapSendRow(waiting: Boolean, skin: TetherSkin, name:
     }
     mainClock.advanceTimeBy(700)
     waitForIdle()
-    onNodeWithTag(ComposerTag).captureRoboImage("src/test/screenshots/$name/${skin.id}-phone.png", roborazziOptions = exact)
+    onNodeWithTag(ComposerTag).captureRoboImage("src/test/screenshots/${shot.id}/${skin.id}-$size$suffix.png", roborazziOptions = exact)
 }
 
 @RunWith(ParameterizedRobolectricTestRunner::class)
@@ -170,13 +187,53 @@ class SendBubblesFontScaleScreenshotTest(private val shot: SendShot, private val
 class SendRowScreenshotTest(private val skin: TetherSkin) {
     @get:Rule val rule = createComposeRule()
 
-    @Test fun sending() = rule.snapSendRow(waiting = false, skin, "composer-send-row-sending")
+    @Test fun sending() = rule.snapSendRow(StripShot.Sending, skin)
 
-    @Test fun waiting() = rule.snapSendRow(waiting = true, skin, "composer-send-row-waiting")
+    @Test fun waiting() = rule.snapSendRow(StripShot.Waiting, skin)
+
+    @Test fun uploading() = rule.snapSendRow(StripShot.Uploading, skin)
+
+    @Test fun uploadingNoSpool() = rule.snapSendRow(StripShot.UploadingNoSpool, skin)
 
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
         fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
+    }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w1280dp-h800dp-mdpi")
+class SendRowTabletScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun waiting() = rule.snapSendRow(StripShot.Waiting, skin, "tablet", WellWidthTablet)
+
+    @Test fun uploading() = rule.snapSendRow(StripShot.Uploading, skin, "tablet", WellWidthTablet)
+
+    @Test fun uploadingNoSpool() = rule.snapSendRow(StripShot.UploadingNoSpool, skin, "tablet", WellWidthTablet)
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(it) }
+    }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
+class SendRowFontScaleScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun waiting() = rule.snapSendRow(StripShot.Waiting, skin, suffix = "-font-1.3x")
+
+    @Test fun uploading() = rule.snapSendRow(StripShot.Uploading, skin, suffix = "-font-1.3x")
+
+    @Test fun uploadingNoSpool() = rule.snapSendRow(StripShot.UploadingNoSpool, skin, suffix = "-font-1.3x")
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(it) }
     }
 }

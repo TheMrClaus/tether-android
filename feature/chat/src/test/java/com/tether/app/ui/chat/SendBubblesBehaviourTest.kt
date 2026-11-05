@@ -20,6 +20,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.tether.app.client.FailedSend
 import com.tether.app.client.FailedSendReason
 import com.tether.app.client.PendingInput
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.test.hasProgressBarRangeInfo
 import com.tether.app.client.PendingSendRow
 import com.tether.app.client.SendStatus
 import com.tether.app.protocol.model.AgentSession
@@ -51,7 +53,9 @@ object SendFixtures {
         images: Int = 0,
         bytes: Double = 0.0,
         sessionId: String = SESSION_ID,
-    ) = PendingSendRow(key, sessionId, PendingInput.KIND_SEND, text, status, attachments, images, bytes)
+        percent: Int? = null,
+        keptOnDevice: Boolean = true,
+    ) = PendingSendRow(key, sessionId, PendingInput.KIND_SEND, text, status, attachments, images, bytes, percent, keptOnDevice)
 
     fun failed(
         key: String,
@@ -136,13 +140,38 @@ class SendBubblesBehaviourTest {
         assertEquals("Sending 1 message…", sendRowLabel(listOf(SendFixtures.pending("a", "x"))))
         assertEquals("Sending 2 messages…", sendRowLabel(listOf(SendFixtures.pending("a", "x"), SendFixtures.pending("b", "y"))))
         assertEquals(
-            "Waiting for link — 1 message will send automatically when the connection returns.",
+            "Waiting for link — kept on this device, sends when the connection returns",
             sendRowLabel(listOf(SendFixtures.pending("a", "x"), SendFixtures.pending("b", "y", SendStatus.Waiting))),
         )
         assertEquals(
-            "Waiting for link — 2 messages will send automatically when the connection returns.",
+            "Waiting for link — kept on this device, sends when the connection returns",
             sendRowLabel(listOf(SendFixtures.pending("a", "x", SendStatus.Waiting), SendFixtures.pending("b", "y", SendStatus.Waiting))),
         )
+    }
+
+    // --- ta-delivery V1-V3 in the strip row and the bubble -------------------------------------
+
+    @Test
+    fun theUploadingStripRowSaysV1WithAPrintedPercentAndAProgressRole() {
+        val c = client()
+        c.pendingRows.value = listOf(SendFixtures.pending("k1", "Ship it.", attachments = 2, images = 2, bytes = SendFixtures.THREE_MB, percent = 42))
+        host(c)
+        val words = "2 images · 3.0 MB · Uploading — kept on this device until it reaches the server"
+        // The same words in the strip row and in the transcript bubble.
+        rule.onAllNodesWithText(words).assertCountEquals(2)
+        rule.onAllNodesWithText("42%").assertCountEquals(2)
+        rule.onAllNodes(hasProgressBarRangeInfo(ProgressBarRangeInfo(0.42f, 0f..1f))).assertCountEquals(2)
+    }
+
+    @Test
+    fun offlineWithAnUploadPercentTheLinkStateWinsAndThePercentStaysOut() {
+        val c = client()
+        c.pendingRows.value = listOf(SendFixtures.pending("k1", "Ship it.", SendStatus.Waiting, 1, 1, 8.0, percent = 0))
+        host(c)
+        rule.onNodeWithText("Waiting for link — kept on this device, sends when the connection returns").assertIsDisplayed()
+        rule.onNodeWithText("Waiting for link — reconnecting, your message will be sent automatically").assertIsDisplayed()
+        rule.onAllNodesWithText("0%").assertCountEquals(0)
+        rule.onAllNodesWithTag(UPLOAD_PROGRESS_TAG).assertCountEquals(0)
     }
 
     // --- in the chat --------------------------------------------------------------------------
@@ -165,7 +194,7 @@ class SendBubblesBehaviourTest {
         c.pendingRows.value = listOf(SendFixtures.pending("k1", "Ship it.", SendStatus.Waiting))
         host(c)
         rule.onNodeWithText("Waiting for link — reconnecting, your message will be sent automatically").assertIsDisplayed()
-        rule.onNodeWithText("Waiting for link — 1 message will send automatically when the connection returns.").assertIsDisplayed()
+        rule.onNodeWithText("Waiting for link — kept on this device, sends when the connection returns").assertIsDisplayed()
     }
 
     @Test

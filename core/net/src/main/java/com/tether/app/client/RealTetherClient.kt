@@ -4708,7 +4708,11 @@ class RealTetherClient(
     private fun publishPendingSends() {
         val rows = PendingInput.describePending(pendingStore, clock(), socketOpen, lastInboundAt)
         val hub = attachmentUploads
-        pendingSendsState.value = if (hub == null) rows else rows.map { row -> hub.percentFor(row.key)?.let { row.copy(uploadPercent = it) } ?: row }
+        val onDevice = attachmentSpool != null
+        pendingSendsState.value = rows.map { row ->
+            val withSpool = row.copy(keptOnDevice = onDevice)
+            hub?.percentFor(row.key)?.let { withSpool.copy(uploadPercent = it) } ?: withSpool
+        }
     }
 
     /**
