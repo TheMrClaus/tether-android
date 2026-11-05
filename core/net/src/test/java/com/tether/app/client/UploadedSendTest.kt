@@ -127,7 +127,8 @@ class UploadedSendTest {
         assertEquals(AttachmentSendResult.Sent, r.client.sendUploaded("s1", "look", listOf(photo), listOf(id), null, origin))
         h.serverBarrier(r.ws)
         assertTrue("held: nothing is sent while the photo is uploading", h.framesUntilBarrier().none { it.type() == "send" })
-        h.await(r.client.pendingSends) { rows -> rows.singleOrNull()?.uploadPercent != null }
+        // V1 (spec 4.1b I item 4): with a spool the device really keeps the bytes, so the row may say so.
+        h.await(r.client.pendingSends) { rows -> rows.singleOrNull()?.let { it.uploadPercent != null && it.keptOnDevice } == true }
 
         h.server.enqueue(stored(id))
         runBlocking { r.hub.run(id) }

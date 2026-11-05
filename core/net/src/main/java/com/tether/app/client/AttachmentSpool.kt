@@ -40,11 +40,12 @@ class AttachmentSpool(
     // key -> refs already on disk: a persist runs after every store change; the bytes are written once.
     private val known = HashMap<String, List<SpoolRef>>()
 
-    /** Writes [attachments] for [key] (once); null = not spooled (over a cap, not canonical base64, or an I/O error). */
-    @Synchronized
-    fun put(key: String, attachments: List<Attachment>): List<SpoolRef>? {
+    /**
+     * The decoded bytes [put] would write for [key], or null when it would not spool them (over a cap, not
+     * canonical base64, a bad key). The ONE rule behind [put] and [wouldHold].
+     */
+    private fun acceptable(key: String, attachments: List<Attachment>): List<ByteArray>? {
         if (!validKey(key)) return null
-        known[key]?.let { return it }
         if (attachments.isEmpty() || attachments.size > maxRecordFiles) return null
         val raws = ArrayList<ByteArray>(attachments.size)
         var total = 0L
@@ -62,6 +63,20 @@ class AttachmentSpool(
             raws += raw
         }
         if (total > maxRecordBytes || usedBytesExcept(key) + total > maxTotalBytes) return null
+        return raws
+    }
+
+    /** Dry run of [put]: would the spool accept [key]'s bytes now? Writes nothing (ta-delivery §4.1d A.1). */
+    @Synchronized
+    fun wouldHold(key: String, attachments: List<Attachment>): Boolean =
+        validKey(key) && (known.containsKey(key) || acceptable(key, attachments) != null)
+
+    /** Writes [attachments] for [key] (once); null = not spooled (over a cap, not canonical base64, or an I/O error). */
+    @Synchronized
+    fun put(key: String, attachments: List<Attachment>): List<SpoolRef>? {
+        if (!validKey(key)) return null
+        known[key]?.let { return it }
+        val raws = acceptable(key, attachments) ?: return null
         val dir = File(root, key)
         return try {
             dir.deleteRecursively()

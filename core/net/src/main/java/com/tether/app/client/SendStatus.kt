@@ -22,6 +22,11 @@ data class PendingSendRow(
      * uploading in the background; null when nothing of it is uploading.
      */
     val uploadPercent: Int? = null,
+    /**
+     * ta-delivery V1 (spec 4.1b I item 4): true only when this record's attachments sit in the on-disk spool
+     * (RealTetherClient's `attachmentSpool != null`), so "kept on this device" is true. False = held in memory only.
+     */
+    val keptOnDevice: Boolean = false,
 )
 
 /** pending-input.mjs :371-372: the two states of an unresolved send. */
