@@ -20,8 +20,9 @@ import com.tether.app.protocol.tree.JsStr
  * Every key the web sends, with the web's rule:
  * - `provider` = the row's engine; `cwd` = the form's folder; `requestId` = the submit's token (v76).
  * - `permissionMode`: Claude and opencode send the form's mode (empty: `bypassPermissions`, the web's
- *   cold-start default); every other engine sends `bypassPermissions` (no engine meaning there; the
- *   web keeps it for wire-shape symmetry).
+ *   cold-start default); Reasonix sends `default` (lib/draft-form.ts createPermissionModeFor); every
+ *   other engine sends `bypassPermissions` (no engine meaning there; the web keeps it for wire-shape
+ *   symmetry). One rule: [HandoverDraftForm.permissionModeFor].
  * - `sandboxPolicy`: Codex sends its Mode preset's tier ([CodexModePresets]); every other engine,
  *   Claude included, sends none (ta-93qs: tether 6e38663's composer names no tier for Claude, so the
  *   server's one rule decides, as it does for the web).
@@ -50,7 +51,6 @@ object CreateFrame {
 
     fun build(form: JsObj, entry: ProviderCatalogEntry, modified: JsObj, requestId: String, name: String? = null): ClientMessage.Create {
         val provider = entry.provider
-        val isClaude = provider == "claude"
         val isCodex = provider == "codex"
         val isOpencode = provider == "opencode"
         // use-draft-composer.ts:305-311: the form's mode as it is.
@@ -72,7 +72,7 @@ object CreateFrame {
             provider = provider,
             cwd = form.s("cwd"),
             requestId = requestId,
-            permissionMode = if (isClaude || isOpencode) mode.ifEmpty { DEFAULT_PERMISSION_MODE } else DEFAULT_PERMISSION_MODE,
+            permissionMode = HandoverDraftForm.permissionModeFor(provider, mode),
             sandboxPolicy = if (isCodex) (codexPreset["sandboxPolicy"] as JsStr).value else null,
             approvalPolicy = approvalPolicy?.let { OrNull(it) },
             approvalsReviewer = approvalsReviewer?.let { OrNull(it) },

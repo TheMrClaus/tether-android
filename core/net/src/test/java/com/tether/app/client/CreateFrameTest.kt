@@ -132,7 +132,7 @@ class CreateFrameTest {
         Row("opencode plan", entry("opencode"), form("mode" to "plan"), expected = frame("opencode", """"permissionMode":"plan",""")),
         // --- every other engine: bypassPermissions for wire symmetry, no sandbox, the mode ignored --------
         Row("pi", entry("pi"), form("mode" to "plan"), expected = frame("pi", """"permissionMode":"bypassPermissions",""")),
-        Row("reasonix", entry("reasonix"), form(), expected = frame("reasonix", """"permissionMode":"bypassPermissions",""")),
+        Row("reasonix", entry("reasonix"), form(), expected = frame("reasonix", """"permissionMode":"default",""")),
         Row("dsh", entry("dsh"), form("mode" to "default"), expected = frame("dsh", """"permissionMode":"bypassPermissions",""")),
         Row(
             "acp profile",
@@ -419,7 +419,8 @@ class CreateFrameTest {
             put("provider", provider)
             put("cwd", f("cwd"))
             put("requestId", "r")
-            put("permissionMode", if (isClaude || isOpencode) f("mode").ifEmpty { "bypassPermissions" } else "bypassPermissions")
+            // web lib/draft-form.ts createPermissionModeFor: Claude/opencode their mode, Reasonix "default", the rest bypassPermissions.
+            put("permissionMode", if (isClaude || isOpencode) f("mode").ifEmpty { "bypassPermissions" } else if (provider == "reasonix") "default" else "bypassPermissions")
             // tether 6e38663 (ta-zzl): only Codex names a tier; Claude's is the server's one rule.
             if (isCodex) put("sandboxPolicy", (preset["sandboxPolicy"] as JsStr).value)
             if (isCodex) {
@@ -470,6 +471,30 @@ class CreateFrameTest {
     }
 
     private fun JsObj.flag(key: String) = this[key] == JsBool.TRUE
+
+    /**
+     * ta-h9g5.1: a mode left in the form by a previously selected provider (stale) must not leak into another
+     * provider's create frame. Web createPermissionModeFor: Claude/opencode send the form mode (cold "" -> bypassPermissions),
+     * Reasonix always "default", every other provider bypassPermissions; no toolApproval key anywhere.
+     */
+    @Test
+    fun staleFormModesYieldThePerProviderPermissionModeMatrix() {
+        val staleModes = listOf("", "default", "plan", "acceptEdits", "bypassPermissions", "auto-review", "full-access")
+        for (mode in staleModes) {
+            val f = form("mode" to mode)
+            fun wire(provider: String) = CreateFrame.build(f, entry(provider), DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
+            val passThrough = JsonPrimitive(mode.ifEmpty { "bypassPermissions" })
+            assertEquals("claude/$mode", passThrough, wire("claude")["permissionMode"])
+            assertEquals("opencode/$mode", passThrough, wire("opencode")["permissionMode"])
+            assertEquals("reasonix/$mode", JsonPrimitive("default"), wire("reasonix")["permissionMode"])
+            for (other in listOf("codex", "pi", "dsh", "acp")) {
+                assertEquals("$other/$mode", JsonPrimitive("bypassPermissions"), wire(other)["permissionMode"])
+            }
+            for (provider in listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh", "acp")) {
+                assertFalse("$provider/$mode", "toolApproval" in wire(provider))
+            }
+        }
+    }
 
     /**
      * ta-d3tj.10 (R1, ruling 6): the draft form now carries `toolApproval` ("ask" at start, web draft-form.ts:427) as a pure

@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import com.tether.app.ui.prefs.launchPreferenceWrite
 
 /** The expanded shell's persisted column state and the callback that saves a change. */
-class PersistedPanels(val panels: PanelPrefs, val onChange: (PanelPrefs) -> Unit)
+class PersistedPanels(val panels: PanelPrefs, val onChange: ((PanelPrefs) -> PanelPrefs) -> Unit)
 
 /**
  * Binds [ExpandedShell]'s `panels` / `onPanelsChange` to the app's preference store, as the web
@@ -25,5 +25,9 @@ fun rememberPersistedPanels(prefs: UiPrefs, serverUrl: StateFlow<String?>): Pers
     // ta-coik.52: the server's own columns (the web's preferences are per origin).
     val preferences by remember(prefs, serverUrl) { prefs.preferencesFor(serverUrl) }.collectAsStateWithLifecycle(initialValue = null)
     val panels = preferences?.let(PanelPrefs::from) ?: PanelPrefs()
-    return PersistedPanels(panels) { next -> scope.launchPreferenceWrite { prefs.updatePreferencesFor(serverOrigin(serverUrl.value)) { next.applyTo(it) } } }
+    return PersistedPanels(panels) { transform ->
+        // The change is a transformation applied to the latest STORED panel fields inside the atomic
+        // update, so a change made before the first read lands cannot overwrite unrelated fields.
+        scope.launchPreferenceWrite { prefs.updatePreferencesFor(serverOrigin(serverUrl.value)) { transform(PanelPrefs.from(it)).applyTo(it) } }
+    }
 }

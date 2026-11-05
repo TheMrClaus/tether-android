@@ -84,4 +84,47 @@ class PersistedPanelsLateReadTest : PersistedPanelsBase() {
         recompose()
         awaitWidth(ShellTags.InspectorColumn, 336f)
     }
+
+    @Test fun anInspectorDragBeforeTheReadLandsKeepsTheOtherStoredPanelFields() {
+        val stored = PanelPrefs(sidebarWidth = 360, inspectorWidth = 300, sidebarCollapsed = true)
+        runPrefsWrite { prefs.updatePreferences { stored.applyTo(it) } }
+        show()
+        awaitWidth(ShellTags.InspectorColumn, 288f) // the read has not landed
+        assertTrue("the read is still held", !readLanded.isCompleted)
+        rule.onNodeWithTag(ShellTags.InspectorHandle).performTouchInput {
+            down(center)
+            moveBy(Offset(-dpPx(48f), 0f))
+            up()
+        }
+        val expected = stored.copy(inspectorWidth = 336)
+        rule.waitUntil(5_000) { onDisk().inspectorWidth == 336 }
+        release.complete(Unit)
+        rule.waitUntil(5_000) { readLanded.isCompleted }
+        assertEquals("the drag changes only the inspector", expected, onDisk())
+        awaitWidth(ShellTags.InspectorColumn, 336f)
+        recompose()
+        awaitWidth(ShellTags.InspectorColumn, 336f)
+        assertEquals(expected, onDisk())
+    }
+
+    @Test fun aRailDragBeforeTheReadLandsKeepsTheOtherStoredPanelFields() {
+        val stored = PanelPrefs(sidebarWidth = 360, inspectorWidth = 300, sidebarCollapsed = true)
+        runPrefsWrite { prefs.updatePreferences { stored.applyTo(it) } }
+        show()
+        awaitWidth(ShellTags.Sidebar, 320f) // the wide-window default: the read has not landed
+        assertTrue("the read is still held", !readLanded.isCompleted)
+        rule.onNodeWithTag(ShellTags.RailHandle).performTouchInput {
+            down(center)
+            moveBy(Offset(dpPx(24f), 0f))
+            up()
+        }
+        val expected = stored.copy(sidebarWidth = 344)
+        rule.waitUntil(5_000) { onDisk().sidebarWidth == 344 }
+        release.complete(Unit)
+        rule.waitUntil(5_000) { readLanded.isCompleted }
+        // The stored collapse is kept, so the rail may close once the read is in; the saved record is the proof.
+        assertEquals("the drag changes only the sidebar width", expected, onDisk())
+        recompose()
+        assertEquals(expected, onDisk())
+    }
 }

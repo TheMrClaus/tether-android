@@ -78,7 +78,7 @@ private data class PendingWidth(val width: Int?)
 fun ExpandedShell(
     state: PhoneShellState,
     panels: PanelPrefs,
-    onPanelsChange: (PanelPrefs) -> Unit,
+    onPanelsChange: ((PanelPrefs) -> PanelPrefs) -> Unit,
     session: AgentSession?,
     workspaceRoot: String?,
     emptyStage: EmptyStage,
@@ -171,14 +171,14 @@ fun ExpandedShell(
                         onLive = { w -> pendingRail = w?.let { PendingWidth(it) } },
                         onCommit = { w ->
                             pendingRail = PendingWidth(w)
-                            onPanelsChange(panels.withWidth(PanelKind.Rail, w))
+                            onPanelsChange { it.withWidth(PanelKind.Rail, w) }
                         },
                         // `justify-self: end; transform: translateX(50%)` over the rail's edge.
                         modifier = Modifier.offset(x = railWidth.dp - PanelHandleWidth / 2).zIndex(3f),
                     )
                 } else if (showRail) {
                     ExpandDock(
-                        onExpand = { onPanelsChange(panels.copy(sidebarCollapsed = false)) },
+                        onExpand = { onPanelsChange { it.copy(sidebarCollapsed = false) } },
                         modifier = Modifier.align(Alignment.BottomStart).zIndex(3f),
                     )
                 }
@@ -190,7 +190,7 @@ fun ExpandedShell(
                         onLive = { w -> pendingInspector = w?.let { PendingWidth(it) } },
                         onCommit = { w ->
                             pendingInspector = PendingWidth(w)
-                            onPanelsChange(panels.withWidth(PanelKind.Inspector, w))
+                            onPanelsChange { it.withWidth(PanelKind.Inspector, w) }
                         },
                         // `justify-self: start; transform: translateX(-50%)` over the inspector's edge.
                         modifier = Modifier

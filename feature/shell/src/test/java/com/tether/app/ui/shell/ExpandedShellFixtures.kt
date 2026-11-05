@@ -62,7 +62,8 @@ class PanelStore(initial: PanelPrefs = PanelPrefs()) {
     var panels by mutableStateOf(initial)
     val commits = mutableListOf<PanelPrefs>()
 
-    fun commit(next: PanelPrefs) {
+    fun commit(transform: (PanelPrefs) -> PanelPrefs) {
+        val next = transform(panels)
         commits += next
         panels = next
     }
