@@ -57,10 +57,13 @@ class RuntimeDeskBehaviourTest {
         compose.onNodeWithText("Engines").performClick()
         compose.onNode(hasText("Codex") and hasClickAction()).performClick()
         compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
         assertEquals(RuntimeDeskLevel.Entities, state.route.level)
         compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
         assertEquals(RuntimeDeskLevel.Destinations, state.route.level)
         compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
         assertEquals(1, closes)
     }
 
@@ -69,12 +72,20 @@ class RuntimeDeskBehaviourTest {
             draft = GeneralDraft.of(com.tether.app.ui.prefs.TetherPreferences.Default),
             route = RuntimeDeskRoute(RuntimeDeskDestinations.Engines, "claude", RuntimeDeskLevel.Detail),
         )
+        val writer = RecordingWriter()
+        val binding = ServerFixtures.binding(writer = writer)
         compose.setContent {
-            SettingsUnderTest(store.prefs, state, serverSettings = ServerShot.Engines.binding())
+            SettingsUnderTest(store.prefs, state, serverSettings = binding)
         }
         val tag = ServerSettingsTags.input(ServerSetting.ClaudeCommand)
         compose.onNodeWithTag(tag, useUnmergedTree = true).performTextReplacement("claude-preview")
         compose.onNodeWithContentDescription("Back").performClick()
+        compose.waitForIdle()
+        assertEquals(
+            listOf(ServerFixtures.json("""{"claudeCommand":"claude-preview"}""") to ServerFixtures.ORIGIN),
+            writer.patches,
+        )
+        assertEquals("claude", binding.settings!!.text(ServerSetting.ClaudeCommand))
         compose.onNode(hasText("Codex") and hasClickAction()).performClick()
         compose.waitForIdle()
         compose.onNodeWithContentDescription("Back").performClick()
@@ -84,6 +95,7 @@ class RuntimeDeskBehaviourTest {
         val value = compose.onNodeWithTag(tag, useUnmergedTree = true)
             .fetchSemanticsNode().config[SemanticsProperties.EditableText].text
         assertEquals("claude-preview", value)
+        assertEquals("the blur commit is not repeated by mounted navigation", 1, writer.patches.size)
     }
 
     @Test fun returningToADestinationRestoresItsRealEntitySelection() {

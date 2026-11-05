@@ -60,7 +60,6 @@ class SettingsBehaviourTest {
         }
         // The draft is seeded from the store's first read.
         compose.waitUntil(5_000) { state.draft != null }
-        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsPanelTags.UseCurrent) }
         compose.waitForIdle()
     }
 
@@ -90,8 +89,8 @@ class SettingsBehaviourTest {
     }
 
     @Test fun theSevenDestinationsDrillIntoTheirPanels() {
-        state.route = RuntimeDeskRoute.Root
         show()
+        compose.onNodeWithContentDescription("Back").performClick()
         RuntimeDeskDestinations.items.forEach { item ->
             compose.onNodeWithText(item.label).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
         }
@@ -105,8 +104,8 @@ class SettingsBehaviourTest {
         compose.onNodeWithText("Sessions opened on this phone").assertExists()
         compose.onNodeWithText("Paired devices").assertExists()
         // T10.4: the web's SignInSecuritySection headings (the slot's "Sign-in security" is gone).
-        compose.onNodeWithText("Passkeys").assertExists()
-        compose.onNodeWithText("Signed-in sessions").assertExists()
+        compose.onNodeWithText("Passkeys").performScrollTo().assertExists()
+        compose.onNodeWithText("Signed-in sessions").performScrollTo().assertExists()
     }
 
     /**
@@ -115,6 +114,7 @@ class SettingsBehaviourTest {
      */
     @Test fun everyDestinationHasAControlledDetail() {
         show()
+        compose.onNodeWithContentDescription("Back").performClick()
         val uniqueContent = mapOf(
             RuntimeDeskDestinations.Preferences to "Startup",
             RuntimeDeskDestinations.AccessDevices to "Passkeys",
@@ -125,9 +125,14 @@ class SettingsBehaviourTest {
             RuntimeDeskDestinations.ServerIntegrations to "Server settings",
         )
         RuntimeDeskDestinations.items.forEach { item ->
-            compose.runOnUiThread { state.route = state.route.selectDestination(item.id).let { if (it.level == RuntimeDeskLevel.Entities) it.copy(level = RuntimeDeskLevel.Detail) else it } }
+            compose.onNodeWithText(item.label).performClick()
+            if (item.id == RuntimeDeskDestinations.Engines) compose.onNodeWithText("Claude Code").performClick()
+            if (item.id == RuntimeDeskDestinations.Accounts) compose.onNodeWithText("Credentials").performClick()
             compose.waitForIdle()
-            compose.onNodeWithText(uniqueContent.getValue(item.id)).assertExists()
+            compose.onNodeWithText(uniqueContent.getValue(item.id)).performScrollTo().assertExists()
+            compose.onNodeWithContentDescription("Back").performClick()
+            if (RuntimeDeskDestinations.hasEntities(item.id)) compose.onNodeWithContentDescription("Back").performClick()
+            compose.waitForIdle()
         }
     }
 
@@ -200,11 +205,11 @@ class SettingsBehaviourTest {
     @Test fun appearanceAppliesAtOnceAndSaveKeepsIt() {
         show()
         flip(GeneralToggle.ShowThinking)
-        compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performClick()
+        compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performScrollTo().performClick()
         compose.waitUntil(5_000) { store.storedFor()[PreferenceKeys.THEME_MODE] == "dark" }
         waitSelected(SettingsPanelTags.themeMode(ThemeMode.Dark))
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).assertIsSelected()
-        compose.onNodeWithTag(SettingsPanelTags.loginVariant("retro")).performClick()
+        compose.onNodeWithTag(SettingsPanelTags.loginVariant("retro")).performScrollTo().performClick()
         compose.waitUntil(5_000) { store.storedFor()[PreferenceKeys.LOGIN_VARIANT] == "retro" }
         // The General draft is still unsaved (the appearance write keeps the stored value).
         assertEquals(false, store.storedFor()[PreferenceKeys.SHOW_THINKING])

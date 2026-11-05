@@ -249,7 +249,7 @@ abstract class UsageBehaviourBase {
         accountsEmbedded(source)
         assertEquals(listOf<String?>(null), source.of("accounts").map { it.a })
         rule.onNodeWithText("Host default").assertExists()
-        rule.onNodeWithText("Codex").assertExists()
+        rule.onAllNodesWithText("Codex").assertCountEquals(2)
         rule.onNodeWithText("DeepSeek").assertExists()
 
         rule.onNodeWithTag(AccountsTags.Refresh).performClick()

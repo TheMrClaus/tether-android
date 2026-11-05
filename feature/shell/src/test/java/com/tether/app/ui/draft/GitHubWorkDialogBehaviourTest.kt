@@ -17,6 +17,8 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.unit.IntSize
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -32,7 +34,6 @@ import com.tether.app.ui.chat.LinkOpener
 import com.tether.app.ui.chat.LocalLinkOpener
 import com.tether.app.ui.prefs.UiPrefs
 import com.tether.app.ui.settings.SettingsDialogTags
-import com.tether.app.ui.settings.SettingsTab
 import com.tether.app.ui.theme.TetherTheme
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
@@ -244,7 +245,8 @@ class GitHubWorkDialogBehaviourTest {
         tap(GitHubWorkTags.SetUp)
         awaitGone(GitHubWorkTags.Dialog)
         awaitTag(SettingsDialogTags.Dialog)
-        rule.onNodeWithTag(SettingsDialogTags.tab(SettingsTab.Advanced)).assertIsSelected()
+        rule.onNodeWithText("Server & integrations").assertExists()
+        rule.onNodeWithText("GitHub connection").performScrollTo().assertExists()
     }
 
     @Test

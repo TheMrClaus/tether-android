@@ -59,9 +59,8 @@ class RefusedPreferenceWriteTest {
 
     private fun read() = runBlocking(Dispatchers.IO) { prefs.preferences.first().forServer(null) }
 
-    private fun show(tab: SettingsTab) {
+    private fun show() {
         grantNotificationPermission()
-        state.route = RuntimeDeskRoute.fromLegacyTab(tab)
         compose.setContent { SettingsUnderTest(prefs, state) }
         compose.waitUntil(5_000) { state.draft != null }
         compose.waitForIdle()
@@ -71,17 +70,17 @@ class RefusedPreferenceWriteTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithTag(t).fetchSemanticsNodes().singleOrNull()?.config?.getOrNull(SemanticsProperties.Selected) == true }
 
     @Test fun appearancePicksApplyWhenTheDiskRefusesThem() {
-        show(SettingsTab.Appearance)
-        compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performClick()
+        show()
+        compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performScrollTo().performClick()
         waitSelected(SettingsPanelTags.themeMode(ThemeMode.Dark))
-        compose.onNodeWithTag(SettingsPanelTags.loginVariant("retro")).performClick()
+        compose.onNodeWithTag(SettingsPanelTags.loginVariant("retro")).performScrollTo().performClick()
         waitSelected(SettingsPanelTags.loginVariant("retro"))
         assertEquals(ThemeMode.Dark to LoginVariant.Retro, read().let { it.themeMode to it.loginVariant })
         assertTrue("both picks were written, and refused", disk.attempts >= 2)
     }
 
     @Test fun theNotificationsRowAppliesWhenTheDiskRefusesIt() {
-        show(SettingsTab.Appearance)
+        show()
         compose.onNodeWithText("Pinned sessions").performScrollTo().performClick()
         compose.waitUntil(5_000) { runBlocking(Dispatchers.IO) { prefs.pushScope.first() } == PushScope.Pinned }
         // T12.2: the web's Disable (notifications allowed, the registration in place).

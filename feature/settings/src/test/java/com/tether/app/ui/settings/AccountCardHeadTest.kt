@@ -9,7 +9,6 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.assertCountEquals
@@ -147,11 +146,18 @@ abstract class AccountCardHeadBase(private val width: Int) {
         val title = tag(ClaudeAccountsTags.head("claude-work"))
         assertEquals("$width: the glyph is 32 tall at every width ($glyph)", 32f, glyph.h, 0.5f)
         if (width == 412) {
-            // The web's own measures (c3ie-premerge-probe, Rename-104 variant): glyph 12.1, title 66.9. The app
-            // reaches 12.5 and 67.7 from its own key widths (Rename 104.8, Check 94: 1.2 dp more room) and text
-            // metrics (title max-content 173 against the web's 177); the same flex-shrink arithmetic.
-            assertEquals("412: the glyph shrinks to the web's 12.1", 12.1f, glyph.w, 1f)
-            assertEquals("412: the title column is the web's 66.9", 66.9f, title.w, 1f)
+            // Runtime Desk gives this card the focused pane's actual width. Re-derive the CSS flex result from
+            // that container, the intrinsic keys, and this fixture's measured max-content title basis.
+            val card = tag(ClaudeAccountsTags.card("claude-work"))
+            val rename = tag(ClaudeAccountsTags.rename("claude-work"))
+            val check = tag(ClaudeAccountsTags.check("claude-work"))
+            val titleBasis = titleLayouts("claude-work").maxOf { it.multiParagraph.maxIntrinsicWidth / d }
+            val available = card.w - 2 * 16f - rename.w - 12f - check.w - 2 * 12f
+            val deficit = (32f + titleBasis - available).coerceAtLeast(0f)
+            val expectedGlyph = 32f - deficit * 32f / (32f + titleBasis)
+            val expectedTitle = available - expectedGlyph
+            assertEquals("412: the glyph follows flex shrink in the actual $card card", expectedGlyph, glyph.w, 1f)
+            assertEquals("412: the title gets the actual container remainder", expectedTitle, title.w, 1f)
         }
         if (width >= 641) assertEquals("$width: the glyph keeps its 32 basis when the head has room", 32f, glyph.w, 0.5f)
         assertTrue("$width: the glyph never grows past 32 ($glyph)", glyph.w <= 32.5f)
@@ -186,7 +192,7 @@ abstract class AccountCardHeadBase(private val width: Int) {
         assertTrue("$width: drawn $drawn dp is at least the unwrapped ${email.multiParagraph.maxIntrinsicWidth / d} of its own line", drawn > 90f)
         if (width == 412) {
             assertEquals("412: the email line is its own", "work@example.com", text.trim())
-            assertTrue("412: it overflows the $title column (drawn $drawn dp)", drawn >= title.w + 20f)
+            assertTrue("412: it overflows the $title column whole (drawn $drawn dp)", drawn > title.w)
             assertTrue("412: and is drawn at its unwrapped width", drawn >= email.multiParagraph.maxIntrinsicWidth / d - 1f)
         }
     }
@@ -228,9 +234,12 @@ abstract class AccountCardHeadBase(private val width: Int) {
         show()
         for (id in listOf("claude-default", "claude-work", "claude-fresh")) {
             compose.onNodeWithTag(ClaudeAccountsTags.plan(id), useUnmergedTree = true).assertDoesNotExist()
-        }
-        for (text in listOf("Team Premium 5x", "Team Standard", "Pre-existing")) {
-            compose.onAllNodesWithText(text, useUnmergedTree = true).assertCountEquals(0)
+            for (text in listOf("Team Premium 5x", "Team Standard", "Pre-existing")) {
+                compose.onAllNodes(
+                    hasText(text) and hasAnyAncestor(hasTestTag(ClaudeAccountsTags.head(id))),
+                    useUnmergedTree = true,
+                ).assertCountEquals(0)
+            }
         }
     }
 

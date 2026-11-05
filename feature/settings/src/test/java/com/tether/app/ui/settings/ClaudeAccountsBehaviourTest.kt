@@ -11,6 +11,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -90,6 +91,12 @@ class ClaudeAccountsBehaviourTest {
 
     private fun waitFor(text: String) = compose.waitUntil(5_000) { everything().any { it.contains(text) } }
 
+    private fun openAccountSync() {
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Account sync").performClick()
+        compose.waitForIdle()
+    }
+
     @Test fun openingTheTabReadsTheListAndTheSyncStateOnceAndNothingElse() {
         val fake = FakeAccounts()
         show(fake.binding())
@@ -134,9 +141,11 @@ class ClaudeAccountsBehaviourTest {
         assertTrue(all.contains("/srv/tether/state/claude-accounts/claude-work"))
         assertTrue(all.contains(ClaudeAccountsPresentation.NO_HOME))
         assertEquals(1, all.count { it == "/srv/tether/.claude" })
-        // The sync state (ta-7rh: as its controls: the mode and primary said with their values, the categories ticked).
+        // The sync state now has its own real entity; visit it through the Runtime Desk hierarchy.
+        openAccountSync()
+        val sync = everything()
         for (text in listOf("Sync across accounts", "Sync across accounts: Sync selected categories", "Primary account for sync: Claude Code (default)", "Last synced at 10:13:20 — 2 updated, 1 already current.")) {
-            assertTrue(text, all.contains(text))
+            assertTrue(text, sync.contains(text))
         }
         for ((key, on) in listOf("plugins" to true, "skills" to true, "mcp" to true, "hooks" to false)) {
             val state = tag(ClaudeAccountsTags.syncCategory(key)).fetchSemanticsNode().config[SemanticsProperties.ToggleableState]
@@ -177,6 +186,7 @@ class ClaudeAccountsBehaviourTest {
         tag(ClaudeAccountsTags.rename("claude-work")).assertIsEnabled()
         tag(ClaudeAccountsTags.rename("claude-default")).assertDoesNotExist()
         tag(ClaudeAccountsTags.Add).assertIsEnabled()
+        openAccountSync()
         tag(ClaudeAccountsTags.SyncNow).assertIsEnabled()
     }
 
@@ -228,7 +238,7 @@ class ClaudeAccountsBehaviourTest {
             }
             compose.waitUntil(5_000) { state.draft != null }
             waitFor("Claude Code (work)")
-            waitFor("Sync across accounts")
+            compose.waitUntil(5_000) { "GET /api/claude-accounts/sync" in arrived }
             tag(ClaudeAccountsTags.Add).performScrollTo().performClick()
             compose.onNodeWithTag(ClaudeAccountsTags.AddField, useUnmergedTree = true).performTextReplacement("home")
             tag(ClaudeAccountsTags.AddSubmit).performScrollTo().performClick()
@@ -242,6 +252,7 @@ class ClaudeAccountsBehaviourTest {
             assertFalse("one tap sends nothing", arrived.any { it.startsWith("DELETE") })
             tag(ClaudeAccountsTags.remove("claude-fresh")).performScrollTo().performClick()
             waitFor("Removed Claude Code (fresh).")
+            openAccountSync()
             compose.waitUntil(5_000) { compose.isDrawnEnabled(ClaudeAccountsTags.SyncNow) }
             tag(ClaudeAccountsTags.SyncNow).performScrollTo().performClick()
             waitFor("0 updated, 0 already current.")

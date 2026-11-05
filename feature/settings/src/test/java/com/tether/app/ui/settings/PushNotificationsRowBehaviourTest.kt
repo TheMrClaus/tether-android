@@ -24,7 +24,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * T12.2: the Devices tab's push row does what the web's Web Push row does (tether 90fbb9f
+ * T12.2: Preferences' push row does what the web's Web Push row does (tether 90fbb9f
  * settings-dialog.tsx:2073-2096): it refreshes on opening, Re-enable re-registers a stale
  * registration, Disable turns push off (the pipeline then DELETEs the row), Enable turns it on.
  */
@@ -37,13 +37,13 @@ class PushNotificationsRowBehaviourTest {
 
     @get:Rule val rules: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    private val state = SettingsDialogState()
+    private val state = SettingsDialogState(route = RuntimeDeskRoute.Root)
 
     private fun show(push: FakePushRegistration) {
         grantNotificationPermission()
         compose.setContent { SettingsUnderTest(store.prefs, state, push = push) }
         compose.waitUntil(5_000) { state.draft != null }
-        compose.onNodeWithTag(SettingsDialogTags.tab(SettingsTab.Devices)).performClick()
+        compose.onNodeWithText("Preferences").performClick()
         compose.waitForIdle()
     }
 

@@ -14,6 +14,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -90,13 +91,19 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
             node.config.getOrNull(SemanticsProperties.TestTag)?.let { out += it }
             node.children.forEach(::walk)
         }
-        compose.onAllNodesWithTag(ClaudeAccountsTags.Section, useUnmergedTree = true).fetchSemanticsNodes().forEach(::walk)
+        walk(compose.onRoot(useUnmergedTree = true).fetchSemanticsNode())
         return out
     }
 
     private fun waitFor(text: String) = compose.waitUntil(5_000) { everything().any { it.contains(text) } }
     private fun waitForCall(actions: FakeAccountActions, name: String) = compose.waitUntil(5_000) { actions.pending(name) }
     private fun exists(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+
+    private fun openAccountSync() {
+        if (layout == TetherLayoutClass.Phone) compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText("Account sync").performClick()
+        compose.waitForIdle()
+    }
 
     private val removedKept = ClaudeAccountRemoved(removed = true, credentialsDeleted = false)
 
@@ -621,6 +628,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         waitFor("Logged in — work@example.com")
         assertEquals(listOf("add"), actions.names())
         // The next change is sent as it is on the web, and the note goes while it runs.
+        openAccountSync()
         tap(ClaudeAccountsTags.SyncNow)
         waitForCall(actions, "runSync")
         tag(ClaudeAccountsTags.OwnerNeeded).assertDoesNotExist()
@@ -698,6 +706,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     @Test fun aSyncSettingIsSavedWholeAndTheAnswerShown() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
+        openAccountSync()
         waitFor("Sync across accounts")
         tap(ClaudeAccountsTags.syncCategory("hooks"))
         waitForCall(actions, "saveSync")
@@ -716,6 +725,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     @Test fun twoCategoryTapsInOneFrameBothLand() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
+        openAccountSync()
         waitFor("Sync across accounts")
         compose.waitForIdle()
         val hooks = tag(ClaudeAccountsTags.syncCategory("hooks")).fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
@@ -737,6 +747,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     @Test fun aRefusedSyncSaveGoesBackAndSaysWhy() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
+        openAccountSync()
         waitFor("Sync across accounts")
         tag(ClaudeAccountsTags.SyncMode).performScrollTo().performClick()
         compose.onNodeWithContentDescription("Sync everything").performClick()
@@ -754,6 +765,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     @Test fun syncNowRunsAPassAndShowsIt() {
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
+        openAccountSync()
         waitFor("Sync across accounts")
         tap(ClaudeAccountsTags.SyncNow)
         waitForCall(actions, "runSync")
@@ -789,8 +801,9 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         val reads = FakeAccounts(listGate = { if (++lists == 2) gate.await() })
         val actions = FakeAccountActions()
         show(binding(reads, actions))
-        waitFor("Sync across accounts")
         addWithTheReReadHeld({ lists }, actions)
+        openAccountSync()
+        waitFor("Sync across accounts")
         tap(ClaudeAccountsTags.syncCategory("hooks"))
         waitForCall(actions, "saveSync")
         actions.answer("saveSync", SecurityResult.Ok(hooksOn(), ORIGIN, null))
@@ -814,8 +827,9 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         val reads = FakeAccounts(listGate = { if (++lists == 2) gate.await() })
         val actions = FakeAccountActions()
         show(binding(reads, actions))
-        waitFor("Sync across accounts")
         addWithTheReReadHeld({ lists }, actions)
+        openAccountSync()
+        waitFor("Sync across accounts")
         tap(ClaudeAccountsTags.SyncNow)
         waitForCall(actions, "runSync")
         actions.answer("runSync", SecurityResult.Ok(ClaudeSyncSaved(AccountsFixtures.SYNC.config, com.tether.app.client.ClaudeSyncResult(1790000000000, "ok", changed = 0, upToDate = 0, error = null)), ORIGIN, null))
@@ -833,9 +847,10 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         val reads = FakeAccounts(statusGate = { gate.await() })
         val actions = FakeAccountActions()
         show(binding(reads, actions))
-        waitFor("Sync across accounts")
         tap(ClaudeAccountsTags.check("claude-work"))
         compose.waitUntil(5_000) { "status:claude-work" in reads.calls }
+        openAccountSync()
+        waitFor("Sync across accounts")
         tap(ClaudeAccountsTags.syncCategory("hooks"))
         waitForCall(actions, "saveSync")
         actions.answer("saveSync", SecurityResult.Ok(hooksOn(), ORIGIN, null))
