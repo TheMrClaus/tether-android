@@ -3,6 +3,9 @@ package com.tether.app.ui.sidebar
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -70,13 +73,14 @@ class DrawerSettingsRotationTest {
         rule.onNodeWithContentDescription("Open settings").performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(SettingsDialogTags.Dialog).assertExists()
+        rule.onNode(
+            hasText("Preferences") and SemanticsMatcher.expectValue(SemanticsProperties.Selected, true),
+        ).performClick()
         val tag = SettingsPanelTags.toggle(GeneralToggle.ConfirmBeforeEnd)
         // ta-9j0x: the toggle reads On (the default) before the preferences load, but is enabled only
         // once the draft is seeded from them; a tap before that is dropped.
         rule.waitUntil(20_000) { runCatching { rule.onNodeWithTag(tag).assertIsOn().assertIsEnabled() }.isSuccess }
-        // ta-v8dt: the card is 24 dp narrower now, so the row's centre falls inside the "Confirm before ending" tip glyph's
-        // 48 dp touch target (the tap opened the tip bubble, which is why the row grew and stayed On). Tap the switch
-        // track at the row's right end, which is what a reader taps.
+        // Tap the switch track at the row's right end, outside the adjacent 48 dp tip target.
         rule.onNodeWithTag(tag).performScrollTo().performTouchInput { click(Offset(width - 40.dp.toPx(), centerY)) }
         rule.waitForIdle()
         rule.onNodeWithTag(tag).assertIsOff()

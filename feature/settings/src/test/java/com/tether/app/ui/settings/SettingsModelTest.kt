@@ -81,7 +81,10 @@ class SettingsModelTest {
             val saved = androidx.compose.runtime.saveable.SaverScope { true }.save(state)!!
             restore(saved)!!
         }
-        assertEquals(SettingsTab.Appearance, restored.tab)
+        assertEquals(
+            RuntimeDeskRoute(RuntimeDeskDestinations.Preferences, null, RuntimeDeskLevel.Detail),
+            restored.route,
+        )
         assertEquals(state.draft, restored.draft)
         val fresh = with(SettingsDialogState.Saver) { restore(androidx.compose.runtime.saveable.SaverScope { true }.save(SettingsDialogState())!!)!! }
         assertEquals(SettingsTab.General, fresh.tab)

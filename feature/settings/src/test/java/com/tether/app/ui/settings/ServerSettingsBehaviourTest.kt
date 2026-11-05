@@ -257,6 +257,7 @@ class ServerSettingsBehaviourTest {
     @Test fun autoArchiveIdleDaysIsAnOffByDefaultNumberRowThatSavesThroughTheServerSettingsPath() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(writer = writer))
+        sessions()
         val all = texts()
         val label = all.indexOf("Auto-archive idle sessions (days)")
         assertTrue(label >= 0)
@@ -349,7 +350,7 @@ class ServerSettingsBehaviourTest {
         val forced = mapOf("host" to true, "password" to true, "claudePersistent" to true, "allowedRoots" to true, "messageInterruptMode" to true, "stateDir" to true)
         show(ServerFixtures.binding(view = ServerFixtures.view(envForced = forced), advanced = ServerFixtures.ADVANCED_FORCED, writer = writer))
         // Server & integrations owns the host, password, and state-directory locks.
-        assertEquals(3, compose.onAllNodesWithTag(SettingsTags.EnvLock, useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertEquals(3, compose.onAllNodesWithTag(SettingsTags.EnvLock).fetchSemanticsNodes().size)
         tag(ServerSettingsTags.input(ServerSetting.Host)).assertIsNotEnabled()
         tag(ServerSettingsTags.input(ServerSetting.StateDir)).assertIsNotEnabled()
         // A forced secret has no key at all (the web hides them), the token (not forced) does.
@@ -357,7 +358,7 @@ class ServerSettingsBehaviourTest {
         tag(ServerSecretTags.opener(ServerSetting.ProxyToken)).assertExists()
         // A forced toggle does nothing; a forced list has no remove or add.
         sessions()
-        assertEquals(3, compose.onAllNodesWithTag(SettingsTags.EnvLock, useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertEquals(3, compose.onAllNodesWithTag(SettingsTags.EnvLock).fetchSemanticsNodes().size)
         tag(ServerSettingsTags.row(ServerSetting.ClaudePersistent)).performScrollTo().performClick()
         tag(ServerSettingsTags.remove(ServerSetting.AllowedRoots, "/srv/work")).assertDoesNotExist()
         tag(ServerSettingsTags.add(ServerSetting.AllowedRoots)).assertDoesNotExist()

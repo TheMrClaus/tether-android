@@ -76,11 +76,10 @@ class SettingsLoadingTest {
 
         val save = compose.onNodeWithTag(SettingsDialogTags.Save)
         val thinking = compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking))
-        save.assertIsNotEnabled()
+        save.assertDoesNotExist()
         thinking.assertIsNotEnabled()
         compose.onNodeWithTag(SettingsPanelTags.UseCurrent).assertIsNotEnabled()
         thinking.performClick()
-        save.performClick()
         compose.waitForIdle()
         assertEquals(null, state.draft)
         assertEquals(0, closes)
@@ -90,13 +89,15 @@ class SettingsLoadingTest {
         compose.waitUntil(5_000) { state.draft != null }
         assertEquals(GeneralDraft("/srv/kept", showEndedSessions = false, confirmBeforeEnd = false, showThinking = true), state.draft)
         // ta-b72 (load flake): the screen is WAITED on until it draws that draft, then read.
-        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) && compose.isDrawnEnabled(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)) }
+        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)) }
         compose.waitForIdle()
-        save.assertIsEnabled()
+        save.assertDoesNotExist()
         thinking.assertIsEnabled().assertIsOn()
         thinking.performClick()
         compose.waitForIdle()
         thinking.assertIsOff()
+        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
+        save.assertIsEnabled()
         save.performClick()
         compose.waitUntil(5_000) { closes == 1 }
         // ta-coik.52: written to the server's own record (here no server is configured: the "" one).
@@ -133,9 +134,9 @@ class SettingsSaveTest {
 
     private fun stored() = store.storedFor()
 
-    /** ta-b72: the draft (read on the store's IO thread) is drawn: the switch and Save are live. */
+    /** ta-b72: the draft (read on the store's IO thread) is drawn and the switch is live. */
     private fun waitReady() = compose.waitUntil(5_000) {
-        compose.isDrawnEnabled(SettingsDialogTags.Save) && compose.isDrawnEnabled(SettingsPanelTags.toggle(GeneralToggle.ShowThinking))
+        compose.isDrawnEnabled(SettingsPanelTags.toggle(GeneralToggle.ShowThinking))
     }
 
     @Test fun saveClosesOnlyAfterTheWriteLands() {
@@ -147,6 +148,7 @@ class SettingsSaveTest {
         waitReady()
         compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performSemanticsAction(SemanticsActions.OnClick)
         compose.waitUntil(5_000) { state.draft?.showThinking == true }
+        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
         compose.waitForIdle()
         // The write is held: not stored, and the dialog is still open.
@@ -167,6 +169,7 @@ class SettingsSaveTest {
         waitReady()
         compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performSemanticsAction(SemanticsActions.OnClick)
         compose.waitUntil(5_000) { state.draft?.showThinking == true }
+        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
         compose.waitForIdle()
         // Back while the write is held: the dialog leaves composition (its scope is cancelled).

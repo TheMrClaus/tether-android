@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -58,9 +59,10 @@ import org.robolectric.shadows.ShadowLog
  * the web's order and words; server text drawn safely; add / probe / remove each sent once, by
  * its key only, to the drawing server, one at a time, its own answer shown (a refusal included,
  * the form kept, nothing retried); and the credential under slice 3's rules: masked by default,
- * the sentinel in no semantics node, log line, preference, saver or saved-state value while
- * masked, no copy or cut, the password keyboard, masked again on close, tab change, server switch
- * and rotation, kept over ON_STOP/ON_START (ta-coik.15), and never sent by anything but Add node.
+ * the sentinel in no log line, preference, saver or saved-state value, copy and cut marked
+ * sensitive, the password keyboard, retained in memory across tab changes and rotation while
+ * Settings stays open, cleared on close, server switch or process death, kept over
+ * ON_STOP/ON_START (ta-coik.15), and never sent by anything but Add node.
  *
  * The v2 rule (ta-b72): an answer resumes the panel's request on the composition's dispatcher,
  * the test's here, and every read after a tap waits on the screen or the writer.
@@ -509,15 +511,26 @@ class NodesBehaviourTest {
         assertNowhere(SENTINEL)
     }
 
-    @Test fun leavingTheTabDropsTheCredential() {
+    @Test fun leavingTheTabKeepsTheUnsentDraftWhileSettingsStaysOpen() {
+        val label = "Draft workstation"
+        val baseUrl = "https://draft.example.test"
         show()
+        tag(NodeTags.Label).performTextReplacement(label)
+        tag(NodeTags.BaseUrl).performTextReplacement(baseUrl)
         typeCredential(SENTINEL)
         state.tab = SettingsTab.Advanced
         compose.waitForIdle()
+        compose.onNodeWithTag(NodeTags.Credential).assertDoesNotExist()
+        tag(NodeTags.Credential).assertExists().assertIsNotDisplayed()
+        assertTrue(writer.calls.isEmpty())
+        assertNotStored(SENTINEL)
         state.tab = SettingsTab.Nodes
-        waitFor(NodeTags.Credential)
-        assertEquals("", fieldText(NodeTags.Credential))
-        assertNowhere(SENTINEL)
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag(NodeTags.Credential).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(SENTINEL, fieldText(NodeTags.Credential))
+        assertEquals(label, fieldText(NodeTags.Label))
+        assertEquals(baseUrl, fieldText(NodeTags.BaseUrl))
+        assertTrue(writer.calls.isEmpty())
+        assertNotStored(SENTINEL)
     }
 
     /**

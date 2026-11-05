@@ -17,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -27,10 +26,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * ta-09ca E1 + ta-v8dt: the live Settings dialog takes its narrow metrics at studio.css:957's `(max-width: 640px)`, not at
- * the shell's 768. Since ta-v8dt it is ONE card shape at every width (SettingsShapeEdge640Test / 641Test hold the pixels):
- * at 640 dp a content-sized card 12 dp in from each side (`100vw - 24`, radius 14), from 641 dp `min(880, 100vw - 48)`.
- * This reads the width through the live SessionDrawer -> SettingsDialog path.
+ * The live Runtime Desk is a full-page Activity branch at the contract widths. This reads the
+ * exact surface width through the live SessionDrawer -> Settings path.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w640dp-h900dp-mdpi")
@@ -58,21 +55,17 @@ class SettingsWidthEdgeTest {
         return rule.onNodeWithTag(SettingsDialogTags.Dialog).fetchSemanticsNode().boundsInRoot.width
     }
 
-    @Test fun at640TheCaseIsTheCardTwelveInFromEachSide() {
-        val w = caseWidth()
-        assertEquals("the narrow card is 100vw - 24", 640f - 24f, w, 1f)
-        assertTrue("and is not the full window", w < 640f - 20f)
+    @Test fun at640TheSurfaceFillsTheWindow() {
+        assertEquals("the Runtime Desk fills 640dp", 640f, caseWidth(), 1f)
     }
 
     @Test @Config(qualifiers = "w641dp-h900dp-mdpi")
-    fun at641TheCaseIsTheCentredCard() {
-        val w = caseWidth()
-        assertEquals("the card is 100vw - 48 (24 in from each side)", 641f - 48f, w, 1f)
-        assertTrue("and is narrower than the 640 card", w < 640f - 24f)
+    fun at641TheSurfaceFillsTheWindow() {
+        assertEquals("the Runtime Desk fills 641dp", 641f, caseWidth(), 1f)
     }
 
     @Test @Config(qualifiers = "w768dp-h900dp-mdpi")
-    fun atTheShellsOwnEdgeItIsTheCentredCardToo() {
-        assertEquals(768f - 48f, caseWidth(), 1f)
+    fun atTheExpandedBreakpointTheSurfaceFillsTheWindow() {
+        assertEquals("the Runtime Desk fills 768dp", 768f, caseWidth(), 1f)
     }
 }

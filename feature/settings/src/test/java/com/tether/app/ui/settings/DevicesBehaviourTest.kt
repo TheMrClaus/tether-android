@@ -13,6 +13,7 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -126,10 +127,12 @@ class DevicesBehaviourTest {
     }
     private fun enabled(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()
         ?.config?.contains(SemanticsProperties.Disabled) == false
+    private fun visibleEnabled(t: String) = compose.onAllNodesWithTag(t).fetchSemanticsNodes().singleOrNull()
+        ?.config?.contains(SemanticsProperties.Disabled) == false
 
     private fun tap(t: String) {
-        compose.waitUntil(5_000) { enabled(t) }
-        tag(t).performScrollTo().performClick()
+        compose.waitUntil(5_000) { visibleEnabled(t) }
+        compose.onNodeWithTag(t).performScrollTo().performClick()
     }
 
     /** A key in the confirmation (its own window: no scroll). */
@@ -252,8 +255,10 @@ class DevicesBehaviourTest {
         waitFor(DevicesTags.ownerNote(DevicesArea.Devices))
         waitFor(DevicesTags.ownerNote(DevicesArea.Security))
         assertTrue(texts().contains(DevicesCopy.OWNER_NEEDED))
-        // The screen stays usable: Notifications is there, the write keys are off (they would be refused).
-        assertTrue(texts().contains("Notifications"))
+        // The Access & devices sections stay visible, while write keys are off (they would be refused).
+        compose.onNodeWithTag(DevicesTags.Passkeys).assertExists()
+        compose.onNodeWithTag(DevicesTags.Sessions).assertExists()
+        compose.onNodeWithTag(DevicesTags.Paired).assertExists()
         assertFalse(enabled(DevicesTags.Pair))
         assertFalse(enabled(DevicesTags.SignOutOthers))
         // Nothing is asked again by itself, however long it waits.
@@ -397,7 +402,9 @@ class DevicesBehaviourTest {
         tag(DevicesTags.CodeCopy).performScrollTo().performClick()
         compose.waitUntil(5_000) { clipText() == SENTINEL }
         state.tab = SettingsTab.General
-        waitGone(DevicesTags.CodeCard)
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag(DevicesTags.CodeCard).fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithTag(DevicesTags.CodeCard).assertDoesNotExist()
+        tag(DevicesTags.CodeCard).assertExists().assertIsNotDisplayed()
         clock = NOW + 20_000
         compose.mainClock.advanceTimeBy(20_000)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(OLD_CLEAR_AFTER_MS + 1_000))

@@ -4,6 +4,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -48,7 +51,9 @@ abstract class SettingsTabsInsetBase(private val expanded: Boolean) {
         }
         compose.waitForIdle()
         compose.onNodeWithTag(SettingsDialogTags.Dialog).assertExists()
-        compose.onNodeWithText("Preferences").assertExists()
+        compose.onNode(
+            hasText("Preferences") and SemanticsMatcher.expectValue(SemanticsProperties.Selected, true),
+        ).assertExists()
         if (expanded) compose.onNodeWithText("Startup").assertExists() else compose.onNodeWithText("Startup").assertDoesNotExist()
     }
 }

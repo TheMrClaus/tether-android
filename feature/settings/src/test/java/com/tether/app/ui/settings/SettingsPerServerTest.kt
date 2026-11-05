@@ -55,12 +55,12 @@ class SettingsPerServerTest {
         compose.setContent { SettingsUnderTest(store.prefs, state, onClose = { closes++ }, serverUrl = MutableStateFlow("https://A.example/")) }
         compose.waitUntil(5_000) { state.draft != null }
         assertEquals("the draft is A's", GeneralDraft("/srv/a", showEndedSessions = true, confirmBeforeEnd = true, showThinking = false), state.draft)
-        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
         waitSelected(SettingsPanelTags.themeMode(ThemeMode.Light))
         compose.onNodeWithTag(SettingsPanelTags.themeMode(ThemeMode.Dark)).performClick()
         compose.waitUntil(5_000) { store.storedFor(a)[PreferenceKeys.THEME_MODE] == "dark" }
         compose.onNodeWithTag(SettingsPanelTags.toggle(GeneralToggle.ShowThinking)).performSemanticsAction(SemanticsActions.OnClick)
         compose.waitUntil(5_000) { state.draft?.showThinking == true }
+        compose.waitUntil(5_000) { compose.isDrawnEnabled(SettingsDialogTags.Save) }
         compose.onNodeWithTag(SettingsDialogTags.Save).performClick()
         compose.waitForIdle()
         assertEquals("Save stays in Runtime Desk", 0, closes)

@@ -122,15 +122,17 @@ internal fun RuntimeEnginesPanel(
 
 @Composable
 internal fun RuntimeSessionsRoutingPanel(narrow: Boolean, binding: ServerSettingsBinding) {
-    Column {
-        MetadataPanel(narrow, binding)
-        SessionSettingsPanel(narrow, binding)
+    key(binding.origin) {
+        Column {
+            MetadataPanel(narrow, binding)
+            SessionSettingsPanel(narrow, binding)
+        }
     }
 }
 
 @Composable
 internal fun RuntimeServerIntegrationsPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding) {
-    ServerIntegrationsPanel(narrow, binding, github)
+    key(binding.origin) { ServerIntegrationsPanel(narrow, binding, github) }
 }
 
 /**

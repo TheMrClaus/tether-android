@@ -393,10 +393,10 @@ internal fun NodesSection(binding: NodesBinding, narrow: Boolean) {
 
 /**
  * `.settings-node-add`: the form. Label, base URL and the credential are plain fields, as on the
- * web. A browser keeps them across a resize and drops them on a reload (ta-coik.20): a rotation keeps
- * them (label and URL saved, the credential in memory only, never the saved-instance Bundle); a process
- * death, a close, a tab change or another server starts it empty, and nothing in it is ever
- * sent but by Add node. The credential is let go once the server holds the node
+ * web. They remain while Settings stays open, including across a tab change and a resize/rotation
+ * (ta-coik.20: label and URL saved, the credential in memory only, never the saved-instance
+ * Bundle). A process death, Settings close or server-origin change starts it empty, and nothing in
+ * it is ever sent but by Add node. The credential is let go once the server holds the node
  * ([NodeNotice.heldByServer]); after any other answer (a refusal, nothing sent, no answer) the form
  * keeps it, so a deliberate second tap can send it again. Nothing is resent by itself. ta-coik.15:
  * the app going to the background clears nothing (the web has no such clear).
