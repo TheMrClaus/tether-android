@@ -111,7 +111,7 @@ class KeptOnDeviceTest {
         val root = File.createTempFile("spool-root", "").also { dirs += it }
         val client = connected(spoolRoot = root)
         val photo = com.tether.app.protocol.Attachment("pic.png", "image/png", java.util.Base64.getEncoder().encodeToString(ByteArray(300) { it.toByte() }))
-        client.sendAttachments("s1", "look", listOf(photo), null)
+        client.sendAttachments("s1", "look", listOf(photo), null, null, null)
         h.await(client.pendingSends) { it.size == 1 }
         // The write dropped the record (nothing on disk): the row ends not kept.
         h.await(client.pendingSends) { it.size == 1 && !it.single().keptOnDevice }
