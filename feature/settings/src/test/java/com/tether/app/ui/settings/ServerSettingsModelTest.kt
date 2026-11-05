@@ -103,6 +103,7 @@ class ServerSettingsModelTest {
         // list, and Host config's toggle.
         val engines = com.tether.app.client.EngineCard.entries.flatMap { listOfNotNull(it.home, it.command, it.launch) } +
             listOf(ServerSetting.HeadlessModes, HostConfigRows.shareHostConfig.setting)
-        assertEquals(ServerSetting.entries.toSet(), (rows + engines).toSet())
+        // A7: MessageInterruptMode stays in the enum (an old server reply still decodes) but has no row.
+        assertEquals(ServerSetting.entries.toSet(), (rows + engines + ServerSetting.MessageInterruptMode).toSet())
     }
 }
