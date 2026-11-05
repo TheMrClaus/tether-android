@@ -141,10 +141,12 @@ class ServerSettingsBehaviourTest {
         assertEquals(at.sorted(), at)
         for (label in listOf("Host", "Port", "Password", "Proxy token", "State directory", "Workspace root", "Persistent mode", "Task telemetry",
             "Max warm sessions", "Max concurrent turns", "Idle eviction (ms)", "Background hard cap (ms)", "Sweep interval (ms)", "Shutdown drain (ms)",
-            "Message while busy", "Claude model fallback", "Auto-archive idle sessions (days)", "Archive on merge", "Default permission mode", "Default sandbox tier",
+            "Claude model fallback", "Auto-archive idle sessions (days)", "Archive on merge", "Default permission mode", "Default sandbox tier",
             "Default to isolated worktree", "Allowed folders", "Spawn extra writable roots", "Detached agent launches", "Claude CLI version")) {
             assertTrue(label, all.contains(label))
         }
+        // A7: the "Message while busy" row is gone (the server always queues), though the fixture's reply still carries the key.
+        assertFalse(all.contains("Message while busy"))
         // ta-coik.21: the GitHub connection is drawn in its place (its rows: GitHubConnectionBehaviourTest).
         tag(ServerSettingsTags.GitHub).assertExists()
         assertTrue(all.contains("2 allowed folders"))
@@ -194,18 +196,16 @@ class ServerSettingsBehaviourTest {
     @Test fun aSelectSendsTheChosenOptionAndTheEmptyOptionAsNull() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("defaultSandboxPolicy" to "read-only"))), writer = writer))
-        openSelect("Message while busy")
-        pick("End of turn")
         openSelect("Default sandbox tier")
         pick("Provider default")
         compose.waitForIdle()
         assertEquals(
             listOf(
-                json("""{"type":"set-server-settings","settings":{"messageInterruptMode":"end"}}"""),
                 json("""{"type":"set-server-settings","settings":{"defaultSandboxPolicy":null}}"""),
             ),
             writer.frames(),
         )
+        assertTrue(writer.frames().none { it.toString().contains("messageInterruptMode") })
     }
 
     /**
@@ -329,7 +329,7 @@ class ServerSettingsBehaviourTest {
 
     @Test fun anEnvForcedValueIsLockedAndNeverWritten() {
         val writer = RecordingWriter()
-        val forced = mapOf("host" to true, "password" to true, "claudePersistent" to true, "allowedRoots" to true, "messageInterruptMode" to true, "stateDir" to true)
+        val forced = mapOf("host" to true, "password" to true, "claudePersistent" to true, "allowedRoots" to true, "stateDir" to true)
         show(ServerFixtures.binding(view = ServerFixtures.view(envForced = forced), advanced = ServerFixtures.ADVANCED_FORCED, writer = writer))
         // Each forced row: the lock (named "Set by environment") and the caption that says it.
         assertEquals(forced.size, compose.onAllNodesWithTag(SettingsTags.EnvLock, useUnmergedTree = true).fetchSemanticsNodes().size)
@@ -343,7 +343,6 @@ class ServerSettingsBehaviourTest {
         tag(ServerSettingsTags.row(ServerSetting.ClaudePersistent)).performScrollTo().performClick()
         tag(ServerSettingsTags.remove(ServerSetting.AllowedRoots, "/srv/work")).assertDoesNotExist()
         tag(ServerSettingsTags.add(ServerSetting.AllowedRoots)).assertDoesNotExist()
-        compose.onNodeWithContentDescription("Message while busy").assertIsNotEnabled()
         // The CLI forced by env: its path, no picker.
         tag(ServerSettingsTags.CliForced).performScrollTo()
         tag(ServerSettingsTags.CliPicker).assertDoesNotExist()
