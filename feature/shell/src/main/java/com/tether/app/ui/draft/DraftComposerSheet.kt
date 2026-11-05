@@ -649,8 +649,15 @@ fun DraftComposerFrame(
         // the 48dp target that lies outside the header bar's bounds is answered here (see DraftCloseButton).
         var closeTarget by remember { mutableStateOf<Rect?>(null) }
         var sheetOrigin by remember { mutableStateOf(Offset.Zero) }
+        // ta-y3dw: the sheet owns its initial focus, a non-text target (the card itself), so no text field is ever auto-focused
+        // on open (touch or key mode, first open or reopen) and the keyboard stays down. A tap on the message box still
+        // focuses it and raises the IME; Tab / D-pad move on from the card into the keys and the box as before.
+        val initialFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+        LaunchedEffect(Unit) { runCatching { initialFocus.requestFocus() } }
         Column(
             case
+                .focusRequester(initialFocus)
+                .focusable()
                 .onGloballyPositioned { sheetOrigin = it.positionInRoot() }
                 .testTag(DraftComposerTags.Sheet)
                 .semantics { paneTitle = inputs.draft.handover?.let { com.tether.app.client.Handover.modeTitle("\u2068" + com.tether.app.client.LabelText.label(it.sourceName) + "\u2069") } ?: DRAFT_TITLE }
