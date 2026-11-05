@@ -1,6 +1,15 @@
 package com.tether.app.ui.settings
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasClickAction
@@ -12,6 +21,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import com.tether.app.client.ServerSetting
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -20,7 +31,6 @@ import org.junit.rules.RuleChain
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -119,6 +129,12 @@ class RuntimeDeskBehaviourTest {
     }
 
     @Test fun routeBodyUpdatesAfterTheDetailMovesFromCompactToExpanded() {
+        var width by mutableIntStateOf(412)
+        var height by mutableIntStateOf(915)
+        val window = object : WindowInfo {
+            override val isWindowFocused: Boolean get() = true
+            override val containerSize: IntSize get() = IntSize(width, height)
+        }
         val state = SettingsDialogState(
             draft = GeneralDraft.of(com.tether.app.ui.prefs.TetherPreferences.Default),
             route = RuntimeDeskRoute(
@@ -128,10 +144,19 @@ class RuntimeDeskBehaviourTest {
             ),
         )
         val binding = ServerFixtures.binding()
-        compose.setContent { SettingsUnderTest(store.prefs, state, serverSettings = binding) }
+        compose.setContent {
+            CompositionLocalProvider(LocalWindowInfo provides window) {
+                Box(Modifier.requiredSize(width.dp, height.dp)) {
+                    SettingsUnderTest(store.prefs, state, serverSettings = binding)
+                }
+            }
+        }
         compose.onNodeWithContentDescription("Back").assertExists()
 
-        RuntimeEnvironment.setQualifiers("w800dp-h1000dp-mdpi")
+        compose.runOnIdle {
+            width = 800
+            height = 1000
+        }
         compose.waitForIdle()
         compose.onNodeWithContentDescription("Back").assertDoesNotExist()
 
