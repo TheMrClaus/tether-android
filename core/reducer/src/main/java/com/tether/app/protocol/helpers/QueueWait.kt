@@ -87,11 +87,15 @@ object QueueWait {
     const val QUEUED_TURN_END_COPY = "Queued on the server \u00B7 sends when this turn ends"
     const val QUEUED_STEER_COPY = "Queued on the server \u00B7 goes into this turn at the agent\u2019s next step"
 
-    /** V5 only when the engine can steer ([QueuedMessage] with attachments is never steered in the first ship, D-L143-3); else V4. */
-    fun queuedLabel(steerCapable: Boolean, message: QueuedMessage): String {
-        val steered = steerCapable && message.attachmentIds.isNullOrEmpty() && message.attachments.isNullOrEmpty()
-        return if (steered) QUEUED_STEER_COPY else QUEUED_TURN_END_COPY
-    }
+    /**
+     * THE one V5 predicate (label and glyph both read it): the engine can steer, the row has no attachments (never steered in the
+     * first ship, D-L143-3) and it is not a legacy `next-call` row (spec §3.2: legacy renders as V4). Otherwise V4.
+     */
+    fun isSteered(steerCapable: Boolean, message: QueuedMessage): Boolean =
+        steerCapable && message.attachmentIds.isNullOrEmpty() && message.attachments.isNullOrEmpty() && !message.atToolBoundary
+
+    fun queuedLabel(steerCapable: Boolean, message: QueuedMessage): String =
+        if (isSteered(steerCapable, message)) QUEUED_STEER_COPY else QUEUED_TURN_END_COPY
 
     // ---- spec §4.1a C: held rows ----------------------------------------------------------------------
 

@@ -90,6 +90,8 @@ object ComposerFixtures {
         val reason: String? = null,
         val origin: String? = null,
         val kind: String? = null,
+        val attachmentIds: List<String>? = null,
+        val flushMode: String? = null,
     )
 
     /**
@@ -117,6 +119,8 @@ object ComposerFixtures {
                     put("text", r.text)
                     r.origin?.let { put("origin", it) }
                     r.kind?.let { put("noticeKind", it) }
+                    r.flushMode?.let { put("flushMode", it) }
+                    r.attachmentIds?.let { ids -> put("attachmentIds", kotlinx.serialization.json.buildJsonArray { ids.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }) }
                 },
                 if (r.held) {
                     evNullTurn("queued_message_updated") {

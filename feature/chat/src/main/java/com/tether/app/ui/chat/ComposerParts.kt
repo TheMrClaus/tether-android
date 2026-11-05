@@ -423,7 +423,7 @@ internal fun QueuedMessageRow(
         if (!offerInterruptAndSend || interruptLock != null) confirmingInterrupt = false
     }
     val confirming = confirmingInterrupt && offerInterruptAndSend && interruptLock == null
-    val steered = steerCapable && !held && !handoverRequest
+    val steered = !held && !handoverRequest && QueueWait.isSteered(steerCapable, message)
     val waitLabel = when {
         held -> QueueWait.heldLabel(message)
         handoverWaitLabel != null -> handoverWaitLabel

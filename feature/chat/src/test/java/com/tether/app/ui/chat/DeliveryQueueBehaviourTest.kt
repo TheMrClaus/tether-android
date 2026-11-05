@@ -115,6 +115,35 @@ class DeliveryQueueBehaviourTest {
     }
 
     @Test
+    fun steerEngineRowWithAttachmentsReadsV4GlyphAndWords() {
+        steer = true
+        show(ComposerFixtures.delivery(QueueSpec("a", attachmentIds = listOf("att-1"))))
+        rule.onNodeWithText(v4).assertExists()
+        rule.onAllNodesWithText(v5).assertCountEquals(0)
+        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG).assertCountEquals(1)
+        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG).assertCountEquals(0)
+    }
+
+    @Test
+    fun steerEngineLegacyNextCallRowReadsV4GlyphAndWords() {
+        steer = true
+        show(ComposerFixtures.delivery(QueueSpec("a", flushMode = "next-call")))
+        rule.onNodeWithText(v4).assertExists()
+        rule.onAllNodesWithText(v5).assertCountEquals(0)
+        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG).assertCountEquals(1)
+        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG).assertCountEquals(0)
+    }
+
+    @Test
+    fun steerEngineOrdinaryRowReadsV5GlyphAndWords() {
+        steer = true
+        show(ComposerFixtures.delivery(QueueSpec("a")))
+        rule.onNodeWithText(v5).assertExists()
+        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG).assertCountEquals(1)
+        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG).assertCountEquals(0)
+    }
+
+    @Test
     fun withoutTheCapabilityTheV5LabelNeverShows() {
         steer = false
         show(ComposerFixtures.delivery(QueueSpec("a")))
