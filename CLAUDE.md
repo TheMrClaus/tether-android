@@ -47,6 +47,15 @@ exits 13, so re-read instead of retrying.
 - `bd` is pinned (v1.3.0, `~/bin/bd`) — never upgrade it mid-program: the store carries a Dolt schema
   version and an older binary refuses a newer store.
 
+## Public release notes (binding)
+
+- Release notes are concise user-outcome bullets: aim for 3-5, fewer for a small fix release. Target about 120 characters per bullet, 5 bullets at most.
+- Write plain language about what changed for the user. Group under "What's new" / "Bug fixes" headings only when that helps.
+- Never include git subjects, commit hashes, bead IDs, lane names, test counts, or internal implementation jargon.
+- Curated notes are required before publication. There is no automatic commit-log fallback: no curated notes, no release.
+- The technical audit trail belongs in the PR and the receipts, not in the public notes.
+- Follow the Omnio editorial style (plain text, user outcomes, no unrelated feature content).
+
 <!-- app-orchestration:begin (managed by ~/bin/game-orchestration --fleet app — do not edit by hand) -->
 ## Orchestration policy (binding — every session in this repo)
 
