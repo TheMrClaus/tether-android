@@ -19,6 +19,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
@@ -161,9 +162,24 @@ class ApprovalCardBehaviourTest {
         rule.waitForIdle()
     }
 
+    /**
+     * Bring the first composed [tag] into the lazy transcript. Jumps by index (instant, like [scrollToEntry]),
+     * from the last row backwards: the card's controls sit at its tail. performScrollToNode instead pages by
+     * animated ScrollBy through a card of 128 x 4,096-code-point rows, remeasuring the list every frame, and
+     * does not settle in the test clock.
+     */
     private fun scrollTo(tag: String) {
-        rule.onNodeWithTag("chat-transcript").performScrollToNode(hasTestTag(tag))
         rule.waitForIdle()
+        fun composed() = rule.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty()
+        if (!composed()) {
+            val total = rule.runOnIdle { listState.layoutInfo.totalItemsCount }
+            for (i in total - 1 downTo 0) {
+                rule.onNodeWithTag("chat-transcript").performScrollToIndex(i)
+                rule.waitForIdle()
+                if (composed()) break
+            }
+        }
+        assertTrue("$tag is not composed in the transcript", composed())
     }
 
     @Test fun nothingIsSentWithoutATapWhateverArrives() {

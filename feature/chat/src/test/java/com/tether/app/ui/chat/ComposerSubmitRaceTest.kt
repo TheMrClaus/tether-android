@@ -135,15 +135,24 @@ class ComposerSubmitRaceTest {
         rule.waitForIdle()
     }
 
+    /** ta-y3dw: soft keyboard Return and Shift+Enter are newlines, never a send; the last keystroke is kept with the break. */
     @Test
-    fun theImeSendActionSendsTheLastKeystrokeToo() {
+    fun aSoftReturnOrShiftEnterAfterTheLastKeystrokeBreaksTheLineAndSendsNothing() {
         show(ComposerFixtures.idle)
-        typeThen("hello wor") { ic, _ ->
+        typeThen("hello wor") { ic, view ->
             ic.commitText("ld", 1)
-            ic.performEditorAction(EditorInfo.IME_ACTION_SEND)
+            view.dispatchKeyEvent(android.view.KeyEvent(0L, 0L, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER, 0, 0, 0, 0, android.view.KeyEvent.FLAG_SOFT_KEYBOARD))
+            view.dispatchKeyEvent(android.view.KeyEvent(0L, 0L, android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_ENTER, 0, 0, 0, 0, android.view.KeyEvent.FLAG_SOFT_KEYBOARD))
         }
-        assertEquals(listOf("hello world"), sends.map { it.first })
-        assertEquals("", inputText())
+        assertEquals(emptyList<String>(), sends.map { it.first })
+        assertEquals("hello world\n", inputText())
+        typeThen("") { ic, view ->
+            ic.commitText("!", 1)
+            view.dispatchKeyEvent(android.view.KeyEvent(0L, 0L, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER, 0, android.view.KeyEvent.META_SHIFT_ON))
+            view.dispatchKeyEvent(android.view.KeyEvent(0L, 0L, android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_ENTER, 0, android.view.KeyEvent.META_SHIFT_ON))
+        }
+        assertEquals(emptyList<String>(), sends.map { it.first })
+        assertEquals("hello world\n!\n", inputText())
     }
 
     @Test
@@ -172,9 +181,11 @@ class ComposerSubmitRaceTest {
     @Test
     fun whileBusyTheQueuedTextIncludesTheLastKeystroke() {
         show(ComposerFixtures.busy)
-        typeThen("after this tur") { ic, _ ->
+        // ta-y3dw: the hardware Enter queues (the soft keyboard's Return is a newline).
+        typeThen("after this tur") { ic, view ->
             ic.commitText("n", 1)
-            ic.performEditorAction(EditorInfo.IME_ACTION_SEND)
+            view.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
+            view.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_ENTER))
         }
         assertEquals(listOf("after this turn"), sends.map { it.first })
         assertEquals("", inputText())
