@@ -19,12 +19,18 @@
 | Program status | IN PROGRESS |
 | Current phase | Phases 0-3 CLOSED; Phase 4+ shipped through the 1.5.x releases; see `bd` for live rows |
 | PARITY_BASE (tether SHA) | Protocol corpora at `19c56e25` (PROTOCOL 152, floor 129); tokens and web screenshots at `887c222`; Parity Matrix re-baselined at `29537e0` (PROTOCOL 143, T14.4). Detail: `parity-corpus/VENDORED.md`, archive L13 |
-| App version | Published: **1.5.8 (code 63)** at `75911d0b` on 2026-11-05. The archived resume point predates this release. |
+| App version | Published: **1.6.0 (code 64)**; tag and release head `3c921956` on 2026-11-05. The archived resume point predates this release. |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches -> PR); S* work only in standalone clones/worktrees under `~/git/tether-wt/`, never the production checkout |
 | Digest condensed | 2026-11-05 (previous tracker header: last updated 2026-10-17 by claude-main) |
 
 ## ▶ RESUME HERE
+
+**Current release: ta-ty2a — APK PUBLISHED (2026-11-05; root-owned).**
+- [v1.6.0 / code 64](https://github.com/TheMrClaus/tether-android/releases/tag/v1.6.0), tag and release head `3c921956`; native PR #8 merged.
+- Full gate **9352/0/5**. A signed upgrade from 1.5.8 retained the saved login and Dark theme; Engines, Credentials and Limits full pages, Back and Return were exercised, with a zero-byte crash log.
+- The public unauthenticated APK matched the verified draft byte-for-byte: SHA-256 `150f717e16ecfbc0b4aa12abe8ac8107c03c4c77dc17bc45c205f85f7304453d`.
+- Web PR #288 remains pending. This digest does not claim cleanup complete or bead verification. Canonical evidence: `/home/marcelloc/gauntlet/tether/runtime-desk-release-20261105/{ci-result.json,published-metadata.json,native-release-gate.md,plan.md}`.
 
 **Overnight request: ta-h9g5 — SHIPPED (2026-11-05).**
 - [v1.5.8 / code 63](https://github.com/TheMrClaus/tether-android/releases/tag/v1.5.8), tag and gated code `75911d0b`, merged to `main`; curated user-facing notes published.
