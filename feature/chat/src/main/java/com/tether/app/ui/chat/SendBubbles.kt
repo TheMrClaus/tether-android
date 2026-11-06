@@ -132,9 +132,21 @@ const val STRIP_WAITING_NOT_KEPT_LABEL = "Waiting for link — sends when the co
 const val BUBBLE_WAITING_LABEL = "Waiting for link — reconnecting, your message will be sent automatically"
 const val BUBBLE_WAITING_NOT_KEPT_LABEL = "Waiting for link — reconnecting; may be lost if the app closes first"
 
+/** AW.4 / AW.5 (web C.1): why a message cannot be sent again; m = the record's attachment count (one reason for all of them). */
+internal fun attachmentsGoneSentence(count: Int): String =
+    if (count >= 2) "$count attachments are no longer on this device; attach them again and resend."
+    else "An attachment is no longer on this device; attach it again and resend."
+
 /** chat-view.tsx 90fbb9f :1596-1600: the failed bubble's status line. */
 fun failedSendLabel(row: FailedSend): String {
-    if (row.reason == FailedSendReason.PhotoLost) return "Photo could not be recovered — send again."
+    // AW.4: the web's C2 label for the same case (restored, bytes gone): the upload-failed lead, then the C.1 sentence.
+    if (row.reason == FailedSendReason.PhotoLost) {
+        val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
+        return buildString {
+            append("Not sent — the upload failed. ").append(attachmentsGoneSentence(row.attachmentCount))
+            if (summary.isNotEmpty()) append(" · ").append(summary)
+        }
+    }
     // ta-delivery A2: the upload failed; the server's own reason follows (never the bytes, never a path).
     // spec 4.1b B.1: "Not sent — the upload failed." then " {reason}" when there is one, then " · {summary}".
     if (row.reason == FailedSendReason.Upload) {

@@ -340,4 +340,31 @@ class AttachmentUploadsTest {
         assertFalse("more than 10 files a message is refused (inline parity)", hub.bind(eleven, "eleven", PendingInput.KIND_SEND, origin, "s1"))
         assertEquals(0, server.requestCount)
     }
+
+    /** AW.4 (tth-0y63): the words an upload prints when the server gave none; "attachment", never "photo". */
+    @Test
+    fun theReasonsThatHaveNoServerTextAreInPlainAttachmentWords() {
+        server.start()
+        val root = root()
+        val hub = hub(root)
+        // 409 other than upload_in_progress, empty body: the fallback sentence.
+        val a = hub.begin(origin, "s1", "a.png", "image/png", bytes)!!
+        server.enqueue(MockResponse().setResponseCode(409).setBody("""{"code":"attachment_id_conflict"}"""))
+        assertEquals(UploadRunResult.Done, runBlocking { hub.run(a) })
+        assertEquals("The server already holds a different attachment for this upload; attach it again.", hub.state(a)!!.reason)
+        // upload_in_progress with no text, retries spent: the failure reason reads true ("retry in a moment").
+        val b = hub.begin(origin, "s1", "b.png", "image/png", bytes)!!
+        repeat(AttachmentUploads.MAX_ATTEMPTS) { server.enqueue(MockResponse().setResponseCode(409).setBody("""{"code":"upload_in_progress"}""")) }
+        repeat(AttachmentUploads.MAX_ATTEMPTS - 1) { assertEquals(UploadRunResult.Retry, runBlocking { hub.run(b) }) }
+        assertEquals(UploadRunResult.Done, runBlocking { hub.run(b) })
+        assertEquals("That attachment is already being uploaded; retry in a moment.", hub.state(b)!!.reason)
+        // The spooled file is gone: spool_missing.
+        val c = hub.begin(origin, "s1", "c.png", "image/png", bytes)!!
+        File(File(root, c), AttachmentUploads.DATA).delete()
+        assertEquals(UploadRunResult.Done, runBlocking { hub.run(c) })
+        assertEquals("An attachment is no longer on this device; attach it again and resend.", hub.state(c)!!.reason)
+        assertFalse(hub.state(c)!!.retryable)
+        // A failed upload with no reason prints no reason sentence (the label already says "the upload failed").
+        assertEquals("", AttachmentUploads.DEFAULT_FAILURE)
+    }
 }

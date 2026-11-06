@@ -488,7 +488,8 @@ class AttachmentUploads(
         const val META = "meta.json"
         const val MAX_ATTEMPTS = 5
         const val CANCELLED = "The upload was cancelled."
-        const val DEFAULT_FAILURE = "The upload failed."
+        /** No reason sentence: the label already says "Not sent — the upload failed." (§4.1b B.1, AW.4). */
+        const val DEFAULT_FAILURE = ""
         private val ID = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
     }
 }
