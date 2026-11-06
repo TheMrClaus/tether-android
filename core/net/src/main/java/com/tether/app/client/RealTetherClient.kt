@@ -23,6 +23,7 @@ import com.tether.app.protocol.fold.projectionHasNoticeKey
 import com.tether.app.protocol.fold.reduce
 import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.str
+import com.tether.app.protocol.helpers.QueueWait
 import com.tether.app.protocol.helpers.PendingWorkspace
 import com.tether.app.protocol.helpers.get
 import com.tether.app.protocol.tree.js
@@ -5328,7 +5329,10 @@ class RealTetherClient(
      * reducer's own [isOpenCurrentTurn]); then enqueued on that socket. Nothing is retried, held or
      * persisted.
      */
-    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): InterruptResult {
+    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): InterruptResult =
+        interrupt(sessionId, expectedOrigin, expectedTurnId, stopBackground = false)
+
+    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String, stopBackground: Boolean): InterruptResult {
         if (sessionId.isEmpty()) return InterruptResult.Locked
         val result = synchronized(lock) {
             val ws = socket
@@ -5340,7 +5344,9 @@ class RealTetherClient(
             if (session.readOnly || !session.handedOffTo.isNullOrEmpty()) return@synchronized InterruptResult.Locked
             // T6.7: the frame names no turn, so the server would stop whichever one runs now.
             if (!isCurrentTurn(sessionStore.tree(sessionId), expectedTurnId)) return@synchronized InterruptResult.NotCurrentTurn
-            if (!ws.send(ClientMessage.Interrupt(sessionId).encode())) return@synchronized InterruptResult.NotConnected
+            // v156: `stopBackground` rides the frame only to a server that speaks it (tether lib/protocol-schema-lu.ts:296), read under the lock.
+            val alsoStop = stopBackground && QueueWait.stopBackgroundSupported(serverProtocolVersionState.value)
+            if (!ws.send(ClientMessage.Interrupt(sessionId, alsoStop).encode())) return@synchronized InterruptResult.NotConnected
             val bound = interruptsBound.getOrPut(sessionId) { ArrayDeque() }
             if (bound.size >= INTERRUPTS_REMEMBERED) bound.removeFirst()
             bound.addLast(expectedTurnId)

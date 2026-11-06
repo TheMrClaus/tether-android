@@ -298,6 +298,14 @@ interface TetherClient {
     fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): InterruptResult = InterruptResult.NotConnected
 
     /**
+     * v156 (tth-fqjc): [interrupt] that also asks the server to stop the background work Tether can stop (`interrupt.stopBackground`).
+     * [stopBackground] true goes on the wire ONLY when the connected server's protocol is >= 156; on an older server the key is never
+     * written (a plain interrupt). false is exactly [interrupt]. The default delegates, so a client without the flag keeps working.
+     */
+    fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String, stopBackground: Boolean): InterruptResult =
+        interrupt(sessionId, expectedOrigin, expectedTurnId)
+
+    /**
      * T6.7 r3: per session, the turn whose interrupt the server reported `failed` (the turn stays
      * "cancelling" in the projection). While a turn is cancelling every interrupt control of its
      * session is locked; a failure recorded here for THAT turn unlocks them so the operator can retry.

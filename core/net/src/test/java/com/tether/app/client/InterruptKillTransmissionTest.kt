@@ -75,6 +75,37 @@ class InterruptKillTransmissionTest {
         assertEquals("s1", frames[0].str("sessionId"))
     }
 
+    // ---- v156 stopBackground (tth-fqjc A-stop-core) -----------------------------------------------------
+
+    private fun readyAt(protocol: Int) = readyWithSessions("s1", "s2")
+        .replace("\"protocolVersion\":${com.tether.app.protocol.PROTOCOL_VERSION}", "\"protocolVersion\":$protocol")
+
+    @Test
+    fun stopBackgroundIsSentOnlyToAServerThatSpeaksProtocol156() {
+        val (c156, _) = connected(readyAt(156))
+        assertEquals(InterruptResult.Sent, c156.interrupt("s1", c156.consentOrigin.value, T1, stopBackground = true))
+        val on = framesOf("interrupt")
+        assertEquals(1, on.size)
+        assertEquals(setOf("type", "sessionId", "stopBackground"), on[0].keys)
+        assertEquals("true", on[0]["stopBackground"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun aServerBelow156NeverSeesTheKeyAndFalseNeverWritesIt() {
+        val (c155, _) = connected(readyAt(155))
+        assertEquals(InterruptResult.Sent, c155.interrupt("s1", c155.consentOrigin.value, T1, stopBackground = true))
+        val old = framesOf("interrupt")
+        assertEquals(1, old.size)
+        assertEquals("a 155 server gets the plain frame", setOf("type", "sessionId"), old[0].keys)
+    }
+
+    @Test
+    fun aFalseFlagOn156IsThePlainFrame() {
+        val (c156, _) = connected(readyAt(156))
+        assertEquals(InterruptResult.Sent, c156.interrupt("s1", c156.consentOrigin.value, T1, stopBackground = false))
+        assertEquals(setOf("type", "sessionId"), framesOf("interrupt")[0].keys)
+    }
+
     @Test
     fun offlineTheInterruptIsRefusedAndNotHeldButCatchingUpItIsSentAsOnTheWeb() {
         val (client, ws) = connected()

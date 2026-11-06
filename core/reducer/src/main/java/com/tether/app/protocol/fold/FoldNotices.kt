@@ -136,6 +136,9 @@ private fun foldTurnInterrupted(state: JsObj, event: JsObj): JsObj {
     )
     val queueId = boundedIdentifier(event["queueId"])
     if (!queueId.isNullOrEmpty()) notice = notice.put("queueId", js(queueId))
+    // v156 (events.ts:3700): present only when >= 1 (definite stop failures only).
+    val unstopped = interruptCount(event["unstoppedBackground"])
+    if (unstopped.num!! > 0) notice = notice.put("unstoppedBackground", unstopped)
     if (isFiniteNumber(event["ts"])) notice = notice.put("at", event["ts"])
     var notices = state["notices"].arr!!.add(notice)
     val interruptedCount = notices.count { isTurnInterruptedNotice(it) }

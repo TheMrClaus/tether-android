@@ -1,6 +1,7 @@
 package com.tether.app.protocol.helpers
 
 import com.tether.app.protocol.model.QueuedMessage
+import com.tether.app.protocol.tree.JsStr
 
 /**
  * Delivery UI words (delivery-composer-spec §1 V4/V5, §3.2, §4.1, §4.1a A/C). Pure, no clock reads. ta-ceo's
@@ -64,30 +65,143 @@ object QueueWait {
     /** Spec §4.1: background tasks are visible to Tether only where the engine reports them (today Claude). */
     fun backgroundVisible(provider: String?): Boolean = provider == "claude"
 
-    /** Spec §4.1 `interruptCostCopy`, exactly. */
+    /** First protocol whose server accepts `interrupt.stopBackground` and reports `backgroundTerminals` / `unstoppedBackground` (v156, additive). */
+    const val STOP_BACKGROUND_PROTOCOL_MIN = 156
+
+    /** The ONE gate of the "Also stop" box and of the `stopBackground` flag: the CONNECTED SERVER's protocol (`serverProtocolVersion`), never a client constant. */
+    fun stopBackgroundSupported(serverProtocol: Int?): Boolean = serverProtocol != null && serverProtocol >= STOP_BACKGROUND_PROTOCOL_MIN
+
+    // ---- spec §4.1f F.1 / F.3 / B.1 / B.3 (twin of lib/queue-wait.ts + lib/claude-stop-band.ts, tether w2-int) ----------------
+
+    /** lib/claude-stop-band.ts CLAUDE_SPARES_BACKGROUND_FROM: the first Claude CLI whose interrupt spares background agents. */
+    const val CLAUDE_SPARES_BACKGROUND_FROM = "2.1.246"
+
+    enum class ClaudeStopBand { Spares, EndsAgents, Unknown }
+
+    /** lib/claude-stop-band.ts `claudeStopBand`: `Spares` >= 2.1.246, `EndsAgents` below it, `Unknown` for an absent or malformed version (never a guess). */
+    fun claudeStopBand(cliVersion: String?): ClaudeStopBand {
+        if (cliVersion.isNullOrEmpty()) return ClaudeStopBand.Unknown
+        return try {
+            if (VersionCompare.compareVersionTriples(JsStr(cliVersion), JsStr(CLAUDE_SPARES_BACKGROUND_FROM)) >= 0.0) {
+                ClaudeStopBand.Spares
+            } else {
+                ClaudeStopBand.EndsAgents
+            }
+        } catch (_: JsError) {
+            ClaudeStopBand.Unknown
+        }
+    }
+
+    /** spec §4.1f F.3: what the sentence says about background work an engine does NOT report. */
+    enum class BackgroundTail { MayStop, KeepsRunning }
+
+    /** lib/queue-wait.ts `stopFactsFor` result. */
+    data class StopFacts(
+        val foregroundCertain: Boolean,
+        val backgroundVisible: Boolean,
+        val backgroundSpared: Boolean,
+        val backgroundTail: BackgroundTail,
+    )
+
+    /**
+     * lib/queue-wait.ts `stopFactsFor`: per-engine facts of the cost sentence. [cliVersion] is the version the RUNNING Claude CLI
+     * reported (the projection's `cliVersion`): a CLI below 2.1.246 (or one that reported none) does not spare background agents, so
+     * `backgroundSpared` needs the Spares band (F.1) as well as `persistentSessions`. Supersedes [backgroundSparedFor]'s protocol-155 stand-in.
+     */
+    fun stopFactsFor(
+        provider: String?,
+        persistentSessions: Boolean = false,
+        cliVersion: String? = null,
+        engineGeneration: String? = null,
+    ): StopFacts = StopFacts(
+        foregroundCertain = provider == "claude" || provider == "pi" || provider == "reasonix",
+        backgroundVisible = provider == "claude",
+        backgroundSpared = provider == "claude" && persistentSessions && claudeStopBand(cliVersion) == ClaudeStopBand.Spares,
+        backgroundTail = if (provider == "reasonix" || (provider == "codex" && engineGeneration == "codex-app-server-v2")) {
+            BackgroundTail.KeepsRunning
+        } else {
+            BackgroundTail.MayStop
+        },
+    )
+
+    /** spec §4.1f B.1: the background work a checked "Also stop" box would stop, per kind. */
+    data class BackgroundStoppable(val tasks: Int = 0, val terminals: Int = 0, val spawned: Int = 0)
+
+    /** A spawned-run row as [backgroundStoppable] reads it. */
+    data class SpawnedRun(val status: String? = null, val origin: String? = null)
+
+    /**
+     * lib/queue-wait.ts `backgroundStoppable`: Claude persistent = every counted background task ([outstandingBackground] is the
+     * server's basis, `stoppableBackgroundTaskCount`); Codex terminals = the app-server's main-thread count (`backgroundTerminals`); every
+     * harness = the RUNNING spawn_agent runs this server started (origin "spawned").
+     */
+    fun backgroundStoppable(
+        provider: String?,
+        persistentSessions: Boolean = false,
+        outstandingBackground: Int = 0,
+        terminals: Int = 0,
+        spawnedRuns: List<SpawnedRun> = emptyList(),
+    ): BackgroundStoppable = BackgroundStoppable(
+        tasks = if (provider == "claude" && persistentSessions) count(outstandingBackground) else 0,
+        terminals = count(terminals),
+        spawned = spawnedRuns.count { it.status == "running" && it.origin == "spawned" },
+    )
+
+    fun stoppableTotal(stoppable: BackgroundStoppable?): Int =
+        if (stoppable == null) 0 else count(stoppable.tasks) + count(stoppable.terminals) + count(stoppable.spawned)
+
+    /** spec §4.1f B.3: `1 background task and 2 spawned agents` - kinds in this order, zero counts dropped. */
+    fun stopItems(stoppable: BackgroundStoppable?): String {
+        val items = ArrayList<String>(3)
+        if (stoppable != null) {
+            if (count(stoppable.tasks) > 0) items.add(plural(count(stoppable.tasks), "background task", "background tasks"))
+            if (count(stoppable.terminals) > 0) items.add(plural(count(stoppable.terminals), "background terminal", "background terminals"))
+            if (count(stoppable.spawned) > 0) items.add(plural(count(stoppable.spawned), "spawned agent", "spawned agents"))
+        }
+        if (items.size <= 1) return items.joinToString("")
+        return items.dropLast(1).joinToString(", ") + " and " + items.last()
+    }
+
+    /** The box label: `Also stop {items}`, no full stop. */
+    fun alsoStopLabel(stoppable: BackgroundStoppable?): String = "Also stop ${stopItems(stoppable)}"
+
+    /**
+     * The ONE cost sentence of Stop and of Interrupt and send (spec §4.1 + §4.1f B.3), word for word lib/queue-wait.ts `interruptCostCopy`.
+     * [alsoStop] = what the "Also stop" box covers WHEN CHECKED (null when unchecked or when there is no box).
+     */
     fun interruptCostCopy(
         work: LiveWork,
         foregroundCertain: Boolean,
         backgroundVisible: Boolean,
         backgroundSpared: Boolean = false,
+        backgroundTail: BackgroundTail = BackgroundTail.MayStop,
+        alsoStop: BackgroundStoppable? = null,
     ): String {
         val spared = backgroundVisible && backgroundSpared
         val tools = count(work.openTools)
         val bg = count(work.outstandingBackground)
         val toolText = plural(tools, "running tool call", "running tool calls")
         val bgText = plural(bg, "background task", "background tasks")
+        val covered = count(alsoStop?.tasks ?: 0) > 0
+        val alsoItems = stopItems(alsoStop)
         val certain = ArrayList<String>(2).apply {
             add("the current response")
             if (foregroundCertain && tools > 0) add(toolText)
         }
         val maybe = ArrayList<String>(2).apply {
             if (!foregroundCertain && tools > 0) add(toolText)
-            if (backgroundVisible && !spared && bg > 0) add(bgText)
+            if (backgroundVisible && !spared && !covered && bg > 0) add(bgText)
         }
         return "Stops " + certain.joinToString(" and ") +
             (if (maybe.isNotEmpty()) ", and may stop " + maybe.joinToString(" and ") else "") + "." +
-            (if (spared && bg > 0) (if (bg == 1) " 1 background task keeps running." else " $bg background tasks keep running.") else "") +
-            (if (!backgroundVisible) " It may also stop background work the agent started." else "")
+            (if (alsoItems.isNotEmpty()) " It also stops $alsoItems." else "") +
+            (if (covered) (if (count(alsoStop?.tasks ?: 0) == 1) " Claude is told the task stopped and may reply right away." else " Claude is told the tasks stopped and may reply right away.") else "") +
+            (if (spared && !covered && bg > 0) (if (bg == 1) " 1 background task keeps running." else " $bg background tasks keep running.") else "") +
+            (if (backgroundVisible) "" else if (backgroundTail == BackgroundTail.KeepsRunning) {
+                if (alsoItems.isNotEmpty()) " Other background work the agent started keeps running." else " Background work the agent started keeps running."
+            } else {
+                if (alsoItems.isNotEmpty()) " It may also stop other background work the agent started." else " It may also stop background work the agent started."
+            })
     }
 
     /**
@@ -105,6 +219,9 @@ object QueueWait {
             else -> ""
         }
     }
+
+    /** lib/queue-wait.ts `stopDescription`: `{cost} {line}`, the line omitted when empty. */
+    fun stopDescription(cost: String, line: String): String = listOf(cost, line).filter { it.isNotEmpty() }.joinToString(" ")
 
     // ---- spec §1 V4/V5, §3.2 --------------------------------------------------------------------------
 
