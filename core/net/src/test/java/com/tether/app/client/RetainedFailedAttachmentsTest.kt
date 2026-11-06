@@ -264,18 +264,18 @@ class RetainedFailedAttachmentsTest {
         assertEquals("only the newest message's bytes remain", full, client.retainedFailedBytes)
     }
 
-    // R4-e: 6 MiB (A) and 8 MiB (C) are 14 MiB, under the bound: both keep Send again.
+    // R4-e: 6 MiB (A) and 9 MiB (C) are 15 MiB, under the bound: both keep Send again.
     @Test
     fun twoMessagesUnderTheBoundBothKeepSendAgain() {
         val client = connected()
-        failedAttachmentRows(client, listOf("A" to message(6 * MIB, "a"), "C" to message(8 * MIB, "c")))
+        failedAttachmentRows(client, listOf("A" to message(6 * MIB, "a"), "C" to message(9 * MIB, "c")))
         val rows = client.failedSends.value
         listOf("A", "C").forEach { t ->
             val row = rows.single { it.text == t }
             assertTrue("$t keeps Send again", row.canSendAgain)
             assertFalse("$t is not released", row.released)
         }
-        assertEquals(14 * MIB, client.retainedFailedBytes)
+        assertEquals(15 * MIB, client.retainedFailedBytes)
     }
 
     // Exit: retractFailed (the server proves it accepted the key: a live ack takes the bubble back).
