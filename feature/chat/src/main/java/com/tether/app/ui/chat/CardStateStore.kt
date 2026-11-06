@@ -64,6 +64,8 @@ internal data class QuestionSelection(
     val other: Map<Int, String> = emptyMap(),
     val skipped: Set<Int> = emptySet(),
     val attempted: Boolean = false,
+    /** AW.2.7: what Skip cleared, by slot, for Undo skip (picks as label-union indices, and the Other text). */
+    val skipUndo: Map<Int, SkippedAnswer> = emptyMap(),
 )
 
 @Stable
@@ -113,7 +115,13 @@ class CardStateStore internal constructor(
     internal fun question(contentFp: String): QuestionSelection = questionStates[contentFp] ?: QuestionSelection()
 
     internal fun setQuestion(contentFp: String, value: QuestionSelection) {
-        put(questionStates, questionOrder, contentFp, value.copy(other = value.other.mapValues { cutCodePoints(it.value, ConsentGuard.MAX_OTHER_CHARS) }))
+        put(
+            questionStates, questionOrder, contentFp,
+            value.copy(
+                other = value.other.mapValues { cutCodePoints(it.value, ConsentGuard.MAX_OTHER_CHARS) },
+                skipUndo = value.skipUndo.mapValues { (_, u) -> u.copy(other = cutCodePoints(u.other, ConsentGuard.MAX_OTHER_CHARS)) },
+            ),
+        )
         trimOtherBudget(keep = contentFp)
     }
 
@@ -122,17 +130,20 @@ class CardStateStore internal constructor(
      * the OLDEST records' text goes first (never the card being typed in).
      */
     private fun trimOtherBudget(keep: String) {
-        var total = questionStates.values.sumOf { q -> q.other.values.sumOf { it.length } }
+        var total = questionStates.values.sumOf { q -> otherChars(q) }
         for (key in questionOrder.toList()) {
             if (total <= MAX_OTHER_TOTAL) break
             if (key == keep) continue
             val q = questionStates[key] ?: continue
-            val size = q.other.values.sumOf { it.length }
+            val size = otherChars(q)
             if (size == 0) continue
-            questionStates[key] = q.copy(other = emptyMap())
+            questionStates[key] = q.copy(other = emptyMap(), skipUndo = emptyMap())
             total -= size
         }
     }
+
+    /** The Other text a record holds: its own and what Undo skip would restore (both count toward the budget). */
+    private fun otherChars(q: QuestionSelection): Int = q.other.values.sumOf { it.length } + q.skipUndo.values.sumOf { it.other.length }
 
     /**
      * I-2: the records belong to [serverUrl] (the CONFIGURED server, not the socket's origin, so a drop
@@ -189,6 +200,13 @@ class CardStateStore internal constructor(
                         add(buildJsonObject { q.other.forEach { (i, t) -> put(i.toString(), JsonPrimitive(cutCodePoints(t, ConsentGuard.MAX_OTHER_CHARS))) } })
                         add(ints(q.skipped))
                         add(JsonPrimitive(q.attempted))
+                        add(
+                            buildJsonObject {
+                                q.skipUndo.forEach { (i, u) ->
+                                    put(i.toString(), buildJsonArray { add(ints(u.picks)); add(JsonPrimitive(cutCodePoints(u.other, ConsentGuard.MAX_OTHER_CHARS))) })
+                                }
+                            },
+                        )
                     },
                 )
             }
@@ -221,6 +239,10 @@ class CardStateStore internal constructor(
                     other = (a[3] as JsonObject).entries.associate { (k, v) -> k.toInt() to v.jsonPrimitive.content },
                     skipped = intList(a[4]).toSet(),
                     attempted = a[5].jsonPrimitive.content == "true",
+                    // A record saved before the tabs has no seventh element: nothing to undo.
+                    skipUndo = (a.getOrNull(6) as? JsonObject)?.entries?.associate { (k, v) ->
+                        k.toInt() to SkippedAnswer(intList(v.jsonArray[0]), v.jsonArray[1].jsonPrimitive.content)
+                    }.orEmpty(),
                 )
             }
             CardStateStore(grants, questions, (o["b"] as? JsonPrimitive)?.content)

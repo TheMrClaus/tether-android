@@ -23,7 +23,7 @@ class TetherIconsTest {
 
     @Test
     fun fixtureIsTheWebInventory() {
-        assertEquals(136, webGlyphs.size)
+        assertEquals(137, webGlyphs.size)
         assertEquals("fixture has duplicates", webGlyphs.size, webGlyphs.toSet().size)
     }
 

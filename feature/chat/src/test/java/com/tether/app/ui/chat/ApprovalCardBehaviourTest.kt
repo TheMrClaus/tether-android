@@ -332,7 +332,7 @@ class ApprovalCardBehaviourTest {
     @Test fun aQuestionPagesAndSubmitsOnceWithTheWebsPayload() {
         show(ApprovalFixtures.question)
         scrollTo("question-next")
-        rule.onNodeWithTag("question-page").assert(hasText("Question 1 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 1 of 2"))
         rule.onNodeWithTag("question-next").assertIsNotEnabled()
         rule.onNodeWithText("Postgres").performClick()
         rule.onAllNodesWithTag("question-option")[0].assertIsOn()
@@ -340,7 +340,7 @@ class ApprovalCardBehaviourTest {
         rule.waitForIdle()
         arm()
         scrollTo("question-submit")
-        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 2 of 2"))
         rule.onNodeWithText("staging").performClick()
         rule.onNode(androidx.compose.ui.test.hasSetTextAction() and androidx.compose.ui.test.hasAnyAncestor(hasTestTag("question-other"))).performTextInput("  canary ")
         val submit = rule.onNodeWithTag("question-submit").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
@@ -356,7 +356,10 @@ class ApprovalCardBehaviourTest {
     @Test fun submittingWithAnUnansweredPageAsksForAnAnswerOrASkip() {
         show(ApprovalFixtures.question)
         scrollTo("question-skip")
-        rule.onNodeWithTag("question-skip").assertHeightIsAtLeast(44.dp).performClick() // skip page 1
+        rule.onNodeWithTag("question-skip").assertHeightIsAtLeast(44.dp).performClick() // skip page 1: marks it, stays
+        rule.waitForIdle()
+        arm()
+        rule.onNodeWithTag("question-next").assertIsEnabled().performClick() // settled by the skip
         rule.waitForIdle()
         arm()
         scrollTo("question-submit")
@@ -364,7 +367,10 @@ class ApprovalCardBehaviourTest {
         rule.waitForIdle()
         rule.onNodeWithTag("question-validation").assertIsDisplayed()
         assertTrue(calls.isEmpty())
-        rule.onNodeWithTag("question-skip").performClick() // skip page 2 = submit with nothing answered
+        rule.onNodeWithTag("question-skip").performClick() // skip page 2: marks it, never sends on a 2+ card
+        rule.waitForIdle()
+        assertTrue(calls.isEmpty())
+        rule.onNodeWithTag("question-submit").performClick() // every question settled: sends with nothing answered
         rule.waitForIdle()
         assertEquals(listOf("question:q-1:{}"), calls)
     }
@@ -582,7 +588,7 @@ class ApprovalCardBehaviourTest {
         scrollTo("question-skip")
         val cfp = pendingQuestions(ApprovalFixtures.question.tree).single().contentFp
         rule.pressAcross({ rule.onNodeWithTag("question-skip") }) { store.setQuestion(cfp, store.question(cfp).copy(page = 1)) }
-        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 2 of 2"))
         assertTrue("page 2 was skipped by a press on page 1: ${store.question(cfp).skipped}", store.question(cfp).skipped.isEmpty())
         assertTrue(calls.isEmpty())
     }
@@ -799,7 +805,7 @@ class ApprovalCardBehaviourTest {
         rule.waitForIdle()
         arm()
         scrollTo("question-submit")
-        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 2 of 2"))
         rule.onAllNodesWithTag("question-option")[1].assertIsOn()
         rule.onNodeWithTag("question-submit").performClick()
         rule.waitForIdle()
@@ -827,7 +833,8 @@ class ApprovalCardBehaviourTest {
 
     @Test fun page2sKeysActOnTheirFirstTapRightAfterNext() {
         // ta-coik.13: chat-view.tsx 90fbb9f :1108-1120, the web's next page is answerable at once (no
-        // per-page wait). A fresh tap on page 2's Skip, in the frame after Next, skips it and sends.
+        // per-page wait). A fresh tap on page 2's Skip, in the frame after Next, acts at once: it marks
+        // page 2 skipped (a 2+ card never sends on Skip); the primary then sends.
         show(ApprovalFixtures.question)
         scrollTo("question-next")
         rule.onNodeWithText("Postgres").performClick()
@@ -835,9 +842,12 @@ class ApprovalCardBehaviourTest {
         val next = rule.onNodeWithTag("question-next").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
         rule.runOnUiThread { next() }
         rule.waitForIdle()
-        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 2 of 2"))
         rule.onNodeWithTag("question-submit").assertIsEnabled()
         rule.onNodeWithTag("question-skip").assertIsEnabled().performClick()
+        rule.waitForIdle()
+        assertTrue("Skip never sends on a 2+ card: $calls", calls.isEmpty())
+        rule.onNodeWithTag("question-submit").performClick()
         rule.waitForIdle()
         assertEquals("page 2 skipped, page 1's answer sent: $calls", 1, calls.size)
     }
@@ -968,9 +978,11 @@ class ApprovalCardBehaviourTest {
         rule.onNodeWithTag("question-next").performClick()
         rule.waitForIdle(); arm()
         scrollTo("question-skip")
-        rule.onNodeWithTag("question-skip").performClick() // skip page 2 ("Env?")
+        rule.onNodeWithTag("question-skip").performClick() // skip page 2 ("Env?"): marks it and stays
         rule.waitForIdle(); arm()
-        rule.onNodeWithTag("question-page").assert(hasText("Question 3 of 3"))
+        rule.onNodeWithTag("question-next").performClick() // settled by the skip
+        rule.waitForIdle(); arm()
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 3 of 3"))
         rule.onNode(sqlite).assertIsOn() // the same label, picked on page 1
         rule.onAllNodesWithTag("question-option")[0].assertIsOff() // DynamoDB, first on this page
         // Now pick Postgres HERE: third on this page, first on page 1; the answer names Postgres.
@@ -1057,7 +1069,7 @@ class ApprovalCardBehaviourTest {
             next()
         }
         rule.waitForIdle()
-        rule.onNodeWithTag("question-page").assert(hasText("Question 1 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 1 of 2"))
     }
 
     @Test fun allowSelectedSendsWhatIsTickedNow() {
@@ -1109,7 +1121,7 @@ class ApprovalCardBehaviourTest {
             up(1) // an option of page 1, which is no longer shown
         }
         rule.waitForIdle()
-        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 2 of 2"))
         assertEquals(mapOf(0 to listOf(0)), store.question(pendingQuestions(ApprovalFixtures.question.tree).single().contentFp).picks)
     }
 
@@ -1126,7 +1138,7 @@ class ApprovalCardBehaviourTest {
             field(androidx.compose.ui.text.AnnotatedString("typed after Next"))
         }
         rule.waitForIdle()
-        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 2 of 2"))
         assertTrue(store.question(pendingQuestions(ApprovalFixtures.question.tree).single().contentFp).other.isEmpty())
     }
 
@@ -1143,7 +1155,7 @@ class ApprovalCardBehaviourTest {
             next()
         }
         rule.waitForIdle()
-        rule.onNodeWithTag("question-page").assert(hasText("Question 1 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 1 of 2"))
         rule.onNodeWithText("SQLite").assertIsOn()
     }
 
@@ -1192,7 +1204,7 @@ class ApprovalCardBehaviourTest {
             next()
         }
         rule.waitForIdle()
-        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 2 of 2"))
     }
 
     /** Paths that try to read as something else. */
@@ -1715,10 +1727,10 @@ class ApprovalScreenBehaviourTest {
         rule.onNodeWithTag("question-next").performClick()
         rule.waitForIdle()
         arm()
-        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
-        blip(client) { rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2")) }
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 2 of 2"))
+        blip(client) { rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 2 of 2")) }
         scrollTo("question-submit")
-        rule.onNodeWithTag("question-page").assert(hasText("Question 2 of 2"))
+        rule.onNodeWithTag("question-page-words", useUnmergedTree = true).assert(hasText("Question 2 of 2"))
         rule.onNodeWithText("staging").performClick()
         rule.onNodeWithTag("question-submit").performClick()
         rule.waitForIdle()

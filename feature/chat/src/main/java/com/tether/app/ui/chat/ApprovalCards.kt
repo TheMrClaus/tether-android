@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -30,7 +32,28 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -923,9 +946,11 @@ private fun grantRowName(verb: String, path: String): String = remember(verb, pa
 
 /**
  * `.chat-question`: `--question-bg` under `--question-border`, `space-md` padding and gaps, the seam
- * lip + raised shadow (Studio: flat, 0.875rem, 1.25rem). One question per page (issue #160): Next
- * once the page is answered, Skip to leave it out; the last page's primary key submits the whole
- * request in one `question` message.
+ * lip + raised shadow (Studio: flat, 0.875rem, 1.25rem). One question per page (issue #160), with a
+ * tab per question when there are two or more (AW.2, the twin of the web's tth-jg2 tabs): Next once the
+ * page is settled (answered or skipped), Back from the second tab, Skip marks a question skipped and
+ * stays (it never sends on a 2+ card), Undo skip restores it; the last page's primary key submits the
+ * whole request in one `question` message, or selects the first open question.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -968,9 +993,51 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
         else -> null
     }
     val total = view.prompts.size
+    val tabbed = total > 1
     val question = view.prompts.getOrNull(pageIndex)
     val isLastPage = pageIndex >= total - 1
     val allAnswered = view.prompts.all { slotOf(it) in sel.skipped || isAnswered(it) }
+    // The tab labels (web questionTabLabels), drawn by the SafeText prose rule: server text.
+    val rawLabels = remember(view.request) { questionTabLabels(view.prompts.map { it.header }) }
+    val labels = rawLabels.map { proseText(cut4k(it)).text } // the spoken / source-casing words
+    val slotOfPage = remember(view.request) { view.prompts.map { slotOf(it) } }
+
+    // The announce node's text (only Next, Back, Skip and Undo skip set it; the sequence makes a repeated
+    // text speak again, web N8) and the programmatic focus moves. All kept ABOVE the stale-tap guard, whose
+    // key recreates the page's content when the page changes.
+    var announceText by remember(cfp) { mutableStateOf("") }
+    var announceSeq by remember(cfp) { mutableIntStateOf(0) }
+    fun announce(text: String) { announceText = text; announceSeq += 1 }
+    val inputMode = LocalInputModeManager.current
+    var focusWish by remember(cfp) { mutableStateOf<FocusWish?>(null) }
+    val optionRequesters = remember(cfp) { List(view.prompts.maxOfOrNull { it.options.size } ?: 0) { FocusRequester() } }
+    val primaryRequester = remember(cfp) { FocusRequester() }
+    val tabRequesters = remember(cfp, total) { List(total) { FocusRequester() } }
+    // Focus moves only for a hardware keyboard (the web's fine-pointer rule): in touch mode (TalkBack
+    // included) it stays where it is and the announce node / validation line carry the change. A tab key
+    // is itself a keyboard act, so a tab focus is requested whatever the mode says.
+    fun wishFocus(kind: FocusKind, tab: Int = 0) {
+        if (kind == FocusKind.Tab || inputMode.inputMode == InputMode.Keyboard) focusWish = FocusWish(kind, tab)
+    }
+    LaunchedEffect(focusWish) {
+        val wish = focusWish ?: return@LaunchedEffect
+        focusWish = null
+        withFrameNanos { }
+        val target: FocusRequester? = when (wish.kind) {
+            FocusKind.Primary -> primaryRequester
+            FocusKind.Tab -> tabRequesters.getOrNull(wish.tab)
+            FocusKind.Option -> {
+                val now = store.question(cfp)
+                val prompt = view.prompts.getOrNull(now.page.coerceIn(0, (view.prompts.size - 1).coerceAtLeast(0)))
+                val pressed = prompt?.let { q ->
+                    val slot = slotOf(q)
+                    q.options.indexOfFirst { labelIndex(q, it.label) in now.picks[slot].orEmpty() }
+                } ?: -1
+                optionRequesters.getOrNull(if (pressed >= 0) pressed else 0)
+            }
+        }
+        runCatching { target?.requestFocus() }
+    }
 
     // ta-coik.13: answerable on the first tap, as on the web (chat-view.tsx 90fbb9f :1073-1120, no
     // arm delay); a press that began on another page or request is dropped ([StaleTapGuard] below).
@@ -991,7 +1058,13 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
         update { it.copy(attempted = true) }
         val now = store.question(cfp)
         val effectiveSkipped = now.skipped + listOfNotNull(extraSkipped)
-        if (!view.prompts.all { slotOf(it) in effectiveSkipped || answeredIn(now, it) }) return
+        if (!view.prompts.all { slotOf(it) in effectiveSkipped || answeredIn(now, it) }) {
+            // A failed Submit selects the first open question and moves focus to its first option.
+            val first = firstUnsettledPage(now, slotOfPage)
+            if (first >= 0 && first != now.page) update { it.copy(page = first) }
+            wishFocus(FocusKind.Option)
+            return
+        }
         // L2: indices and the operator's own text; the guard builds the answer strings from the request.
         val picks = (now.picks.keys + now.other.keys).distinct().sorted().map { slot ->
             com.tether.app.client.ConsentGuard.QuestionPick(slot, now.picks[slot].orEmpty(), now.other[slot].orEmpty())
@@ -1000,16 +1073,52 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
         if (!consent.onAnswer(id, fp, picks, effectiveSkipped).settles()) latched = false
     }
 
+    fun moved(to: Int) {
+        val now = store.question(cfp)
+        announce(moveAnnouncement(to, total, labels[to], slotStatus(now, slotOfPage[to], now.attempted)))
+        wishFocus(FocusKind.Option)
+    }
+
     fun next() {
-        if (!armed || question == null || !onThisPage() || !isDrawn() || !answeredIn(store.question(cfp), question)) return
+        if (!armed || question == null || !onThisPage() || !isDrawn() || !slotSettled(store.question(cfp), slotOf(question)) || isLastPage) return
         update { it.copy(page = pageIndex + 1) }
+        moved(pageIndex + 1)
+    }
+
+    // Back works while the card is sent or unavailable (reading); the target is absolute.
+    fun back() {
+        if (pageIndex < 1 || !onThisPage()) return
+        update { it.copy(page = pageIndex - 1) }
+        moved(pageIndex - 1)
+    }
+
+    // A tab selects its page and nothing else; leaving an unanswered question does not skip it.
+    fun selectTab(target: Int) {
+        if (target !in 0 until total) return
+        update { it.copy(page = target) }
     }
 
     fun skip() {
         if (!armed || question == null || !onThisPage() || !isDrawn()) return
-        update { it.copy(skipped = it.skipped + slotOf(question)) }
-        // The drawn check was made above, before this skip's own write.
-        if (isLastPage) submit(extraSkipped = slotOf(question), drawnChecked = true) else update { it.copy(page = pageIndex + 1) }
+        val slot = slotOf(question)
+        if (!tabbed) {
+            // One question: skip and send, as before. The drawn check was made above, before this skip's own write.
+            update { it.copy(skipped = it.skipped + slot) }
+            submit(extraSkipped = slot, drawnChecked = true)
+            return
+        }
+        if (slot in store.question(cfp).skipped) return
+        // Two or more: mark and clear (kept for Undo skip), stay, never send.
+        update { applySkip(it, slot) }
+        announce("${labels[pageIndex]} skipped.")
+        wishFocus(FocusKind.Primary)
+    }
+
+    fun undoSkip() {
+        if (!armed || question == null || !onThisPage() || !isDrawn()) return
+        update { applyUndoSkip(it, slotOf(question)) }
+        announce("${labels[pageIndex]} answer restored.")
+        wishFocus(FocusKind.Option)
     }
 
     val frozen = !armed
@@ -1039,23 +1148,53 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                 val highlight = question != null && submitAttempted && !isAnswered(question) && slotOf(question) !in sel.skipped
                 SelectableRow {
                     Column(Modifier.testTag("question-words"), verticalArrangement = Arrangement.spacedBy(t.css.spaceMd)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
-                            Icon(TetherIcons.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(15.dp))
-                            Text(
-                                "The agent needs your input",
-                                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.92f), fontWeight = FontWeight(700)),
-                                color = t.white,
-                                modifier = Modifier.weight(1f).semantics { heading(); liveRegion = LiveRegionMode.Polite },
-                            )
-                            if (total > 1) {
-                                // `.chat-question-page { margin-left: auto }`: pushed to the row's end.
+                        Box(Modifier.fillMaxWidth()) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm)) {
+                                Icon(TetherIcons.CircleHelp, contentDescription = null, tint = t.questionInk, modifier = Modifier.size(15.dp))
                                 Text(
-                                    "Question ${pageIndex + 1} of $total",
-                                    style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), fontWeight = FontWeight(500)),
-                                    color = t.muted,
-                                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("question-page"),
+                                    "The agent needs your input",
+                                    style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.92f), fontWeight = FontWeight(700)),
+                                    color = t.white,
+                                    modifier = Modifier.weight(1f).semantics { heading(); liveRegion = LiveRegionMode.Polite },
+                                )
+                                if (tabbed) {
+                                    // `.chat-question-page { margin-left: auto }`: pushed to the row's end. Visible, hidden from
+                                    // TalkBack (aria-hidden) with no live region: the announce node speaks the button-driven moves.
+                                    Box(Modifier.clearAndSetSemantics { testTag = "question-page" }) {
+                                        Text(
+                                            "Question ${pageIndex + 1} of $total",
+                                            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), fontWeight = FontWeight(500)),
+                                            color = t.muted,
+                                            modifier = Modifier.testTag("question-page-words"),
+                                        )
+                                    }
+                                }
+                            }
+                            if (tabbed) {
+                                // The hidden polite node (web `.visually-hidden` live <p>): 1dp, transparent, speaks the text; the
+                                // sequence's trailing space makes the same text twice announce again.
+                                val spoken = announceText + if (announceSeq % 2 == 1) " " else ""
+                                Box(
+                                    Modifier.size(1.dp).align(Alignment.BottomStart)
+                                        .semantics { liveRegion = LiveRegionMode.Polite; contentDescription = spoken }
+                                        .testTag("question-announce"),
                                 )
                             }
+                        }
+                        if (tabbed) {
+                            QuestionTabStrip(
+                                rawLabels = rawLabels,
+                                labels = labels,
+                                statuses = slotOfPage.map { slotStatus(sel, it, submitAttempted) },
+                                selected = pageIndex,
+                                requesters = tabRequesters,
+                                onSelect = ::selectTab,
+                                onKey = { key, index ->
+                                    val target = tabKeyTarget(key, index, total)
+                                    if (target != null) { selectTab(target); wishFocus(FocusKind.Tab, target) }
+                                    target != null
+                                },
+                            )
                         }
                         if (question != null) {
                             // `.is-unanswered` pads the page in; its `--attention` rule names a token no skin defines,
@@ -1065,7 +1204,8 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                                 verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
                             ) {
                                 // ta-28i: the agent's question and header are prose (SafeText), as on the answered card.
-                                question.header?.let {
+                                // A tabbed card drops the in-panel header line: its tab shows it. A 1-question card keeps it.
+                                if (!tabbed) question.header?.let {
                                     Text(
                                         proseText(cut4k(it).uppercase()),
                                         style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), letterSpacing = 0.06.em),
@@ -1089,6 +1229,37 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                         Modifier.fillMaxWidth().padding(start = if (highlight) t.css.spaceSm else 0.dp, top = t.css.spaceXs),
                         verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
                     ) {
+                        val skippedHere = tabbed && slotOf(question) in sel.skipped
+                        if (skippedHere) {
+                            // `.chat-question-skipped-note`: outside the selection container because it holds a control.
+                            FlowRow(
+                                Modifier.fillMaxWidth().testTag("question-skipped-note"),
+                                horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+                                itemVerticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("Skipped.", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f)), color = t.muted)
+                                if (slotOf(question) in sel.skipUndo) {
+                                    Box(
+                                        Modifier
+                                            .heightIn(min = 48.dp)
+                                            .refuseObscuredTouches(blocked)
+                                            .clearsReviewRing()
+                                            .clickable(enabled = armed, role = Role.Button, onClick = ::undoSkip)
+                                            .alpha(if (armed) 1f else 0.65f)
+                                            .testTag("question-undo-skip"),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        androidx.compose.foundation.text.selection.DisableSelection {
+                                            Text(
+                                                "Undo skip",
+                                                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f), fontWeight = FontWeight(620), textDecoration = TextDecoration.Underline),
+                                                color = t.ink,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         Column(Modifier.fillMaxWidth().padding(top = t.css.spaceXs), verticalArrangement = Arrangement.spacedBy(t.css.spaceXs)) {
                             val slot = slotOf(question)
                             val multi = slots.single[slot] != true
@@ -1101,9 +1272,10 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                                     enabled = !frozen,
                                     // L-A: an option of a page that is no longer shown (a second finger after Next) is ignored.
                                     onToggle = {
-                                        if (onThisPage()) update { it.copy(picks = it.picks + (slot to togglePick(it.picks[slot].orEmpty(), multi, labelAt))) }
+                                        if (onThisPage()) update { applyPick(it, slot, multi, labelAt) }
                                     },
                                     onBlocked = blocked,
+                                    focusRequester = optionRequesters.getOrNull(question.options.indexOf(option)),
                                 )
                             }
                         }
@@ -1113,7 +1285,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                             onValueChange = { text ->
                                 if (onThisPage()) {
                                     val clean = cutCodePoints(text.replace("\r", "").replace("\n", ""), com.tether.app.client.ConsentGuard.MAX_OTHER_CHARS)
-                                    update { it.copy(other = it.other + (slotOf(question) to clean)) }
+                                    update { applyOther(it, slotOf(question), clean) }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().padding(top = t.css.spaceXs).testTag("question-other"),
@@ -1140,17 +1312,20 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                         sent && consent.isUnconfirmed(id, fp) -> Box(Modifier.fillMaxWidth()) { StatusLine(UNCONFIRMED_COPY, t.muted, "consent-unconfirmed") }
                         sent -> Box(Modifier.fillMaxWidth()) { StatusLine("Answer sent. Waiting for the agent.", t.muted, "consent-sent") }
                         submitAttempted && !allAnswered -> Box(Modifier.fillMaxWidth().padding(vertical = pMargin(0.78f))) {
-                            StatusLine("Answer each highlighted question, or choose Skip to leave it unanswered.", t.ink, "question-validation")
+                            val open = labels.filterIndexed { i, _ -> !slotSettled(sel, slotOfPage[i]) }
+                            StatusLine(if (tabbed) unansweredMessage(open) else SINGLE_UNANSWERED_MESSAGE, t.ink, "question-validation")
                         }
                     }
+                    // Skip on a 2+ card is disabled while the current question is skipped (Undo skip is the way back).
+                    val skipEnabled = armed && !(tabbed && question != null && slotOf(question) in sel.skipped)
                     if (unavailable == null && question != null) {
                         Box(
                             Modifier
                                 .heightIn(min = TetherDimens.touchTargetDp)
                                 .refuseObscuredTouches(blocked)
                                 .clearsReviewRing()
-                                .clickable(enabled = armed, role = Role.Button, onClick = ::skip)
-                                .alpha(if (armed) 1f else 0.65f)
+                                .clickable(enabled = skipEnabled, role = Role.Button, onClick = ::skip)
+                                .alpha(if (skipEnabled) 1f else 0.65f)
                                 .padding(horizontal = t.css.spaceSm)
                                 .testTag("question-skip"),
                             contentAlignment = Alignment.Center,
@@ -1159,6 +1334,17 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                                 Text("Skip", style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f), fontWeight = FontWeight(560)), color = t.muted)
                             }
                         }
+                    }
+                    if (tabbed && pageIndex >= 1) {
+                        TetherKey(
+                            onClick = ::back,
+                            classes = KeyClasses.ButtonSecondary,
+                            label = "Back",
+                            icon = TetherIcons.ChevronLeft,
+                            iconSize = 14.dp,
+                            contentPadding = t.css.spaceSm,
+                            modifier = Modifier.refuseObscuredTouches(blocked).clearsReviewRing().testTag("question-back"),
+                        )
                     }
                     if (isLastPage || unavailable != null) {
                         TetherKey(
@@ -1171,19 +1357,125 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                             },
                             icon = TetherIcons.Check,
                             enabled = armed,
-                            modifier = Modifier.refuseObscuredTouches(blocked).clearsReviewRing().testTag("question-submit"),
+                            modifier = Modifier.focusRequester(primaryRequester).refuseObscuredTouches(blocked).clearsReviewRing().testTag("question-submit"),
                         )
                     } else {
                         TetherKey(
                             onClick = ::next,
                             classes = KeyClasses.ButtonPrimary,
                             label = "Next",
-                            enabled = armed && question != null && isAnswered(question),
-                            modifier = Modifier.refuseObscuredTouches(blocked).clearsReviewRing().testTag("question-next"),
+                            enabled = armed && question != null && slotSettled(sel, slotOf(question)),
+                            modifier = Modifier.focusRequester(primaryRequester).refuseObscuredTouches(blocked).clearsReviewRing().testTag("question-next"),
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+/** What a programmatic focus move aims at (AW.2.6). */
+internal enum class FocusKind { Option, Primary, Tab }
+
+/** One pending focus move; a fresh object each time so the same move twice still runs. */
+internal class FocusWish(val kind: FocusKind, val tab: Int)
+
+/**
+ * `.chat-question-tabs`: one tab per question, wrapping (never scrolling), a 1dp `--question-border` divider below.
+ * Named `Questions`; only the selected tab is a Tab-key stop (roving), the arrows, Home and End move between them.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun QuestionTabStrip(
+    rawLabels: List<String>,
+    labels: List<String>,
+    statuses: List<QuestionStatus>,
+    selected: Int,
+    requesters: List<FocusRequester>,
+    onSelect: (Int) -> Unit,
+    onKey: (TabKey, Int) -> Boolean,
+) {
+    val t = LocalTetherTokens.current
+    Column(Modifier.fillMaxWidth()) {
+        FlowRow(
+            Modifier.fillMaxWidth().selectableGroup().semantics { contentDescription = "Questions" }.testTag("question-tabs"),
+            horizontalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            labels.forEachIndexed { i, label ->
+                QuestionTab(
+                    label = label,
+                    shown = rawLabels[i],
+                    status = statuses[i],
+                    selected = i == selected,
+                    requester = requesters[i],
+                    onSelect = { onSelect(i) },
+                    onKey = { onKey(it, i) },
+                )
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(t.questionBorder))
+    }
+}
+
+/** The status glyph a tab draws (the four differ: the words are not the only carrier). */
+internal fun statusGlyph(status: QuestionStatus) = when (status) {
+    QuestionStatus.Answered -> TetherIcons.CircleCheck
+    QuestionStatus.Skipped -> TetherIcons.CircleMinus
+    QuestionStatus.NeedsAnswer -> TetherIcons.CircleAlert
+    QuestionStatus.Unanswered -> TetherIcons.Circle
+}
+
+@Composable
+private fun QuestionTab(label: String, shown: String, status: QuestionStatus, selected: Boolean, requester: FocusRequester, onSelect: () -> Unit, onKey: (TabKey) -> Boolean) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val keyboard = LocalInputModeManager.current.inputMode == InputMode.Keyboard
+    val target = when {
+        status == QuestionStatus.NeedsAnswer -> t.attentionInk // wins over the selected colour
+        selected -> t.white
+        else -> t.muted
+    }
+    val color by animateColorAsState(target, tween(t.css.durationFast), label = "questionTab")
+    val underline = t.violetStrong
+    Row(
+        Modifier
+            .heightIn(min = 48.dp)
+            .widthIn(max = 192.dp)
+            .focusRing(focused && keyboard, RectangleShape, t.violetStrong, width = 2.dp, offset = (-2).dp)
+            .focusRequester(requester)
+            .focusProperties { canFocus = selected } // roving: only the selected tab is a Tab-key stop
+            .onKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
+                val k = when (e.key) {
+                    Key.DirectionRight -> TabKey.Right
+                    Key.DirectionLeft -> TabKey.Left
+                    Key.MoveHome -> TabKey.Home
+                    Key.MoveEnd -> TabKey.End
+                    else -> return@onKeyEvent false
+                }
+                onKey(k)
+            }
+            .selectable(selected = selected, interactionSource = interaction, indication = null, role = Role.Tab, onClick = onSelect)
+            .semantics { contentDescription = label + statusWords(status) }
+            .drawBehind { if (selected) drawRect(underline, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - 2.dp.toPx()), size = androidx.compose.ui.geometry.Size(size.width, 2.dp.toPx())) }
+            .padding(horizontal = t.css.spaceSm)
+            .testTag("question-tab"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.4.dp),
+    ) {
+        androidx.compose.foundation.text.selection.DisableSelection {
+            Icon(statusGlyph(status), contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
+            Text(
+                proseText(cut4k(shown).uppercase()),
+                style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.72f), fontWeight = FontWeight(650), letterSpacing = 0.06.em),
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clearAndSetSemantics { },
+            )
         }
     }
 }
@@ -1203,7 +1495,15 @@ internal fun cut4k(s: String): String = if (s.length > CARD_TEXT_MAX) com.tether
  * The label is provider content (never uppercased).
  */
 @Composable
-private fun QuestionOption(option: QuestionOptionView, active: Boolean, multi: Boolean, enabled: Boolean, onToggle: () -> Unit, onBlocked: () -> Unit = {}) {
+private fun QuestionOption(
+    option: QuestionOptionView,
+    active: Boolean,
+    multi: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    onBlocked: () -> Unit = {},
+    focusRequester: FocusRequester? = null,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val shape = RoundedCornerShape(t.radiusSm)
@@ -1223,6 +1523,7 @@ private fun QuestionOption(option: QuestionOptionView, active: Boolean, multi: B
             .cssSurface(shape, background = if (active) t.violetWash else t.keyFace, border = CssBorder(1.dp, border), shadows = shadows)
             .refuseObscuredTouches(onBlocked)
             .clearsReviewRing()
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .toggleable(value = active, enabled = enabled, role = if (multi) Role.Checkbox else Role.RadioButton, onValueChange = { onToggle() })
             .padding(horizontal = t.css.spaceMd, vertical = t.css.spaceSm)
             .testTag("question-option"),
