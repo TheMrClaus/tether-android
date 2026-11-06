@@ -1,6 +1,13 @@
 package com.tether.app.ui.chat
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -31,6 +38,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -352,8 +361,11 @@ internal fun QueuedMessages(
     provider: String? = null,
     /** Spec §4.1a A: messages already sent INTO the running turn (n of them). */
     steeredInTurn: Int = 0,
-    /** Spec §4.1c A: Stop spares background tasks (server >= 155 AND claude persistent). */
-    backgroundSpared: Boolean = false,
+    /** Spec §4.1f F.1 / F.3: the per-engine facts of the cost sentence ([QueueWait.stopFactsFor]); the row's confirmation reads the same words as Stop. */
+    stopFacts: QueueWait.StopFacts = QueueWait.stopFactsFor(provider),
+    /** Spec §4.3 condition 2: the ONE open confirmation of the composer; the row whose "Interrupt and send" is open (null = none). */
+    confirmingRowId: String? = null,
+    onConfirmRow: (queueId: String?) -> Unit = {},
     /** W34 (v151): the handover stage underway; rows then say where they go and the instruction row has no X. */
     handoverStage: com.tether.app.client.Handover.StageView? = null,
     /** W34: v151: the instruction row has no X, whatever the stage (chat-view.tsx:1632 `!handoverRequest`). */
@@ -363,7 +375,7 @@ internal fun QueuedMessages(
     val t = LocalTetherTokens.current
     val instructionIndex = queued.indexOfFirst { it.isHandoverRequest }
     val confirmation = listOf(
-        QueueWait.interruptCostCopy(liveWork, QueueWait.foregroundCertain(provider), QueueWait.backgroundVisible(provider), backgroundSpared),
+        QueueWait.interruptCostCopy(liveWork, stopFacts.foregroundCertain, stopFacts.backgroundVisible, stopFacts.backgroundSpared, stopFacts.backgroundTail),
         QueueWait.steeredStopCopy(provider, steeredInTurn),
         QUEUE_INTERRUPT_THEN_SENT,
     ).filter { it.isNotEmpty() }.joinToString(" ")
@@ -390,6 +402,8 @@ internal fun QueuedMessages(
                     interruptTurnId = interruptTurnId,
                     offerInterruptAndSend = !handedOff && message.queueId == interruptSendId && !message.held && !message.isHandoverRequest && !message.isPeer,
                     confirmationCopy = confirmation,
+                    confirming = confirmingRowId == message.queueId,
+                    onConfirmingChange = { open -> onConfirmRow(if (open) message.queueId else null) },
                 )
             }
         }
@@ -449,6 +463,9 @@ internal fun QueuedMessageRow(
     handoverV151: Boolean = false,
     /** tth-2zt: the row stayed on a handed-off source: held, read-only, Remove only. */
     handedOff: Boolean = false,
+    /** Spec §4.3 condition 2: whether this row's confirmation is the composer's open one (hoisted: it and the Stop panel never both show). */
+    confirming: Boolean = false,
+    onConfirmingChange: (Boolean) -> Unit = {},
 ) {
     val t = LocalTetherTokens.current
     val focusManager = LocalFocusManager.current
@@ -461,9 +478,6 @@ internal fun QueuedMessageRow(
     var editing by remember { mutableStateOf(false) }
     var reverting by remember { mutableStateOf(false) }
     LaunchedEffect(text) { if (!editing) value = text }
-
-    // The confirmation belongs to the turn it was asked for: a new turn (or another session) drops it.
-    var confirmingInterrupt by remember(interruptIdentity) { mutableStateOf(false) }
 
     fun commit() {
         editing = false
@@ -479,11 +493,9 @@ internal fun QueuedMessageRow(
         }
     }
 
-    // A row that stops being the next one, or a copy that cannot interrupt, closes its confirmation.
-    LaunchedEffect(offerInterruptAndSend, interruptLock != null) {
-        if (!offerInterruptAndSend || interruptLock != null) confirmingInterrupt = false
-    }
-    val confirming = confirmingInterrupt && offerInterruptAndSend && interruptLock == null
+    // The open confirmation is the composer's one state (it belongs to its turn and row there); a row that stops being the
+    // next one, or a copy that cannot interrupt, shows none, and the composer then drops the state.
+    val confirmingNow = confirming && offerInterruptAndSend && interruptLock == null
     val steered = !held && !handoverRequest && !peer && QueueWait.isSteered(steerCapable, message)
     val waitLabel = when {
         handedOff -> handedOffRowLabel(message)
@@ -556,9 +568,9 @@ internal fun QueuedMessageRow(
             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
             decorationBox = { inner -> Box(Modifier.padding(vertical = t.css.spaceXs)) { inner() } },
         )
-        if (offerInterruptAndSend && !confirming) {
+        if (offerInterruptAndSend && !confirmingNow) {
             QueueInterruptButton(
-                onClick = { confirmingInterrupt = true },
+                onClick = { onConfirmingChange(true) },
                 lock = interruptLock,
                 identity = interruptIdentity,
                 turnId = interruptTurnId,
@@ -583,12 +595,12 @@ internal fun QueuedMessageRow(
             style = style,
             modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
         )
-        if (confirming) {
+        if (confirmingNow) {
             QueueInterruptConfirmation(
                 copy = confirmationCopy,
-                onKeepQueued = { confirmingInterrupt = false },
+                onKeepQueued = { onConfirmingChange(false) },
                 onCommit = { turnId ->
-                    confirmingInterrupt = false
+                    onConfirmingChange(false)
                     onInterruptNow(turnId)
                 },
                 lock = interruptLock,
@@ -689,11 +701,14 @@ private fun QueueInterruptButton(
     turnId: String?,
     danger: Boolean = false,
     tag: String = QUEUE_INTERRUPT_TAG,
+    /** The Stop panel's commit reuses this recipe under its own words (AW.3.2): `Stop`, named by its label. */
+    label: String = QUEUE_INTERRUPT_LABEL,
+    description: String = "Interrupt and send — stops the current turn, then sends this message",
+    focusRequester: FocusRequester? = null,
 ) {
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(t.radiusSm)
     val ink = if (danger) t.brick else t.muted
-    val description = "Interrupt and send — stops the current turn, then sends this message"
     val live = lock == null && turnId != null
     StaleTapGuard(identity) { guard ->
         Row(
@@ -701,6 +716,7 @@ private fun QueueInterruptButton(
                 .heightIn(min = 44.dp)
                 .then(guard)
                 .alpha(if (lock == null) 1f else 0.55f)
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 .cssSurface(shape, if (danger) t.dangerWash else Color.Transparent, CssBorder(1.dp, if (danger) t.dangerEdge else t.lineStrong))
                 .clickable(enabled = live, onClick = { if (live && turnId != null) onClick(turnId) })
                 .semantics(mergeDescendants = true) {
@@ -712,7 +728,135 @@ private fun QueueInterruptButton(
             horizontalArrangement = Arrangement.spacedBy(4.8.dp),
         ) {
             Icon(TetherIcons.CircleStop, contentDescription = null, tint = ink, modifier = Modifier.size(13.dp))
-            Text(QUEUE_INTERRUPT_LABEL, color = ink, fontFamily = Manrope, fontSize = 11.84.sp, maxLines = 1)
+            Text(label, color = ink, fontFamily = Manrope, fontSize = 11.84.sp, maxLines = 1)
         }
     }
 }
+
+// ---- spec AW.3 (twin of web §4.3 / §4.1f Part B): the Stop panel ----------------------------------------------------
+
+/** AW.3.4: the panel's heading and its pane title. */
+internal const val STOP_PANEL_HEADING = "Stop this turn?"
+internal const val STOP_PANEL_TAG = "stop-panel"
+internal const val STOP_BOX_TAG = "stop-box"
+
+/** AW.3.4: the panel's two keys, each named by its label. */
+internal const val STOP_KEEP_RUNNING_LABEL = "Keep running"
+internal const val STOP_COMMIT_LABEL = "Stop"
+
+/** AW.3.3: the composer's ONE open confirmation: a stop for a turn id (with its box value), or a row for a queue id (and its turn). */
+internal sealed interface OpenConfirm {
+    data class Stop(val turnId: String?, val stopBackground: Boolean) : OpenConfirm
+    data class Row(val queueId: String, val turnId: String?) : OpenConfirm
+}
+
+/**
+ * AW.3.2: the Stop panel, above the well. Heading, the `{cost} {line}` sentence, the opt-in "Also stop" box (only when
+ * [boxLabel] is non-null), and `Keep running` + `Stop`. Hardware Escape acts as Keep running ([onKeepRunning]). Nothing in it
+ * is a live region: the platform announces the pane title once as it opens (AW.3.5).
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun StopPanel(
+    sentence: String,
+    boxLabel: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    onKeepRunning: () -> Unit,
+    onStop: (turnId: String) -> Unit,
+    lock: String?,
+    identity: Any,
+    turnId: String?,
+    boxFocus: FocusRequester,
+    keepFocus: FocusRequester,
+    onBoxFocusChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val shape = RoundedCornerShape(t.radiusMd)
+    val body = type.body.copy(color = t.ink, fontSize = 12.48.sp, lineHeight = 18.096.sp) // 0.78rem, 1.45
+    Column(
+        modifier
+            .fillMaxWidth()
+            .padding(bottom = t.css.spaceSm)
+            .cssSurface(shape, t.mineralDeep, CssBorder(1.dp, t.lineStrong))
+            .stopEdge(t.danger)
+            .padding(horizontal = t.css.spaceSm, vertical = t.css.spaceXs)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
+                    onKeepRunning()
+                    true
+                } else {
+                    false
+                }
+            }
+            .semantics { paneTitle = STOP_PANEL_HEADING }
+            .testTag(STOP_PANEL_TAG),
+        verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+    ) {
+        Text(STOP_PANEL_HEADING, style = body.copy(color = t.white, fontWeight = FontWeight(700)), modifier = Modifier.semantics { heading() })
+        Text(sentence, style = body)
+        if (boxLabel != null) {
+            // The box is drawn exactly as GrantCheckbox draws its box (ApprovalCards.kt; copied, not shared, while lane A-tabs owns that file).
+            val boxShape = RoundedCornerShape(3.dp)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .focusRequester(boxFocus)
+                    .onFocusChanged { onBoxFocusChange(it.isFocused) }
+                    .toggleable(value = checked, role = Role.Checkbox, onValueChange = onCheckedChange)
+                    .semantics { contentDescription = boxLabel }
+                    .testTag(STOP_BOX_TAG),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+            ) {
+                Box(
+                    Modifier
+                        .size(16.dp)
+                        .background(if (checked) t.accent else t.mineralDeep, boxShape)
+                        .border(1.dp, if (checked) t.accentSide else t.lineStrong, boxShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (checked) Icon(TetherIcons.Check, contentDescription = null, tint = t.accentInk, modifier = Modifier.size(12.dp))
+                }
+                Box(Modifier.weight(1f).clearAndSetSemantics { }) {
+                    Text(boxLabel, style = body.copy(fontWeight = FontWeight(610)))
+                }
+            }
+        }
+        androidx.compose.foundation.layout.FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(top = t.css.spaceXs),
+            horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
+        ) {
+            Box(
+                Modifier
+                    .heightIn(min = 44.dp)
+                    .focusRequester(keepFocus)
+                    .cssSurface(RoundedCornerShape(t.radiusSm), Color.Transparent, CssBorder(1.dp, t.lineStrong))
+                    .clickable(onClick = onKeepRunning)
+                    .semantics(mergeDescendants = true) { contentDescription = STOP_KEEP_RUNNING_LABEL }
+                    .testTag(KEEP_RUNNING_KEY_TAG)
+                    .padding(horizontal = t.css.spaceSm),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(STOP_KEEP_RUNNING_LABEL, color = t.ink, fontFamily = Manrope, fontSize = 11.84.sp, maxLines = 1)
+            }
+            QueueInterruptButton(
+                onClick = onStop,
+                lock = lock,
+                identity = "stop-panel" to identity,
+                turnId = turnId,
+                danger = true,
+                tag = STOP_ANYWAY_KEY_TAG,
+                label = STOP_COMMIT_LABEL,
+                description = STOP_COMMIT_LABEL,
+            )
+        }
+    }
+}
+
+/** AW.3.2: a 2dp `t.danger` left edge, drawn like [queueEdge] over the 1dp line. */
+private fun Modifier.stopEdge(color: Color): Modifier = queueEdge(color)
