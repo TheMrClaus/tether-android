@@ -70,7 +70,12 @@ import com.tether.app.protocol.Attachment
 import com.tether.app.protocol.ServerMessage
 import com.tether.app.protocol.SessionCommandOption
 import com.tether.app.protocol.SessionModelOption
-import com.tether.app.protocol.fold.liveBackgroundTaskCount
+import com.tether.app.protocol.fold.backgroundTerminalCount
+import com.tether.app.protocol.fold.stoppableBackgroundTaskCount
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.platform.LocalInputModeManager
 import com.tether.app.protocol.fold.openToolCount
 import com.tether.app.protocol.helpers.QueueWait
 import com.tether.app.protocol.model.AgentSession
@@ -209,8 +214,15 @@ fun Composer(
     liveness: ComposerLiveness,
     /** v155 (spec §1 V5): the session's provider says `capabilities.steer`; queued rows then read "goes into this turn". */
     steerCapableEngine: Boolean = false,
-    /** Spec §4.1c A / D-L148-1 (1): Stop spares background tasks here ([QueueWait.backgroundSpared]: server >= 155 AND claude persistent). */
-    backgroundSpared: Boolean = false,
+    /**
+     * AW.3.3: the CONNECTED SERVER's protocol (`serverProtocolVersion`). Null or below 156 => the "Also stop" total is 0 (no box,
+     * no `stopBackground`); [QueueWait.stopBackgroundSupported] is the one test.
+     */
+    serverProtocol: Int? = null,
+    /** The session's provider row says `capabilities.persistentSessions` (Claude persistent tasks; [QueueWait.stopFactsFor]). */
+    persistentSessions: Boolean = false,
+    /** AW.3.3: Stop that also asks the server to stop background work (`stopBackground = true`); the box's commit only. */
+    onInterruptStopBackground: (turnId: String) -> InterruptResult = onInterrupt,
     modifier: Modifier = Modifier,
     /**
      * T7.4: the staged attachments of this session, staging picks, and the ONE send that carries
@@ -325,8 +337,8 @@ fun Composer(
     // unless the server said that interrupt failed: then they unlock for a retry.
     val interruptLock = liveness.interruptLock
         ?: if (activeTurn?.status == Vocab.TURN_CANCELLING && liveness.failedInterruptTurn != interruptTurnId) INTERRUPTING_LOCK_COPY else null
-    fun interruptTurn(drawnFor: String) {
-        interruptRefusalCopy(onInterrupt(drawnFor))?.let(::flash)
+    fun interruptTurn(drawnFor: String, stopBackground: Boolean = false) {
+        interruptRefusalCopy(if (stopBackground) onInterruptStopBackground(drawnFor) else onInterrupt(drawnFor))?.let(::flash)
     }
 
     // T7.3 (chat-view.tsx:2158-2167): `!` command mode, and whether the running turn is a FOREGROUND
@@ -339,22 +351,80 @@ fun Composer(
     // price. With live work Interrupt needs a second, informed tap that names the price; the
     // confirmation belongs to the turn it was asked for (a new turn or another session drops it), and
     // lapses when there is no price left to confirm or the copy cannot interrupt at all.
-    val liveWork = remember(tree) { QueueWait.LiveWork(openToolCount(tree), liveBackgroundTaskCount(tree)) }
-    // The RULE (does Stop need a confirmation): live visible work that Stop ENDS (§4.1c A.3; spared background tasks never count).
-    val stopConfirms = QueueWait.stopConfirms(liveWork, backgroundSpared)
+    val liveWork = remember(tree) { QueueWait.LiveWork(openToolCount(tree), stoppableBackgroundTaskCount(tree)) }
+    // AW.3.3 / §4.1f F.1: the per-engine facts of the sentence (the running CLI's version decides "spares"), and what a checked box would stop.
+    val cliVersion = (tree?.get("cliVersion") as? com.tether.app.protocol.tree.JsStr)?.value
+    val stopFacts = remember(session?.provider, persistentSessions, cliVersion, session?.engineGeneration) {
+        QueueWait.stopFactsFor(session?.provider, persistentSessions, cliVersion, session?.engineGeneration)
+    }
+    val spawnedRuns = remember(tree) {
+        (tree?.get("spawnedRuns") as? com.tether.app.protocol.tree.JsArr)?.mapNotNull { v ->
+            (v as? com.tether.app.protocol.tree.JsObj)?.let { o ->
+                QueueWait.SpawnedRun((o["status"] as? com.tether.app.protocol.tree.JsStr)?.value, (o["origin"] as? com.tether.app.protocol.tree.JsStr)?.value)
+            }
+        }.orEmpty()
+    }
+    val stoppable = if (QueueWait.stopBackgroundSupported(serverProtocol)) {
+        QueueWait.backgroundStoppable(
+            provider = session?.provider,
+            persistentSessions = persistentSessions,
+            outstandingBackground = liveWork.outstandingBackground,
+            terminals = if (session?.provider == "codex" && session.engineGeneration == com.tether.app.client.CODEX_V2) backgroundTerminalCount(tree) else 0,
+            spawnedRuns = spawnedRuns,
+        )
+    } else {
+        QueueWait.BackgroundStoppable()
+    }
+    val stoppableCount = QueueWait.stoppableTotal(stoppable)
     // Delivery (spec §1 V5, §4.1a A): the engine can steer; and how many queued messages already went INTO this turn.
     val steerCapable = steerCapableEngine
     val steeredInTurn = remember(activeTurn?.blocksById) { activeTurn?.blocksById?.values?.count { it.steered == true } ?: 0 }
-    // Spec §4.1a A + §4.1: what the confirmation and the resting key's description SAY: `{cost} {line}`.
-    val stopCopy = listOf(
-        QueueWait.interruptCostCopy(liveWork, QueueWait.foregroundCertain(session?.provider), QueueWait.backgroundVisible(session?.provider), backgroundSpared),
+    fun costSentence(alsoStop: QueueWait.BackgroundStoppable?) = listOf(
+        QueueWait.interruptCostCopy(liveWork, stopFacts.foregroundCertain, stopFacts.backgroundVisible, stopFacts.backgroundSpared, stopFacts.backgroundTail, alsoStop),
         QueueWait.steeredStopCopy(session?.provider, steeredInTurn),
     ).filter { it.isNotEmpty() }.joinToString(" ")
-    var confirmStop by remember(session?.id, interruptTurnId) { mutableStateOf(false) }
-    LaunchedEffect(stopConfirms, interruptLock != null, commandRunning) {
-        if (!stopConfirms || interruptLock != null || commandRunning) confirmStop = false
+    // Spec §4.1 + §4.1a A: what the panel and the resting key's description SAY: `{cost} {line}` (the key always reads the unchecked form).
+    val stopCopy = costSentence(null)
+    // AW.3.3 eligible (web stopPanelEligible): busy, not a foreground command, and live work Stop ends or something the box can stop.
+    val stopPanelEligible = busy && !commandRunning && (QueueWait.stopConfirms(liveWork, stopFacts.backgroundSpared) || stoppableCount > 0)
+    // AW.3.3: ONE confirmation at a time, hoisted here: a stop for a turn (with its box value) or a row for a queue id.
+    var openConfirm by remember(session?.id) { mutableStateOf<OpenConfirm?>(null) }
+    val stopOpen = openConfirm as? OpenConfirm.Stop
+    val stopPanelOpen = stopOpen != null && interruptTurnId != null && stopOpen.turnId == interruptTurnId && stopPanelEligible && interruptLock == null
+    val stopBoxShown = stopPanelOpen && stoppableCount > 0
+    val stopChecked = stopBoxShown && stopOpen?.stopBackground == true
+    val rowConfirmId = (openConfirm as? OpenConfirm.Row)?.takeIf { it.turnId == interruptTurnId && interruptLock == null }?.queueId
+    val confirmStale = openConfirm != null && !stopPanelOpen && (rowConfirmId == null || rowConfirmId != QueueWait.interruptAndSendRowId(projection?.queuedMessages.orEmpty()))
+    // AW.3.5 focus: keyboard input mode only; never the soft keyboard on touch.
+    val inputModeManager = LocalInputModeManager.current
+    val stopKeyFocus = remember { FocusRequester() }
+    val keepRunningFocus = remember { FocusRequester() }
+    val stopBoxFocus = remember { FocusRequester() }
+    val composerInputFocus = remember { FocusRequester() }
+    val boxFocused = remember { booleanArrayOf(false) }
+    fun keyboardMode() = inputModeManager.inputMode == InputMode.Keyboard
+    LaunchedEffect(stopPanelOpen) {
+        if (stopPanelOpen && keyboardMode()) runCatching { if (stopBoxShown) stopBoxFocus.requestFocus() else keepRunningFocus.requestFocus() }
     }
-    val confirmingStop = confirmStop && stopConfirms && interruptLock == null && !commandRunning
+    // The box row went (total dropped to 0): its checked value goes with it, and focus moves to Keep running, never to the page.
+    LaunchedEffect(stopBoxShown) {
+        if (!stopBoxShown && stopPanelOpen) {
+            if (stopOpen?.stopBackground == true) openConfirm = stopOpen.copy(stopBackground = false)
+            if (boxFocused[0] && keyboardMode()) runCatching { keepRunningFocus.requestFocus() }
+        }
+        boxFocused[0] = false
+    }
+    // A confirmation that no longer applies closes itself (the turn ended or changed, not eligible, a lock): composer input in keyboard mode only.
+    LaunchedEffect(confirmStale) {
+        if (confirmStale) {
+            openConfirm = null
+            if (keyboardMode()) runCatching { composerInputFocus.requestFocus() }
+        }
+    }
+    BackHandler(enabled = stopPanelOpen) {
+        openConfirm = null
+        if (keyboardMode()) runCatching { stopKeyFocus.requestFocus() }
+    }
     val commandMode = runActions.commandMode && draft.startsWith("!")
     // ta-coik.22: the same lock as Interrupt ([commandKeyLock]: read-only / handed off, never a stale copy).
     val commandLock = liveness.interruptLock
@@ -1097,9 +1167,40 @@ fun Composer(
                         steerCapable = steerCapable,
                         provider = session?.provider,
                         steeredInTurn = steeredInTurn,
-                        backgroundSpared = backgroundSpared,
+                        stopFacts = stopFacts,
+                        confirmingRowId = rowConfirmId,
+                        onConfirmRow = { id ->
+                            // Opening the row's confirmation closes the Stop panel (one state), and closing it clears the state.
+                            openConfirm = id?.let { OpenConfirm.Row(it, interruptTurnId) }
+                        },
                         handoverStage = handoverStage.takeIf { handoverHolding },
                         handoverV151 = handoverV151,
+                    )
+                }
+
+                // AW.3.2: after the queue strip, before the page picks, the chips, the delegate bar and the well.
+                if (stopPanelOpen) {
+                    StopPanel(
+                        sentence = if (stopChecked) costSentence(stoppable) else stopCopy,
+                        boxLabel = if (stopBoxShown) QueueWait.alsoStopLabel(stoppable) else null,
+                        checked = stopChecked,
+                        onCheckedChange = { next -> openConfirm = stopOpen?.copy(stopBackground = next) },
+                        onKeepRunning = {
+                            openConfirm = null
+                            if (keyboardMode()) runCatching { stopKeyFocus.requestFocus() }
+                        },
+                        onStop = { turnId ->
+                            val alsoStop = stoppableCount > 0 && stopChecked
+                            openConfirm = null
+                            interruptTurn(turnId, stopBackground = alsoStop)
+                            if (keyboardMode()) runCatching { composerInputFocus.requestFocus() }
+                        },
+                        lock = interruptLock,
+                        identity = Triple("stop-panel", session?.id, interruptTurnId),
+                        turnId = interruptTurnId,
+                        boxFocus = stopBoxFocus,
+                        keepFocus = keepRunningFocus,
+                        onBoxFocusChange = { boxFocused[0] = it },
                     )
                 }
 
@@ -1155,6 +1256,7 @@ fun Composer(
                         metrics = metrics,
                         onKey = ::onComposerKey,
                         interactionSource = inputInteraction,
+                        modifier = Modifier.focusRequester(composerInputFocus),
                         command = commandMode,
                     )
                     ComposerToolbar(
@@ -1164,7 +1266,7 @@ fun Composer(
                         // ta-ceo: on a phone the Stop confirmation takes the attach and settings keys'
                         // room for the moment it is open (its price must be read whole; the web phone
                         // hides the words instead, globals.css:7894).
-                        showAttach = !(metrics.phone && confirmingStop),
+                        showAttach = true,
                         browser = browser,
                         // The web keeps the paperclip live while a turn runs; submit() asks the operator to wait.
                         attachEnabled = session != null,
@@ -1179,7 +1281,7 @@ fun Composer(
                         } else {
                             null
                         },
-                        settingsKey = if (liveControls != null && !wideRow && !(metrics.phone && confirmingStop)) {
+                        settingsKey = if (liveControls != null && !wideRow) {
                             { mod ->
                                 val hasOther = liveControls.effort != null || liveControls.mode != null || liveControls.fastMode != null || liveControls.auto != null || liveControls.autoContinue != null || handlers.openProviderControls != null
                                 SessionSettingsTrigger(
@@ -1214,10 +1316,14 @@ fun Composer(
                             interruptTurnId = interruptTurnId,
                             onInterrupt = ::interruptTurn,
                             interruptLock = interruptLock,
-                            stopConfirms = stopConfirms,
+                            stopPanelEligible = stopPanelEligible,
+                            stopPanelOpen = stopPanelOpen,
+                            onToggleStopPanel = {
+                                // AW.3.3: the key is a disclosure toggle and never commits; opening closes a row confirmation.
+                                openConfirm = if (stopPanelOpen) null else OpenConfirm.Stop(interruptTurnId, false)
+                            },
+                            stopKeyFocus = stopKeyFocus,
                             stopCopy = stopCopy,
-                            confirmingStop = confirmingStop,
-                            onConfirmStop = { confirmStop = it },
                             commandMode = commandMode,
                             commandRunning = commandRunning,
                             canRun = draft.trim().length > 1,
@@ -1398,13 +1504,13 @@ private fun RowScope.ComposerActions(
     onInterrupt: (turnId: String) -> Unit,
     /** T13.2 r2: why Interrupt cannot send (a copy that is not live); null = it can. */
     interruptLock: String?,
-    /** ta-ceo (#229): Stop would end live work ([QueueWait.stopConfirms]); it only decides WHETHER to confirm. */
-    stopConfirms: Boolean = false,
+    /** AW.3.3: the Stop panel applies (live work Stop ends, or something the box can stop): the key then toggles it and never commits. */
+    stopPanelEligible: Boolean = false,
+    stopPanelOpen: Boolean = false,
+    onToggleStopPanel: () -> Unit = {},
+    stopKeyFocus: FocusRequester? = null,
     /** Spec §4.1 + §4.1a A: the sentences the Stop confirmation and the key's description show (`{cost} {line}`). */
     stopCopy: String = "",
-    /** ta-ceo: the first Stop tap asked for the second, informed one (Keep running · Stop). */
-    confirmingStop: Boolean = false,
-    onConfirmStop: (Boolean) -> Unit = {},
     /** T7.3: the draft is a `!` command (idle: Send to agent + Background). */
     commandMode: Boolean = false,
     /** T7.3: the running turn is a foreground command (Background + Stop instead of Queue + Interrupt). */
@@ -1460,7 +1566,14 @@ private fun RowScope.ComposerActions(
                 onClick = { if (interruptLock == null) onInterrupt(drawnFor) },
                 classes = KeyClasses.ChatInterrupt,
                 label = if (labelled) "Stop" else null,
-                icon = TetherIcons.CircleStop,
+                // AW.3.2: while the panel is open the glyph is `t.danger` (§4.4); at rest it is unchanged.
+                icon = if (stopPanelOpen) null else TetherIcons.CircleStop,
+                leading = if (stopPanelOpen) {
+                    { Icon(TetherIcons.CircleStop, contentDescription = null, tint = LocalTetherTokens.current.danger, modifier = Modifier.size(18.dp)) }
+                } else {
+                    null
+                },
+                dangerOutline = stopPanelOpen,
                 iconSize = 18.dp,
                 fontSize = fontSize,
                 enabled = interruptLock == null,
@@ -1495,60 +1608,25 @@ private fun RowScope.ComposerActions(
         // (chat-view.tsx 90fbb9f :4559-4573, no arm delay); a press that began before the turn changed
         // is dropped ([StaleTapGuard]), and never through an overlay.
         val drawnFor = interruptTurnId
-        if (confirmingStop && drawnFor != null) {
-            // ta-ceo (chat-view.tsx:4543-4558): Stop is turn-wide — with live work the second tap
-            // names the price. The pair is always labelled (a phone's icon-only key would hide the
-            // price). ta-coik.13: the confirming Stop acts on its first tap, as on the web (:4552-4558).
-            TetherKey(
-                onClick = { onConfirmStop(false) },
-                classes = KeyClasses.ChatSend,
-                label = "Keep running",
-                fontSize = fontSize,
-                minHeight = height,
-                modifier = Modifier.heightIn(min = height).widthIn(min = 44.dp).testTag(KEEP_RUNNING_KEY_TAG),
-                contentPadding = 16.dp,
-                contentDescription = "Keep running",
-            )
-            StaleTapGuard(Triple("interrupt-confirm", sessionId, drawnFor)) { guard ->
-                TetherKey(
-                    onClick = {
-                        if (interruptLock == null) {
-                            onConfirmStop(false)
-                            onInterrupt(drawnFor)
-                        }
-                    },
-                    classes = KeyClasses.ChatInterrupt,
-                    label = "Stop — $stopCopy",
-                    icon = TetherIcons.CircleStop,
-                    iconSize = 18.dp,
-                    fontSize = fontSize,
-                    enabled = interruptLock == null,
-                    minHeight = height,
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .heightIn(min = height)
-                        .then(guard)
-                        .testTag(STOP_ANYWAY_KEY_TAG),
-                    contentPadding = 16.dp,
-                    contentDescription = "Stop — $stopCopy",
-                    // The price is never cut: the key grows a line instead.
-                    maxLines = Int.MAX_VALUE,
-                )
-            }
-            return
-        }
         val live = interruptLock == null && drawnFor != null
         StaleTapGuard(Triple("interrupt", sessionId, drawnFor)) { guard ->
             TetherKey(
                 onClick = {
                     if (live && drawnFor != null) {
-                        // issue #229: with live work the first tap asks; without, it interrupts at once.
-                        if (stopConfirms) onConfirmStop(true) else onInterrupt(drawnFor)
+                        // AW.3.3: eligible -> the key toggles the panel and never commits; else one tap stops.
+                        if (stopPanelEligible) onToggleStopPanel() else onInterrupt(drawnFor)
                     }
                 },
                 classes = KeyClasses.ChatInterrupt,
                 label = if (labelled) "Stop" else null,
-                icon = TetherIcons.CircleStop,
+                // AW.3.2: while the panel is open the glyph is `t.danger` (§4.4); at rest it is unchanged.
+                icon = if (stopPanelOpen) null else TetherIcons.CircleStop,
+                leading = if (stopPanelOpen) {
+                    { Icon(TetherIcons.CircleStop, contentDescription = null, tint = LocalTetherTokens.current.danger, modifier = Modifier.size(18.dp)) }
+                } else {
+                    null
+                },
+                dangerOutline = stopPanelOpen,
                 iconSize = 18.dp,
                 fontSize = fontSize,
                 enabled = interruptLock == null,
@@ -1559,8 +1637,14 @@ private fun RowScope.ComposerActions(
                     .semantics {
                         if (!live) disabled()
                         // The web's aria-describedby: the name stays `Stop the current turn`, the cost + line ride alongside.
-                        if (stopCopy.isNotEmpty()) stateDescription = stopCopy
+                        // AW.3.4: eligible and closed `Collapsed. {cost} {line}`, open `Expanded` (Expandable.kt's literals), else `{cost} {line}`.
+                        if (stopPanelEligible) {
+                            stateDescription = if (stopPanelOpen) "Expanded" else if (stopCopy.isNotEmpty()) "Collapsed. $stopCopy" else "Collapsed"
+                        } else if (stopCopy.isNotEmpty()) {
+                            stateDescription = stopCopy
+                        }
                     }
+                    .then(if (stopKeyFocus != null) Modifier.focusRequester(stopKeyFocus) else Modifier)
                     .testTag(INTERRUPT_KEY_TAG),
                 contentPadding = padding,
                 contentDescription = (interruptDescription ?: "Stop the current turn").let { if (interruptLock == null) it else "$it, unavailable: $interruptLock" },

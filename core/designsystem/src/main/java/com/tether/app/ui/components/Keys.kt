@@ -103,6 +103,8 @@ fun TetherKey(
     maxLines: Int = 1,
     /** False: focus is held but its ring stays unpainted (`:focus-visible`: a touch user's programmatic focus shows none). */
     showFocusRing: Boolean = true,
+    /** AW.3.2: the Stop key while its panel is open: the Interrupt recipe (globals.css 7128) in every skin: `dangerEdge` border, `dangerWash` face, `danger` glyph. */
+    dangerOutline: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -125,7 +127,8 @@ fun TetherKey(
         down -> KeyState.Pressed
         else -> KeyState.Rest
     }
-    val look = resolveKey(t, classes, state, selected = selected, size = size, layout = currentLayoutClass())
+    val resolved = resolveKey(t, classes, state, selected = selected, size = size, layout = currentLayoutClass())
+    val look = if (dangerOutline) resolved.copy(border = t.dangerEdge, face = t.dangerWash, ink = t.danger) else resolved
     val round = shape == KeyShape.Circle || (shape == null && look.radius == KeyRadiusCircle)
     val keyShape: Shape = if (round) CircleShape else RoundedCornerShape(if (look.radius == KeyRadiusCircle) 0.dp else look.radius)
 
