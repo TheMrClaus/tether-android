@@ -284,7 +284,7 @@ class ComposerBehaviourTest {
         assertEquals(listOf("t1"), interrupts)
         rule.onAllNodesWithContentDescription("Remove queued message").onLast().performClick()
         assertEquals(listOf("parity-queue-2"), removes)
-        rule.onNodeWithContentDescription("Queued messages").assertExists()
+        rule.onNodeWithContentDescription("Message queue, 2 messages").assertExists()
     }
 
     /**
@@ -309,7 +309,7 @@ class ComposerBehaviourTest {
     fun aQueueOfSystemNoticesAloneDrawsNoPanel() {
         show(ComposerFixtures.systemOnly)
         assertEquals(3, projection!!.queuedMessages.size)
-        rule.onNodeWithContentDescription("Queued messages").assertDoesNotExist()
+        rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Message queue", substring = true)).assertCountEquals(0)
         queueRows().assertCountEquals(0)
         rule.onAllNodesWithText("SYSTEM", substring = true).assertCountEquals(0)
     }

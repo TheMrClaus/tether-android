@@ -385,8 +385,11 @@ data class QueuedMessage(
     val isHandoverRequest: Boolean
         get() = originKind == QueuedOrigin.SYSTEM && noticeKindValue == QueuedOrigin.HANDOVER_REQUEST
 
-    /** The rows the composer queue lists: the operator's drafts plus the handover instruction row, in order. */
-    val isListedInComposer: Boolean get() = isOperatorMessage || isHandoverRequest
+    /**
+     * The rows the composer queue lists (lib/queued-message.ts operatorQueuedMessages): the operator's drafts, the handover
+     * instruction row and (tth-y1hv) a peer session's message, in order. A peer row is visible and withdrawable, never editable.
+     */
+    val isListedInComposer: Boolean get() = isOperatorMessage || isHandoverRequest || isPeer
 }
 
 /** v133 (issue #211): lib/queued-message.mjs, the queued-message provenance vocabulary. */

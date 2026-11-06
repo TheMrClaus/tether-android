@@ -42,6 +42,7 @@ enum class ComposerShot(val id: String) {
     InterruptSendConfirm("interrupt-send-confirm"),
     StopConfirm("stop-confirm"),
     HeldHandover("held-handover"),
+    HeldPeer("held-peer"),
     StopConfirmSteered("stop-confirm-steered"),
     StopConfirmSpared("stop-confirm-spared"),
 }
@@ -58,7 +59,12 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
         ComposerShot.HeldOpenFailed -> ComposerFixtures.delivery(QueueSpec("h", "Then fix the snapshot test.", held = true, reason = "open_failed"), QueueSpec("b", "Also bump the changelog."))
         ComposerShot.HeldSteerUncertain -> ComposerFixtures.delivery(QueueSpec("h", "Then fix the snapshot test.", held = true, reason = "steer_uncertain"), QueueSpec("b", "Also bump the changelog."))
         ComposerShot.HeldAttachmentMissing -> ComposerFixtures.delivery(QueueSpec("h", "Here are the screenshots.", held = true, reason = "attachment_missing"))
-        // Spec §4.1a C: the instruction row's hint. (A held PEER row is not listed in the composer: no golden, see the receipt.)
+        // tth-y1hv: a held peer row (read-only, Remove only, "cannot be edited; remove it") beside an operator row.
+        ComposerShot.HeldPeer -> ComposerFixtures.delivery(
+            QueueSpec("p", "Please also run the lint pass.", held = true, origin = "system", kind = "peer"),
+            QueueSpec("b", "Also bump the changelog."),
+        )
+        // Spec §4.1a C: the instruction row's hint.
         ComposerShot.HeldHandover -> ComposerFixtures.delivery(
             QueueSpec("h", "Hand over to a fresh session.", held = true, origin = "system", kind = "handover-request"),
             QueueSpec("b", "Also bump the changelog."),
