@@ -131,9 +131,14 @@ class SendBubblesBehaviourTest {
         )
         assertEquals("Not delivered", failedSendLabel(SendFixtures.failed("a", "x")))
         assertEquals("Not delivered (2 images · 3.0 MB)", failedSendLabel(SendFixtures.failed("a", "x", 2, 2, SendFixtures.THREE_MB)))
+        // AW.4: one attachment lost, then several; the web's C2 words.
         assertEquals(
-            "Photo could not be recovered — send again.",
-            failedSendLabel(SendFixtures.failed("a", "x", reason = FailedSendReason.PhotoLost)),
+            "Not sent — the upload failed. An attachment is no longer on this device; attach it again and resend. · 1 image · 10 B",
+            failedSendLabel(SendFixtures.failed("a", "x", 1, 1, 10.0, FailedSendReason.PhotoLost)),
+        )
+        assertEquals(
+            "Not sent — the upload failed. 2 attachments are no longer on this device; attach them again and resend. · 2 images · 3.0 MB",
+            failedSendLabel(SendFixtures.failed("a", "x", 2, 2, SendFixtures.THREE_MB, FailedSendReason.PhotoLost)),
         )
         assertEquals("Not sent — the link was down", failedSendLabel(SendFixtures.failed("a", "x", reason = FailedSendReason.Link)))
         assertEquals(
@@ -429,7 +434,7 @@ class SendBubblesBehaviourTest {
         rule.waitForIdle()
         val copied = checkNotNull(clip()) { "nothing was copied" }
         assertEquals("the failed bubble's exact words", words, copied)
-        assertFalse("the status line stays out of the selection: $copied", copied.contains("Photo could not") || copied.contains("Not delivered"))
+        assertFalse("the status line stays out of the selection: $copied", copied.contains("no longer on this device") || copied.contains("Not delivered"))
     }
 
     @Test fun aPhotoLostBubblesWordsAreSelectableAndCopyExactly() = copiesTheFailedWords(FailedSendReason.PhotoLost)
@@ -437,4 +442,48 @@ class SendBubblesBehaviourTest {
     @Test fun anExpiredBubblesWordsAreSelectableAndCopyExactly() = copiesTheFailedWords(FailedSendReason.Expired)
 
     @Test fun aLinkBubblesWordsAreSelectableAndCopyExactly() = copiesTheFailedWords(FailedSendReason.Link)
+
+    /** AW.4: "attachment", never "photo": no reason or bubble string a failed row can print contains the word. */
+    @Test
+    fun noFailedBubbleReasonOrLabelSaysPhoto() {
+        val labels = FailedSendReason.entries.flatMap { reason ->
+            listOf(0, 1, 2).map { n -> failedSendLabel(SendFixtures.failed("a", "x", n, n, 10.0 * n, reason)) }
+        }
+        labels.forEach { assertFalse("no photo word in: $it", it.contains("photo", ignoreCase = true)) }
+    }
+
+    /** AW.5 R4-f: the released forms, m = 1 and m = 2; a row that was never resendable keeps today's label. */
+    @Test
+    fun aReleasedRowSaysWhyAndOnlyAReleasedRowDoes() {
+        fun released(reason: FailedSendReason, n: Int) =
+            failedSendLabel(SendFixtures.failed("a", "x", n, n, 6.0 * 1024 * 1024, reason).copy(released = true))
+        assertEquals(
+            "Not sent — the link was down (1 image · 6.0 MB). An attachment is no longer on this device; attach it again and resend.",
+            released(FailedSendReason.Link, 1),
+        )
+        assertEquals(
+            "Not sent — the link was down (2 images · 6.0 MB). 2 attachments are no longer on this device; attach them again and resend.",
+            released(FailedSendReason.Link, 2),
+        )
+        assertEquals(
+            "Not delivered (1 image · 6.0 MB). An attachment is no longer on this device; attach it again and resend.",
+            released(FailedSendReason.Expired, 1),
+        )
+        assertEquals(
+            "Not delivered (2 images · 6.0 MB). 2 attachments are no longer on this device; attach them again and resend.",
+            released(FailedSendReason.Expired, 2),
+        )
+        assertEquals(
+            "Not sent — the upload failed. An attachment is no longer on this device; attach it again and resend. · 1 image · 6.0 MB",
+            released(FailedSendReason.Upload, 1),
+        )
+        assertEquals(
+            "Not sent — the upload failed. 2 attachments are no longer on this device; attach them again and resend. · 2 images · 6.0 MB",
+            released(FailedSendReason.Upload, 2),
+        )
+        // Never resendable (canSendAgain false, NOT released): today's labels, no sentence.
+        val refusal = SendFixtures.failed("r", "x", 2, 2, 6.0 * 1024 * 1024, FailedSendReason.Upload).copy(detail = "An attachment is limited to 9 MiB.")
+        assertEquals("Not sent — the upload failed. An attachment is limited to 9 MiB. · 2 images · 6.0 MB", failedSendLabel(refusal))
+        assertEquals("Not sent — the link was down (2 images · 6.0 MB)", failedSendLabel(SendFixtures.failed("m", "x", 2, 2, 6.0 * 1024 * 1024, FailedSendReason.Link)))
+    }
 }

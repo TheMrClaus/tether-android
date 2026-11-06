@@ -216,6 +216,19 @@ class AttachmentUploads(
         }
     }
 
+    /**
+     * tth-87eo: a failed message is sent again under its ORIGINAL key: whatever ledger rows (failed or stored) the old
+     * record left under [holder] go, with their files, so the new uploads are the only ones the key's gate reads.
+     */
+    fun release(holder: String) {
+        val gone = synchronized(this) {
+            val doomed = metas.values.filter { it.holder == holder }.map { it.id }
+            doomed.forEach { removeLocked(it) }
+            doomed
+        }
+        gone.forEach { scheduler.cancel(it); cancelCall(it) }
+    }
+
     /** What [holder]'s uploads allow its frame to be now (see [UploadGate]). */
     @Synchronized
     fun gate(holder: String): UploadGate {
@@ -488,7 +501,8 @@ class AttachmentUploads(
         const val META = "meta.json"
         const val MAX_ATTEMPTS = 5
         const val CANCELLED = "The upload was cancelled."
-        const val DEFAULT_FAILURE = "The upload failed."
+        /** No reason sentence: the label already says "Not sent — the upload failed." (§4.1b B.1, AW.4). */
+        const val DEFAULT_FAILURE = ""
         private val ID = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
     }
 }

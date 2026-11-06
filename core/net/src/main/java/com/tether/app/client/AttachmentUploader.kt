@@ -99,7 +99,7 @@ class AttachmentUploader(
         // R4: only for the origin that created it.
         if (paired.origin != expectedOrigin) return UploadOutcome.WrongServer
         val size = file.length()
-        if (!file.isFile) return UploadOutcome.Refused(0, "spool_missing", "The photo is no longer on this device.", retryable = false)
+        if (!file.isFile) return UploadOutcome.Refused(0, "spool_missing", "An attachment is no longer on this device; attach it again and resend.", retryable = false)
         if (size <= 0L) return UploadOutcome.Refused(400, "empty_attachment", "The attachment is empty.", retryable = false)
         if (size > MAX_FILE_BYTES) return UploadOutcome.Refused(413, "attachment_too_large", "An attachment is limited to 9 MiB.", retryable = false)
         val url = paired.base.newBuilder()
@@ -163,8 +163,8 @@ class AttachmentUploader(
             // Server side (tether lib/attachment-store.ts): a same-id PUT already being written answers
             // `409 upload_in_progress` ("retry in a moment") - recoverable, the SAME id is retried with backoff.
             // `409 attachment_id_conflict` (same id, other bytes) stays final.
-            status == 409 && code == "upload_in_progress" -> UploadOutcome.Transient(serverReason ?: "That photo is already being uploaded; retrying.")
-            status == 409 -> UploadOutcome.Refused(status, code, serverReason ?: "That attachment id already holds different bytes.", retryable = false)
+            status == 409 && code == "upload_in_progress" -> UploadOutcome.Transient(serverReason ?: "That attachment is already being uploaded; retry in a moment.")
+            status == 409 -> UploadOutcome.Refused(status, code, serverReason ?: "The server already holds a different attachment for this upload; attach it again.", retryable = false)
             status == 413 -> UploadOutcome.Refused(status, code, serverReason ?: "An attachment is limited to 9 MiB.", retryable = false)
             status == 429 || status >= 500 -> UploadOutcome.Refused(status, code, serverReason ?: "The server could not take the upload right now.", retryable = true)
             else -> UploadOutcome.Refused(status, code, serverReason ?: "The server refused the upload.", retryable = false)
