@@ -216,6 +216,19 @@ class AttachmentUploads(
         }
     }
 
+    /**
+     * tth-87eo: a failed message is sent again under its ORIGINAL key: whatever ledger rows (failed or stored) the old
+     * record left under [holder] go, with their files, so the new uploads are the only ones the key's gate reads.
+     */
+    fun release(holder: String) {
+        val gone = synchronized(this) {
+            val doomed = metas.values.filter { it.holder == holder }.map { it.id }
+            doomed.forEach { removeLocked(it) }
+            doomed
+        }
+        gone.forEach { scheduler.cancel(it); cancelCall(it) }
+    }
+
     /** What [holder]'s uploads allow its frame to be now (see [UploadGate]). */
     @Synchronized
     fun gate(holder: String): UploadGate {

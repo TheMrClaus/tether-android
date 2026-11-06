@@ -15,6 +15,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -147,6 +155,20 @@ fun failedSendLabel(row: FailedSend): String {
             if (summary.isNotEmpty()) append(" · ").append(summary)
         }
     }
+    // tth-87eo (AW.5): the one-message bound released this row's bytes: the C.1 sentence takes the reason's slot. Only the
+    // released mark picks these forms (a delegate-mention row is not resendable either, and keeps today's label).
+    if (row.released) {
+        val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
+        val gone = attachmentsGoneSentence(row.attachmentCount)
+        return when (row.reason) {
+            FailedSendReason.Upload -> buildString {
+                append("Not sent — the upload failed. ").append(gone)
+                if (summary.isNotEmpty()) append(" · ").append(summary)
+            }
+            FailedSendReason.Link -> "Not sent — the link was down ($summary). $gone"
+            else -> "Not delivered ($summary). $gone"
+        }
+    }
     // ta-delivery A2: the upload failed; the server's own reason follows (never the bytes, never a path).
     // spec 4.1b B.1: "Not sent — the upload failed." then " {reason}" when there is one, then " · {summary}".
     if (row.reason == FailedSendReason.Upload) {
@@ -239,6 +261,15 @@ private fun FailedSendBubbleBody(row: FailedSend, onDismiss: () -> Unit, onSendA
         ink = t.ink,
         style = base.style,
     )
+    // tth-87eo (NOTE 1): when the memory bound releases this row while focus sits on its Send again key, the key goes;
+    // focus moves to this bubble's Dismiss key (a recovery move, not an announcement).
+    val dismissFocus = remember { FocusRequester() }
+    var sendAgainFocused by remember { mutableStateOf(false) }
+    var hadSendAgain by remember { mutableStateOf(row.canSendAgain) }
+    LaunchedEffect(row.canSendAgain) {
+        if (hadSendAgain && !row.canSendAgain && sendAgainFocused) runCatching { dismissFocus.requestFocus() }
+        hadSendAgain = row.canSendAgain
+    }
     BubbleBox(look, alignEnd = true, modifier.testTag(FAILED_SEND_TAG)) {
         // The operator's own words stay recoverable: selectable and copyable like every transcript row
         // (the Dismiss key below stays outside the selection, as the notice keys do).
@@ -250,6 +281,7 @@ private fun FailedSendBubbleBody(row: FailedSend, onDismiss: () -> Unit, onSendA
             Modifier
                 .offset(x = (30.4.dp - DISMISS_TARGET) / 2)
                 .size(DISMISS_TARGET)
+                .focusRequester(dismissFocus)
                 .clickable(role = Role.Button, onClick = onDismiss)
                 .semantics { contentDescription = "Dismiss failed message" },
             contentAlignment = Alignment.Center,
@@ -266,7 +298,7 @@ private fun FailedSendBubbleBody(row: FailedSend, onDismiss: () -> Unit, onSendA
                 icon = TetherIcons.RotateCw,
                 iconSize = 13.dp,
                 contentDescription = "Send again",
-                modifier = Modifier.testTag(SEND_AGAIN_TAG),
+                modifier = Modifier.testTag(SEND_AGAIN_TAG).onFocusChanged { sendAgainFocused = it.hasFocus },
             )
         }
     }

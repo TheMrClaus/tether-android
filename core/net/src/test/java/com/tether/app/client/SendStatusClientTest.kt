@@ -287,17 +287,19 @@ class SendStatusClientTest {
         assertTrue(client.failedSends.value.isEmpty())
     }
 
+    /** tth-87eo: an aged-out attachment message keeps its bytes in memory and so shows Send again (it used to never). */
     @Test
-    fun anAttachmentFailureNeverOffersSendAgain() {
+    fun anAgedOutAttachmentMessageOffersSendAgainAndRefilesItsAttachments() {
         val (client, ws) = connected(sweepIntervalMs = 50)
         assertEquals(AttachmentSendResult.Sent, client.sendAttachments("s1", "aged", listOf(picture), null, client.consentOrigin.value))
         sentKey()
         dropLink(client, ws)
         h.now.addAndGet(Web.MAX_AGE_MS.toLong())
         val failed = h.await(client.failedSends) { it.isNotEmpty() }.single()
-        assertEquals(false, failed.canSendAgain)
+        assertEquals(true, failed.canSendAgain)
         client.sendAgain(failed.key)
-        assertEquals(1, client.failedSends.value.size)
+        h.await(client.pendingSends) { rows -> rows.any { it.key == failed.key && it.attachmentCount == 1 } }
+        assertTrue(client.failedSends.value.isEmpty())
     }
 
     // --- the pure record (use-tether.ts :450-471) ----------------------------------------------

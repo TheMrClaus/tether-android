@@ -3565,7 +3565,7 @@ class RealTetherClient(
                     if (changed) persistPending()
                     // use-tether.ts 90fbb9f :846-852: its failed bubbles can never be retried; drop them too.
                     ifCurrent(webSocket) {
-                        failedSendsState.update { current ->
+                        updateFailed { current ->
                             current.filter { it.sessionId != message.session.id }.takeIf { it.size != current.size } ?: current
                         }
                     }
@@ -4779,7 +4779,11 @@ class RealTetherClient(
         raceHook?.invoke(RacePoint.FailedComputed, givenUp.records)
         synchronized(lock) {
             if (givenUp.generation != failedGeneration) return
-            failedSendsState.update { PendingInput.recordFailed(it, givenUp.records, reason, details) }
+            val before = failedSendsState.value.mapTo(HashSet()) { it.key }
+            updateFailed { PendingInput.recordFailed(it, givenUp.records, reason, details) }
+            // tth-87eo: only a row that was really added AND shows Send again keeps its bytes (a row that is not there, or
+            // one already failed, keeps what it had); the bound then runs on this write's total.
+            if (retainedFailed.retainNew(before, failedSendsState.value, givenUp.records)) reconcileRetainedLocked()
         }
     }
 
@@ -4791,13 +4795,35 @@ class RealTetherClient(
     private fun retractFailed(keys: Collection<String>) {
         if (keys.isEmpty()) return
         val set = keys as? Set<String> ?: keys.toHashSet()
-        failedSendsState.update { current -> current.filter { it.key !in set }.takeIf { it.size != current.size } ?: current }
+        updateFailed { current -> current.filter { it.key !in set }.takeIf { it.size != current.size } ?: current }
     }
 
     /** ta-coik.19 r2: drop every failed bubble and retire their generation. Caller holds [lock]. */
     private fun clearFailedSendsLocked() {
         failedGeneration++
-        failedSendsState.value = emptyList()
+        updateFailed { emptyList() }
+    }
+
+    // tth-87eo (AW.5): the attachment bytes of failed rows that show Send again, in memory beside failedSendsState.
+    // Guarded by [lock]. EVERY write to failedSendsState goes through [updateFailed], so release follows the row.
+    private val retainedFailed = RetainedAttachments()
+
+    /** Test seam (tth-87eo): the raw bytes the failed rows retain right now. */
+    internal val retainedFailedBytes: Long get() = synchronized(lock) { retainedFailed.totalBytes }
+
+    /** Every write to [failedSendsState] (any exit of a row: Send again, Dismiss, retraction, clear, archive drop, fall-off). */
+    private fun updateFailed(transform: (List<FailedSend>) -> List<FailedSend>) {
+        synchronized(lock) {
+            failedSendsState.update(transform)
+            reconcileRetainedLocked()
+        }
+    }
+
+    /** Caller holds [lock]: prune the bytes to the rows that are there, then apply the one-message bound; a row the bound released loses Send again for good. */
+    private fun reconcileRetainedLocked() {
+        val released = retainedFailed.reconcile(failedSendsState.value.mapTo(HashSet()) { it.key })
+        if (released.isEmpty()) return
+        failedSendsState.update { rows -> rows.map { if (it.key in released) it.copy(canSendAgain = false, released = true) else it } }
     }
 
     /**
@@ -4812,19 +4838,52 @@ class RealTetherClient(
             val row = failedSendsState.value.firstOrNull { it.key == key && it.canSendAgain } ?: return@synchronized false
             if (pendingStore.records.any { it.key == key }) return@synchronized false
             val kind = if (turnRunning(row.sessionId)) PendingInput.KIND_QUEUE else PendingInput.KIND_SEND
+            // tth-87eo: the retained bytes go back into the new record, which follows the spool rules like any send.
+            val attachments = if (row.attachmentCount > 0) retainedFailed.take(key)?.takeIf { it.isNotEmpty() } else null
+            if (row.attachmentCount > 0 && attachments == null) return@synchronized false
+            if (attachments != null) {
+                val hub = attachmentUploads
+                val origin = pendingOrigin
+                // The old record's ledger rows (failed or stored) go: the key's gate reads only the new uploads.
+                hub?.release(key)
+                val ids = if (hub == null || origin == null) emptyList() else attachments.map { a ->
+                    val raw = runCatching { java.util.Base64.getDecoder().decode(a.data) }.getOrNull()
+                    raw?.let { hub.begin(origin, row.sessionId, a.name, a.mediaType, it) }
+                }
+                val begun = ids.isNotEmpty() && ids.all { it != null }
+                // A queue-add carries uploaded ids only (R2): without them it cannot go, and the row stays (bytes put back).
+                if (!begun && kind == PendingInput.KIND_QUEUE) {
+                    ids.filterNotNull().forEach { hub?.cancelStaged(it) }
+                    retainedFailed.retain(key, attachments)
+                    return@synchronized false
+                }
+                val result = PendingInput.addRecord(pendingStore, key, kind, row.sessionId, row.text, clock(), attachments, null)
+                if (begun) {
+                    // A partial begin (some null) cannot be bound: those that started are cancelled, the record goes inline.
+                    if (!hub!!.bind(ids.filterNotNull(), key, kind, origin, row.sessionId)) ids.filterNotNull().forEach { hub.cancelStaged(it) }
+                } else {
+                    ids.filterNotNull().forEach { hub?.cancelStaged(it) }
+                }
+                pendingStore = result.store
+                clearedKeys.remove(key)
+                forgetLocked(result.evicted.map { it.key })
+                evicted = givenUpLocked(result.evicted)
+                updateFailed { current -> current.filter { it.key != key } }
+                return@synchronized true
+            }
             val result = PendingInput.addRecord(pendingStore, key, kind, row.sessionId, row.text, clock(), null, null)
             pendingStore = result.store
             clearedKeys.remove(key)
             forgetLocked(result.evicted.map { it.key })
             evicted = givenUpLocked(result.evicted)
-            failedSendsState.update { current -> current.filter { it.key != key } }
+            updateFailed { current -> current.filter { it.key != key } }
             true
         }
         if (filed) afterRecord(evicted)
     }
 
     override fun dismissFailedSend(key: String) {
-        failedSendsState.update { current -> current.filter { it.key != key }.takeIf { it.size != current.size } ?: current }
+        updateFailed { current -> current.filter { it.key != key }.takeIf { it.size != current.size } ?: current }
     }
 
     private fun undeliveredMessage(unsent: List<PendingRecord>): String {

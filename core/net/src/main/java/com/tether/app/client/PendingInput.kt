@@ -143,9 +143,15 @@ object PendingInput {
         val additions = describePending(store, 0L, socketOpen = false, lastServerFrameAt = 0L)
             .filter { it.key !in seen }
             .map {
-                // A9: Send again only where the whole content is still here: text alone (no attachment, no delegate mention).
-                val textOnly = it.attachmentCount == 0 && held[it.key]?.mention == null && reason != FailedSendReason.PhotoLost && reason != FailedSendReason.Upload
-                FailedSend(it.key, it.sessionId, it.kind, it.text, it.attachmentCount, it.imageCount, it.bytes, reason, details[it.key]?.first, details[it.key]?.second ?: false, textOnly)
+                val retryable = details[it.key]?.second ?: false
+                // A9 / tth-87eo: Send again where the whole content is still here: text, or attachments the client
+                // retains (Expired, Link, a retryable Upload); never a delegate mention, never PhotoLost.
+                val again = held[it.key]?.mention == null && when (reason) {
+                    FailedSendReason.PhotoLost -> false
+                    FailedSendReason.Upload -> retryable && it.attachmentCount > 0
+                    else -> true
+                }
+                FailedSend(it.key, it.sessionId, it.kind, it.text, it.attachmentCount, it.imageCount, it.bytes, reason, details[it.key]?.first, retryable, again)
             }
         if (additions.isEmpty()) return current
         val next = current + additions
@@ -388,4 +394,72 @@ class PendingRecord internal constructor(val tree: JsObj) {
     override fun equals(other: Any?): Boolean = other is PendingRecord && other.tree == tree
     override fun hashCode(): Int = tree.hashCode()
     override fun toString(): String = "PendingRecord($key, $kind, $sessionId, tries=$tries, sentAt=$sentAt)"
+}
+
+
+/**
+ * tth-87eo (AW.5, owner D-L152-7 "until the app closes"): the attachment bytes of failed messages that show Send again,
+ * kept in MEMORY only (never the spool, never the uploads store, never a file), keyed by the failed row's key.
+ * Release follows the row: [reconcile] prunes to the keys the failed list still holds on every write to it. The bound
+ * (lead ruling D-L152-6) is ONE full message: all retained raw bytes together stay <= [cap]; the newest retained message
+ * always stays, older ones are released oldest first. Not thread-safe: the client calls it under its lock.
+ */
+internal class RetainedAttachments(private val cap: Long = com.tether.app.protocol.helpers.AttachmentDraft.MAX_ATTACHMENTS_TOTAL_BYTES.toLong()) {
+    private class Entry(val attachments: List<Attachment>, val bytes: Long)
+
+    private val entries = LinkedHashMap<String, Entry>()
+
+    val totalBytes: Long get() = entries.values.sumOf { it.bytes }
+    val keys: Set<String> get() = entries.keys.toSet()
+    fun has(key: String): Boolean = key in entries
+
+    /** Retain [attachments] for [key] (a key already held keeps what it had). */
+    fun retain(key: String, attachments: List<Attachment>) {
+        if (attachments.isEmpty() || key in entries) return
+        entries[key] = Entry(attachments, attachments.sumOf { rawSize(it.data) })
+    }
+
+    /**
+     * The give-up that just made [rows]: retain the bytes of every row that is NEW (not in [before]) AND shows Send
+     * again AND carries attachments, from its record in [records]. A row that is not there, one already failed, and one
+     * that cannot show Send again (a non-retryable refusal, a delegate mention, PhotoLost) retains nothing. True when
+     * anything was retained.
+     */
+    fun retainNew(before: Set<String>, rows: List<FailedSend>, records: List<PendingRecord>): Boolean {
+        val held = records.associateBy { it.key }
+        var any = false
+        for (row in rows) {
+            if (row.key in before || !row.canSendAgain || row.attachmentCount == 0) continue
+            val atts = held[row.key]?.attachments ?: continue
+            retain(row.key, atts)
+            any = true
+        }
+        return any
+    }
+
+    /** Hand the bytes of [key] over (Send again); they are no longer retained here. */
+    fun take(key: String): List<Attachment>? = entries.remove(key)?.attachments
+
+    /**
+     * Release what no row holds ([liveKeys]), then the oldest while the total passes the cap (the newest is never
+     * released). Returns the keys the BOUND released (not the pruned ones).
+     */
+    fun reconcile(liveKeys: Set<String>): Set<String> {
+        entries.keys.retainAll(liveKeys)
+        val released = LinkedHashSet<String>()
+        while (entries.size > 1 && totalBytes > cap) {
+            val oldest = entries.keys.first()
+            entries.remove(oldest)
+            released += oldest
+        }
+        return released
+    }
+
+    companion object {
+        /** Decoded size of canonical base64 [data], counted without decoding. */
+        fun rawSize(data: String): Long {
+            val pad = if (data.endsWith("==")) 2 else if (data.endsWith("=")) 1 else 0
+            return data.length.toLong() / 4 * 3 - pad
+        }
+    }
 }

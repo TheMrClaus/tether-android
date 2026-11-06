@@ -35,6 +35,8 @@ enum class SendShot(val id: String) {
     UploadFailed("send-upload-failed"),
     LinkAgain("send-link-again"),
     UploadRetryable("send-upload-retryable"),
+    /** tth-87eo (AW.5 R4-f): a `Link` row the one-message bound released (2 attachments); phone only. */
+    Released("send-released"),
     /** One golden only (phone, Studio): the not-kept waiting bubble in the warning tone (§4.1d A.2). */
     WaitingNotKept("send-waiting-not-kept"),
 }
@@ -61,9 +63,16 @@ private fun sendsFor(shot: SendShot): SendBubbles = when (shot) {
         emptyList(),
         listOf(SendFixtures.failed("k9", "Here are the two screenshots.", 2, 2, SendFixtures.THREE_MB)),
     ) {}
+    SendShot.Released -> SendBubbles(
+        emptyList(),
+        listOf(
+            SendFixtures.failed("k10", "Here are the two screenshots.", 2, 2, 6.0 * 1024 * 1024, reason = com.tether.app.client.FailedSendReason.Link)
+                .copy(released = true),
+        ),
+    ) {}
     SendShot.PhotoLost -> SendBubbles(
         emptyList(),
-        listOf(SendFixtures.failed("k8", "Here are the two screenshots.", reason = com.tether.app.client.FailedSendReason.PhotoLost)),
+        listOf(SendFixtures.failed("k8", "Here are the two screenshots.", 2, 2, SendFixtures.THREE_MB, reason = com.tether.app.client.FailedSendReason.PhotoLost)),
     ) {}
     // ta-delivery A2 (fix1 B2): "Uploading N%" while the photos go up, and "Not sent — the upload failed (<server reason>)".
     SendShot.Uploading -> SendBubbles(
@@ -185,7 +194,7 @@ class SendBubblesTabletScreenshotTest(private val shot: SendShot, private val sk
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept && it != SendShot.Released }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -200,7 +209,7 @@ class SendBubblesFontScaleScreenshotTest(private val shot: SendShot, private val
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept && it != SendShot.Released }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 

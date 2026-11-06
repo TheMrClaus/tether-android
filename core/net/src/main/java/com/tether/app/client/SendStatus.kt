@@ -57,11 +57,17 @@ data class FailedSend(
     /** ta-delivery A2: a later Send again may work (a transient reason), as opposed to a refusal that would repeat. */
     val retryable: Boolean = false,
     /**
-     * ta-delivery A9: [TetherClient.sendAgain] can re-dispatch this one: the client still holds ALL of its content (text
-     * only: no attachment bytes, no delegate mention) and it is not the app's own photo-lost case. False for any
-     * attachment record (the given-up record, with its bytes, is discarded), so no Send again key is drawn for it.
+     * ta-delivery A9 / tth-87eo: [TetherClient.sendAgain] can re-dispatch this one: the client still holds ALL of its
+     * content. Text alone, or attachments whose bytes it retained in memory (reasons Expired, Link, and a retryable
+     * Upload), and never a delegate mention, never [FailedSendReason.PhotoLost]. False once the retention bound
+     * released the bytes ([released]).
      */
     val canSendAgain: Boolean = false,
+    /**
+     * tth-87eo (AW.5): the one-message memory bound released this row's attachment bytes, so it lost Send again for good.
+     * Only this mark (never `canSendAgain == false`, which a delegate-mention row also is) picks the released label.
+     */
+    val released: Boolean = false,
 )
 
 /**
