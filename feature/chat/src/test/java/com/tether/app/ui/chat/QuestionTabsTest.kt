@@ -209,7 +209,10 @@ class QuestionTabsTest {
 
     @Test fun skipOnTheLastTabOfATabbedCardDoesNotSend() {
         show()
-        selectTab(3)
+        pick("Yes")
+        selectTab(1); pick("One Tap")
+        selectTab(2); pick("Purchases")
+        selectTab(3) // every other question is settled: a Skip that sent would send now
         scrollTo("question-skip")
         rule.onNodeWithTag("question-skip").performClick(); settle()
         assertTrue("Skip sent on the last tab: $calls", calls.isEmpty())
