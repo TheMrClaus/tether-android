@@ -5,6 +5,8 @@ import com.tether.app.protocol.reduce.ev
 import com.tether.app.protocol.reduce.evNullTurn
 import com.tether.app.protocol.reduce.foldTree
 import com.tether.app.protocol.reduce.freshTree
+import com.tether.app.protocol.tree.JsArr
+import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
@@ -81,6 +83,32 @@ class StopBackgroundV156Test {
         assertEquals(1, stoppableBackgroundTaskCount(state))
         assertEquals(1, liveBackgroundTaskCount(state, levelTaskIds = listOf(JsStr("x1"), JsStr("x2")), terminalEnds = true))
         assertEquals("the unflagged ta-ceo count is unchanged", 2, liveBackgroundTaskCount(state, levelTaskIds = listOf(JsStr("x1"), JsStr("x2"))))
+    }
+
+    @Test
+    fun snapshotRowLiveButTerminalIsNotCounted() {
+        // #278 terminal-row rule at the stoppable site: a snapshot row can be live:true AND already terminal (no fold event cleared it).
+        fun row(id: String, status: String) = JsObj.of("taskId" to JsStr(id), "live" to JsBool.TRUE, "status" to JsStr(status))
+        val state = freshTree().with(
+            "backgroundTasks" to JsArr.EMPTY.add(row("x1", "running")).add(row("x2", "completed")),
+        )
+        assertEquals(1, stoppableBackgroundTaskCount(state))
+    }
+
+    @Test
+    fun foregroundToolPlusSubAgentInnerTasksCountsTheLevelNotEveryRow() {
+        fun ids(vararg v: String) = buildJsonArray { v.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } }
+        val state = foldTree(
+            freshTree(), *open,
+            t("tool_start") { put("toolId", "fg"); put("name", "Read"); put("input", buildJsonObject {}) },
+            evNullTurn("task_started") { put("taskId", "x-a") },
+            evNullTurn("task_started") { put("taskId", "x-b") },
+            evNullTurn("task_started") { put("taskId", "inner-1") },
+            evNullTurn("task_started") { put("taskId", "inner-2") },
+            evNullTurn("background_tasks_changed") { put("taskIds", ids("x-a", "x-b")) },
+        )
+        assertEquals(1, openToolCount(state))
+        assertEquals("the CLI level (2), not the 4 running rows", 2, stoppableBackgroundTaskCount(state))
     }
 
     @Test
