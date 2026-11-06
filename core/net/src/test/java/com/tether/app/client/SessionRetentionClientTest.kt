@@ -134,6 +134,7 @@ class SessionRetentionClientTest {
         assertEquals(listOf("s1" to null), attaches(h.framesUntilBarrier()))
         ws.send(snapshotFrame("s1", 2, JsCodec.stringify(reference)))
         h.await(h.client.projectionTrees) { it.containsKey("s1") }
+        h.await(h.client.projections) { it.containsKey("s1") }
         assertEquals(reference, h.client.projectionTrees.value.getValue("s1"))
         assertEquals(referenceTyped, h.client.projections.value.getValue("s1"))
         // And it is a live, attached session again, with a cursor.
