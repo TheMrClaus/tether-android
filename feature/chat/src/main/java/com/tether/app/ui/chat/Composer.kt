@@ -1573,6 +1573,7 @@ private fun RowScope.ComposerActions(
                 } else {
                     null
                 },
+                dangerOutline = stopPanelOpen,
                 iconSize = 18.dp,
                 fontSize = fontSize,
                 enabled = interruptLock == null,
@@ -1625,6 +1626,7 @@ private fun RowScope.ComposerActions(
                 } else {
                     null
                 },
+                dangerOutline = stopPanelOpen,
                 iconSize = 18.dp,
                 fontSize = fontSize,
                 enabled = interruptLock == null,

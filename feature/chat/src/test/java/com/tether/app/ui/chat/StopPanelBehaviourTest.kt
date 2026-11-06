@@ -218,6 +218,35 @@ class StopPanelBehaviourTest {
     }
 
     @Test
+    fun aPanelClosedByItsTurnEndingStaysClosedWhenTheSameTurnIdReturns() {
+        show(ComposerFixtures.delivery(tools = 1, background = 3))
+        tapKey()
+        assertEquals(1, panelCount())
+        rule.runOnIdle { fixture = ComposerFixtures.idle }
+        frames()
+        assertEquals("the turn ended", 0, panelCount())
+        rule.runOnIdle { fixture = ComposerFixtures.delivery(tools = 1, background = 3) } // same id t1: only a dropped stale state could not reopen it
+        frames()
+        assertEquals("the stale open state was dropped at turn end", 0, panelCount())
+    }
+
+    @Test
+    fun theBoxValueResetsWhenTheStoppableTotalDropsToZero() {
+        show(ComposerFixtures.delivery(tools = 1, background = 3))
+        tapKey()
+        rule.onNodeWithTag(STOP_BOX_TAG).performClick()
+        frames()
+        assertEquals(true, boxChecked())
+        rule.runOnIdle { fixture = ComposerFixtures.delivery(tools = 1, background = 0) }
+        frames()
+        assertEquals("no box while nothing is stoppable", 0, boxCount())
+        rule.runOnIdle { fixture = ComposerFixtures.delivery(tools = 1, background = 3) }
+        frames()
+        assertEquals(1, boxCount())
+        assertEquals("the stored checked value went with the box row", false, boxChecked())
+    }
+
+    @Test
     fun escapeAndBackActAsKeepRunning() {
         show(ComposerFixtures.delivery(tools = 1, background = 3))
         keyboard() // a clickable takes focus (and a key event) only in keyboard input mode

@@ -1,6 +1,8 @@
 package com.tether.app.ui.chat
 
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -215,6 +217,9 @@ class ComposerStopPanel360ScreenshotTest(private val checked: Boolean, private v
             rule.onNodeWithTag(STOP_BOX_TAG).performClick()
             rule.mainClock.advanceTimeBy(600)
             rule.waitForIdle()
+            // The shot must picture the checked box and the checked sentence, never the unchecked panel under the checked name.
+            rule.onNodeWithTag(STOP_BOX_TAG).assertIsOn()
+            rule.onNodeWithText("It also stops 3 background tasks.", substring = true).assertExists()
         }
         rule.onNodeWithTag(ComposerTag).captureRoboImage(
             "src/test/screenshots/composer-stop-panel-box${if (checked) "-checked" else ""}/${skin.id}-phone-360.png",
