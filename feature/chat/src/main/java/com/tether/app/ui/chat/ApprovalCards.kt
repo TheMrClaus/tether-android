@@ -1010,7 +1010,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
     fun announce(text: String) { announceText = text; announceSeq += 1 }
     val inputMode = LocalInputModeManager.current
     var focusWish by remember(cfp) { mutableStateOf<FocusWish?>(null) }
-    val optionRequesters = remember(cfp) { HashMap<Int, FocusRequester>() }
+    val optionRequesters = remember(cfp) { List(view.prompts.maxOfOrNull { it.options.size } ?: 0) { FocusRequester() } }
     val primaryRequester = remember(cfp) { FocusRequester() }
     val tabRequesters = remember(cfp, total) { List(total) { FocusRequester() } }
     // Focus moves only for a hardware keyboard (the web's fine-pointer rule): in touch mode (TalkBack
@@ -1033,7 +1033,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                     val slot = slotOf(q)
                     q.options.indexOfFirst { labelIndex(q, it.label) in now.picks[slot].orEmpty() }
                 } ?: -1
-                optionRequesters[if (pressed >= 0) pressed else 0]
+                optionRequesters.getOrNull(if (pressed >= 0) pressed else 0)
             }
         }
         runCatching { target?.requestFocus() }
@@ -1275,7 +1275,7 @@ internal fun QuestionCard(view: QuestionRequestView, answered: Boolean, modifier
                                         if (onThisPage()) update { applyPick(it, slot, multi, labelAt) }
                                     },
                                     onBlocked = blocked,
-                                    focusRequester = optionRequesters.getOrPut(question.options.indexOf(option)) { FocusRequester() },
+                                    focusRequester = optionRequesters.getOrNull(question.options.indexOf(option)),
                                 )
                             }
                         }
