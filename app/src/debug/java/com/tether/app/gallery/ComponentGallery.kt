@@ -52,7 +52,7 @@ val GalleryFontScales: List<Float> = listOf(1f, 1.3f, 2f)
 
 /**
  * The debug Component Gallery: every design-system primitive (by web class set, in every state),
- * the type roles, all 136 icon glyphs, the provider logos and the adaptive launcher icon, under a
+ * the type roles, all 137 icon glyphs, the provider logos and the adaptive launcher icon, under a
  * mode switcher (Studio light, dark, or follow system), a font-scale toggle and a
  * reduced-motion toggle. Sections are [GallerySections]; the screenshot tests render the same
  * section composables ([GalleryGoldens]).

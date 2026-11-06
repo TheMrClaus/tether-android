@@ -39,7 +39,7 @@ class ComponentGalleryTest {
     }
 
     @Test fun iconGridHoldsAllWebGlyphsAndTheGoldensSplitItWithoutGaps() {
-        assertEquals(136, IconNames.size)
+        assertEquals(137, IconNames.size)
         assertEquals(TetherIcons.byWebName.keys.toList(), IconNames)
         // icons-1..3 together are exactly IconNames, in order (asserted via the same subList bounds).
         assertEquals(setOf("icons-1", "icons-2", "icons-3"), GalleryGoldens.keys.filter { it.startsWith("icons") }.toSet())

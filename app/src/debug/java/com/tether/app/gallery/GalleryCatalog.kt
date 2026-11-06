@@ -190,7 +190,7 @@ private fun fmt(u: TextUnit): String {
 // ---------------------------------------------------------------------------------------------
 // Icons (T3.5)
 
-/** Every lucide-react name the web imports (136), in TetherIcons' order. */
+/** Every lucide-react name the web imports (137), in TetherIcons' order. */
 val IconNames: List<String> = TetherIcons.byWebName.keys.toList()
 
 /** Two columns of glyph + web name; a deprecated alias (drawn as its canonical glyph) is marked `*`. */

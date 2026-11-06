@@ -21,7 +21,7 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * T3.4: the gallery's own sections as goldens, every skin at phone size (412×915dp @420dpi, the
  * web's 412×915 @2.625). Only what T3.3's primitive goldens (:core:designsystem) do not already
- * cover: the type roles, the 136-glyph icon grid, the provider logos and the adaptive launcher icon.
+ * cover: the type roles, the 137-glyph icon grid, the provider logos and the adaptive launcher icon.
  * `recordRoborazziDebug` writes src/testDebug/screenshots/gallery; `verifyRoborazziDebug` (the gate)
  * fails on any changed pixel.
  *
