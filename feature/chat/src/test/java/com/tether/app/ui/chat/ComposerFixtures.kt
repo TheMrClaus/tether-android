@@ -200,3 +200,7 @@ fun ComposerHost(skin: TetherSkin, width: Dp? = null, content: @Composable () ->
 }
 
 const val ComposerTag = "composer-deck"
+
+/** AW.3: [folded] as a server that reported the running CLI's [version] (`cliVersion` on the projection tree; F.1 reads it). */
+fun withCliVersion(folded: ChatFixtures.Folded, version: String?): ChatFixtures.Folded =
+    if (version == null) folded else folded.copy(tree = folded.tree.put("cliVersion", com.tether.app.protocol.tree.JsStr(version)))

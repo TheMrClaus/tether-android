@@ -205,6 +205,15 @@ fun ChatScreen(
         }
         interrupt
     }
+    // AW.3.3: the Stop panel's box commit (`stopBackground = true`; the client sends the key only to a server that speaks v156).
+    val onInterruptStopBackground: (String) -> com.tether.app.client.InterruptResult = remember(session?.id, consentOrigin, vm) {
+        val s = session
+        val drawnFor = consentOrigin
+        val interrupt: (String) -> com.tether.app.client.InterruptResult = { turnId ->
+            if (s != null) vm.client.interrupt(s.id, drawnFor, turnId, stopBackground = true) else com.tether.app.client.InterruptResult.Locked
+        }
+        interrupt
+    }
     val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
     // ONE store for every card of this screen (transcript and run tabs alike): the shell's (round 4,
     // H1: above the layout switch), or one saved here when nobody provides it.
@@ -548,7 +557,9 @@ fun ChatScreen(
                 onRequestControls = { session?.let { vm.client.requestSessionControls(it.id) } },
                 liveness = liveness,
                 steerCapableEngine = session != null && providers.firstOrNull { it.id == session.provider }?.capabilities?.steer == true,
-                backgroundSpared = com.tether.app.protocol.helpers.QueueWait.backgroundSparedFor(session, providers, chatProtocol),
+                onInterruptStopBackground = onInterruptStopBackground,
+                serverProtocol = chatProtocol,
+                persistentSessions = session != null && providers.firstOrNull { it.id == session.provider }?.capabilities?.persistentSessions == true,
                 attachments = attachments,
                 // A plain read, not a subscription: only the opening value matters here.
                 initialDraft = session?.let { vm.loadedDraft(it.id) },

@@ -160,6 +160,21 @@ class NoticeModelTest {
     }
 
     @Test
+    fun anInterruptedTurnSaysWhatCouldNotBeStopped() {
+        val at = 3_702_000.0 // 01:01:42 UTC
+        assertEquals(
+            "Interrupted at 01:01:42 by Stop · 1 tool stopped · 2 background tasks killed · 1 background task could not be stopped",
+            interruptedNoticeCopy(InterruptNoticeView("operator-stop", at, 1, 2, 1), ZoneOffset.UTC),
+        )
+        assertEquals(
+            "Interrupted at 01:01:42 by Stop · 2 background tasks could not be stopped",
+            interruptedNoticeCopy(InterruptNoticeView("operator-stop", at, 0, 0, 2), ZoneOffset.UTC),
+        )
+        // An old journal (no unstoppedBackground) reads as before.
+        assertEquals("Interrupted at 01:01:42 by Stop", interruptedNoticeCopy(InterruptNoticeView("operator-stop", at, 0, 0), ZoneOffset.UTC))
+    }
+
+    @Test
     fun outcomeCopyPrefersTheErrorThenTheOutcomesWords() {
         assertEquals("boom", outcomeText("error", "boom", null))
         assertEquals("Turn ended with an error", outcomeText("error", null, null))

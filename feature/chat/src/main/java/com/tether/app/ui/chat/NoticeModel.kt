@@ -43,7 +43,7 @@ internal data class SessionNoticeView(val kind: String, val text: String, val di
 
 /** A `turn_interrupted` notice, shown in words at its turn's outcome row (issue #184). */
 @Immutable
-internal data class InterruptNoticeView(val by: String?, val at: Double?, val stoppedTools: Int, val stoppedBackground: Int)
+internal data class InterruptNoticeView(val by: String?, val at: Double?, val stoppedTools: Int, val stoppedBackground: Int, val unstoppedBackground: Int = 0)
 
 /** `state.rateLimitResume` while it asks for a choice or holds a schedule. */
 @Immutable
@@ -222,6 +222,8 @@ internal fun interruptNoticesByTurn(tree: JsObj?): Map<String, InterruptNoticeVi
             at = o["at"].num(),
             stoppedTools = wholeCount(o["stoppedTools"]),
             stoppedBackground = wholeCount(o["stoppedBackground"]),
+            // AW.3.6 (v156): absent = 0, so an old journal reads as before.
+            unstoppedBackground = wholeCount(o["unstoppedBackground"]),
         )
     }
     return byTurn
@@ -259,6 +261,7 @@ internal fun interruptedNoticeCopy(notice: InterruptNoticeView?, zone: ZoneId = 
     fun plural(n: Int, one: String, many: String) = "$n ${if (n == 1) one else many}"
     if (notice.stoppedTools > 0) parts.add("${plural(notice.stoppedTools, "tool", "tools")} stopped")
     if (notice.stoppedBackground > 0) parts.add("${plural(notice.stoppedBackground, "background task", "background tasks")} killed")
+    if (notice.unstoppedBackground > 0) parts.add("${plural(notice.unstoppedBackground, "background task", "background tasks")} could not be stopped")
     return parts.joinToString(" · ")
 }
 

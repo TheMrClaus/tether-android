@@ -98,11 +98,13 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
                 onQueueRemove = {},
                 onRequestControls = {},
                 liveness = ComposerLiveness.Live,
-                backgroundSpared = shot == ComposerShot.StopConfirmSpared,
+                // AW.3 fixtures' servers: stop-confirm and -steered on protocol 155 (no box); -spared on 156 with CLI 2.1.295 (spares: the box offers the 3 tasks).
+                serverProtocol = if (shot == ComposerShot.StopConfirmSpared) 156 else 155,
+                persistentSessions = true,
                 steerCapableEngine = shot == ComposerShot.QueueSteer || shot == ComposerShot.QueueSteerAttachments,
                 initialDraft = draft,
                 controlActions = SessionControlFixtures.Recorder().actions(),
-                tree = fixture.tree,
+                tree = withCliVersion(fixture, if (shot == ComposerShot.StopConfirmSpared) "2.1.295" else null).tree,
             )
         }
     }
@@ -172,5 +174,57 @@ class ComposerFontScaleScreenshotTest(private val shot: ComposerShot, private va
         fun params(): List<Array<Any>> = listOf(ComposerShot.Draft, ComposerShot.Queue, ComposerShot.QueueSteer, ComposerShot.QueueSteerAttachments, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.InterruptSendConfirm, ComposerShot.StopConfirm, ComposerShot.HeldHandover, ComposerShot.StopConfirmSteered, ComposerShot.StopConfirmSpared).flatMap { s ->
             listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
+    }
+}
+
+/** AW.3.7: the new panel goldens at 360dp: Claude persistent, server 156, CLI 2.1.295, 1 tool + 3 background tasks; unchecked, then the box checked. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w360dp-h800dp-420dpi")
+class ComposerStopPanel360ScreenshotTest(private val checked: Boolean, private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    @Test fun panel() {
+        rule.mainClock.autoAdvance = false
+        val fixture = withCliVersion(ComposerFixtures.delivery(tools = 1, background = 3), "2.1.295")
+        rule.setContent {
+            ComposerHost(skin) {
+                Composer(
+                    session = ComposerFixtures.session,
+                    projection = fixture.projection,
+                    controls = SessionControlFixtures.claudeIdleControls,
+                    serverNow = { ComposerFixtures.BUSY_NOW },
+                    onSend = { _, _ -> true },
+                    onInterrupt = { com.tether.app.client.InterruptResult.Sent },
+                    onQueueEdit = { _, _ -> },
+                    onQueueRemove = {},
+                    onRequestControls = {},
+                    liveness = ComposerLiveness.Live,
+                    serverProtocol = 156,
+                    persistentSessions = true,
+                    controlActions = SessionControlFixtures.Recorder().actions(),
+                    tree = fixture.tree,
+                )
+            }
+        }
+        rule.mainClock.advanceTimeBy(600)
+        rule.waitForIdle()
+        rule.onNodeWithTag(INTERRUPT_KEY_TAG).performClick()
+        rule.mainClock.advanceTimeBy(600)
+        rule.waitForIdle()
+        if (checked) {
+            rule.onNodeWithTag(STOP_BOX_TAG).performClick()
+            rule.mainClock.advanceTimeBy(600)
+            rule.waitForIdle()
+        }
+        rule.onNodeWithTag(ComposerTag).captureRoboImage(
+            "src/test/screenshots/composer-stop-panel-box${if (checked) "-checked" else ""}/${skin.id}-phone-360.png",
+            roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),
+        )
+    }
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun params(): List<Array<Any>> = listOf(false, true).flatMap { c -> listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(c, it) } }
     }
 }
