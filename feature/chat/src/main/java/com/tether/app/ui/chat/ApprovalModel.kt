@@ -457,6 +457,101 @@ internal fun <T> togglePick(current: List<T>, multi: Boolean, pick: T): List<T> 
     else -> listOf(pick)
 }
 
+// --- Question tabs (AW.2; twin of the web's lib/question-tabs.ts), by answer SLOT ----------------------
+
+/** A slot's status (web `questionStatus`): answered wins, then skipped, then needs-an-answer or unanswered. */
+internal enum class QuestionStatus { Answered, Skipped, Unanswered, NeedsAnswer }
+
+/** What Skip cleared from a slot (picks as indices into the slot's label union, and the Other text), kept for Undo skip. */
+internal data class SkippedAnswer(val picks: List<Int>, val other: String)
+
+/** `questionTabLabels`: the trimmed header, else `Question {i}`; a case-folded duplicate gets ` {i}` on every occurrence. */
+internal fun questionTabLabels(headers: List<String?>): List<String> {
+    val base = headers.mapIndexed { i, h -> jsTrim(h.orEmpty()).ifEmpty { "Question ${i + 1}" } }
+    val counts = base.groupingBy { it.lowercase() }.eachCount()
+    return base.mapIndexed { i, label -> if ((counts[label.lowercase()] ?: 0) > 1) "$label ${i + 1}" else label }
+}
+
+internal fun slotAnswered(sel: QuestionSelection, slot: Int): Boolean =
+    sel.picks[slot].orEmpty().isNotEmpty() || jsTrim(sel.other[slot].orEmpty()).isNotEmpty()
+
+internal fun slotSettled(sel: QuestionSelection, slot: Int): Boolean = slot in sel.skipped || slotAnswered(sel, slot)
+
+internal fun slotStatus(sel: QuestionSelection, slot: Int, submitAttempted: Boolean): QuestionStatus = when {
+    slotAnswered(sel, slot) -> QuestionStatus.Answered
+    slot in sel.skipped -> QuestionStatus.Skipped
+    submitAttempted -> QuestionStatus.NeedsAnswer
+    else -> QuestionStatus.Unanswered
+}
+
+/** Skip (2+ questions): clears the slot's answer into skipUndo (only when something was cleared) and marks it skipped. */
+internal fun applySkip(sel: QuestionSelection, slot: Int): QuestionSelection {
+    val priorPicks = sel.picks[slot].orEmpty()
+    val priorOther = sel.other[slot].orEmpty()
+    val cleared = priorPicks.isNotEmpty() || priorOther.isNotEmpty()
+    return sel.copy(
+        picks = sel.picks - slot,
+        other = sel.other - slot,
+        skipped = sel.skipped + slot,
+        skipUndo = if (cleared) sel.skipUndo + (slot to SkippedAnswer(priorPicks, priorOther)) else sel.skipUndo - slot,
+    )
+}
+
+/** Undo skip: restores the cleared picks and Other, un-skips and deletes the entry; no entry, no change. */
+internal fun applyUndoSkip(sel: QuestionSelection, slot: Int): QuestionSelection {
+    val saved = sel.skipUndo[slot] ?: return sel
+    return sel.copy(
+        picks = if (saved.picks.isNotEmpty()) sel.picks + (slot to saved.picks) else sel.picks,
+        other = if (saved.other.isNotEmpty()) sel.other + (slot to saved.other) else sel.other,
+        skipped = sel.skipped - slot,
+        skipUndo = sel.skipUndo - slot,
+    )
+}
+
+/** The invariant: a change that leaves the slot answered removes it from skipped and drops its undo entry. */
+private fun settleAfterChange(sel: QuestionSelection, slot: Int): QuestionSelection =
+    if (slot !in sel.skipped || !slotAnswered(sel, slot)) sel else sel.copy(skipped = sel.skipped - slot, skipUndo = sel.skipUndo - slot)
+
+internal fun applyPick(sel: QuestionSelection, slot: Int, multi: Boolean, labelAt: Int): QuestionSelection =
+    settleAfterChange(sel.copy(picks = sel.picks + (slot to togglePick(sel.picks[slot].orEmpty(), multi, labelAt))), slot)
+
+internal fun applyOther(sel: QuestionSelection, slot: Int, text: String): QuestionSelection =
+    settleAfterChange(sel.copy(other = sel.other + (slot to text)), slot)
+
+/** The first page (by prompt order) whose slot is neither answered nor skipped, or -1. */
+internal fun firstUnsettledPage(sel: QuestionSelection, slotOfPage: List<Int>): Int =
+    slotOfPage.indexOfFirst { !slotSettled(sel, it) }
+
+/** APG tabs with automatic activation, wrapping arrows; null for any other key. */
+internal fun tabKeyTarget(key: TabKey, index: Int, total: Int): Int? = when {
+    total < 1 -> null
+    key == TabKey.Right -> (index + 1) % total
+    key == TabKey.Left -> (index - 1 + total) % total
+    key == TabKey.Home -> 0
+    key == TabKey.End -> total - 1
+    else -> null
+}
+
+internal enum class TabKey { Left, Right, Home, End }
+
+internal fun unansweredMessage(labels: List<String>): String =
+    if (labels.size == 1) "Still unanswered: ${labels[0]}. Answer it, or choose Skip to leave it unanswered."
+    else "Still unanswered: ${labels.joinToString(", ")}. Answer each one, or choose Skip to leave it unanswered."
+
+internal const val SINGLE_UNANSWERED_MESSAGE = "Answer each highlighted question, or choose Skip to leave it unanswered."
+
+internal fun moveAnnouncement(index: Int, total: Int, label: String, status: QuestionStatus): String {
+    val suffix = when (status) { QuestionStatus.Answered -> ", answered"; QuestionStatus.Skipped -> ", skipped"; else -> "" }
+    return "Question ${index + 1} of $total: $label$suffix"
+}
+
+internal fun statusWords(status: QuestionStatus): String = when (status) {
+    QuestionStatus.Answered -> ", answered"
+    QuestionStatus.Skipped -> ", skipped"
+    QuestionStatus.NeedsAnswer -> ", needs an answer"
+    QuestionStatus.Unanswered -> ", not answered"
+}
+
 @Immutable
 internal data class AnsweredItemView(val header: String?, val question: String, val answer: String?)
 

@@ -200,6 +200,72 @@ object ApprovalFixtures {
         ChatFixtures.fold(*prompt("t1", "Set up the new service.", "Two choices before I scaffold it.").toTypedArray(), *askEvents().toTypedArray())
     }
 
+    /** One question pending: no strip, no Back, the header line kept, Skip skips and sends. */
+    val questionSingle: ChatFixtures.Folded by lazy {
+        ChatFixtures.fold(
+            *prompt("t1", "Set up the new service.", "One choice before I scaffold it.").toTypedArray(),
+            ev("tool_start", "t1", ts = T) { put("toolId", "ask-1"); put("name", "AskUserQuestion"); putJsonObject("input") {} },
+            ev("question_request", "t1", ts = T) {
+                put("requestId", "q-1"); put("toolId", "ask-1")
+                putJsonArray("questions") {
+                    addJsonObject {
+                        put("question", Q_DB); put("header", "Database"); put("multiSelect", false)
+                        putJsonArray("options") {
+                            addJsonObject { put("label", "Postgres"); put("description", "") }
+                            addJsonObject { put("label", "SQLite"); put("description", "") }
+                        }
+                    }
+                }
+            },
+        )
+    }
+
+    const val Q_CRASH = "Send crash reports to the team?"
+    const val Q_LOGIN = "Which Google login flow should the app use?"
+    const val Q_ANALYTICS = "Which analytics events should be recorded?"
+    const val Q_DEPLOY = "Where should the first build be deployed?"
+
+    /** Four questions pending (tabbed): the AW.2.9 golden fixture, headers `Crash reports`, `Google login`, `Analytics`, `Deploy target`. */
+    val questionTabs: ChatFixtures.Folded by lazy {
+        ChatFixtures.fold(
+            *prompt("t1", "Set up the new service.", "Four choices before I scaffold it.").toTypedArray(),
+            ev("tool_start", "t1", ts = T) { put("toolId", "ask-1"); put("name", "AskUserQuestion"); putJsonObject("input") {} },
+            ev("question_request", "t1", ts = T) {
+                put("requestId", "q-1"); put("toolId", "ask-1")
+                putJsonArray("questions") {
+                    addJsonObject {
+                        put("question", Q_CRASH); put("header", "Crash reports"); put("multiSelect", false)
+                        putJsonArray("options") {
+                            addJsonObject { put("label", "Yes"); put("description", "Send them automatically") }
+                            addJsonObject { put("label", "No"); put("description", "Keep them on the device") }
+                        }
+                    }
+                    addJsonObject {
+                        put("question", Q_LOGIN); put("header", "Google login"); put("multiSelect", false)
+                        putJsonArray("options") {
+                            addJsonObject { put("label", "One Tap"); put("description", "The quickest sign-in") }
+                            addJsonObject { put("label", "Classic button"); put("description", "The familiar button") }
+                        }
+                    }
+                    addJsonObject {
+                        put("question", Q_ANALYTICS); put("header", "Analytics"); put("multiSelect", true)
+                        putJsonArray("options") {
+                            addJsonObject { put("label", "Screen views"); put("description", "") }
+                            addJsonObject { put("label", "Purchases"); put("description", "") }
+                        }
+                    }
+                    addJsonObject {
+                        put("question", Q_DEPLOY); put("header", "Deploy target"); put("multiSelect", false)
+                        putJsonArray("options") {
+                            addJsonObject { put("label", "Staging"); put("description", "") }
+                            addJsonObject { put("label", "Production"); put("description", "") }
+                        }
+                    }
+                }
+            },
+        )
+    }
+
     /** The question answered and resolved: the record in the AskUserQuestion slot; a second, block-less record trails. */
     val answered: ChatFixtures.Folded by lazy {
         ChatFixtures.fold(

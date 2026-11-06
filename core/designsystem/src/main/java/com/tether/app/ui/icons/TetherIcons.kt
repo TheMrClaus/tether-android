@@ -32,6 +32,7 @@ import com.composables.icons.lucide.CircleAlert
 import com.composables.icons.lucide.CircleCheck
 import com.composables.icons.lucide.CircleDot
 import com.composables.icons.lucide.CircleHelp
+import com.composables.icons.lucide.CircleMinus
 import com.composables.icons.lucide.CircleStop
 import com.composables.icons.lucide.CircleX
 import com.composables.icons.lucide.ClipboardCheck
@@ -188,6 +189,7 @@ object TetherIcons {
     val CircleCheck: ImageVector get() = Lucide.CircleCheck
     val CircleDot: ImageVector get() = Lucide.CircleDot
     val CircleHelp: ImageVector get() = Lucide.CircleHelp
+    val CircleMinus: ImageVector get() = Lucide.CircleMinus
     val CircleStop: ImageVector get() = Lucide.CircleStop
     val ClipboardCheck: ImageVector get() = Lucide.ClipboardCheck
     val ClipboardPaste: ImageVector get() = Lucide.ClipboardPaste
@@ -354,6 +356,7 @@ object TetherIcons {
             "Circle" to Circle,
             "CircleAlert" to CircleAlert,
             "CircleDot" to CircleDot,
+            "CircleMinus" to CircleMinus,
             "CircleStop" to CircleStop,
             "ClipboardCheck" to ClipboardCheck,
             "ClipboardPaste" to ClipboardPaste,
