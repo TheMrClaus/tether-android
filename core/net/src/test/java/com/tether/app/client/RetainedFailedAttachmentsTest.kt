@@ -239,4 +239,64 @@ class RetainedFailedAttachmentsTest {
         assertEquals(4, rows.size)
         assertNotNull(rows)
     }
+
+    /** Send each message first, then enough text sends to evict them all oldest-first: their failed rows, no other failure rows. */
+    private fun failedAttachmentRows(client: RealTetherClient, sends: List<Pair<String, List<Attachment>>>): List<FailedSend> {
+        sends.forEach { (text, atts) -> sendWithRetry(client, text, atts) }
+        repeat(Web.MAX_RECORDS) { client.send("s1", "m$it") }
+        val texts = sends.map { it.first }
+        h.await(client.failedSends) { rows -> texts.all { t -> rows.any { it.text == t } } }
+        return texts.map { t -> client.failedSends.value.single { it.text == t } }
+    }
+
+    // BLOCKING (refuter): the flip lives in reconcileRetainedLocked; pin the ROW, not only the bytes.
+    @Test
+    fun aSecondFullFailureReleasesTheFirstRowAndItLosesSendAgainForGood() {
+        val client = connected()
+        failedAttachmentRows(client, listOf("first" to message(full, "a"), "second" to message(full, "b")))
+        val rows = client.failedSends.value
+        val first = rows.single { it.text == "first" }
+        val second = rows.single { it.text == "second" }
+        assertFalse("the released row no longer shows Send again", first.canSendAgain)
+        assertTrue("the released row is marked released", first.released)
+        assertTrue("the newest keeps Send again", second.canSendAgain)
+        assertFalse(second.released)
+        assertEquals("only the newest message's bytes remain", full, client.retainedFailedBytes)
+    }
+
+    // R4-e: 6 MiB (A) and 8 MiB (C) are 14 MiB, under the bound: both keep Send again.
+    @Test
+    fun twoMessagesUnderTheBoundBothKeepSendAgain() {
+        val client = connected()
+        failedAttachmentRows(client, listOf("A" to message(6 * MIB, "a"), "C" to message(8 * MIB, "c")))
+        val rows = client.failedSends.value
+        listOf("A", "C").forEach { t ->
+            val row = rows.single { it.text == t }
+            assertTrue("$t keeps Send again", row.canSendAgain)
+            assertFalse("$t is not released", row.released)
+        }
+        assertEquals(14 * MIB, client.retainedFailedBytes)
+    }
+
+    // Exit: retractFailed (the server proves it accepted the key: a live ack takes the bubble back).
+    @Test
+    fun aRetractedFailedRowReleasesItsBytes() {
+        val client = connected()
+        val row = failedAttachmentRow(client, two)
+        assertEquals(twoBytes, client.retainedFailedBytes)
+        lastWs!!.send("""{"type":"event","sessionId":"s1","event":{"type":"turn_started","turnId":"t1","idempotencyKey":"${row.key}","seq":2,"ts":1000}}""")
+        h.await(client.failedSends) { rows -> rows.none { it.key == row.key } }
+        assertEquals(0L, client.retainedFailedBytes)
+    }
+
+    // Exit: clearFailedSendsLocked (a sign-out / stop drops every failed bubble).
+    @Test
+    fun aSignOutClearReleasesTheBytes() {
+        val client = connected()
+        failedAttachmentRow(client, two)
+        assertEquals(twoBytes, client.retainedFailedBytes)
+        client.stop()
+        assertTrue(client.failedSends.value.isEmpty())
+        assertEquals(0L, client.retainedFailedBytes)
+    }
 }

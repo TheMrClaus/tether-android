@@ -37,6 +37,8 @@ enum class SendShot(val id: String) {
     UploadRetryable("send-upload-retryable"),
     /** tth-87eo (AW.5 R4-f): a `Link` row the one-message bound released (2 attachments); phone only. */
     Released("send-released"),
+    /** tth-87eo fix round: the row the client really produces when the bound releases a message (reason Expired, "Not delivered"); phone only. */
+    ReleasedExpired("send-released-expired"),
     /** One golden only (phone, Studio): the not-kept waiting bubble in the warning tone (§4.1d A.2). */
     WaitingNotKept("send-waiting-not-kept"),
 }
@@ -67,6 +69,13 @@ private fun sendsFor(shot: SendShot): SendBubbles = when (shot) {
         emptyList(),
         listOf(
             SendFixtures.failed("k10", "Here are the two screenshots.", 2, 2, 6.0 * 1024 * 1024, reason = com.tether.app.client.FailedSendReason.Link)
+                .copy(released = true),
+        ),
+    ) {}
+    SendShot.ReleasedExpired -> SendBubbles(
+        emptyList(),
+        listOf(
+            SendFixtures.failed("k11", "Here are the two screenshots.", 2, 2, 6.0 * 1024 * 1024, reason = com.tether.app.client.FailedSendReason.Expired)
                 .copy(released = true),
         ),
     ) {}
@@ -194,7 +203,7 @@ class SendBubblesTabletScreenshotTest(private val shot: SendShot, private val sk
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept && it != SendShot.Released }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept && it != SendShot.Released && it != SendShot.ReleasedExpired }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -209,7 +218,7 @@ class SendBubblesFontScaleScreenshotTest(private val shot: SendShot, private val
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept && it != SendShot.Released }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = SendShot.entries.filter { it != SendShot.WaitingNotKept && it != SendShot.Released && it != SendShot.ReleasedExpired }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
