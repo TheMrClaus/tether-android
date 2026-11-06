@@ -220,6 +220,7 @@ class StopPanelBehaviourTest {
     @Test
     fun escapeAndBackActAsKeepRunning() {
         show(ComposerFixtures.delivery(tools = 1, background = 3))
+        keyboard() // a clickable takes focus (and a key event) only in keyboard input mode
         tapKey()
         rule.onNodeWithTag(KEEP_RUNNING_KEY_TAG).requestFocus()
         rule.onNodeWithTag(KEEP_RUNNING_KEY_TAG).performKeyInput { keyDown(Key.Escape); keyUp(Key.Escape) }
