@@ -215,6 +215,8 @@ class ComposerStopPanel360ScreenshotTest(private val checked: Boolean, private v
         rule.waitForIdle()
         if (checked) {
             rule.onNodeWithTag(STOP_BOX_TAG).performClick()
+            // Manual clock: the click's state write must be applied before frames advance (StopPanelBehaviourTest.frames does the same).
+            rule.runOnIdle { androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() }
             rule.mainClock.advanceTimeBy(600)
             rule.waitForIdle()
             // The shot must picture the checked box and the checked sentence, never the unchecked panel under the checked name.
