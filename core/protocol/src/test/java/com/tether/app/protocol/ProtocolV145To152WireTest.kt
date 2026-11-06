@@ -162,8 +162,8 @@ class ProtocolV145To152WireTest {
         assertEquals("Reviewer", c.fromSessionName)
         assertFalse(a.isPeer)
         assertFalse("origin user with a peer kind is not a peer row", ParsedQueue.peer(origin = "user").isPeer)
-        // isListedInComposer / operatorQueuedMessages are L4's and unchanged: a peer row is still not listed here.
-        assertFalse(c.isListedInComposer)
+        // tth-y1hv: a peer row IS listed in the composer now (visible, withdrawable, never editable).
+        assertTrue(c.isListedInComposer)
     }
 
     private object ParsedQueue {

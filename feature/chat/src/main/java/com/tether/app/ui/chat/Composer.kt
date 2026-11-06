@@ -1042,6 +1042,20 @@ fun Composer(
                 // the HandoffNotice ("Handed off to <name> →"); a read-only session's by the replay-only flag. No input, no keys.
                 val handedOff = !session?.handedOffTo.isNullOrEmpty()
                 if (session != null && handedOff) {
+                    // tth-2zt (spec §4.1b J): rows that stayed on the source stay visible, held + read-only, Remove only, above the notice.
+                    val staying = operatorQueuedMessages(projection?.queuedMessages.orEmpty())
+                    if (staying.isNotEmpty()) {
+                        QueuedMessages(
+                            queued = staying,
+                            onSave = { _, _ -> },
+                            onRemove = onQueueRemove,
+                            sessionId = session.id,
+                            interruptTurnId = null,
+                            onInterruptNow = {},
+                            interruptLock = null,
+                            handedOff = true,
+                        )
+                    }
                     HandoffNotice(HandoffVariant.To, handoffTarget, onOpenSession, linkFocus = handoffLinkFocus)
                 } else if (session?.readOnly == true) {
                     ReplayOnlyFlag(session.provider)

@@ -310,9 +310,26 @@ internal const val HANDOVER_QUEUE_ROW_DESCRIPTION = "Tether's handover instructi
 internal const val HANDOVER_QUEUE_REMOVE_DESCRIPTION = "Remove the handover instruction to cancel the handover"
 internal const val HANDOVER_QUEUE_WAIT_COPY = "Queued — Tether's handover instruction, sent after the current turn. Remove it to cancel the handover."
 
+/** E.2 (tth-4idu, lib/delivery-state.ts queueRegionLabel): the strip's region name, what the container is, never a state. n = rows rendered. */
+internal fun queueRegionLabel(n: Int): String = if (n == 1) "Message queue, 1 message" else "Message queue, $n messages"
+
+/** tth-y1hv (chat-view.tsx:1455): a queued row another session sent; visible and withdrawable, never editable. */
+internal const val PEER_QUEUE_WAIT_COPY = "Queued — from another session, not you. It sends after the current turn; remove it to withdraw it."
+internal const val PEER_QUEUE_ROW_DESCRIPTION = "Queued message from another session (read-only)"
+internal const val PEER_QUEUE_REMOVE_DESCRIPTION = "Withdraw queued message from another session"
+internal const val OPERATOR_READ_ONLY_ROW_DESCRIPTION = "Queued message (read-only)"
+internal const val QUEUE_READONLY_TEXT_TAG = "queue-readonly-text"
+
+/** tth-2zt (spec §4.1b J, lib/delivery-state.ts handedOffRowLabel): the label of a row that stayed on a handed-off source. */
+internal const val HANDED_OFF_ROW_LABEL = "Not sent: this session was handed off."
+internal fun handedOffRowLabel(message: QueuedMessage): String =
+    if (message.isHandoverRequest || message.isPeer) "$HANDED_OFF_ROW_LABEL Remove it."
+    else "$HANDED_OFF_ROW_LABEL Send it again in the new session, then remove it here."
+
 /**
- * `.chat-queue` (v14): the messages queued while a turn runs, each editable in place. Labelled
- * "Queued messages" for TalkBack, as the web's `aria-label`.
+ * `.chat-queue` (v14): the messages queued while a turn runs, each editable in place (a peer session's row and the handover
+ * instruction are read-only). Named [queueRegionLabel] for TalkBack, as the web's `aria-label`. [handedOff] (tth-2zt, spec §4.1b J):
+ * the strip a handed-off source keeps while it holds rows: every row held and read-only, Remove only.
  */
 @Composable
 internal fun QueuedMessages(
@@ -341,6 +358,7 @@ internal fun QueuedMessages(
     handoverStage: com.tether.app.client.Handover.StageView? = null,
     /** W34: v151: the instruction row has no X, whatever the stage (chat-view.tsx:1632 `!handoverRequest`). */
     handoverV151: Boolean = false,
+    handedOff: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val instructionIndex = queued.indexOfFirst { it.isHandoverRequest }
@@ -350,7 +368,7 @@ internal fun QueuedMessages(
         QUEUE_INTERRUPT_THEN_SENT,
     ).filter { it.isNotEmpty() }.joinToString(" ")
     Column(
-        Modifier.fillMaxWidth().semantics { contentDescription = "Queued messages" },
+        Modifier.fillMaxWidth().semantics { contentDescription = queueRegionLabel(queued.size) },
         verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
         for ((index, message) in queued.withIndex()) {
@@ -358,8 +376,10 @@ internal fun QueuedMessages(
                 QueuedMessageRow(
                     message = message,
                     handoverWaitLabel = com.tether.app.client.Handover.queueRowLabel(
-                        handoverStage, instruction = message.isHandoverRequest, index = index, instructionIndex = instructionIndex,
-                    ),
+                        handoverStage, instruction = message.isHandoverRequest, peer = message.isPeer, held = message.held,
+                        index = index, instructionIndex = instructionIndex,
+                    ).takeIf { !handedOff },
+                    handedOff = handedOff,
                     steerCapable = steerCapable,
                     handoverV151 = handoverV151,
                     onSave = { onSave(message.queueId, it) },
@@ -368,7 +388,7 @@ internal fun QueuedMessages(
                     interruptLock = interruptLock,
                     interruptIdentity = Triple(sessionId, message.queueId, interruptTurnId),
                     interruptTurnId = interruptTurnId,
-                    offerInterruptAndSend = message.queueId == interruptSendId && !message.held && !message.isHandoverRequest,
+                    offerInterruptAndSend = !handedOff && message.queueId == interruptSendId && !message.held && !message.isHandoverRequest && !message.isPeer,
                     confirmationCopy = confirmation,
                 )
             }
@@ -427,12 +447,16 @@ internal fun QueuedMessageRow(
     /** W34 (v151): the wait line this row reads while a handover is underway (null = its own). #273: the instruction row is read-only and removable. */
     handoverWaitLabel: String? = null,
     handoverV151: Boolean = false,
+    /** tth-2zt: the row stayed on a handed-off source: held, read-only, Remove only. */
+    handedOff: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val focusManager = LocalFocusManager.current
     val text = message.text
     val handoverRequest = message.isHandoverRequest
-    val held = message.held
+    val peer = message.isPeer
+    val held = handedOff || message.held
+    val readOnly = handoverRequest || peer || handedOff
     var value by remember { mutableStateOf(text) }
     var editing by remember { mutableStateOf(false) }
     var reverting by remember { mutableStateOf(false) }
@@ -460,11 +484,13 @@ internal fun QueuedMessageRow(
         if (!offerInterruptAndSend || interruptLock != null) confirmingInterrupt = false
     }
     val confirming = confirmingInterrupt && offerInterruptAndSend && interruptLock == null
-    val steered = !held && !handoverRequest && QueueWait.isSteered(steerCapable, message)
+    val steered = !held && !handoverRequest && !peer && QueueWait.isSteered(steerCapable, message)
     val waitLabel = when {
+        handedOff -> handedOffRowLabel(message)
         held -> QueueWait.heldLabel(message)
         handoverWaitLabel != null -> handoverWaitLabel
         handoverRequest -> HANDOVER_QUEUE_WAIT_COPY
+        peer -> PEER_QUEUE_WAIT_COPY
         else -> QueueWait.queuedLabel(steerCapable, message)
     }
     val shape = RoundedCornerShape(t.radiusMd)
@@ -496,7 +522,7 @@ internal fun QueuedMessageRow(
                 modifier = Modifier.size(13.dp).testTag(if (held) QUEUE_HELD_TAG + "-glyph" else if (steered) QUEUE_STATE_STEER_TAG else QUEUE_STATE_TURN_END_TAG),
             )
         }
-        if (handoverRequest) {
+        if (readOnly) {
             Text(
                 text,
                 style = LocalTetherTypography.current.body.copy(color = t.ink, fontSize = 13.6.sp, lineHeight = 20.4.sp),
@@ -504,8 +530,14 @@ internal fun QueuedMessageRow(
                     .weight(1f)
                     .heightIn(min = rowHeight)
                     .padding(vertical = t.css.spaceXs)
-                    .semantics { contentDescription = HANDOVER_QUEUE_ROW_DESCRIPTION }
-                    .testTag(HANDOVER_QUEUE_ROW_TAG),
+                    .semantics {
+                        contentDescription = when {
+                            handoverRequest -> HANDOVER_QUEUE_ROW_DESCRIPTION
+                            peer -> PEER_QUEUE_ROW_DESCRIPTION
+                            else -> OPERATOR_READ_ONLY_ROW_DESCRIPTION
+                        }
+                    }
+                    .testTag(if (handoverRequest) HANDOVER_QUEUE_ROW_TAG else QUEUE_READONLY_TEXT_TAG),
             )
         } else BasicTextField(
             value = value,
@@ -533,11 +565,11 @@ internal fun QueuedMessageRow(
             )
         }
         // v151: Stop handover (the Session links menu) is the one stop, so Tether's instruction row has no X.
-        if (!(handoverRequest && handoverV151)) Box(
+        if (!(handoverRequest && handoverV151 && !handedOff)) Box(
             Modifier
                 .minimumInteractiveComponentSize()
                 .clickable(onClick = onRemove)
-                .semantics { contentDescription = if (handoverRequest) HANDOVER_QUEUE_REMOVE_DESCRIPTION else "Remove queued message" }
+                .semantics { contentDescription = if (handoverRequest) HANDOVER_QUEUE_REMOVE_DESCRIPTION else if (peer) PEER_QUEUE_REMOVE_DESCRIPTION else "Remove queued message" }
                 .size(rowHeight),
             contentAlignment = Alignment.Center,
         ) {

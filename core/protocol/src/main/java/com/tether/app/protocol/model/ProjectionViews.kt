@@ -150,8 +150,11 @@ value class QueuedMessageView(val obj: JsObj) {
     /** v150: the operator's handover instruction row (read-only, withdrawable); twin of [QueuedMessage.isHandoverRequest]. */
     val isHandoverRequest: Boolean get() = origin == QueuedOrigin.SYSTEM && noticeKind == QueuedOrigin.HANDOVER_REQUEST
 
-    /** v150: twin of [QueuedMessage.isListedInComposer]. */
-    val isListedInComposer: Boolean get() = isOperatorMessage || isHandoverRequest
+    /** v149: a peer session's message (origin "system", noticeKind "peer"); twin of [QueuedMessage.isPeer]. */
+    val isPeer: Boolean get() = origin == QueuedOrigin.SYSTEM && noticeKind == QueuedOrigin.PEER
+
+    /** v150 + tth-y1hv: twin of [QueuedMessage.isListedInComposer]. */
+    val isListedInComposer: Boolean get() = isOperatorMessage || isHandoverRequest || isPeer
 
     /** v136 (issue #229): when a deferred ("next-call") message was queued (epoch ms); null otherwise. */
     val queuedAt: Double? get() = obj.number("queuedAt")
