@@ -26,6 +26,11 @@
 
 ## ▶ RESUME HERE
 
+**Next release (DRAFT, not published): 1.6.2 / code 66** - branch `release/1.6.2` from main `dfe85f92`; curated notes in `docs/releases/1.6.2.md`.
+- Contents: tabbed multi-part questions, "Also stop" for background work in the Stop panel, plain-word upload failures with Send again kept, and peer / handed-off messages in the queue above the composer.
+- Server already deployed at protocol 157 (floor 129).
+- OPEN CRITERION (owner accepted shipping with it open): manual touch-mode focus check of the Stop panel on a device (bead tth-25ue). Status once published: SHIPPED WITH OPEN CRITERIA.
+
 **Current release: 1.6.1 / code 65 — APK PUBLISHED (2026-11-06; root-owned).**
 - [v1.6.1 / code 65](https://github.com/TheMrClaus/tether-android/releases/tag/v1.6.1), published 2026-11-06T07:13:04Z, Latest, not a prerelease; tag and release head `a02bf422` (`release/1.6.1`, built on 1.6.0 `5581abaa`).
 - Contents: the delivery lanes (Send again on a failed send, upload progress and "may be lost" wording, Stop-spares-background wording, removal of the no-op "Message while busy" Settings row, Interrupt-and-send, attach while busy) on top of the 1.6.0 Runtime Desk settings pages. Curated notes (4 bullets, the 4th added by the owner): `docs/releases/1.6.1.md`.
