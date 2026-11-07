@@ -196,24 +196,10 @@ fun ChatScreen(
     val staleCopy = ChatFreshness.staleCopy(liveNow, sync)
     val failedInterruptTurn = session?.let { failedInterrupts[it.id] }
     val liveness = remember(stopLock, staleCopy, failedInterruptTurn) { ComposerLiveness(interruptLock = stopLock, stale = staleCopy, failedInterruptTurn = failedInterruptTurn) }
-    // T6.7: and to the turn the tapped key was drawn for (the Composer passes it).
-    val onInterrupt: (String) -> com.tether.app.client.InterruptResult = remember(session?.id, consentOrigin, vm) {
-        val s = session
-        val drawnFor = consentOrigin
-        val interrupt: (String) -> com.tether.app.client.InterruptResult = { turnId ->
-            if (s != null) vm.client.interrupt(s.id, drawnFor, turnId) else com.tether.app.client.InterruptResult.Locked
-        }
-        interrupt
-    }
-    // AW.3.3: the Stop panel's box commit (`stopBackground = true`; the client sends the key only to a server that speaks v156).
-    val onInterruptStopBackground: (String) -> com.tether.app.client.InterruptResult = remember(session?.id, consentOrigin, vm) {
-        val s = session
-        val drawnFor = consentOrigin
-        val interrupt: (String) -> com.tether.app.client.InterruptResult = { turnId ->
-            if (s != null) vm.client.interrupt(s.id, drawnFor, turnId, stopBackground = true) else com.tether.app.client.InterruptResult.Locked
-        }
-        interrupt
-    }
+    // T6.7: and to the turn the tapped key was drawn for (the Composer passes it). AW.3.3: the Stop panel's box commit is `stopBackground = true`.
+    val interruptActions = remember(session?.id, consentOrigin, vm) { interruptActionsFor(vm.client, session?.id, consentOrigin) }
+    val onInterrupt = interruptActions.interrupt
+    val onInterruptStopBackground = interruptActions.interruptStopBackground
     val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
     // ONE store for every card of this screen (transcript and run tabs alike): the shell's (round 4,
     // H1: above the layout switch), or one saved here when nobody provides it.
