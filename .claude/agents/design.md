@@ -64,4 +64,9 @@ For each brief:
    In a fix round, answer the findings your brief lists — those and only those; a note you agree with
    is a candidate in your receipt, not extra work.
 
+Read your role/routing in `docs/agents/orchestration-roles.md` before dispatch.
+Read `docs/agents/run-operations.md` > Context and handover before work and > Validation and
+acceptance before checks. Use window-aware lane budgets, reuse valid unchanged-input gate
+receipts, provide negative-control evidence for changed behaviour, and preserve Open items.
+
 <!-- canonical: app-orchestration — refresh with `game-orchestration install --fleet app --all`; don't hand-edit this file here -->

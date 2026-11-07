@@ -65,7 +65,7 @@ agent that made it. A run's lead never builds; an interactive session may make o
 single-file, non-design, non-core edit itself (policy rule 3).
 
 - Spawn roster roles **by name, no model/effort override**; prove the models before wave 1 and at
-  every wave end (`game-orchestration models --fleet app <session-id>`).
+  every wave end (`game-orchestration --fleet app models <session-id>`).
 - All design → `design`. Every raster asset (icons, buttons, illustrations, textures, reference
   images) → the **Codex image lane** the design lane drives: `codex exec -m gpt-6-astra -c
   model_reasoning_effort=high` + the built-in `imagegen` skill — one lane at a time, recipe
@@ -80,14 +80,8 @@ single-file, non-design, non-core edit itself (policy rule 3).
   rest are notes; the lead triages before dispatch (gauntlet-core › Findings). UI claims are verified with a real-browser capture at the run doc's viewports.
 - The lead keeps the build gates, the shared dev instance (single-instance: wait, never kill), the
   pushes and the deploys — and verifies a deploy against the served artifact.
-- **Hand over at 300k — every session, overnight or not:** check `tether_context` at each clean
-  point; at ≥300k reach a clean point (no lane in flight, nothing half-integrated or unpushed), then
-  ONE `tether_handover` with the mandate verbatim + full state + the chain, and end the turn
-  (orchestration.md › Cost discipline). Lanes keep ~200k → receipt → hand back.
-- **Lead context diet** (orchestration.md › Cost discipline): hand-backs are ≤~1.5k pointers
-  (verdict + receipt path; caveats under the receipt's `## Open items`, always read); the lead runs
-  no analysis — `scout` does, one-line checks excepted; receipts are read by section; the handover
-  prompt names exact sections and the successor always reads LIVE STATUS + open items.
+- **Window-aware context and evidence rules:** `docs/agents/run-operations.md` > Context and
+  handover; Validation and acceptance; State and findings. Check at clean points and before
+  dispatch. Hand-backs are <=1.5k-character pointers; always read `## Open items`.
 - Full policy: `docs/agents/orchestration.md`; how a run works: `docs/agents/gauntlet-core.md`.
 <!-- app-orchestration:end -->
-

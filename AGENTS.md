@@ -65,4 +65,3 @@ in `.claude/agents/` by name with no model/effort override; all design work goes
 raster asset goes to the Codex image lane (`astra`, High) the design lane drives; no 3D in this
 fleet; no agent grades its own work. Commit by explicit path, never `git add -A`.
 <!-- app-orchestration:end -->
-

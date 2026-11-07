@@ -3,8 +3,8 @@
 Canonical, fleet-wide (installed by `~/bin/game-orchestration --fleet app`; don't hand-edit here).
 Each repo's **run doc** adds only what is specific to that run: scope and milestones, the named bar
 files, the rig table (gate, capture, deploy commands and paths), checkpoints and the paste-ready
-prompts. The roster and routing are in `docs/agents/orchestration.md`. Where a run doc and this file
-disagree, the run doc wins for that run and the lead reports the contradiction.
+prompts. The roster and routing are in `docs/agents/orchestration.md`. Explicit owner rulings take precedence; run docs specialize scope and instruments. They do not
+silently override shared operating controls. Record any owner-authorized exception and its scope.
 
 ## The loop
 
@@ -80,6 +80,13 @@ survived triage.
 notes, notes dispatched (`round` is 1 for a first review, 2+ for a re-review). A judge held under 70% across 5+ BLOCKING findings is a policy finding: its next brief
 quotes the rejected lines as what is not blocking; a second such wave goes to the owner.
 
+**Validate before reporting.** Use the current wave's ledger, not a historical aggregate.
+Run `game-orchestration findings <current-wave-ledger> --json` after each update and reconcile
+its coverage against the review-receipt index. Invalid syntax or missing reviewed pieces means
+INVALID/PARTIAL metrics; never a zero or trustworthy held rate. Closure and acceptance dimension
+belong in linked evidence, not free-form class/disposition values. Migration of legacy ledgers:
+`run-operations.md` > State and findings. A complete no-findings review needs an index entry.
+
 **Nothing unmeasurable is dispatched.** Every piece in the wave plan, and the brief that makes it,
 names its **instrument** (gate or harness command, critics workflow, or judge) and its **bar line**
 (the exact requirement, number, or plate/reference + the elements it is judged on). Without both it
@@ -91,7 +98,8 @@ names the plate) — and `wave-check` returns it UNMEASURABLE, a BLOCKING findin
 A wave **starts** with the lead's plan in the run-artefacts dir (`w<N>-plan.md`: *Verified at
 dispatch · Wave · Open questions for wave-check · LIVE STATUS*) and a `wave-check` pass over it
 **before any brief goes out**. Every piece in the plan names its instrument and its bar line
-(*Findings*, above).
+(*Findings*, above). Preflight the instrument before a large matrix; name implementation,
+verification and release criteria separately (`run-operations.md` > Validation and acceptance).
 
 A wave **ends** when all of this is true:
 
@@ -100,11 +108,11 @@ A wave **ends** when all of this is true:
 2. every bead is closed with its evidence and verified by a different actor; the human tracker
    (GitHub issues) and the journal are updated, the lead has rewritten STATUS, **and the markdown
    tracker/digest is under 40k chars with no line over 2k** (`~/bin/gauntlet-tracker check
-   <tracker…>`; over either, demote first — no wave report is posted on an oversize digest);
+   <tracker…>`; over either, demote first — no COMPLETE claim on an oversize digest; send a progress/blocker report);
 3. anything user-visible is **deployed and the served artifact verified**;
-4. the models line and the `FINDINGS:` line are recorded (`game-orchestration models --fleet app
-   <session-id>`, routing rule 6; `game-orchestration findings <ledger>`) — and once the run is over budget, or the owner asks, the wave report carries the per-role
-   spend (`game-orchestration cost <session-id>` — per role, never per agent count);
+4. the models line and the `FINDINGS:` line are recorded (`game-orchestration --fleet app models
+   <session-id>`, routing rule 6; `game-orchestration findings <ledger>`); every wave also carries the cost/coverage checkpoint from
+   `run-operations.md` > Run ledger and cost checkpoint;
 5. a **short wave report** is posted: what landed (shas), what was refuted, what is next.
 
 **Restart safety:** keep the run's restart record current as things land — by default `w<N>-plan.md`
@@ -144,37 +152,15 @@ that record, never the chat.
 - **Run artefacts live outside git** — plans, verdicts, captures, pairs — in `~/gauntlet/<project>/`
   unless the run doc names another out-of-git path. Generated images are the same: the committed
   artefact is the asset plus its recipe, never a scratch render tree.
-- **The tracker is an INDEX, never a store.** One line per item — what it is, the verdict, and the
-  path to the body — and the body lives in its own file in the run-artefacts dir
-  (`w<N>/deltas/D<NNN>.md`, `w<N>/gate-int<NN>.log`, …). Pasting a judge's review, a gate log or a
-  brief INTO the tracker is the one habit that reliably blows the ceiling: on 2026-10-06 seven whole
-  `wave-check` DELTA reviews took a live tracker from 12k to 33k chars (47 lines over 2k in the
-  archive, the longest 5.5k). `~/bin/gauntlet-tracker check <tracker>` before you write a brief —
-  the ceiling is a per-write budget, not a wave-end exam — and `… demote <tracker> <records-dir>
-  --apply` moves every over-long line out and leaves the pointer.
-- **Context hygiene:** never read a file over 15k chars whole, and keep docs under 15k — a run doc
-  fits because this file carries the shared part. A beads graph has no size ceiling (`bd list
-  --json`), so where beads is the writer the markdown tracker becomes a generated digest and the
-  40k rule applies to that digest alone. **Enforced at every wave end** (`wc -c`, item 2 above): a
-  digest, plan or handover over 40k is archived (`<name>.archive-<date>.md`; the live file keeps LIVE
-  STATUS plus the last wave's log) before the wave report goes out — a tracker that has to be read in
-  windows has already failed the rule.
-- **Budget — policy, not advice, and it goes into every brief:** one pass, one check, a written
-  receipt, then stop. A lane never iterates against its own taste (the judges judge) and never
-  re-reads the corpus or its own transcript on later turns; a doubt is a candidate in the receipt
-  and the lead decides. A brief names the exact section a lane must read — never "read X in full".
-  What comes back to the lead is that receipt, never raw output or long prose. Reuse a lane (resume)
-  before re-spawning it. **Cache reads cost the same on Opus and Sonnet**, so a model downgrade
-  changes the output line and never the cache-read line: trajectory length is the lever.
-
-- **Hand over at 300k — every session, overnight or not:** check `tether_context` at each clean
-  point; at ≥300k reach a clean point (no lane in flight, nothing half-integrated or unpushed), then
-  ONE `tether_handover` with the mandate verbatim + full state + the chain, and end the turn
-  (orchestration.md › Cost discipline). Lanes keep ~200k → receipt → hand back.
-- **Lead context diet** (orchestration.md › Cost discipline): hand-backs are ≤~1.5k pointers
-  (verdict + receipt path; caveats under the receipt's `## Open items`, always read); the lead runs
-  no analysis — `scout` does, one-line checks excepted; receipts are read by section; the handover
-  prompt names exact sections and the successor always reads LIVE STATUS + open items.
+- **The tracker is an index.** One line per item: state, verdict, evidence path. Keep history
+  in dated records and the live state small. After writes and before dispatch/handover/completion,
+  run `gauntlet-tracker check <live-files...>`; preserve unresolved obligations when archiving
+  (`run-operations.md` > State and findings).
+- **Working state, acceptance and cost:** `docs/agents/run-operations.md` owns context limits,
+  handover, job records, instrument preflight, validation reuse, the three acceptance dimensions,
+  state/ledger checks and cost checkpoints. Read the relevant section before dispatch. A live
+  file failing its size check or an invalid current-wave ledger prevents a COMPLETE claim;
+  report the blocker honestly and normalize before further dispatch.
 
 ## Running in ultracode
 

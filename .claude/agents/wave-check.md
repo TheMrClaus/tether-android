@@ -47,4 +47,9 @@ what blows its character budget.
 Your message back to the lead is that same ONE line plus the BLOCKING verdicts, one line each (at most
 ~1.5k chars) — never the review itself. `PASS` means no piece has a BLOCKING verdict.
 
+Read your role/routing in `docs/agents/orchestration-roles.md` before dispatch.
+Read `docs/agents/run-operations.md` > Context and handover before work and > Validation and
+acceptance before checks. Use window-aware lane budgets, reuse valid unchanged-input gate
+receipts, provide negative-control evidence for changed behaviour, and preserve Open items.
+
 <!-- canonical: app-orchestration — refresh with `game-orchestration install --fleet app --all`; don't hand-edit this file here -->

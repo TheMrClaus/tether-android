@@ -43,4 +43,9 @@ rule.
 - Report as: verdict, reference path, artefact path(s) with viewport, the ranked BLOCKING findings
   (each: bar · evidence · smallest change), then the NOTES under their own heading.
 
+Read your role/routing in `docs/agents/orchestration-roles.md` before dispatch.
+Read `docs/agents/run-operations.md` > Context and handover before work and > Validation and
+acceptance before checks. Use window-aware lane budgets, reuse valid unchanged-input gate
+receipts, provide negative-control evidence for changed behaviour, and preserve Open items.
+
 <!-- canonical: app-orchestration — refresh with `game-orchestration install --fleet app --all`; don't hand-edit this file here -->
