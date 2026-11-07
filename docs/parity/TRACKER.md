@@ -19,20 +19,24 @@
 | Program status | IN PROGRESS |
 | Current phase | Phases 0-3 CLOSED; Phase 4+ shipped through the 1.5.x releases; see `bd` for live rows |
 | PARITY_BASE (tether SHA) | Protocol corpora at `19c56e25` (PROTOCOL 152, floor 129); tokens and web screenshots at `887c222`; Parity Matrix re-baselined at `29537e0` (PROTOCOL 143, T14.4). Detail: `parity-corpus/VENDORED.md`, archive L13 |
-| App version | Published: **1.6.1 (code 65)**; tag and release head `a02bf422` on 2026-11-06. The archived resume point predates this release. |
+| App version | Published: **1.6.2 (code 66)**; tag and release head `ff96d4ce` on 2026-11-07. The archived resume point predates this release. |
 | Android repo | `~/git/tether-android` (`TheMrClaus/tether-android`, `main`) |
 | Server repo | `~/git/tether` (`TheMrClaus/tether`, server tasks on `android-parity/<task>` branches -> PR); S* work only in standalone clones/worktrees under `~/git/tether-wt/`, never the production checkout |
 | Digest condensed | 2026-11-05 (previous tracker header: last updated 2026-10-17 by claude-main) |
 
 ## ▶ RESUME HERE
 
-**Next release (DRAFT, not published): 1.6.2 / code 66** - branch `release/1.6.2` from main `dfe85f92`; curated notes in `docs/releases/1.6.2.md`.
-- Contents: tabbed multi-part questions, "Also stop" for background work in the Stop panel, plain-word upload failures with Send again kept, and peer / handed-off messages in the queue above the composer.
-- Server already deployed at protocol 157 (floor 129).
-- OPEN CRITERION (owner accepted shipping with it open): manual touch-mode focus check of the Stop panel on a device (bead tth-25ue). Status once published: SHIPPED WITH OPEN CRITERIA.
+**Current release: 1.6.2 / code 66 — APK PUBLISHED (2026-11-07; SHIPPED WITH OPEN CRITERIA).**
+- [v1.6.2 / code 66](https://github.com/TheMrClaus/tether-android/releases/tag/v1.6.2), published 2026-11-07T13:44:09Z, Latest, not a prerelease; tag and release head `ff96d4ce` (`release/1.6.2`, built on main `dfe85f92`), merged back into main.
+- Contents: tabbed multi-part questions, "Also stop" for background work in the Stop panel, plain-word upload failures with Send again kept, and peer / handed-off messages in the queue above the composer. Curated notes (4 bullets): `docs/releases/1.6.2.md`.
+- Release build fix: the K2 compiler's data-flow analysis ran out of memory on `ChatScreen` (a second interrupt `remember` block); both interrupt lambdas now come from `InterruptActions.kt`, behaviour unchanged. Compile headroom is back to 1.6.1's, no more; the structural split of `ChatScreen` is bead tth-t751.
+- Independent refuters APPROVE (0 blocking) on the fix and on the draft. The public APK is byte-identical to the verified draft: SHA-256 `0b199231934acaa40093a98919b39361fd65b59dca682a336278d7071aa1db0f` (8861272 bytes), signed with the 1.6.1 certificate. No upgrade test is claimed here.
+- Server production at publication: protocol 157 (floor 129); the app advertises protocol 143.
+- OPEN CRITERION (owner accepted shipping with it open): manual touch-mode focus check of the Stop panel on a device (bead tth-25ue).
+- Verdicts: `/home/marcelloc/gauntlet/tether-ts-migration/verdicts/wave-next2-Aoomfix-refuter.md`, `.../wave-next2-Arelease162-refuter.md`.
 
-**Current release: 1.6.1 / code 65 — APK PUBLISHED (2026-11-06; root-owned).**
-- [v1.6.1 / code 65](https://github.com/TheMrClaus/tether-android/releases/tag/v1.6.1), published 2026-11-06T07:13:04Z, Latest, not a prerelease; tag and release head `a02bf422` (`release/1.6.1`, built on 1.6.0 `5581abaa`).
+**Previous release: 1.6.1 / code 65 — APK PUBLISHED (2026-11-06; root-owned).**
+- [v1.6.1 / code 65](https://github.com/TheMrClaus/tether-android/releases/tag/v1.6.1), published 2026-11-06T07:13:04Z, not a prerelease; tag and release head `a02bf422` (`release/1.6.1`, built on 1.6.0 `5581abaa`).
 - Contents: the delivery lanes (Send again on a failed send, upload progress and "may be lost" wording, Stop-spares-background wording, removal of the no-op "Message while busy" Settings row, Interrupt-and-send, attach while busy) on top of the 1.6.0 Runtime Desk settings pages. Curated notes (4 bullets, the 4th added by the owner): `docs/releases/1.6.1.md`.
 - Independent refuter APPROVE (0 blocking): gate at `a02bf422` BUILD SUCCESSFUL, 783/783 tasks executed. The public unauthenticated APK is byte-identical to the verified draft: SHA-256 `cec0a66f6f4c194142706114a3fad3bc1956fa347ce8405a5a21bff0fdad5802` (8812120 bytes). No upgrade test is claimed here.
 - Server production at publication: Tether `a1f1da74` (protocol 155, floor 129), deployed 2026-11-06 08:09 local, tag `prod/2026-11-06.1`. Publishing after the server deploy was feature ordering (the new delivery features need a server at protocol >= 155), not a connection guard: the app advertises protocol 143 and accepts any server from protocol 143 up (`ConnectionPolicy.kt` Compatibility.evaluate).
