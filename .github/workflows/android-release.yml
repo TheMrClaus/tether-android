@@ -160,12 +160,12 @@ jobs:
 
       - name: Assemble release APK
         # :feature:chat compile OOMs at the 4g in gradle.properties (1.4.0 run). Release-only heap:
-        # Kotlin compiles in-process (the strategy the local gates use) inside ONE 10g Gradle daemon, at
-        # most 2 workers, on the 16 GB public-repo runner. 1.6.2 OOMed (GC overhead) at 5g+7g, 4 workers.
+        # Gradle daemon 5g + Kotlin daemon 7g = 12g peak on the 16 GB public-repo runner (the
+        # Kotlin daemon is the 7g local gates prove; the Gradle daemon only orchestrates).
         run: >-
-          ./gradlew :app:assembleRelease --stacktrace --max-workers=2
-          "-Dorg.gradle.jvmargs=-Xmx10g -Dfile.encoding=UTF-8 -XX:+UseParallelGC"
-          -Pkotlin.compiler.execution.strategy=in-process
+          ./gradlew :app:assembleRelease --stacktrace
+          "-Dorg.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8 -XX:+UseParallelGC"
+          "-Pkotlin.daemon.jvmargs=-Xmx7g -Dfile.encoding=UTF-8 -XX:+UseParallelGC"
 
       - name: Locate APK
         id: apk
