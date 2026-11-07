@@ -34,6 +34,9 @@ enum class SendStatus {
     /** Filed and on the wire, awaiting the server's journaled proof. */
     Sending,
 
+    /** tth-xyp9: the photos are still uploading, so nothing is on the wire yet (the web's "uploading", which outranks "waiting"). */
+    Uploading,
+
     /** The link is down or presumed half-open; the record goes out again on reconnect. */
     Waiting,
 }

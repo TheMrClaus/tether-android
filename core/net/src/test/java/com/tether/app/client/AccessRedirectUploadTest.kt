@@ -68,7 +68,7 @@ class AccessRedirectUploadTest {
      * no holder), then the user taps Send. The result is `NotConnected`, which the composer words as "The secure
      * link is reconnecting - your attachments were not sent. Try again in a moment." (AttachSheet.kt:356): the
      * link is fine, the upload was refused, and every retry repeats it. Expected: the refusal is surfaced as the
-     * failed-upload bubble ("The server redirected the upload.") like the send-first order below.
+     * failed-upload bubble ("A sign-in gateway blocked the upload (HTTP 302).") like the send-first order below.
      */
     @Test
     fun redPickThenAccess302ThenSendMislabelsTheRefusedUploadAsALinkProblem() {
@@ -80,6 +80,12 @@ class AccessRedirectUploadTest {
         assertEquals(UploadPhase.Failed, hub.state(id)?.phase)
         val res = client.sendUploaded("s1", "look", listOf(photo), listOf(id), null, origin)
         assertNotEquals("a refused upload must not read as a link problem", AttachmentSendResult.NotConnected, res)
+        h.await(client.failedSends) { it.isNotEmpty() }
+        val failed = client.failedSends.value.single()
+        assertEquals("A sign-in gateway blocked the upload (HTTP 302).", failed.detail)
+        assertEquals(FailedSendReason.Upload, failed.reason)
+        assertEquals(false, failed.retryable)
+        assertEquals(true, client.pendingSends.value.isEmpty())
     }
 
     /** Characterisation: send tapped while the upload is in flight, then the 302 lands: a visible failed-upload bubble, nothing held. */
@@ -92,7 +98,22 @@ class AccessRedirectUploadTest {
         h.server.enqueue(access302())
         assertEquals(UploadRunResult.Done, runBlocking { hub.run(id) })
         h.await(client.failedSends) { it.isNotEmpty() }
-        assertEquals("The server redirected the upload.", client.failedSends.value.single().detail)
+        assertEquals("A sign-in gateway blocked the upload (HTTP 302).", client.failedSends.value.single().detail)
         assertEquals(true, client.pendingSends.value.isEmpty())
+    }
+
+    /**
+     * tth-xyp9 item 2: a message held while its photo is still uploading, on a link that is open, reads Uploading with the
+     * percent (the web's describePending: uploading outranks waiting) - not "Waiting for link".
+     */
+    @Test
+    fun heldMessageWithUploadInFlightReadsUploadingNotWaiting() {
+        val (client, hub, _) = rig()
+        val origin = client.consentOrigin.value
+        val id = hub.begin(origin, "s1", photo.name, photo.mediaType, bytes)!!
+        assertEquals(AttachmentSendResult.Sent, client.sendUploaded("s1", "look", listOf(photo), listOf(id), null, origin))
+        val row = client.pendingSends.value.single()
+        assertEquals(SendStatus.Uploading, row.status)
+        assertEquals(true, row.uploadPercent != null)
     }
 }
