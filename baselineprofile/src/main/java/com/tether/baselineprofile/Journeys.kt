@@ -164,7 +164,7 @@ private fun MacrobenchmarkScope.typeInto(desc: String, value: String, secret: Bo
 
 /** Anything only a signed-in app shows: the top bar's brand link / drawer key / tools menu, or the chat composer. */
 private val SIGNED_IN_MARKER = By.desc(
-    Pattern.compile("Tether \u2014 Overview|Open sessions|Menu: navigation and tools.*|More tools.*|Message the agent"),
+    Pattern.compile(".* workspace \u2014 Overview|Open sessions|Menu: navigation and tools.*|More tools.*|Message the agent"),
 )
 
 private fun MacrobenchmarkScope.signIn(sign: SignInArgs) {
@@ -183,7 +183,7 @@ private fun MacrobenchmarkScope.signIn(sign: SignInArgs) {
         }
     }
     if (signedIn) {
-        device.findObject(By.desc("Tether \u2014 Overview"))?.click()
+        device.findObject(By.desc(Pattern.compile(".* workspace \u2014 Overview")))?.click()
         device.waitForIdle()
         Log.i(TAG, "already signed in: skipped sign-in")
         return
@@ -198,11 +198,11 @@ private fun MacrobenchmarkScope.signIn(sign: SignInArgs) {
     typeInto("Dashboard password", sign.password, secret = true)
     val unlock = findScrolling(By.desc("Unlock Tether"), WAIT_MS) ?: fail("no 'Unlock Tether' button")
     unlock.click()
-    // Signed in once the shell's top bar shows. Its brand link ("Tether \u2014 Overview", Topbar.kt BrandLink) is
+    // Signed in once the shell's top bar shows. Its brand link (".* workspace \u2014 Overview", Topbar.kt BrandLink) is
     // on every layout; "Open sessions" (drawer key, narrow only) and the Overview cards are not on all of
     // them. A permission dialog over the shell is dismissed while waiting (the grant above should make that
     // rare; this is the fallback).
-    val shell = By.desc(Pattern.compile("Tether \u2014 Overview|Open sessions|Open session: .*"))
+    val shell = By.desc(Pattern.compile(".* workspace \u2014 Overview|Open sessions|Open session: .*"))
     val deadline = System.currentTimeMillis() + WAIT_MS * 2
     var landed = false
     while (!landed && System.currentTimeMillis() < deadline) {
