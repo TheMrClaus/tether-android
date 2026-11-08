@@ -631,7 +631,8 @@ class DurableSendTest {
         h.await(client.liveSessions) { "s1" in it }
         assertEquals(ConsentResult.Sent, client.approval("s1", "r-choice", consentFp(client, "s1", "r-choice"), choiceId = "accept"))
         assertEquals(ConsentResult.Sent, client.answerQuestion("s1", "q1", consentFp(client, "s1", "q1", question = true), listOf(ConsentGuard.QuestionPick(0, listOf(0), ""))))
-        assertEquals(listOf("approval", "question"), h.framesUntilBarrier().map { it.type() })
+        // tth-9hvv (#5): the first tap arms one liveness probe (a ping); the second finds it outstanding. Never a second consent frame.
+        assertEquals(listOf("approval", "ping", "question"), h.framesUntilBarrier().map { it.type() })
 
         ws.close(1001, null)
         h.await(client.connection) { it == ConnectionState.Disconnected }
