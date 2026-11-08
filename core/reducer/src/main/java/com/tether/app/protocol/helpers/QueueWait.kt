@@ -313,7 +313,7 @@ object QueueWait {
     }
 
     /**
-     * The summary of one queued row. [handedOff]: the row stayed on a handed-off source (held recipe, Remove only). Precedence
+     * The summary of one queued row. [handedOff]: the row stayed on a handed-off source (held recipe, Remove only). A held handover instruction reads "Not sent" like a handed-off one (QA B1). Precedence
      * (spec 2.2 + QD round 2 R2-N1/N2): a held operator `steer_uncertain` row reads "Unconfirmed" (danger tone, warning glyph) even on a
      * handed-off strip, whose wait label stays handedOffRowLabel; every other held or handed-off row reads "Not sent".
      */
@@ -328,11 +328,11 @@ object QueueWait {
 
         if (message.isHandoverRequest) {
             return QueueRowSummary(
-                if (handedOff) QueueRowGlyph.AlertTriangle else QueueRowGlyph.ArrowRightLeft,
-                if (handedOff) "Not sent" else "Handover",
-                if (handedOff) QueueLeadTone.Danger else QueueLeadTone.Muted,
+                if (heldLike) QueueRowGlyph.AlertTriangle else QueueRowGlyph.ArrowRightLeft,
+                if (heldLike) "Not sent" else "Handover",
+                if (heldLike) QueueLeadTone.Danger else QueueLeadTone.Muted,
                 previewOf(message.text), "", "Tether\u2019s handover instruction", "Handover instruction",
-                if (handedOff) "Not sent" else "Runs when this turn ends",
+                if (heldLike) "Not sent" else "Runs when this turn ends",
             )
         }
         if (message.isPeer) {

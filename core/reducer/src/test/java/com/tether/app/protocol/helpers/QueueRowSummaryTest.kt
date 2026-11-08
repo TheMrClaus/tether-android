@@ -74,6 +74,12 @@ class QueueRowSummaryTest {
         val instruction = QueuedMessage(queueId = "i", text = "Handover instruction", origin = JsonPrimitive("system"), noticeKind = JsonPrimitive("handover-request"))
         QueueWait.queueRowSummary(instruction).also { assertEquals("Handover", it.lead); assertEquals(QueueWait.QueueRowGlyph.ArrowRightLeft, it.glyph); assertEquals("Runs when this turn ends", it.meta) }
         QueueWait.queueRowSummary(instruction, handedOff = true).also { assertEquals("Not sent", it.lead); assertEquals("Not sent", it.meta) }
+        // QA fix r1 (director B1, D-GH-L7): a HELD instruction row reads exactly like a handed-off one.
+        QueueWait.queueRowSummary(instruction.copy(held = true)).also {
+            assertEquals(QueueWait.QueueRowGlyph.AlertTriangle, it.glyph); assertEquals("Not sent", it.lead)
+            assertEquals(QueueWait.QueueLeadTone.Danger, it.leadTone); assertEquals("Not sent", it.meta)
+            assertEquals("Handover instruction", it.sheetTitle)
+        }
         val files = QueuedMessage(
             queueId = "a", text = "", attachmentIds = listOf("1", "2"),
             attachments = listOf(AttachmentMeta("a.png", "image/png"), AttachmentMeta("b.txt", "text/plain")),
