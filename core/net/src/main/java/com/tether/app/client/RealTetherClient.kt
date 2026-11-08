@@ -116,6 +116,32 @@ private const val TRIM_MEMORY_RUNNING_LOW = 10
 /** use-tether.ts:339, the web's word for any frame its `send` could not put on the link. */
 private const val LINK_RECONNECTING = "The secure link is reconnecting. Your input was not sent."
 
+/** At most one consent-refusal full resync per session in this window (tth-9hvv, #5). */
+private const val CONSENT_RESYNC_DEBOUNCE_MS = 10_000L
+
+/**
+ * Why a consent tap was refused, kept inside the client (the public ConsentResult is unchanged):
+ * it selects the operator line on the `errors` flow. Native-only wording: the web never refuses
+ * locally (it sends and the server answers). [resyncs]: the refusal proves the card on screen
+ * disagrees with this device's tree.
+ */
+internal enum class ConsentRefusal(val resyncs: Boolean) {
+    Answered(true),
+    NoTurn(true),
+    NotOpen(true),
+    Drift(false),
+    Decided(false),
+    ;
+
+    fun line(noun: String): String = when (this) {
+        Answered -> "That question was already answered. Your answer was not sent."
+        NoTurn -> "This device has no running turn. Your $noun was not sent."
+        NotOpen -> "That request is no longer open here. Your $noun was not sent."
+        Drift -> "The request on screen is out of date. Your $noun was not sent. Check it and try again."
+        Decided -> "Your earlier $noun was already sent. This one was not sent."
+    }
+}
+
 /** T8.2 (use-tether.ts 90fbb9f :73): BROWSE_TIMEOUT_MS = UNACKED_CLOSE_MS. */
 private const val BROWSE_TIMEOUT_MS: Long = PendingInput.UNACKED_CLOSE_MS
 
@@ -4158,13 +4184,7 @@ class RealTetherClient(
             // projection shape (a JS reduce throws on the same malformed base). Never let that
             // take down the socket thread: drop the diverged base and ask for a FULL snapshot
             // (no afterSeq — a cursor-at-head attach would come back stateless).
-            val current = ifCurrent(webSocket) {
-                sessionStore.drop(message.sessionId)
-                setLiveLocked(message.sessionId, false)
-                // The reducer is the arbiter (§10 C5): the mirrored base goes too.
-                mirrorOriginLocked()?.let { mirrorLink?.drop(it, message.sessionId) }
-                forgetSavedCopyLocked(message.sessionId)
-            }
+            val current = ifCurrent(webSocket) { dropForFullResyncLocked(message.sessionId) }
             if (current) sendFrameOn(webSocket, ClientMessage.Attach(message.sessionId, null))
             return
         }
@@ -4222,6 +4242,24 @@ class RealTetherClient(
             if (mirrorLink != null) sessionStore.addDetails(message.sessionId, message.turns)
         }
     }
+
+    /**
+     * A FULL resync's local half (the reducer-throw recovery, and the consent refusals of tth-9hvv):
+     * drop the session's diverged base so the next `Attach(id, null)` rebuilds it from a full
+     * snapshot (a cursor-at-head attach would come back stateless). Caller holds [lock]. The consent
+     * ledger is untouched: nothing about an answer is resent after a resync.
+     */
+    private fun dropForFullResyncLocked(sessionId: String) {
+        sessionStore.drop(sessionId)
+        setLiveLocked(sessionId, false)
+        // The reducer is the arbiter (§10 C5): the mirrored base goes too.
+        mirrorOriginLocked()?.let { mirrorLink?.drop(it, sessionId) }
+        forgetSavedCopyLocked(sessionId)
+    }
+
+    /** When each session last had a consent-refusal full resync ([clock]): the 10 s debounce. */
+    private val lastConsentResyncAt = HashMap<String, Long>()
+
 
     /**
      * Run [write] (a write of the published per-server state) under [lock], and
@@ -5491,10 +5529,11 @@ class RealTetherClient(
     ): ConsentResult {
         // The wire type refuses both-or-neither and a grant without a choice; refuse before it throws.
         if ((choiceId == null) == (decision == null) || (grantedPermissions != null && choiceId == null)) {
+            emitError("Your decision was not sent. Pick an option and try again.")
             return ConsentResult.InvalidChoice
         }
         val message = ClientMessage.Approval(sessionId, requestId, choiceId, decision, grantedPermissions)
-        return transmitConsent(sessionId, requestId, expectedFingerprint, ConsentGuard::pendingApproval) { _, request ->
+        return transmitConsent(sessionId, requestId, expectedFingerprint, "decision", ConsentGuard::pendingApproval) { _, request ->
             ConsentGuard.checkApproval(request, choiceId, decision, grantedPermissions) ?: message
         }
     }
@@ -5506,10 +5545,10 @@ class RealTetherClient(
         picks: List<ConsentGuard.QuestionPick>,
         skipped: Set<Int>,
     ): ConsentResult =
-        transmitConsent(sessionId, requestId, expectedFingerprint, ConsentGuard::pendingQuestion) { tree, request ->
+        transmitConsent(sessionId, requestId, expectedFingerprint, "answer", ConsentGuard::pendingQuestion) { tree, request ->
             when {
                 // An answer already on record (question_answered, from this or another device) closes it.
-                ConsentGuard.isAnswered(tree, requestId) -> ConsentResult.NotPending
+                ConsentGuard.isAnswered(tree, requestId) -> ConsentRefusal.Answered
                 else -> ConsentGuard.buildAnswers(request, picks, skipped)?.let { reply ->
                     ClientMessage.Question(sessionId, requestId, reply.answers, reply.response)
                 } ?: ConsentResult.InvalidChoice
@@ -5530,10 +5569,13 @@ class RealTetherClient(
         sessionId: String,
         requestId: String,
         expectedFingerprint: String,
+        /** The card's own noun for the operator's tap: "decision" (approval) or "answer" (question). */
+        noun: String,
         pending: (JsObj?, String) -> JsObj?,
-        /** The frame to send ([ClientMessage]), or the refusal ([ConsentResult]). */
+        /** The frame to send ([ClientMessage]), or the refusal ([ConsentResult], [ConsentRefusal]). */
         decide: (JsObj?, JsObj) -> Any,
     ): ConsentResult {
+        var refusal: ConsentRefusal? = null
         val result = synchronized(lock) {
             val ws = socket
             val origin = socketOrigin
@@ -5545,18 +5587,28 @@ class RealTetherClient(
             // `error`, shown. The request must still be the one the card drew, in the copy this
             // client holds (an absent projection has no pending request).
             val tree = sessionStore.tree(sessionId)
-            val turnId = ConsentGuard.activeTurnId(tree) ?: return@synchronized ConsentResult.NotPending
-            val request = pending(tree, requestId) ?: return@synchronized ConsentResult.NotPending
+            val turnId = ConsentGuard.activeTurnId(tree) ?: run { refusal = ConsentRefusal.NoTurn; return@synchronized ConsentResult.NotPending }
+            val request = pending(tree, requestId) ?: run { refusal = ConsentRefusal.NotOpen; return@synchronized ConsentResult.NotPending }
             val fingerprint = ConsentGuard.fingerprint(origin, turnId, request)
-            if (fingerprint != expectedFingerprint) return@synchronized ConsentResult.NotPending
+            if (fingerprint != expectedFingerprint) {
+                refusal = ConsentRefusal.Drift
+                return@synchronized ConsentResult.NotPending
+            }
             val entry = ConsentLedger.Entry(origin, sessionId, turnId, requestId, fingerprint, epoch)
-            if (consentLedger.contains(entry)) return@synchronized ConsentResult.AlreadyDecided
+            if (consentLedger.contains(entry)) {
+                refusal = ConsentRefusal.Decided
+                return@synchronized ConsentResult.AlreadyDecided
+            }
             val text = when (val decided = decide(tree, request)) {
+                is ConsentRefusal -> { refusal = decided; return@synchronized ConsentResult.NotPending }
                 is ConsentResult -> return@synchronized decided
                 is ClientMessage -> decided.encode()
                 else -> return@synchronized ConsentResult.InvalidChoice
             }
-            if (!consentLedger.claim(entry, ::stillPendingLocked)) return@synchronized ConsentResult.AlreadyDecided
+            if (!consentLedger.claim(entry, ::stillPendingLocked)) {
+                refusal = ConsentRefusal.Decided
+                return@synchronized ConsentResult.AlreadyDecided
+            }
             if (!ws.send(text)) {
                 consentLedger.release(entry)
                 return@synchronized ConsentResult.NotConnected
@@ -5566,6 +5618,29 @@ class RealTetherClient(
         }
         // use-tether.ts:325-328: the web's words when the link is down; the decision is not kept.
         if (result == ConsentResult.NotConnected) emitError("The secure link is reconnecting. Your input was not sent.")
+        refusal?.let { why ->
+            // tth-9hvv (#5): the card on screen disagrees with this device's tree: ask for a FULL
+            // snapshot (never a cursor attach, never a resend of the answer), at most once per
+            // session per 10 s; the line says "Refreshing" only when this refusal issued it.
+            if (why.resyncs) {
+                val resyncWs = synchronized(lock) {
+                    val ws = socket
+                    val now = clock()
+                    val last = lastConsentResyncAt[sessionId]
+                    if (ws == null || !socketOpen || !handshakeDone || (last != null && now - last in 0 until CONSENT_RESYNC_DEBOUNCE_MS)) {
+                        null
+                    } else {
+                        lastConsentResyncAt[sessionId] = now
+                        dropForFullResyncLocked(sessionId)
+                        ws
+                    }
+                }
+                if (resyncWs != null) sendFrameOn(resyncWs, ClientMessage.Attach(sessionId, null))
+                emitError(why.line(noun) + if (resyncWs != null) " Refreshing this session." else "")
+            } else {
+                emitError(why.line(noun))
+            }
+        }
         return result
     }
 
