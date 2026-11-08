@@ -27,6 +27,7 @@ enum class NoticeShot(val id: String, val composer: Boolean = false) {
     Codex("codex"),
     Reasonix("reasonix"),
     Session("session"),
+    PeerReceipt("peer-receipt"),
     Interrupted("interrupted"),
     Limit("limit"),
     Scheduled("scheduled"),
@@ -43,6 +44,7 @@ private fun fixtureFor(shot: NoticeShot): ChatFixtures.Folded = when (shot) {
     NoticeShot.Codex -> NoticeFixtures.codexNotices
     NoticeShot.Reasonix -> NoticeFixtures.reasonixNotices
     NoticeShot.Session -> NoticeFixtures.sessionNotices
+    NoticeShot.PeerReceipt -> NoticeFixtures.peerReceipt
     NoticeShot.Interrupted -> NoticeFixtures.interrupted
     NoticeShot.Limit -> NoticeFixtures.limit
     NoticeShot.Scheduled -> NoticeFixtures.scheduled

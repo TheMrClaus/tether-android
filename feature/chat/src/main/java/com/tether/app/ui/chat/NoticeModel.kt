@@ -123,13 +123,24 @@ internal fun handoverNoticeView(code: String?, v151: Boolean = false): HandoverN
     return HandoverNoticeView.Words(words ?: HANDOVER_NOTICE_GENERIC)
 }
 
-/** A `providerNotices` list (session- or turn-scoped), in order; rows without an id or message are skipped. */
+/** The code of a peer-message receipt (GH #265): the server tells the SENDER what became of its queued peer message. */
+private const val PEER_MESSAGE_RECEIPT_CODE = "peer_message_receipt"
+
+/** A `providerNotices` list (session- or turn-scoped), in order; rows without an id or message are skipped.
+ *
+ * A `peer_message_receipt` notice with a non-empty message reads as the plain "Tether" line, as on the web (tether
+ * lib/handover-ui.ts `peerReceiptNoticeView`, rendered by components/codex-rich-renderers.tsx): no provider heading, no
+ * code, the server's sentence as the body, the same dismiss key as any notice (the web shows its dismiss control for it too). The web tests the raw message, the phone the cleaned one (the
+ * same cleaning it applies to any server message). An empty message falls through to the usual heading. */
 fun providerNotices(list: JsValue?, providerLabel: String, v151: Boolean = false): List<ProviderNoticeView> =
     (list as? JsArr)?.mapNotNull { item ->
         val o = item as? JsObj ?: return@mapNotNull null
         val id = o["noticeId"].str()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
         val message = LabelText.clean(o["message"].str(), NOTICE_BODY_MAX)
         val level = o["level"].str().takeIf { it == "info" || it == "error" } ?: "warning"
+        if (o["code"].str() == PEER_MESSAGE_RECEIPT_CODE && message.isNotEmpty()) {
+            return@mapNotNull ProviderNoticeView(id, level, HANDOVER_NOTICE_HEADING, message, dismissKeyOf(o["dismissKey"]))
+        }
         when (val handover = handoverNoticeView(o["code"].str(), v151)) {
             HandoverNoticeView.Hide -> return@mapNotNull null
             is HandoverNoticeView.Words ->

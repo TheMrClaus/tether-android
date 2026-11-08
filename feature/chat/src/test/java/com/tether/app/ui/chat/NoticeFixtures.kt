@@ -80,6 +80,17 @@ object NoticeFixtures {
         )
     }
 
+    /** GH #265: the server's receipt to a peer message's SENDER, a session-tail notice (turnId null) the phone reads as "Tether". */
+    val peerReceipt: ChatFixtures.Folded by lazy {
+        ChatFixtures.fold(
+            *ChatFixtures.turn("t1", "Ask qtarget to rerun the lint.", "I sent the request to qtarget.", TS),
+            evNullTurn("provider_notice", seq = 10, ts = TS) {
+                put("noticeId", "peer-1"); put("level", "info"); put("code", "peer_message_receipt")
+                put("message", "Your message to qtarget was delivered.")
+            },
+        )
+    }
+
     /** issue #184: a turn Tether interrupted (by the operator's next message), said at its outcome row. */
     val interrupted: ChatFixtures.Folded by lazy {
         ChatFixtures.fold(
