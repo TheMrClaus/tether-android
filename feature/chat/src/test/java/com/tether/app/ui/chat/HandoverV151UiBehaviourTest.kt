@@ -194,10 +194,10 @@ class HandoverV151UiBehaviourTest {
     fun theInstructionRowHasNoXAndAMovingRowSaysWhereItGoes() {
         composer(HandoverV151Fixtures.requestedQueued)
         rule.waitForIdle()
-        rule.onNodeWithText(Handover.QUEUE_LABEL).assertExists()
-        rule.onNodeWithText(Handover.QUEUE_MOVES).assertExists()
+        rule.onNode(hasWait(Handover.QUEUE_LABEL)).assertExists()
+        rule.onNode(hasWait(Handover.QUEUE_MOVES)).assertExists()
         rule.onAllNodesWithContentDescription(HANDOVER_QUEUE_REMOVE_DESCRIPTION).assertCountEquals(0)
-        rule.onNodeWithContentDescription(HANDOVER_QUEUE_ROW_DESCRIPTION).assertExists()
+        rule.onNodeWithTag(HANDOVER_QUEUE_ROW_TAG).assertExists() // D-GH-8: the row's name is now kind + preview
         // The operator's own row keeps its X.
         rule.onNodeWithContentDescription("Remove queued message").performClick()
         assertEquals(listOf("mine"), removed)
@@ -220,7 +220,7 @@ class HandoverV151UiBehaviourTest {
     fun at150TheInstructionRowKeepsItsXAndItsW33Words() {
         composer(HandoverV151Fixtures.requestedQueued, v151 = false)
         rule.waitForIdle()
-        rule.onNodeWithText(HANDOVER_QUEUE_WAIT_COPY).assertExists()
+        rule.onNode(hasWait(HANDOVER_QUEUE_WAIT_COPY)).assertExists()
         rule.onNodeWithContentDescription(HANDOVER_QUEUE_REMOVE_DESCRIPTION).assertExists()
     }
 

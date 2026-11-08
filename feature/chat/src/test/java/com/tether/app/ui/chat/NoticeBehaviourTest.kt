@@ -547,6 +547,7 @@ class ComposerLockBehaviourTest {
     }
 
     @Test
+    @Config(qualifiers = "w840dp-h915dp-420dpi") // tth-5u90: the row button is on the row from the Medium class
     fun aBusyDrivableSavedCopyKeepsItsInputButBothInterruptKeysAreLocked() {
         // The control case: neither T6.6 lock applies, so the composer is drawn and T13.2's lock holds.
         show(ComposerFixtures.session, null, ComposerFixtures.queued, savedCopy)

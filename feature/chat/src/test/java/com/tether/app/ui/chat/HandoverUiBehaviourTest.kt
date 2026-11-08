@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -273,10 +274,10 @@ class HandoverUiBehaviourTest {
         rule.setContent(composer(ComposerFixtures.session, folded = HandoverUiFixtures.busyWithRequest))
         rule.waitForIdle()
         rule.onNodeWithTag(HANDOVER_QUEUE_ROW_TAG).assertExists()
-        rule.onNodeWithText(HANDOVER_QUEUE_WAIT_COPY).assertExists()
-        rule.onNodeWithContentDescription(HANDOVER_QUEUE_ROW_DESCRIPTION).assertExists()
-        // Only the operator's own row (one) offers Edit; the instruction row offers none and no Interrupt now.
-        rule.onAllNodesWithContentDescription("Edit queued message").assertCountEquals(1)
+        rule.onNode(hasWait(HANDOVER_QUEUE_WAIT_COPY)).assertExists()
+        // D-GH-8 (tth-5u90): the row's name is its kind + preview; "Handover" is the lead; the edit field lives in the sheet (none on a row).
+        rule.onNode(hasContentDescription("Tether’s handover instruction", substring = true)).assertExists()
+        rule.onAllNodesWithContentDescription("Edit queued message").assertCountEquals(0)
         rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(0)
         rule.onNodeWithContentDescription(HANDOVER_QUEUE_REMOVE_DESCRIPTION).performClick()
         rule.waitForIdle()

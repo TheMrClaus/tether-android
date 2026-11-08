@@ -146,6 +146,7 @@ class InterruptErrorBehaviourTest {
     }
 
     @Test
+    @Config(qualifiers = "w840dp-h915dp-420dpi", shadows = [NoMagnifier::class]) // tth-5u90: the row button is on the row from the Medium class
     fun interruptAndSendAsksThenActsOnTheCommitBoundToItsTurn() {
         // Spec §4.2: the row action always confirms; only the commit sends, and it sends exactly one interrupt.
         val client = liveClient(busy, queuedOn("t1"))
@@ -385,6 +386,7 @@ class InterruptErrorBehaviourTest {
      * interrupt failed: then they unlock for a retry. A failure of some other turn unlocks nothing.
      */
     @Test
+    @Config(qualifiers = "w840dp-h915dp-420dpi", shadows = [NoMagnifier::class]) // tth-5u90: the row button is on the row from the Medium class
     fun everyInterruptControlIsLockedWhileTheTurnIsBeingInterruptedUntilItFails() {
         val client = liveClient(busy, queuedTwoOn("t1", cancelling = true))
         rule.mainClock.autoAdvance = false
@@ -424,6 +426,7 @@ class InterruptErrorBehaviourTest {
      * on t1's row sends nothing for t2; a fresh tap interrupts t2 at once (ta-coik.13: no re-arm).
      */
     @Test
+    @Config(qualifiers = "w840dp-h915dp-420dpi", shadows = [NoMagnifier::class]) // tth-5u90: the row button is on the row from the Medium class
     fun theSameQueuedRowDropsAConfirmationAcrossATurnChange() {
         val client = liveClient(busy, queuedOn("t1", queueId = "q-same"))
         rule.mainClock.autoAdvance = false
