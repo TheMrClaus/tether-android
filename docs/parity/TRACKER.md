@@ -26,6 +26,9 @@
 
 ## ▶ RESUME HERE
 
+**Next release (DRAFT, not published): 1.6.3 / code 67** - branch `release/1.6.3` from main `af405232` + the upload fix; curated notes in `docs/releases/1.6.3.md`.
+- Contents: a photo upload refused by a sign-in gateway shows a failed-upload bubble with the reason and Send again; a held message with uploads in flight reads Uploading with a percent. Also carries the regenerated baseline and startup profiles (tth-om62), not listed in the notes.
+
 **Current release: 1.6.2 / code 66 — APK PUBLISHED (2026-11-07; SHIPPED WITH OPEN CRITERIA).**
 - [v1.6.2 / code 66](https://github.com/TheMrClaus/tether-android/releases/tag/v1.6.2), published 2026-11-07T13:44:09Z, Latest, not a prerelease; tag and release head `ff96d4ce` (`release/1.6.2`, built on main `dfe85f92`), merged back into main.
 - Contents: tabbed multi-part questions, "Also stop" for background work in the Stop panel, plain-word upload failures with Send again kept, and peer / handed-off messages in the queue above the composer. Curated notes (4 bullets): `docs/releases/1.6.2.md`.

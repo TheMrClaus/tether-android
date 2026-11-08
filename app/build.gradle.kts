@@ -31,8 +31,8 @@ android {
         applicationId = "com.tether.app"
         minSdk = 34
         targetSdk = 37
-        versionCode = 66
-        versionName = "1.6.2"
+        versionCode = 67
+        versionName = "1.6.3"
         // T13.1 rollback flag (SYNC_DESIGN §2.6): the Room journal mirror. Off with
         // `-Ptether.mirrorEnabled=false`; an existing mirror is then deleted with its keys.
         buildConfigField(
