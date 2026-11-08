@@ -26,7 +26,7 @@
 
 ## ▶ RESUME HERE
 
-**Next release (DRAFT, not published): 1.6.4 / code 68** - branch `release/1.6.4` from main `38fbe783` (1.6.3 published) + the queue and restart-words work; curated notes in `docs/releases/1.6.4.md`.
+**Current release: 1.6.4 / code 68 - APK PUBLISHED** 2026-11-08 12:38Z (release `v1.6.4`, merged as `c20de133`; previous release 1.6.3). Public `app-release.apk` = the verified draft: 8877656 bytes, SHA-256 `6aeec9601255f521eff304b0c25926c8a2021c358e7fe70acfff31bc355e4aa8`, same signing certificate as 1.6.3. Gates: full `:core:net` 1835 tests 0 failures; unsigned `assembleRelease`, `verifyRoborazziDebug`, `:app:verifyGalleryNotInRelease` BUILD SUCCESSFUL locally; `assembleDebug lint testDebugUnitTest` green except the known ShareFlowTest load flake (tth-by0r; passes alone, and the same code had a fully green run in review). Curated notes in `docs/releases/1.6.4.md`.
 - Contents: queued messages fold to one tappable line with a detail sheet (tth-5u90); a turn ended by a requested engine restart says so (tth-5i8m, server 159).
 
 **Current release: 1.6.3 / code 67 - APK PUBLISHED** 2026-11-08 08:17Z (release `v1.6.3`, merged as `170184d2`; previous release 1.6.2). Public `app-release.apk` = the verified draft: 8861272 bytes, SHA-256 `a9bba297300cb93a7168a537ed1acdf89f73c6047700ab98890c6559cc863f63`. Gates: full `:core:net` 1835 tests 0 failures; `assembleDebug lint testDebugUnitTest`, `verifyRoborazziDebug`, `:app:verifyGalleryNotInRelease`, unsigned `assembleRelease` all BUILD SUCCESSFUL locally (CI run 42460996585 failed on an OOM compiling `:feature:chat`, a module this release does not change). Curated notes in `docs/releases/1.6.3.md`.
