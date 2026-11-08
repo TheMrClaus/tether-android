@@ -104,7 +104,14 @@ object PendingInput {
      * `sending` / `waiting` row. Waiting when the link is down, the record is not on the wire, or
      * it has gone unacknowledged past UNACKED_CLOSE_MS with no inbound frame in that window either.
      */
-    fun describePending(store: PendingStore, now: Long, socketOpen: Boolean, lastServerFrameAt: Long): List<PendingSendRow> {
+    fun describePending(
+        store: PendingStore,
+        now: Long,
+        socketOpen: Boolean,
+        lastServerFrameAt: Long,
+        /** tth-xyp9: per record key, the percent of its photos still uploading (web `uploadsComplete` false -> "uploading", ahead of "waiting"). */
+        uploading: Map<String, Int> = emptyMap(),
+    ): List<PendingSendRow> {
         val options = JsObj.of(
             "now" to js(now.toDouble()),
             "socketOpen" to js(socketOpen),
@@ -117,7 +124,12 @@ object PendingInput {
                 sessionId = row["sessionId"].str.orEmpty(),
                 kind = row["kind"].str.orEmpty(),
                 text = row["text"].str.orEmpty(),
-                status = if (row["status"].str == "sending") SendStatus.Sending else SendStatus.Waiting,
+                status = when {
+                    row["key"].str.orEmpty() in uploading -> SendStatus.Uploading
+                    row["status"].str == "sending" -> SendStatus.Sending
+                    else -> SendStatus.Waiting
+                },
+                uploadPercent = uploading[row["key"].str.orEmpty()],
                 attachmentCount = (row["attachmentCount"].num ?: 0.0).toInt(),
                 imageCount = (row["imageCount"].num ?: 0.0).toInt(),
                 bytes = row["bytes"].num ?: 0.0,

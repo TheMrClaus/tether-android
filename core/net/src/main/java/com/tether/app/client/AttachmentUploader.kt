@@ -156,7 +156,8 @@ class AttachmentUploader(
                 if (id == uploadId && bytes != null && sha != null) UploadOutcome.Stored(id, bytes, sha)
                 else UploadOutcome.Refused(status, "bad_reply", "The server's answer to the upload could not be read.", retryable = true)
             }
-            status in 300..399 -> UploadOutcome.Refused(status, null, "The server redirected the upload.", retryable = false)
+            // tth-xyp9: a redirect to another host is a sign-in gateway (Cloudflare Access) in front of the server; say so.
+            status in 300..399 -> UploadOutcome.Refused(status, null, redirectReason(response), retryable = false)
             status == 400 && code == "upload_interrupted" -> UploadOutcome.Transient(serverReason ?: "The upload was interrupted.")
             (status == 404 || status == 405) && code == null -> UploadOutcome.RouteMissing
             status == 401 || status == 403 -> UploadOutcome.Refused(status, code, serverReason ?: "You are not allowed to upload here.", retryable = false)
@@ -169,6 +170,12 @@ class AttachmentUploader(
             status == 429 || status >= 500 -> UploadOutcome.Refused(status, code, serverReason ?: "The server could not take the upload right now.", retryable = true)
             else -> UploadOutcome.Refused(status, code, serverReason ?: "The server refused the upload.", retryable = false)
         }
+    }
+
+    private fun redirectReason(response: okhttp3.Response): String {
+        val location = response.header("Location")?.let { response.request.url.resolve(it) }
+        val elsewhere = location != null && location.host != response.request.url.host
+        return if (elsewhere) "A sign-in gateway blocked the upload (HTTP ${response.code})." else "The server redirected the upload (HTTP ${response.code})."
     }
 
     private fun readCapped(response: okhttp3.Response): String? = try {

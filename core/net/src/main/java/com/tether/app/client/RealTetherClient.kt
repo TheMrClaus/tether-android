@@ -4374,7 +4374,9 @@ class RealTetherClient(
             val marked = PendingInput.markSent(added.store, sent, clock())
             // A2: this message's photos are still uploading: it is held in the store (never sent half-way), and
             // goes out by id when they are stored (or is given up on if one fails).
-            val held = bound && key !in sent && hub!!.gate(key).let { it is UploadGate.Waiting }
+            // tth-xyp9: a photo that already failed at pick time is held too, so [failUploads] below turns it into
+            // the failed-upload bubble (reason + Retry) - never NotConnected, which the composer words as a link problem.
+            val held = bound && key !in sent && hub!!.gate(key).let { it is UploadGate.Waiting || it is UploadGate.Failed }
             if (key !in sent && !held) {
                 if (bound) hub!!.unbind(key)
                 // The web's rollback: a record with attachments that did not reach the wire is
@@ -4390,6 +4392,7 @@ class RealTetherClient(
         // ta-coik.19 (use-tether.ts 90fbb9f :648): surfaced as failed bubbles, not dropped silently.
         recordFailed(evicted)
         if (result == AttachmentSendResult.Sent || result == AttachmentSendResult.NotConnected) persistPending()
+        if (result == AttachmentSendResult.Sent && uploadIds.isNotEmpty()) failUploads()
         // Web #135: an attachment frame is large and never persisted, so a half-open socket
         // swallowing it is the worst case — probe right away.
         if (result == AttachmentSendResult.Sent) probeLink()
@@ -4707,13 +4710,12 @@ class RealTetherClient(
      * from the store and the link (open socket, last inbound frame). Equal rows publish nothing.
      */
     private fun publishPendingSends() {
-        val rows = PendingInput.describePending(pendingStore, clock(), socketOpen, lastInboundAt)
         val hub = attachmentUploads
+        val uploading = HashMap<String, Int>()
+        if (hub != null) for (r in pendingStore.records) hub.percentFor(r.key)?.let { uploading[r.key] = it }
+        val rows = PendingInput.describePending(pendingStore, clock(), socketOpen, lastInboundAt, uploading)
         val kept = keptKeysLocked()
-        pendingSendsState.value = rows.map { row ->
-            val withKept = row.copy(keptOnDevice = row.key in kept)
-            hub?.percentFor(row.key)?.let { withKept.copy(uploadPercent = it) } ?: withKept
-        }
+        pendingSendsState.value = rows.map { row -> row.copy(keptOnDevice = row.key in kept) }
     }
 
     // ta-delivery §4.1d A.1: the per-record fact "kept on this device". Guarded by [lock]. Recomputed only when the

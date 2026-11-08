@@ -285,4 +285,13 @@ class PendingInputTest {
         assertFalse(a == b)
         assertTrue(a, Regex("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$").matches(a))
     }
+
+    @Test
+    fun describePendingReadsUploadingAheadOfWaiting() {
+        val added = PendingInput.addRecord(PendingInput.emptyStore(), "k1", PendingInput.KIND_SEND, "s1", "hi", 1_000L)
+        val rows = PendingInput.describePending(added.store, 2_000L, socketOpen = false, lastServerFrameAt = 0L, uploading = mapOf("k1" to 40))
+        assertEquals(SendStatus.Uploading, rows.single().status)
+        assertEquals(40, rows.single().uploadPercent)
+        assertEquals(SendStatus.Waiting, PendingInput.describePending(added.store, 2_000L, socketOpen = false, lastServerFrameAt = 0L).single().status)
+    }
 }
