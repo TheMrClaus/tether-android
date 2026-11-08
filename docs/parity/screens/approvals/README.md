@@ -103,3 +103,24 @@ Divergences from the web, on purpose:
   field drops line breaks, as an HTML text input does.
 
 The diff is a review aid, not a gate (PLAN §5.3). The pixel gate is `verifyRoborazziDebug`.
+
+## States with no web reference: refused taps (tth-9hvv, #5)
+
+The web never refuses a decision locally: it sends `approval` / `question` on any open socket and
+the server answers. Android refuses before the wire when its own copy disagrees with the card, and
+until 1.6.5 it did so silently (only "NotConnected" spoke). These six lines are **native-only**: there
+is no web reference, and the evidence is `ConsentRefusalLinesTest`. They ride the client's `errors`
+flow (the error toast); the public `ConsentResult` and the cards are unchanged. `{X}` is "decision"
+for an approval and "answer" for a question. " Refreshing this session." is appended only when that
+refusal issued the full resync (`Attach(id, null)`, at most one per session per 10 s).
+
+| Refusal | Line | Full resync |
+|---|---|---|
+| An approval with no choice or decision | `Your decision was not sent. Pick an option and try again.` | no |
+| A question already answered on record | `That question was already answered. Your answer was not sent.` | yes |
+| No running turn in this device's copy | `This device has no running turn. Your {X} was not sent.` | yes |
+| Request not open in this device's copy | `That request is no longer open here. Your {X} was not sent.` | yes |
+| The request on screen changed (fingerprint) | `The request on screen is out of date. Your {X} was not sent. Check it and try again.` | no |
+| A second tap on a request already decided here | `Your earlier {X} was already sent. This one was not sent.` | no |
+
+Unchanged, with its web cite (use-tether.ts:325-328): `The secure link is reconnecting. Your input was not sent.`
