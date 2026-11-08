@@ -26,6 +26,9 @@
 
 ## ▶ RESUME HERE
 
+**Next release (DRAFT, not published): 1.6.6 / code 70** - branch `release/1.6.6` from main `4aa7cc87` (1.6.5 published) + the stuck "Answer sent" heal; curated notes in `docs/releases/1.6.6.md`.
+- Contents: an answered question or decision no longer stays on "Answer sent" when the connection quietly stalls (tth-9hvv, #5): the link is probed after a consent send (a dead downlink is dropped and reconnected), and a closing event that leaves its request pending triggers one debounced full resync.
+
 **Current release: 1.6.5 / code 69 - APK PUBLISHED** 2026-11-08 14:12Z (release `v1.6.5`, merged as `ec8235d1`; previous release 1.6.4). Public `app-release.apk` = the verified draft: 8877656 bytes, SHA-256 `a9d047651dc4cded9803e917f1aa440702e6c4383cd3250f316163ac3eb8ce0f`, same signing certificate as 1.6.4. Gates: full `:core:net` 1852 tests 0 failures; unsigned `assembleRelease`, `verifyRoborazziDebug` (goldens unchanged), `:app:verifyGalleryNotInRelease` BUILD SUCCESSFUL locally; `assembleDebug lint testDebugUnitTest` green except the known ShareFlowTest load flake (tth-by0r; green on the `--continue` rerun). Curated notes in `docs/releases/1.6.5.md`.
 - Contents: returning after a long absence no longer crashes on newer Android (tth-1om0, #3); each socket loss is logged under `TetherLink` (tth-dywx, #4); a refused decision/answer tap says why and a stale session refreshes (tth-9hvv, #5).
 

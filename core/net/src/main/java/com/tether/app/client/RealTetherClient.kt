@@ -4267,6 +4267,7 @@ class RealTetherClient(
         }
         if (buffered) return
         val tree = synchronized(lock) { sessionStore.tree(message.sessionId) } ?: return
+        val closingId = closingRequestId(event)?.takeIf { requestPendingIn(tree, it) }
         val next = try {
             reduce(tree, eventTreeOf(event.raw))
         } catch (e: RuntimeException) {
@@ -4278,6 +4279,8 @@ class RealTetherClient(
             if (current) sendFrameOn(webSocket, ClientMessage.Attach(message.sessionId, null))
             return
         }
+        // tth-9hvv (#5, C2): a closing event that left its request pending was dropped by the fold guard.
+        if (closingId != null && requestPendingIn(next, closingId) && healDroppedClose(webSocket, message.sessionId)) return
         // An unchanged projection is the same object (T2.1 Revision 6): nothing to publish.
         var stored = next
         if (next !== tree) {
@@ -4347,8 +4350,47 @@ class RealTetherClient(
         forgetSavedCopyLocked(sessionId)
     }
 
-    /** When each session last had a consent-refusal full resync ([clock]): the 10 s debounce. */
+    /** When each session last had a consent-refusal or dropped-close full resync ([clock]): the shared 10 s debounce. */
     private val lastConsentResyncAt = HashMap<String, Long>()
+
+    /**
+     * tth-9hvv (#5): the ONE debounced full-resync claim, shared by the consent refusals and the
+     * dropped-close heal ([healDroppedClose]), so both draw on the same per-session 10 s window.
+     * Returns the live, handshaken socket to send `Attach(id, null)` on (the store already dropped),
+     * or null when there is none or the session was resynced within the window. Caller holds [lock].
+     */
+    private fun claimFullResyncLocked(sessionId: String): WebSocket? {
+        val ws = socket
+        val now = clock()
+        val last = lastConsentResyncAt[sessionId]
+        if (ws == null || !socketOpen || !handshakeDone || (last != null && now - last in 0 until CONSENT_RESYNC_DEBOUNCE_MS)) return null
+        lastConsentResyncAt[sessionId] = now
+        dropForFullResyncLocked(sessionId)
+        return ws
+    }
+
+    /** The request id a closing event names (question_resolved / question_cancelled / approval_resolved / approval_expired), else null. */
+    private fun closingRequestId(event: com.tether.app.protocol.AgentEvent): String? = when (event.type) {
+        "question_resolved", "question_cancelled", "approval_resolved", "approval_expired" -> event.raw.str("requestId")
+        else -> null
+    }
+
+    private fun requestPendingIn(tree: JsObj?, requestId: String): Boolean =
+        ConsentGuard.pendingQuestion(tree, requestId) != null || ConsentGuard.pendingApproval(tree, requestId) != null
+
+    /**
+     * tth-9hvv (#5, C2): a closing event for a request that was pending before the fold and still is
+     * after it was dropped by the reducer's turn guard (the cursor has already moved past it, so a
+     * cursor attach would come back stateless). Ask for ONE full resync of a kept session; never
+     * resend anything. Returns true when the event's tree must not be used.
+     */
+    private fun healDroppedClose(webSocket: WebSocket, sessionId: String): Boolean {
+        val resyncWs = synchronized(lock) {
+            if (socket !== webSocket || !retention.isRetained(sessionId)) null else claimFullResyncLocked(sessionId)
+        }
+        if (resyncWs != null) sendFrameOn(resyncWs, ClientMessage.Attach(sessionId, null))
+        return resyncWs != null
+    }
 
 
     /**
@@ -5706,6 +5748,11 @@ class RealTetherClient(
             publishConsentLocked()
             ConsentResult.Sent
         }
+        // tth-9hvv (#5, C1): the answer's own frames (question_answered / question_resolved) come back
+        // on this socket, so a downlink that is dead after the tap would leave the card on "Answer sent"
+        // for good. Probe right away, as an attachment send does: a silent socket is dropped and the
+        // reconnect's cursor attach (behind head) heals the tree. Nothing is resent.
+        if (result == ConsentResult.Sent) probeLink()
         // use-tether.ts:325-328: the web's words when the link is down; the decision is not kept.
         if (result == ConsentResult.NotConnected) emitError("The secure link is reconnecting. Your input was not sent.")
         refusal?.let { why ->
@@ -5713,18 +5760,7 @@ class RealTetherClient(
             // snapshot (never a cursor attach, never a resend of the answer), at most once per
             // session per 10 s; the line says "Refreshing" only when this refusal issued it.
             if (why.resyncs) {
-                val resyncWs = synchronized(lock) {
-                    val ws = socket
-                    val now = clock()
-                    val last = lastConsentResyncAt[sessionId]
-                    if (ws == null || !socketOpen || !handshakeDone || (last != null && now - last in 0 until CONSENT_RESYNC_DEBOUNCE_MS)) {
-                        null
-                    } else {
-                        lastConsentResyncAt[sessionId] = now
-                        dropForFullResyncLocked(sessionId)
-                        ws
-                    }
-                }
+                val resyncWs = synchronized(lock) { claimFullResyncLocked(sessionId) }
                 if (resyncWs != null) sendFrameOn(resyncWs, ClientMessage.Attach(sessionId, null))
                 emitError(why.line(noun) + if (resyncWs != null) " Refreshing this session." else "")
             } else {
