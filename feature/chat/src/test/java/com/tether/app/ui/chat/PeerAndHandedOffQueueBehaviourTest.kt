@@ -3,6 +3,7 @@ package com.tether.app.ui.chat
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -66,26 +67,24 @@ class PeerAndHandedOffQueueBehaviourTest {
         rule.onNodeWithContentDescription("Message queue, 1 message").assertExists()
     }
 
-    // ---- tth-y1hv ----
+    // ---- tth-y1hv (flipped by D-GH-8 / tth-5u90: was "shown in full", now one compact line + the whole message in a sheet) ----
     @Test
-    fun aQueuedPeerRowIsListedReadOnlyAndWithdrawable() {
+    fun aQueuedPeerRowIsOneLineOpensItsSheetAndIsWithdrawable() {
         show(ComposerFixtures.delivery(peer, QueueSpec("b", "Also bump the changelog.")))
         rule.onNodeWithContentDescription("Message queue, 2 messages").assertExists()
-        rule.onNodeWithText("Please also run the lint pass.").assertExists()
-        rule.onNodeWithText(PEER_QUEUE_WAIT_COPY).assertExists()
-        rule.onNodeWithTag(QUEUE_READONLY_TEXT_TAG).assertExists()
-        // one editable field only (the operator's row), never the peer's
-        rule.onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasContentDescription("Edit queued message")).assertCountEquals(1)
+        // D-GH-8: the lead names the sender; the preview is the body (the attribution prefix is stripped); no inline text field.
+        rule.onNode(hasWait(PEER_QUEUE_WAIT_COPY)).assertExists()
+        rule.onNode(hasText("Please also run the lint pass.")).assertExists()
+        rule.onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasContentDescription("Edit queued message")).assertCountEquals(0)
         rule.onNodeWithContentDescription(PEER_QUEUE_REMOVE_DESCRIPTION).performClick()
         assertEquals(listOf("p"), removes)
-        // the next row to deliver is a peer's: no "Interrupt and send" anywhere
         rule.onAllNodesWithContentDescription("Interrupt and send", substring = true).assertCountEquals(0)
     }
 
     @Test
     fun aHeldPeerRowSaysItCannotBeEdited() {
         show(ComposerFixtures.delivery(QueueSpec("p", "Please also run the lint pass.", held = true, origin = "system", kind = "peer")))
-        rule.onNodeWithText("Not sent: the session failed to open. This message from another session cannot be edited; remove it.").assertExists()
+        rule.onNode(hasWait("Not sent: the session failed to open. This message from another session cannot be edited; remove it.")).assertExists()
         rule.onAllNodesWithContentDescription("Edit queued message").assertCountEquals(0)
         rule.onNodeWithTag(QUEUE_HELD_TAG).assertExists()
     }
@@ -99,11 +98,10 @@ class PeerAndHandedOffQueueBehaviourTest {
             ComposerFixtures.session.copy(handedOffTo = target.id),
         )
         rule.onNodeWithContentDescription("Message queue, 2 messages").assertExists()
-        rule.onNodeWithText("$HANDED_OFF_ROW_LABEL Send it again in the new session, then remove it here.").assertExists()
-        rule.onNodeWithText("$HANDED_OFF_ROW_LABEL Remove it.").assertExists()
+        rule.onNode(hasWait("$HANDED_OFF_ROW_LABEL Send it again in the new session, then remove it here.")).assertExists()
+        rule.onNode(hasWait("$HANDED_OFF_ROW_LABEL Remove it.")).assertExists()
         rule.onAllNodesWithContentDescription("Edit queued message").assertCountEquals(0)
         rule.onAllNodesWithContentDescription("Interrupt and send", substring = true).assertCountEquals(0)
-        rule.onNodeWithContentDescription(OPERATOR_READ_ONLY_ROW_DESCRIPTION).assertExists()
         rule.onNodeWithContentDescription("Remove queued message").performClick()
         assertEquals(listOf("a"), removes)
         rule.onNodeWithTag("handoff-notice-to").assertExists()

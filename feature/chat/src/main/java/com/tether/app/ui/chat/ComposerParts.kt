@@ -15,6 +15,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -328,6 +335,7 @@ internal const val PEER_QUEUE_ROW_DESCRIPTION = "Queued message from another ses
 internal const val PEER_QUEUE_REMOVE_DESCRIPTION = "Withdraw queued message from another session"
 internal const val OPERATOR_READ_ONLY_ROW_DESCRIPTION = "Queued message (read-only)"
 internal const val QUEUE_READONLY_TEXT_TAG = "queue-readonly-text"
+internal const val QUEUE_PREVIEW_TAG = "queue-preview"
 
 /** tth-2zt (spec §4.1b J, lib/delivery-state.ts handedOffRowLabel): the label of a row that stayed on a handed-off source. */
 internal const val HANDED_OFF_ROW_LABEL = "Not sent: this session was handed off."
@@ -336,9 +344,10 @@ internal fun handedOffRowLabel(message: QueuedMessage): String =
     else "$HANDED_OFF_ROW_LABEL Send it again in the new session, then remove it here."
 
 /**
- * `.chat-queue` (v14): the messages queued while a turn runs, each editable in place (a peer session's row and the handover
- * instruction are read-only). Named [queueRegionLabel] for TalkBack, as the web's `aria-label`. [handedOff] (tth-2zt, spec §4.1b J):
- * the strip a handed-off source keeps while it holds rows: every row held and read-only, Remove only.
+ * `.chat-queue` (tth-5u90, D-GH-8): every queued message is ONE compact line (glyph, lead in words, a one-line preview, the
+ * X); a tap opens the whole message in [QueuedMessageSheet]. The strip caps at `min(176 dp, 34% of the window)` and scrolls
+ * inside itself. Named [queueRegionLabel] for TalkBack, as the web's `aria-label`. [handedOff] (tth-2zt, spec §4.1b J): the
+ * strip a handed-off source keeps while it holds rows: every row held and read-only, Remove only.
  */
 @Composable
 internal fun QueuedMessages(
@@ -379,14 +388,46 @@ internal fun QueuedMessages(
         QueueWait.steeredStopCopy(provider, steeredInTurn),
         QUEUE_INTERRUPT_THEN_SENT,
     ).filter { it.isNotEmpty() }.joinToString(" ")
+    // Spec §3 Android 3: the open sheet's row, per session; it closes itself when the row leaves (flushed, withdrawn elsewhere).
+    var openId by rememberSaveable(sessionId) { mutableStateOf<String?>(null) }
+    val open = queued.withIndex().firstOrNull { it.value.queueId == openId }
+    LaunchedEffect(open == null, openId) { if (openId != null && open == null) openId = null }
+    val focusers = remember { mutableMapOf<String, FocusRequester>() }
+    var focusAfter by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(focusAfter) {
+        val id = focusAfter ?: return@LaunchedEffect
+        focusAfter = null
+        // One frame later: the sheet's window is going away and the row's focus target must be attached.
+        androidx.compose.runtime.withFrameNanos { }
+        runCatching { focusers[id]?.requestFocus() }
+    }
+    val capDp = minOf(176f, LocalConfiguration.current.screenHeightDp * 0.34f).dp
+    fun summaryOf(message: QueuedMessage, index: Int): QueueWait.QueueRowSummary {
+        val move = com.tether.app.client.Handover.queueRowLabel(
+            handoverStage, instruction = message.isHandoverRequest, peer = message.isPeer, held = message.held,
+            index = index, instructionIndex = instructionIndex,
+        ).takeIf { !handedOff }
+        val operatorRow = !message.isPeer && !message.isHandoverRequest
+        return QueueWait.queueRowSummary(
+            message,
+            steer = !message.held && operatorRow && QueueWait.isSteered(steerCapable, message),
+            movesToNewSession = move != null && operatorRow && !message.held,
+            handedOff = handedOff,
+        )
+    }
     Column(
-        Modifier.fillMaxWidth().semantics { contentDescription = queueRegionLabel(queued.size) },
+        Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = queueRegionLabel(queued.size) }
+            .heightIn(max = capDp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(t.css.spaceXs),
     ) {
         for ((index, message) in queued.withIndex()) {
             androidx.compose.runtime.key(message.queueId) {
                 QueuedMessageRow(
                     message = message,
+                    summary = summaryOf(message, index),
                     handoverWaitLabel = com.tether.app.client.Handover.queueRowLabel(
                         handoverStage, instruction = message.isHandoverRequest, peer = message.isPeer, held = message.held,
                         index = index, instructionIndex = instructionIndex,
@@ -394,7 +435,8 @@ internal fun QueuedMessages(
                     handedOff = handedOff,
                     steerCapable = steerCapable,
                     handoverV151 = handoverV151,
-                    onSave = { onSave(message.queueId, it) },
+                    onOpen = { openId = message.queueId },
+                    focusRegistry = focusers,
                     onRemove = { onRemove(message.queueId) },
                     onInterruptNow = onInterruptNow,
                     interruptLock = interruptLock,
@@ -402,12 +444,56 @@ internal fun QueuedMessages(
                     interruptTurnId = interruptTurnId,
                     offerInterruptAndSend = !handedOff && message.queueId == interruptSendId && !message.held && !message.isHandoverRequest && !message.isPeer,
                     confirmationCopy = confirmation,
-                    confirming = confirmingRowId == message.queueId,
+                    confirming = confirmingRowId == message.queueId && openId != message.queueId,
                     onConfirmingChange = { open -> onConfirmRow(if (open) message.queueId else null) },
                 )
             }
         }
     }
+    if (open != null) {
+        val message = open.value
+        val offer = !handedOff && message.queueId == interruptSendId && !message.held && !message.isHandoverRequest && !message.isPeer
+        val handoverWait = com.tether.app.client.Handover.queueRowLabel(
+            handoverStage, instruction = message.isHandoverRequest, peer = message.isPeer, held = message.held,
+            index = open.index, instructionIndex = instructionIndex,
+        ).takeIf { !handedOff }
+        QueuedMessageSheet(
+            message = message,
+            summary = summaryOf(message, open.index),
+            waitLabel = queueWaitLabel(message, handedOff, handoverWait, steerCapable),
+            handedOff = handedOff,
+            removable = !(message.isHandoverRequest && handoverV151 && !handedOff),
+            offerInterruptAndSend = offer,
+            confirmationCopy = confirmation,
+            confirming = confirmingRowId == message.queueId && offer && interruptLock == null,
+            onConfirmingChange = { o -> onConfirmRow(if (o) message.queueId else null) },
+            interruptLock = interruptLock,
+            interruptTurnId = interruptTurnId,
+            interruptIdentity = Triple(sessionId, message.queueId, interruptTurnId),
+            onInterruptNow = onInterruptNow,
+            onSave = { text -> onSave(message.queueId, text) },
+            onRemove = {
+                // Focus moves to the next row's open area, else the previous one (spec §2.8); the composer otherwise.
+                focusAfter = queued.getOrNull(open.index + 1)?.queueId ?: queued.getOrNull(open.index - 1)?.queueId
+                onRemove(message.queueId)
+            },
+            onClose = {
+                focusAfter = message.queueId
+                if (confirmingRowId == message.queueId) onConfirmRow(null)
+                openId = null
+            },
+        )
+    }
+}
+
+/** The row's full wait label (spec §3.2 / §4.1a C / tth-y1hv / tth-2zt / #273): the words of `stateDescription` and the sheet's wait paragraph. */
+internal fun queueWaitLabel(message: QueuedMessage, handedOff: Boolean, handoverWaitLabel: String?, steerCapable: Boolean): String = when {
+    handedOff -> handedOffRowLabel(message)
+    message.held -> QueueWait.heldLabel(message)
+    handoverWaitLabel != null -> handoverWaitLabel
+    message.isHandoverRequest -> HANDOVER_QUEUE_WAIT_COPY
+    message.isPeer -> PEER_QUEUE_WAIT_COPY
+    else -> QueueWait.queuedLabel(steerCapable, message)
 }
 
 /** What committing a queued row's edit does (chat-view.tsx:1433-1441). */
@@ -427,25 +513,24 @@ internal fun queueCommit(edited: String, serverText: String): QueueCommit {
     }
 }
 
+internal const val QUEUE_LEAD_TAG = "queue-lead"
+internal const val QUEUE_OPEN_LABEL = "Open message"
+
 /**
- * One pending queued message: editable in place (commit on Enter or when focus leaves),
- * removable, and blanking it removes it. While not being edited it mirrors the server text
- * (another device may have edited it). Escape restores the server text without saving: the
- * web's handler means to, but its blur commits the pre-restore buffer from the same render's
- * closure (chat-view.tsx:1464-1467 then 1459) — see the T7.1 README.
+ * One queued message as ONE compact line (spec §2.1, tth-5u90): a state glyph, a short lead in words, the text on one line
+ * (ellipsis), and the X. The open area (everything left of the X) is one merged node: `Role.Button`, click label "Open message",
+ * the kind name + preview as its name, and the row's full wait label as `stateDescription` + the ONE polite live region (so the X
+ * stays its own node and a label change is announced once). Edit, Send again, Interrupt and send (below the Medium layout
+ * class) and the rest live in [QueuedMessageSheet].
  *
- * Delivery states (spec §1, §3.2): a row the server holds says in words and a glyph when it sends —
- * V4 `Clock` "Queued on the server · sends when this turn ends", or V5 `CornerDownRight` "… goes into this
- * turn at the agent's next step" (only when the engine can steer) — with a solid `line-strong` edge, no
- * spinner and no violet. A held row (`held`) never sends by itself: `TriangleAlert` + the danger edge + the
- * reason's words ([QueueWait.heldLabel]); Edit and Remove only, never "Interrupt and send". The ONE next
- * row ([offerInterruptAndSend]) offers "Interrupt and send", which always confirms with the cost sentence.
- * Status is in words and shape, never colour alone.
+ * Delivery states (spec §1, §3.2): the glyph and words carry the state, never colour; static, never a spinner (issue #135); a held
+ * row has `TriangleAlert` + the danger edge, and an unconfirmed (`steer_uncertain`) row says "Unconfirmed" in the danger tone.
  */
 @Composable
 internal fun QueuedMessageRow(
     message: QueuedMessage,
-    onSave: (String) -> Unit,
+    summary: QueueWait.QueueRowSummary,
+    onOpen: () -> Unit,
     onRemove: () -> Unit,
     onInterruptNow: (turnId: String) -> Unit,
     interruptLock: String?,
@@ -466,147 +551,134 @@ internal fun QueuedMessageRow(
     /** Spec §4.3 condition 2: whether this row's confirmation is the composer's open one (hoisted: it and the Stop panel never both show). */
     confirming: Boolean = false,
     onConfirmingChange: (Boolean) -> Unit = {},
+    /** The strip's registry of open-area focus targets (keyed by queue id), so a sheet's close or Remove can return focus to a row. */
+    focusRegistry: MutableMap<String, FocusRequester>? = null,
 ) {
     val t = LocalTetherTokens.current
-    val focusManager = LocalFocusManager.current
-    val text = message.text
+    val focusRequester = remember { FocusRequester() }
+    if (focusRegistry != null) {
+        androidx.compose.runtime.DisposableEffect(message.queueId) {
+            focusRegistry[message.queueId] = focusRequester
+            onDispose { focusRegistry.remove(message.queueId) }
+        }
+    }
     val handoverRequest = message.isHandoverRequest
     val peer = message.isPeer
     val held = handedOff || message.held
-    val readOnly = handoverRequest || peer || handedOff
-    var value by remember { mutableStateOf(text) }
-    var editing by remember { mutableStateOf(false) }
-    var reverting by remember { mutableStateOf(false) }
-    LaunchedEffect(text) { if (!editing) value = text }
-
-    fun commit() {
-        editing = false
-        if (reverting) {
-            reverting = false
-            value = text
-            return
-        }
-        when (val c = queueCommit(value, text)) {
-            QueueCommit.Remove -> onRemove()
-            is QueueCommit.Save -> onSave(c.text)
-            QueueCommit.Nothing -> Unit
-        }
-    }
-
-    // The open confirmation is the composer's one state (it belongs to its turn and row there); a row that stops being the
-    // next one, or a copy that cannot interrupt, shows none, and the composer then drops the state.
+    val waitLabel = queueWaitLabel(message, handedOff, handoverWaitLabel, steerCapable)
     val confirmingNow = confirming && offerInterruptAndSend && interruptLock == null
+    // Spec §2.5: below the Medium layout class the button is sheet-only (a 130 dp button would leave the preview ~70 dp).
+    val buttonOnRow = offerInterruptAndSend && !confirmingNow && currentLayoutClass() != TetherLayoutClass.Phone
     val steered = !held && !handoverRequest && !peer && QueueWait.isSteered(steerCapable, message)
-    val waitLabel = when {
-        handedOff -> handedOffRowLabel(message)
-        held -> QueueWait.heldLabel(message)
-        handoverWaitLabel != null -> handoverWaitLabel
-        handoverRequest -> HANDOVER_QUEUE_WAIT_COPY
-        peer -> PEER_QUEUE_WAIT_COPY
-        else -> QueueWait.queuedLabel(steerCapable, message)
-    }
     val shape = RoundedCornerShape(t.radiusMd)
-    val rowHeight = 30.4.dp // 1.9rem
+    val kindDescription = "${summary.kindName}: ${summary.preview.take(120)}"
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .tetherWell(t, shape)
             .queueEdge(if (held) t.brick else t.lineStrong)
-            .padding(horizontal = t.css.spaceSm, vertical = t.css.spaceXs)
             .then(if (held) Modifier.testTag(QUEUE_HELD_TAG) else Modifier),
-        verticalArrangement = Arrangement.spacedBy(t.css.spaceSm),
     ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
-    ) {
-        Box(Modifier.heightIn(min = rowHeight), contentAlignment = Alignment.Center) {
-            // The glyph and the words carry the state, never colour (spec R2); static, never a spinner (issue #135).
-            Icon(
-                when {
-                    held -> TetherIcons.TriangleAlert
-                    steered && !handoverRequest -> TetherIcons.CornerDownRight
-                    else -> TetherIcons.Clock
-                },
-                contentDescription = null,
-                tint = if (held) t.brick else t.muted,
-                modifier = Modifier.size(13.dp).testTag(if (held) QUEUE_HELD_TAG + "-glyph" else if (steered) QUEUE_STATE_STEER_TAG else QUEUE_STATE_TURN_END_TAG),
-            )
-        }
-        if (readOnly) {
-            Text(
-                text,
-                style = LocalTetherTypography.current.body.copy(color = t.ink, fontSize = 13.6.sp, lineHeight = 20.4.sp),
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = rowHeight)
-                    .padding(vertical = t.css.spaceXs)
-                    .semantics {
-                        contentDescription = when {
-                            handoverRequest -> HANDOVER_QUEUE_ROW_DESCRIPTION
-                            peer -> PEER_QUEUE_ROW_DESCRIPTION
-                            else -> OPERATOR_READ_ONLY_ROW_DESCRIPTION
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            BoxWithConstraints(Modifier.weight(1f)) {
+                val leadMax = maxWidth * 0.45f
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp)
+                        .focusRequester(focusRequester)
+                        .then(if (handoverRequest) Modifier.testTag(HANDOVER_QUEUE_ROW_TAG) else Modifier)
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = kindDescription
+                            stateDescription = waitLabel
+                            liveRegion = LiveRegionMode.Polite
                         }
+                        .clickable(onClickLabel = QUEUE_OPEN_LABEL, role = Role.Button, onClick = onOpen)
+                        .padding(start = t.css.spaceSm, end = t.css.spaceXs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+                ) {
+                    // The glyph and the words carry the state, never colour (spec R2); static, never a spinner (issue #135).
+                    Icon(
+                        when (summary.glyph) {
+                            QueueWait.QueueRowGlyph.AlertTriangle -> TetherIcons.TriangleAlert
+                            QueueWait.QueueRowGlyph.CornerDownRight -> TetherIcons.CornerDownRight
+                            QueueWait.QueueRowGlyph.ArrowRightLeft -> TetherIcons.ArrowRightLeft
+                            QueueWait.QueueRowGlyph.Clock -> TetherIcons.Clock
+                        },
+                        contentDescription = null,
+                        tint = if (summary.glyph == QueueWait.QueueRowGlyph.AlertTriangle) t.brick else t.muted,
+                        modifier = Modifier.size(13.dp).testTag(if (held) QUEUE_HELD_TAG + "-glyph" else if (steered) QUEUE_STATE_STEER_TAG else QUEUE_STATE_TURN_END_TAG),
+                    )
+                    if (summary.lead.isNotEmpty()) {
+                        Text(
+                            summary.lead,
+                            style = LocalTetherTypography.current.body.copy(
+                                color = when (summary.leadTone) {
+                                    QueueWait.QueueLeadTone.Danger -> t.brick
+                                    QueueWait.QueueLeadTone.Ink -> t.ink
+                                    QueueWait.QueueLeadTone.Muted -> t.muted
+                                },
+                                fontSize = 11.84.sp,
+                                fontWeight = FontWeight(650),
+                            ),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = leadMax).testTag(QUEUE_LEAD_TAG),
+                        )
                     }
-                    .testTag(if (handoverRequest) HANDOVER_QUEUE_ROW_TAG else QUEUE_READONLY_TEXT_TAG),
-            )
-        } else BasicTextField(
-            value = value,
-            onValueChange = { value = it },
-            modifier = Modifier
-                .weight(1f)
-                .heightIn(min = rowHeight, max = 128.dp)
-                .onFocusChanged { state ->
-                    if (state.isFocused) editing = true else if (editing) commit()
+                    if (summary.attachments.isNotEmpty() && summary.preview != summary.attachments) {
+                        Icon(TetherIcons.Paperclip, contentDescription = null, tint = t.muted, modifier = Modifier.size(12.dp))
+                        Text(
+                            summary.attachments.substringBefore(' '),
+                            style = LocalTetherTypography.current.body.copy(color = t.muted, fontSize = 11.84.sp),
+                            maxLines = 1,
+                        )
+                    }
+                    Text(
+                        summary.preview,
+                        style = LocalTetherTypography.current.body.copy(color = if (held) t.muted else t.ink, fontSize = 13.6.sp, lineHeight = 20.4.sp),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).testTag(QUEUE_PREVIEW_TAG),
+                    )
                 }
-                .onPreviewKeyEvent { event -> queueRowKey(event, focusManager) { reverting = true } }
-                .semantics { contentDescription = "Edit queued message" },
-            textStyle = LocalTetherTypography.current.body.copy(color = t.ink, fontSize = 13.6.sp, lineHeight = 20.4.sp),
-            cursorBrush = SolidColor(t.violet),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-            decorationBox = { inner -> Box(Modifier.padding(vertical = t.css.spaceXs)) { inner() } },
-        )
-        if (offerInterruptAndSend && !confirmingNow) {
-            QueueInterruptButton(
-                onClick = { onConfirmingChange(true) },
-                lock = interruptLock,
-                identity = interruptIdentity,
-                turnId = interruptTurnId,
-            )
+            }
+            if (buttonOnRow) {
+                QueueInterruptButton(
+                    onClick = { onConfirmingChange(true) },
+                    lock = interruptLock,
+                    identity = interruptIdentity,
+                    turnId = interruptTurnId,
+                )
+            }
+            // v151: Stop handover (the Session links menu) is the one stop, so Tether's instruction row has no X.
+            if (!(handoverRequest && handoverV151 && !handedOff)) Box(
+                Modifier
+                    .clickable(onClick = onRemove)
+                    .semantics { contentDescription = if (handoverRequest) HANDOVER_QUEUE_REMOVE_DESCRIPTION else if (peer) PEER_QUEUE_REMOVE_DESCRIPTION else "Remove queued message" }
+                    .size(44.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
+            }
         }
-        // v151: Stop handover (the Session links menu) is the one stop, so Tether's instruction row has no X.
-        if (!(handoverRequest && handoverV151 && !handedOff)) Box(
-            Modifier
-                .minimumInteractiveComponentSize()
-                .clickable(onClick = onRemove)
-                .semantics { contentDescription = if (handoverRequest) HANDOVER_QUEUE_REMOVE_DESCRIPTION else if (peer) PEER_QUEUE_REMOVE_DESCRIPTION else "Remove queued message" }
-                .size(rowHeight),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(15.dp))
-        }
-    }
-        // `span.chat-queue-wait-label[role=status]` (spec §3.2): the live region is the label alone.
-        val style = LocalTetherTypography.current.body.copy(color = t.muted, fontSize = 11.84.sp, lineHeight = 16.576.sp)
-        Text(
-            waitLabel,
-            style = style,
-            modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
-        )
         if (confirmingNow) {
-            QueueInterruptConfirmation(
-                copy = confirmationCopy,
-                onKeepQueued = { onConfirmingChange(false) },
-                onCommit = { turnId ->
-                    onConfirmingChange(false)
-                    onInterruptNow(turnId)
-                },
-                lock = interruptLock,
-                identity = interruptIdentity,
-                turnId = interruptTurnId,
-            )
+            Box(Modifier.padding(horizontal = t.css.spaceSm, vertical = t.css.spaceXs)) {
+                QueueInterruptConfirmation(
+                    copy = confirmationCopy,
+                    onKeepQueued = { onConfirmingChange(false) },
+                    onCommit = { turnId ->
+                        onConfirmingChange(false)
+                        onInterruptNow(turnId)
+                    },
+                    lock = interruptLock,
+                    identity = interruptIdentity,
+                    turnId = interruptTurnId,
+                )
+            }
         }
     }
 }
@@ -618,7 +690,7 @@ internal fun QueuedMessageRow(
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun QueueInterruptConfirmation(
+internal fun QueueInterruptConfirmation(
     copy: String,
     onKeepQueued: () -> Unit,
     onCommit: (turnId: String) -> Unit,
@@ -666,7 +738,7 @@ private fun QueueInterruptConfirmation(
 }
 
 /** Enter (no Shift) commits by leaving the field; Escape reverts first (web :1460-1468). */
-private fun queueRowKey(event: KeyEvent, focusManager: FocusManager, revert: () -> Unit): Boolean {
+internal fun queueRowKey(event: KeyEvent, focusManager: FocusManager, revert: () -> Unit): Boolean {
     if (event.type != KeyEventType.KeyDown) return false
     return when {
         (event.key == Key.Enter || event.key == Key.NumPadEnter) && !event.isShiftPressed -> {
@@ -694,7 +766,7 @@ private fun Modifier.queueEdge(color: Color): Modifier = drawWithContent {
  * the row changed is dropped ([StaleTapGuard]); a copy that is not live shows it dimmed and inert (T13.2 r2).
  */
 @Composable
-private fun QueueInterruptButton(
+internal fun QueueInterruptButton(
     onClick: (turnId: String) -> Unit,
     lock: String?,
     identity: Any,

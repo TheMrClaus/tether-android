@@ -26,6 +26,9 @@
 
 ## ▶ RESUME HERE
 
+**Next release (DRAFT, not published): 1.6.4 / code 68** - branch `release/1.6.4` from main `38fbe783` (1.6.3 published) + the queue and restart-words work; curated notes in `docs/releases/1.6.4.md`.
+- Contents: queued messages fold to one tappable line with a detail sheet (tth-5u90); a turn ended by a requested engine restart says so (tth-5i8m, server 159).
+
 **Current release: 1.6.3 / code 67 - APK PUBLISHED** 2026-11-08 08:17Z (release `v1.6.3`, merged as `170184d2`; previous release 1.6.2). Public `app-release.apk` = the verified draft: 8861272 bytes, SHA-256 `a9bba297300cb93a7168a537ed1acdf89f73c6047700ab98890c6559cc863f63`. Gates: full `:core:net` 1835 tests 0 failures; `assembleDebug lint testDebugUnitTest`, `verifyRoborazziDebug`, `:app:verifyGalleryNotInRelease`, unsigned `assembleRelease` all BUILD SUCCESSFUL locally (CI run 42460996585 failed on an OOM compiling `:feature:chat`, a module this release does not change). Curated notes in `docs/releases/1.6.3.md`.
 - Contents: a photo upload refused by a sign-in gateway shows a failed-upload bubble with the reason and Send again; a held message with uploads in flight reads Uploading with a percent. Also carries the regenerated baseline and startup profiles (tth-om62), not listed in the notes.
 

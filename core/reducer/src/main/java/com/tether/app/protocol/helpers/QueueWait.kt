@@ -271,4 +271,94 @@ object QueueWait {
         val next = queue.firstOrNull { !it.held } ?: return null
         return next.queueId.takeIf { next.isOperatorMessage }
     }
+
+    // ---- tth-5u90 / D-GH-8: the compact queue row (twin of lib/queue-wait.ts queueRowSummary) -----------
+
+    const val QUEUE_PREVIEW_CAP = 300
+    private const val PEER_HEAD = "Message from session "
+
+    enum class QueueRowGlyph { Clock, CornerDownRight, AlertTriangle, ArrowRightLeft }
+    enum class QueueLeadTone { Muted, Ink, Danger }
+
+    /** One row's compact words: the same table, strings and precedence as the web's `queueRowSummary` (parity test pins both). */
+    data class QueueRowSummary(
+        val glyph: QueueRowGlyph,
+        val lead: String,
+        val leadTone: QueueLeadTone,
+        val preview: String,
+        /** "2 files" / "1 image" / "" */
+        val attachments: String,
+        val kindName: String,
+        val sheetTitle: String,
+        val meta: String,
+    )
+
+    private fun attachmentWords(count: Int, images: Int): String {
+        if (count <= 0) return ""
+        val noun = if (images == count) "image" else "file"
+        return "$count $noun${if (count == 1) "" else "s"}"
+    }
+
+    private fun oneLine(text: String): String = text.replace(Regex("\\s+"), " ").trim().take(QUEUE_PREVIEW_CAP)
+
+    /** Mirrors lib/peer-message.mjs displayPrefix + peerBodyFromDisplay (server code, so mirrored not imported). */
+    private fun peerSplit(text: String, fromSessionId: String?, fromSessionName: String?): Pair<String, String> {
+        val id = fromSessionId ?: ""
+        if (id.isNotEmpty() && text.startsWith(PEER_HEAD)) {
+            val marker = " ($id): "
+            val at = text.indexOf(marker, PEER_HEAD.length)
+            if (at >= 0) return text.substring(PEER_HEAD.length, at) to text.substring(at + marker.length)
+        }
+        return (fromSessionName?.takeIf { it.isNotEmpty() } ?: "another session") to text
+    }
+
+    /**
+     * The summary of one queued row. [handedOff]: the row stayed on a handed-off source (held recipe, Remove only). A held handover instruction reads "Not sent" like a handed-off one (QA B1). Precedence
+     * (spec 2.2 + QD round 2 R2-N1/N2): a held operator `steer_uncertain` row reads "Unconfirmed" (danger tone, warning glyph) even on a
+     * handed-off strip, whose wait label stays handedOffRowLabel; every other held or handed-off row reads "Not sent".
+     */
+    fun queueRowSummary(message: QueuedMessage, steer: Boolean = false, movesToNewSession: Boolean = false, handedOff: Boolean = false): QueueRowSummary {
+        val count = message.attachments?.size ?: message.attachmentIds?.size ?: 0
+        val images = message.attachments?.count { it.mediaType.startsWith("image/") } ?: 0
+        val files = attachmentWords(count, images)
+        fun withFiles(name: String) = if (files.isNotEmpty()) "$name, $files" else name
+        fun previewOf(text: String) = oneLine(text).ifEmpty { files }
+        val heldLike = message.held || handedOff
+        val operator = !message.isPeer && !message.isHandoverRequest
+
+        if (message.isHandoverRequest) {
+            return QueueRowSummary(
+                if (heldLike) QueueRowGlyph.AlertTriangle else QueueRowGlyph.ArrowRightLeft,
+                if (heldLike) "Not sent" else "Handover",
+                if (heldLike) QueueLeadTone.Danger else QueueLeadTone.Muted,
+                previewOf(message.text), "", "Tether\u2019s handover instruction", "Handover instruction",
+                if (heldLike) "Not sent" else "Runs when this turn ends",
+            )
+        }
+        if (message.isPeer) {
+            val (name, body) = peerSplit(message.text, message.fromSessionId, message.fromSessionName)
+            val kindName = "Message from session $name, another agent, not you"
+            return if (heldLike) {
+                QueueRowSummary(QueueRowGlyph.AlertTriangle, "Not sent", QueueLeadTone.Danger, previewOf(message.text), "", kindName, "From $name", "Not sent")
+            } else {
+                QueueRowSummary(QueueRowGlyph.Clock, "From $name", QueueLeadTone.Ink, previewOf(body), "", kindName, "From $name", "Another session, not you")
+            }
+        }
+        check(operator)
+        if (heldLike) {
+            val uncertain = message.held && message.heldReasonValue == "steer_uncertain"
+            return QueueRowSummary(
+                QueueRowGlyph.AlertTriangle, if (uncertain) "Unconfirmed" else "Not sent", QueueLeadTone.Danger, previewOf(message.text), files,
+                withFiles(if (uncertain) "Your queued message, unconfirmed" else "Your message, not sent"),
+                "Queued message", if (uncertain) "Maybe not delivered" else "Not sent",
+            )
+        }
+        if (movesToNewSession) {
+            return QueueRowSummary(QueueRowGlyph.Clock, "To new session", QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message"), "Queued message", "Goes to the new session")
+        }
+        if (steer) {
+            return QueueRowSummary(QueueRowGlyph.CornerDownRight, "Into this turn", QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message"), "Queued message", "Goes into this turn")
+        }
+        return QueueRowSummary(QueueRowGlyph.Clock, "", QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message"), "Queued message", "Sends when this turn ends")
+    }
 }

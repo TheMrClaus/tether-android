@@ -41,7 +41,7 @@ import org.robolectric.annotation.Config
  * names the TOKEN that decides it.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(qualifiers = "w412dp-h915dp-420dpi")
+@Config(qualifiers = "w840dp-h915dp-420dpi") // tth-5u90: "Interrupt and send" is on the row from the Medium class (sheet-only on a phone, pinned in QueueStripCompactTest)
 class StopPanelBehaviourTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 

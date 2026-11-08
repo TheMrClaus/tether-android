@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -224,6 +225,7 @@ class ComposerBehaviourTest {
     @Test
     fun enterCommitsATrimmedEditOnce() {
         show(ComposerFixtures.queued)
+        rule.openRowSheet(0) // D-GH-8 (tth-5u90): the edit field lives in the row's sheet
         queueRows().onFirst().requestFocus()
         queueRows().onFirst().performTextReplacement("  Then fix only the snapshot test.  ")
         queueRows().onFirst().performKeyInput { pressKey(Key.Enter) }
@@ -234,15 +236,16 @@ class ComposerBehaviourTest {
     }
 
     @Test
-    fun leavingTheFieldCommitsAndAnUnchangedRowSendsNothing() {
+    fun closingTheSheetCommitsAndAnUnchangedRowSendsNothing() {
+        // D-GH-8 (tth-5u90): was "leaving the field"; closing the row's sheet is the commit now.
         show(ComposerFixtures.queued)
-        queueRows().onFirst().requestFocus()
-        input().requestFocus() // blur without a change
+        rule.openRowSheet(0)
+        rule.onNodeWithContentDescription("Close").performClick() // close without a change
         rule.waitForIdle()
         assertEquals(emptyList<Pair<String, String>>(), edits)
-        queueRows().onLast().requestFocus()
-        queueRows().onLast().performTextReplacement("Also bump the changelog and the version.")
-        input().requestFocus()
+        rule.openRowSheet(1)
+        queueRows().onFirst().performTextReplacement("Also bump the changelog and the version.")
+        rule.onNodeWithContentDescription("Close").performClick()
         rule.waitForIdle()
         assertEquals(listOf("parity-queue-2" to "Also bump the changelog and the version."), edits)
     }
@@ -250,6 +253,7 @@ class ComposerBehaviourTest {
     @Test
     fun blankingARowRemovesIt() {
         show(ComposerFixtures.queued)
+        rule.openRowSheet(0)
         queueRows().onFirst().requestFocus()
         queueRows().onFirst().performTextReplacement("   ")
         queueRows().onFirst().performKeyInput { pressKey(Key.Enter) }
@@ -261,20 +265,22 @@ class ComposerBehaviourTest {
     @Test
     fun escapeRestoresTheServerTextWithoutSaving() {
         show(ComposerFixtures.queued)
+        rule.openRowSheet(0)
         queueRows().onFirst().requestFocus()
         queueRows().onFirst().performTextReplacement("something else")
         queueRows().onFirst().performKeyInput { pressKey(Key.Escape) }
         rule.waitForIdle()
         assertEquals(emptyList<Pair<String, String>>(), edits)
-        rule.onNodeWithText("Then fix the snapshot test and rerun only that suite.").assertExists()
+        queueRows().onFirst().assertTextContains("Then fix the snapshot test and rerun only that suite.")
     }
 
     @Test
+    @org.robolectric.annotation.Config(qualifiers = "w840dp-h915dp-420dpi") // the row button is on the row from the Medium class (sheet-only on a phone)
     fun theRemoveKeyAndInterruptNow() {
         show(ComposerFixtures.queued)
         // Both rows say when they send (V4; the second is a legacy next-call row and reads the same), and only the FIRST
         // row (the next to deliver) offers "Interrupt and send", which always asks first.
-        rule.onAllNodesWithText("Queued on the server · sends when this turn ends").assertCountEquals(2)
+        rule.onAllNodes(hasWait("Queued on the server · sends when this turn ends")).assertCountEquals(2)
         val interruptAndSend = "Interrupt and send — stops the current turn, then sends this message"
         rule.onAllNodesWithContentDescription(interruptAndSend).assertCountEquals(1)
         rule.onNodeWithContentDescription(interruptAndSend).performClick()
@@ -296,7 +302,7 @@ class ComposerBehaviourTest {
     fun onlyTheOperatorsQueuedDraftsAreListed() {
         show(ComposerFixtures.mixedOrigins)
         assertEquals(5, projection!!.queuedMessages.size)
-        queueRows().assertCountEquals(2)
+        rule.onAllNodesWithContentDescription("Remove queued message").assertCountEquals(2)
         rule.onNodeWithText("Then fix the snapshot test and rerun only that suite.").assertExists()
         rule.onNodeWithText("Also bump the changelog.").assertExists()
         rule.onAllNodesWithText("SYSTEM", substring = true).assertCountEquals(0)
@@ -310,7 +316,7 @@ class ComposerBehaviourTest {
         show(ComposerFixtures.systemOnly)
         assertEquals(3, projection!!.queuedMessages.size)
         rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Message queue", substring = true)).assertCountEquals(0)
-        queueRows().assertCountEquals(0)
+        rule.onAllNodesWithContentDescription("Remove queued message").assertCountEquals(0)
         rule.onAllNodesWithText("SYSTEM", substring = true).assertCountEquals(0)
     }
 
@@ -324,7 +330,8 @@ class ComposerBehaviourTest {
         )
         rule.waitForIdle()
         rule.onNodeWithText("Edited on the laptop.").assertExists()
-        // While editing, the operator's buffer wins until they commit.
+        // While editing (in the row's sheet), the operator's buffer wins until they commit.
+        rule.openRowSheet(0)
         queueRows().onFirst().requestFocus()
         queueRows().onFirst().performTextReplacement("mine")
         projection = projection!!.copy(

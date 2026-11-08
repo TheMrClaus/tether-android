@@ -38,6 +38,8 @@ enum class ComposerShot(val id: String) {
     Queue("queue"),
     QueueSteer("queue-steer"),
     QueueSteerAttachments("queue-steer-attachments"),
+    /** D-GH-8 (tth-5u90): the owner's report: two long peer messages and an operator row; each is ONE compact line. */
+    QueuePeers("queue-peers"),
     HeldOpenFailed("held-open-failed"),
     HeldSteerUncertain("held-steer-uncertain"),
     HeldAttachmentMissing("held-attachment-missing"),
@@ -58,6 +60,11 @@ fun ComposeContentTestRule.snapComposer(shot: ComposerShot, skin: TetherSkin, na
         ComposerShot.StopConfirm -> ComposerFixtures.deferred()
         ComposerShot.QueueSteer -> ComposerFixtures.delivery(QueueSpec("a", "Then fix the snapshot test and rerun only that suite."), QueueSpec("b", "Also bump the changelog."))
         ComposerShot.QueueSteerAttachments -> ComposerFixtures.delivery(QueueSpec("a", "Here are the screenshots.", attachmentIds = listOf("att-1")))
+        ComposerShot.QueuePeers -> ComposerFixtures.delivery(
+            QueueSpec("p1", "Message from session disaster52 (s-1): " + "Please look at the parser rewrite and report back what fails. ".repeat(20), origin = "system", kind = "peer"),
+            QueueSpec("p2", "Message from session disaster52 (s-1): " + "A second long note about the lint pass and the changelog. ".repeat(20), origin = "system", kind = "peer"),
+            QueueSpec("b", "Also bump the changelog."),
+        )
         ComposerShot.HeldOpenFailed -> ComposerFixtures.delivery(QueueSpec("h", "Then fix the snapshot test.", held = true, reason = "open_failed"), QueueSpec("b", "Also bump the changelog."))
         ComposerShot.HeldSteerUncertain -> ComposerFixtures.delivery(QueueSpec("h", "Then fix the snapshot test.", held = true, reason = "steer_uncertain"), QueueSpec("b", "Also bump the changelog."))
         ComposerShot.HeldAttachmentMissing -> ComposerFixtures.delivery(QueueSpec("h", "Here are the screenshots.", held = true, reason = "attachment_missing"))
@@ -143,7 +150,9 @@ class ComposerPhoneScreenshotTest(private val shot: ComposerShot, private val sk
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = ComposerShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        // D-GH-8 (tth-5u90): on a phone the interrupt confirmation opens in the row's sheet (a Dialog, not in a node capture), so
+        // InterruptSendConfirm is a Medium/tablet shot only; the phone sheets are QueueSheetScreenshotTest's boards.
+        fun params(): List<Array<Any>> = ComposerShot.entries.filter { it != ComposerShot.InterruptSendConfirm }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -158,7 +167,7 @@ class ComposerTabletScreenshotTest(private val shot: ComposerShot, private val s
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(ComposerShot.Idle, ComposerShot.Queue, ComposerShot.QueueSteer, ComposerShot.QueueSteerAttachments, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.InterruptSendConfirm, ComposerShot.StopConfirm, ComposerShot.HeldHandover, ComposerShot.StopConfirmSteered, ComposerShot.StopConfirmSpared).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = listOf(ComposerShot.Idle, ComposerShot.Queue, ComposerShot.QueuePeers, ComposerShot.QueueSteer, ComposerShot.QueueSteerAttachments, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.InterruptSendConfirm, ComposerShot.StopConfirm, ComposerShot.HeldHandover, ComposerShot.StopConfirmSteered, ComposerShot.StopConfirmSpared).flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -173,7 +182,7 @@ class ComposerFontScaleScreenshotTest(private val shot: ComposerShot, private va
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = listOf(ComposerShot.Draft, ComposerShot.Queue, ComposerShot.QueueSteer, ComposerShot.QueueSteerAttachments, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.InterruptSendConfirm, ComposerShot.StopConfirm, ComposerShot.HeldHandover, ComposerShot.StopConfirmSteered, ComposerShot.StopConfirmSpared).flatMap { s ->
+        fun params(): List<Array<Any>> = listOf(ComposerShot.Draft, ComposerShot.Queue, ComposerShot.QueuePeers, ComposerShot.QueueSteer, ComposerShot.QueueSteerAttachments, ComposerShot.HeldOpenFailed, ComposerShot.HeldSteerUncertain, ComposerShot.HeldAttachmentMissing, ComposerShot.StopConfirm, ComposerShot.HeldHandover, ComposerShot.StopConfirmSteered, ComposerShot.StopConfirmSpared).flatMap { s ->
             listOf(TetherSkin.StudioDark, TetherSkin.Studio).map { arrayOf<Any>(s, it) }
         }
     }

@@ -39,7 +39,7 @@ import org.robolectric.annotation.Config
  * "Interrupt now" / "Stop anyway" / "Keep waiting" / ticking-wait rows are retired. Each assertion names the TOKEN that decides.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(qualifiers = "w412dp-h915dp-420dpi")
+@Config(qualifiers = "w840dp-h915dp-420dpi") // tth-5u90: the row button is on the row from the Medium class
 class DeliveryQueueBehaviourTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
@@ -93,18 +93,18 @@ class DeliveryQueueBehaviourTest {
     @Test
     fun aQueuedRowSaysV4WithAClockAndNoRetiredCopy() {
         show(ComposerFixtures.delivery(QueueSpec("a"), QueueSpec("b")))
-        rule.onAllNodesWithText(v4).assertCountEquals(2)
-        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG).assertCountEquals(2)
-        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG).assertCountEquals(0)
+        rule.onAllNodes(hasWait(v4)).assertCountEquals(2)
+        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG, useUnmergedTree = true).assertCountEquals(2)
+        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG, useUnmergedTree = true).assertCountEquals(0)
         for (retired in listOf("Queued — sends after the current turn", "Interrupt now", "Stop anyway", "Keep waiting")) {
-            rule.onAllNodesWithText(retired, substring = true).assertCountEquals(0)
+            rule.onAllNodes(hasWaitContaining(retired)).assertCountEquals(0)
         }
     }
 
     @Test
     fun aLegacyNextCallRowReadsV4() {
         show(ComposerFixtures.deferred())
-        rule.onNodeWithText(v4).assertExists()
+        rule.onNode(hasWait(v4)).assertExists()
         rule.onAllNodesWithText("waiting for a safe boundary", substring = true).assertCountEquals(0)
     }
 
@@ -112,9 +112,9 @@ class DeliveryQueueBehaviourTest {
     fun v5OnlyWhenTheEngineCanSteer() {
         steer = true
         show(ComposerFixtures.delivery(QueueSpec("a")))
-        rule.onNodeWithText(v5).assertExists()
-        rule.onAllNodesWithText(v4).assertCountEquals(0)
-        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG).assertCountEquals(1)
+        rule.onNode(hasWait(v5)).assertExists()
+        rule.onAllNodes(hasWait(v4)).assertCountEquals(0)
+        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG, useUnmergedTree = true).assertCountEquals(1)
         rule.onNodeWithText(PLACEHOLDER_BUSY_STEER).assertExists()
     }
 
@@ -122,36 +122,36 @@ class DeliveryQueueBehaviourTest {
     fun steerEngineRowWithAttachmentsReadsV4GlyphAndWords() {
         steer = true
         show(ComposerFixtures.delivery(QueueSpec("a", attachmentIds = listOf("att-1"))))
-        rule.onNodeWithText(v4).assertExists()
-        rule.onAllNodesWithText(v5).assertCountEquals(0)
-        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG).assertCountEquals(1)
-        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG).assertCountEquals(0)
+        rule.onNode(hasWait(v4)).assertExists()
+        rule.onAllNodes(hasWait(v5)).assertCountEquals(0)
+        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG, useUnmergedTree = true).assertCountEquals(1)
+        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG, useUnmergedTree = true).assertCountEquals(0)
     }
 
     @Test
     fun steerEngineLegacyNextCallRowReadsV4GlyphAndWords() {
         steer = true
         show(ComposerFixtures.delivery(QueueSpec("a", flushMode = "next-call")))
-        rule.onNodeWithText(v4).assertExists()
-        rule.onAllNodesWithText(v5).assertCountEquals(0)
-        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG).assertCountEquals(1)
-        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG).assertCountEquals(0)
+        rule.onNode(hasWait(v4)).assertExists()
+        rule.onAllNodes(hasWait(v5)).assertCountEquals(0)
+        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG, useUnmergedTree = true).assertCountEquals(1)
+        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG, useUnmergedTree = true).assertCountEquals(0)
     }
 
     @Test
     fun steerEngineOrdinaryRowReadsV5GlyphAndWords() {
         steer = true
         show(ComposerFixtures.delivery(QueueSpec("a")))
-        rule.onNodeWithText(v5).assertExists()
-        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG).assertCountEquals(1)
-        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG).assertCountEquals(0)
+        rule.onNode(hasWait(v5)).assertExists()
+        rule.onAllNodesWithTag(QUEUE_STATE_STEER_TAG, useUnmergedTree = true).assertCountEquals(1)
+        rule.onAllNodesWithTag(QUEUE_STATE_TURN_END_TAG, useUnmergedTree = true).assertCountEquals(0)
     }
 
     @Test
     fun withoutTheCapabilityTheV5LabelNeverShows() {
         steer = false
         show(ComposerFixtures.delivery(QueueSpec("a")))
-        rule.onAllNodesWithText(v5).assertCountEquals(0)
+        rule.onAllNodes(hasWait(v5)).assertCountEquals(0)
         rule.onNodeWithText(PLACEHOLDER_BUSY).assertExists()
     }
 
@@ -160,25 +160,23 @@ class DeliveryQueueBehaviourTest {
     @Test
     fun aHeldRowShowsItsReasonAndNeverSendsWhenThisTurnEnds() {
         show(ComposerFixtures.delivery(QueueSpec("h", held = true, reason = "open_failed")))
-        rule.onNodeWithText("Not sent: the session failed to open. Edit to send it again, or remove it.").assertExists()
-        rule.onAllNodesWithText("sends when this turn ends", substring = true).assertCountEquals(0)
-        rule.onAllNodesWithTag(QUEUE_HELD_TAG + "-glyph").assertCountEquals(1)
+        rule.onNode(hasWait("Not sent: the session failed to open. Edit to send it again, or remove it.")).assertExists()
+        rule.onAllNodes(hasWaitContaining("sends when this turn ends")).assertCountEquals(0)
+        rule.onAllNodesWithTag(QUEUE_HELD_TAG + "-glyph", useUnmergedTree = true).assertCountEquals(1)
     }
 
     @Test
     fun steerUncertainIsVerbatimAndAbsentReadsOpenFailed() {
         show(ComposerFixtures.delivery(QueueSpec("h", held = true, reason = "steer_uncertain"), QueueSpec("g", held = true)))
-        rule.onNodeWithText("May not have reached the agent; it was not sent again. Edit to resend it, or remove it.").assertExists()
-        rule.onNodeWithText("Not sent: the session failed to open. Edit to send it again, or remove it.").assertExists()
+        rule.onNode(hasWait("May not have reached the agent; it was not sent again. Edit to resend it, or remove it.")).assertExists()
+        rule.onNode(hasWait("Not sent: the session failed to open. Edit to send it again, or remove it.")).assertExists()
     }
 
     @Test
     fun attachmentMissingAndAnUnknownReasonHaveTheirOwnWords() {
         show(ComposerFixtures.delivery(QueueSpec("m", held = true, reason = "attachment_missing"), QueueSpec("z", held = true, reason = "zzz")))
-        rule.onNodeWithText(
-            "Not sent: an attachment was missing when it was time to send. Edit to send the text without it, or remove this message.",
-        ).assertExists()
-        rule.onNodeWithText("Not sent. Edit to send it again, or remove it.").assertExists()
+        rule.onNode(hasWait("Not sent: an attachment was missing when it was time to send. Edit to send the text without it, or remove this message.")).assertExists()
+        rule.onNode(hasWait("Not sent. Edit to send it again, or remove it.")).assertExists()
     }
 
     @Test
@@ -197,7 +195,7 @@ class DeliveryQueueBehaviourTest {
                 QueueSpec("h", text = "Handover instruction", held = true, origin = "system", kind = "handover-request"),
             ),
         )
-        rule.onNodeWithText("Not sent: the session failed to open. Stop handover in the Session links menu (⋯) cancels it.").assertExists()
+        rule.onNode(hasWait("Not sent: the session failed to open. Stop handover in the Session links menu (⋯) cancels it.")).assertExists()
         rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(0)
     }
 

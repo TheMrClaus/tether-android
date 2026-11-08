@@ -316,8 +316,9 @@ private fun foldCancelled(state: JsObj, event: JsObj): JsObj {
             "status" to js("done"),
             "outcome" to js(Limits.TURN_OUTCOMES.CANCELLED),
         ).spread(
-            if (isNullish(turn["errorCause"]) && event["cause"].str == "interrupted") {
-                JsObj.of("errorCause" to js("interrupted"))
+            // tth-5i8m (server 159, events.ts): a plain Stop is "interrupted"; a requested engine restart is "engine_restart".
+            if (isNullish(turn["errorCause"]) && (event["cause"].str == "interrupted" || event["cause"].str == "engine_restart")) {
+                JsObj.of("errorCause" to event["cause"])
             } else {
                 JsObj.EMPTY
             },

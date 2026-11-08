@@ -48,7 +48,7 @@ import kotlinx.serialization.json.put
  * "Older turns not downloaded" instead of offering a key that cannot load them.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(qualifiers = "w412dp-h915dp-420dpi")
+@Config(qualifiers = "w840dp-h915dp-420dpi") // tth-5u90: "Interrupt and send" is on the row from the Medium class (sheet-only on a phone, pinned in QueueStripCompactTest)
 class ChatSyncTest {
     // ta-9dpl: the v2 rule, as for every test whose screen reads IO-fed preferences (ta-b72): under v1
     // the stored "Confirm before ending" was written to Compose state off the main thread and could be missed.
