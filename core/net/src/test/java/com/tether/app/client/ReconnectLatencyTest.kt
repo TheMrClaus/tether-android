@@ -603,6 +603,9 @@ class ReconnectLatencyTest {
         h.scheduler.await { it == ConnectionTimings.BACKGROUND_GRACE_MS }.fire()
         h.await(h.client.connection) { it == ConnectionState.Disconnected }
         h.client.onDefaultNetworkChanged()
+        // tth-1om0: the eviction runs on the IO dispatcher now (a close writes on the socket), so it is awaited.
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (System.nanoTime() < deadline && h.http.connectionPool.idleConnectionCount() > 0) Thread.sleep(5)
         assertEquals("nothing made on the previous network is reused", 0, h.http.connectionPool.idleConnectionCount())
     }
 
