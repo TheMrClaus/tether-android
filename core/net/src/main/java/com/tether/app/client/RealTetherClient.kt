@@ -342,6 +342,19 @@ class RealTetherClient(
      */
     timing: (String) -> Unit = {},
     /**
+     * tth-dywx (#4): one line per socket loss (onFailure / onClosed): exception CLASS only, close
+     * code, a bounded printable-ASCII reason, socket age, ms since the last inbound frame and the
+     * last server ping, foreground, probe pending. Never a URL, host, token or message text. The app
+     * logs them under `TetherLink` (`adb logcat -s TetherLink`). Default: nothing.
+     */
+    private val linkLog: (String) -> Unit = {},
+    /**
+     * tth-1om0 (#3): where idle pooled connections and an abandoned socket are closed (a close
+     * writes TLS close_notify; Android 17's StrictMode refuses that on the main thread). Never the
+     * caller's thread.
+     */
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    /**
      * ta-2vm7: the most the projections of the sessions this client keeps in memory may weigh (an
      * estimate from the frames' sizes). Default: a quarter of the heap limit.
      */
@@ -437,9 +450,46 @@ class RealTetherClient(
      * TCP + TLS handshake. Still one after the other: a sign-out while the probe is out means no
      * socket ever opens with that credential.
      */
-    private val probeHttp: OkHttpClient = authHttp.newBuilder()
+    @Volatile
+    private var probeHttp: OkHttpClient = authHttp.newBuilder()
         .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
         .build()
+
+    /**
+     * The client the upgrade runs on. Until a return after a long absence it is [authHttp] itself;
+     * after one it is [authHttp] on a pool of its own (see [retireLinkConnections]).
+     */
+    @Volatile
+    private var upgradeHttp: OkHttpClient = authHttp
+
+    /** The pool [probeHttp] and [upgradeHttp] use once [retireLinkConnections] has run; null before. */
+    private var linkPool: okhttp3.ConnectionPool? = null
+
+    /**
+     * tth-1om0 (#3): the connections made before an absence or a network change must not carry the
+     * new link, AND closing them must not happen on the caller's thread (main, on a return) AND the
+     * reconnect must not wait for it. A pool cannot be marked, so by construction: the probe and
+     * the upgrade move, synchronously, to a NEW empty pool (it cannot hold a reusable connection,
+     * whatever the old pool's eviction has or has not done yet); the old pools are evicted, and
+     * [abandoned] cancelled, on [ioDispatcher]. Only the link's own two calls moved: everything else
+     * keeps its pool, which is evicted in the same background step as before (a request reusing a
+     * dead idle one before that finishes waits out its read timeout, as on any network change).
+     */
+    private fun retireLinkConnections(abandoned: WebSocket?) {
+        val fresh = okhttp3.ConnectionPool()
+        val old = synchronized(lock) {
+            val previous = linkPool
+            linkPool = fresh
+            probeHttp = probeHttp.newBuilder().connectionPool(fresh).build()
+            upgradeHttp = authHttp.newBuilder().connectionPool(fresh).build()
+            previous
+        }
+        scope.launch(ioDispatcher) {
+            runCatching { httpClient.connectionPool.evictAll() }
+            runCatching { old?.evictAll() }
+            runCatching { abandoned?.cancel() }
+        }
+    }
 
     private val lock = Any()
 
@@ -578,6 +628,14 @@ class RealTetherClient(
      */
     @Volatile
     private var lastWireInboundAt = 0L
+
+    /** tth-dywx: when the server's last WebSocket ping reached a socket's reader (0 = none yet). Diagnostics only. */
+    @Volatile
+    private var lastServerPingAt = 0L
+
+    /** tth-dywx: when the current socket's upgrade was started (0 = none). Diagnostics only. */
+    @Volatile
+    private var socketStartedAt = 0L
 
     /**
      * ta-nl5m: the fresh connect attempt a return from the background starts may fail once for a
@@ -2863,8 +2921,8 @@ class RealTetherClient(
             if (fresh) {
                 // Idle pooled connections were made before the absence: a request reusing a dead one waits
                 // out the read timeout (as on a network change). The pool is shared; only idle ones go.
-                httpClient.connectionPool.evictAll()
-                abandoned?.cancel()
+                // tth-1om0: off this thread (main), and not waited for: see retireLinkConnections.
+                retireLinkConnections(abandoned)
             }
             // Web visibilitychange -> reconnectIfIdle: ping an open socket,
             // reconnect a dead one immediately.
@@ -2899,10 +2957,13 @@ class RealTetherClient(
         // ta-coik.32 (R4): pooled connections were made on the previous network. A request reusing
         // one would write into a dead socket and wait out the read timeout (10 s), so they go now
         // (a browser drops its sockets on a network change too). Idle ones only; the pool is shared.
-        httpClient.connectionPool.evictAll()
         var abandoned: WebSocket? = null
         val stale = synchronized(lock) {
-            if (haltedLocked()) return
+            // Halted (signed out, stopped, suspended): nothing reconnects, but what the old network made is still let go.
+            if (haltedLocked()) {
+                retireLinkConnections(null)
+                return
+            }
             if (socketOpen) return@synchronized socket
             // A probe or an upgrade still in flight on the previous network is abandoned (it does
             // nothing once stale), as is a backoff wait: a new attempt starts now.
@@ -2914,7 +2975,8 @@ class RealTetherClient(
             reconnectTask = null
             null
         }
-        abandoned?.cancel()
+        // tth-1om0: the eviction and the cancel are off this (connectivity) thread; see retireLinkConnections.
+        retireLinkConnections(abandoned)
         if (stale != null) replaceSocketNow(stale) else connectNow()
     }
 
@@ -3306,11 +3368,12 @@ class RealTetherClient(
             // (bindLocked is idempotent). The monitor is reentrant, so a
             // callback made inline would be safe too.
             socketListener = listener
+            socketStartedAt = clock()
             socketOrigin = serverOrigin(base.toString())
             // No redirects on the credential-bearing upgrade either (see authHttp).
             // ta-coik.16: the app's own WebSocket on authHttp's upgrade (same TLS, same credential),
             // which sends a message the server takes (up to 32 MiB) in fragments; OkHttp's could not.
-            listener.bindLocked(TetherWebSocket.connect(authHttp, request, listener, onPing = { listener.onServerPing(it) }))
+            listener.bindLocked(TetherWebSocket.connect(upgradeHttp, request, listener, onPing = { listener.onServerPing(it) }))
             trace.mark("upgrade-sent")
         }
     }
@@ -3460,7 +3523,11 @@ class RealTetherClient(
 
         /** ta-nl5m: a WebSocket ping from the server (its heartbeat) reached this socket's reader. */
         fun onServerPing(webSocket: WebSocket) {
-            if (synchronized(lock) { bindLocked(webSocket) }) lastWireInboundAt = clock()
+            if (synchronized(lock) { bindLocked(webSocket) }) {
+                val at = clock()
+                lastWireInboundAt = at
+                lastServerPingAt = at
+            }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -3471,7 +3538,8 @@ class RealTetherClient(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            synchronized(lock) { bindLocked(webSocket) }
+            val current = synchronized(lock) { bindLocked(webSocket) }
+            logSocketLoss("closed", null, code, reason, stale = !current)
             if (code == CLOSE_DEVICE_REVOKED || code == CLOSE_SESSION_REVOKED) {
                 handleRevokedClose(webSocket, code)
                 return
@@ -3480,7 +3548,8 @@ class RealTetherClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            synchronized(lock) { bindLocked(webSocket) }
+            val current = synchronized(lock) { bindLocked(webSocket) }
+            logSocketLoss("failure", t, null, null, stale = !current)
             handleSocketGone(webSocket)
         }
     }
@@ -3508,6 +3577,27 @@ class RealTetherClient(
                 "You were signed out of this server. Sign in again to reconnect."
             },
         )
+    }
+
+    /**
+     * tth-dywx (#4): the one diagnostic line per socket loss. Fixed fields only: the exception CLASS
+     * (never its message, which can carry a host), the close code, the server's reason cut to 64
+     * printable ASCII characters (it is server text: no injected log line), and ages in ms.
+     */
+    private fun logSocketLoss(kind: String, t: Throwable?, code: Int?, reason: String?, stale: Boolean) {
+        runCatching {
+            val now = clock()
+            val (foreground, probePending) = synchronized(lock) { inForeground to (pingTask != null) }
+            fun since(at: Long) = if (at == 0L) "none" else (now - at).toString()
+            val cleanReason = reason?.filter { it.code in 0x20..0x7e }?.take(64) ?: ""
+            // A callback of a socket already replaced: the stamps are the NEW socket's, so they are omitted.
+            val ages = if (stale) "stale=true" else
+                "age=${since(socketStartedAt)} inbound=${since(lastWireInboundAt)} ping=${since(lastServerPingAt)}"
+            linkLog(
+                "socket-lost kind=$kind ex=${t?.javaClass?.simpleName ?: "-"} code=${code ?: "-"} reason=\"$cleanReason\" " +
+                    "$ages fg=$foreground probe=$probePending",
+            )
+        }
     }
 
     private fun handleSocketGone(webSocket: WebSocket) {

@@ -120,7 +120,10 @@ class CountingServerSocketFactory(private val counter: AtomicLong) : javax.net.S
  * A MockWebServer "Tether" plus a RealTetherClient on a [ManualScheduler] and a
  * manual clock. Frames the client sends land in [received] in wire order.
  */
-class ConnectionHarness {
+class ConnectionHarness(
+    /** The client's HTTP client (its connection pool is observable). */
+    val http: OkHttpClient = OkHttpClient(),
+) {
     /** Bytes the server has read off its accepted sockets (ta-wvz: [frame]'s progress signal). */
     val serverBytesRead = AtomicLong()
 
@@ -134,8 +137,11 @@ class ConnectionHarness {
     val now = AtomicLong(1_000_000)
     lateinit var client: RealTetherClient
 
-    /** The client's HTTP client (its connection pool is observable). */
-    val http = OkHttpClient()
+    /** tth-1om0: where the client closes pooled connections; null = the client's own default. */
+    var ioDispatcher: kotlinx.coroutines.CoroutineDispatcher? = null
+
+    /** tth-dywx: every TetherLink diagnostic line the client emitted, in order. */
+    val linkLog = java.util.concurrent.ConcurrentLinkedQueue<String>()
 
     /** ta-coik.32: every TetherTiming line the client emitted, in order. */
     val timing = java.util.concurrent.ConcurrentLinkedQueue<String>()
@@ -220,6 +226,7 @@ class ConnectionHarness {
             settings = settings,
             httpClient = http,
             timing = { timing.add(it) },
+            linkLog = { linkLog.add(it) },
             scope = scope,
             clock = { now.get() },
             backoff = backoff,
@@ -228,6 +235,7 @@ class ConnectionHarness {
             scheduler = scheduler,
             retentionBudgetBytes = retentionBudgetBytes ?: (Runtime.getRuntime().maxMemory() / 4),
             retainedOthers = retainedOthers,
+            ioDispatcher = ioDispatcher ?: kotlinx.coroutines.Dispatchers.IO,
         )
         return client
     }
