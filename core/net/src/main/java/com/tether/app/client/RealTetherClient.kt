@@ -554,6 +554,9 @@ class RealTetherClient(
     private val attachedThisEpoch = HashSet<String>()
     private var reconnectTask: Cancellable? = null
     private var pingTask: Cancellable? = null
+
+    /** W7 H1: the ONE foreground heartbeat run (armed at READY and on a foreground return; see [armHeartbeatLocked]). */
+    private var heartbeatTask: Cancellable? = null
     private var consecutiveTimeouts = 0
     private var sweeperJob: Job? = null
     private var baseUrlValue: HttpUrl? = null
@@ -2912,6 +2915,8 @@ class RealTetherClient(
                 inForeground = true
                 backgroundTask?.cancel()
                 backgroundTask = null
+                // W7 H1: a live READY socket is watched again from the return (a replaced one re-arms at its ready).
+                if (socketOpen && handshakeDone) armHeartbeatLocked()
                 val wasSuspended = backgroundSuspended
                 backgroundSuspended = false
                 if (wasSuspended) backoff.reset()
@@ -2972,6 +2977,7 @@ class RealTetherClient(
         synchronized(lock) {
             inForeground = false
             resumeRetryLeft = false
+            cancelHeartbeatLocked()
             if (backgroundedAt == null) backgroundedAt = clock()
             backgroundTask?.cancel()
             backgroundTask = scheduler.schedule(ConnectionTimings.BACKGROUND_GRACE_MS) { suspendForBackground() }
@@ -3085,6 +3091,47 @@ class RealTetherClient(
         reconnectTask = null
         pingTask?.cancel()
         pingTask = null
+        cancelHeartbeatLocked()
+    }
+
+    private fun cancelHeartbeatLocked() {
+        heartbeatTask?.cancel()
+        heartbeatTask = null
+    }
+
+    /**
+     * W7 H1: (re)arms the one heartbeat run for the current socket: only while the app is in front and the
+     * link is READY (handshake done). Idempotent: whatever was pending is cancelled first, so there is never
+     * more than one. Caller holds [lock].
+     */
+    private fun armHeartbeatLocked(delayMs: Long = ConnectionTimings.HEARTBEAT_INTERVAL_MS) {
+        cancelHeartbeatLocked()
+        val ws = socket ?: return
+        if (!inForeground || !socketOpen || !handshakeDone || haltedLocked()) return
+        heartbeatTask = scheduler.scheduleHeartbeat(delayMs) { runHeartbeat(ws) }
+    }
+
+    /**
+     * One heartbeat run (R-B3). Quiet q = now - lastInboundAt. q >= interval: probe unless one is outstanding
+     * (that probe's own deadline decides), look again in an interval. Otherwise send nothing and look again
+     * when the link will have been quiet an interval (at least [ConnectionTimings.HEARTBEAT_MIN_RESCHEDULE_MS]).
+     * The probe is the existing [probeLink] (never superseding, no new reconnect path, no resend).
+     */
+    private fun runHeartbeat(ws: WebSocket) {
+        var probe = false
+        synchronized(lock) {
+            heartbeatTask = null
+            if (socket !== ws || !socketOpen || !handshakeDone || !inForeground || haltedLocked()) return
+            val quiet = clock() - lastInboundAt
+            val next = if (quiet >= ConnectionTimings.HEARTBEAT_INTERVAL_MS) {
+                probe = pingTask == null
+                ConnectionTimings.HEARTBEAT_INTERVAL_MS
+            } else {
+                maxOf(ConnectionTimings.HEARTBEAT_INTERVAL_MS - quiet, ConnectionTimings.HEARTBEAT_MIN_RESCHEDULE_MS)
+            }
+            heartbeatTask = scheduler.scheduleHeartbeat(next) { runHeartbeat(ws) }
+        }
+        if (probe) probeLink(ConnectionTimings.PING_TIMEOUT_MS, supersede = false)
     }
 
     /**
@@ -3118,6 +3165,7 @@ class RealTetherClient(
         consentOriginState.value = null
         pingTask?.cancel()
         pingTask = null
+        cancelHeartbeatLocked()
         // Replies to node requests can only come on the socket that carried them:
         // every waiter ends now instead of at its timeout. Safe under the lock,
         // because a waiter resumes on Dispatchers.Default (nodeRequest), never
@@ -3930,6 +3978,8 @@ class RealTetherClient(
             serverProtocolVersionState.value = message.protocolVersion
             handshakeDone = true
             handshakeAt = clock()
+            // W7 H1 (R-N3): the link is READY: from here a quiet link is probed while the app is in front.
+            armHeartbeatLocked()
             consentOriginState.value = socketOrigin
             publishConsentLocked()
             // A handshake the server accepted is the success that resets backoff.
