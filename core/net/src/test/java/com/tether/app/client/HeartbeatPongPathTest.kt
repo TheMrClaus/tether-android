@@ -109,4 +109,22 @@ class HeartbeatPongPathTest {
         ws.ping("tick-2")
         assertPong(ws, "tick-2")
     }
+
+    @Test
+    fun h2_theLossLineNamesTheAgeOfTheLastPongWrittenToTheWire() {
+        val ws = connected()
+        assertEquals("no pong yet", 0L, client.lastPongWrittenAtForTest())
+        ws.ping("p")
+        assertPong(ws, "p") // a real pong on the wire...
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (client.lastPongWrittenAtForTest() == 0L && System.nanoTime() < deadline) Thread.sleep(5)
+        // ...and the stamp is RTC's injected clock, not the fork's.
+        assertEquals(1_000_000L, client.lastPongWrittenAtForTest())
+        now.addAndGet(7_000)
+        ws.close()
+        val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (linkLog.none { "socket-lost" in it } && System.nanoTime() < end) Thread.sleep(5)
+        val line = linkLog.first { "socket-lost" in it }
+        assertTrue(line, "pong=7000 " in line)
+    }
 }

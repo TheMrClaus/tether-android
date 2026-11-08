@@ -65,6 +65,7 @@ internal class TetherWebSocket private constructor(
     private val originalRequest: Request,
     private val listener: WebSocketListener,
     private val onPing: ((TetherWebSocket) -> Unit)?,
+    private val onPongWritten: ((TetherWebSocket) -> Unit)?,
     private val random: SecureRandom,
     private val pingIntervalMillis: Long,
     private val closeTimeoutMillis: Long,
@@ -277,6 +278,13 @@ internal class TetherWebSocket private constructor(
             random.nextBytes(maskKey)
             WebSocketFrames.writeClientFrame(sink, fin, opcode, payload, offset, length, maskKey, scratch)
             sink.flush()
+            // W7 H2: told AFTER the pong is on the sink (not when queued), outside the lock; a hook that throws costs nothing.
+            if (opcode == WebSocketFrames.OPCODE_PONG) {
+                try {
+                    onPongWritten?.invoke(this)
+                } catch (_: Exception) {
+                }
+            }
         }
         try {
             while (true) {
@@ -439,6 +447,7 @@ internal class TetherWebSocket private constructor(
             fragmentBytes: Int = FRAGMENT_BYTES,
             maxQueueBytes: Long = MAX_QUEUE_BYTES,
             onPing: ((TetherWebSocket) -> Unit)? = null,
+            onPongWritten: ((TetherWebSocket) -> Unit)? = null,
         ): TetherWebSocket {
             require(request.method == "GET") { "Request must be GET: ${request.method}" }
             require(fragmentBytes > 0)
@@ -446,6 +455,7 @@ internal class TetherWebSocket private constructor(
                 originalRequest = request,
                 listener = listener,
                 onPing = onPing,
+                onPongWritten = onPongWritten,
                 random = random,
                 pingIntervalMillis = client.pingIntervalMillis.toLong(),
                 closeTimeoutMillis = client.webSocketCloseTimeout.toLong(),

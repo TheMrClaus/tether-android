@@ -662,6 +662,10 @@ class RealTetherClient(
     @Volatile
     private var lastServerPingAt = 0L
 
+    /** W7 H2: when the current socket's last WS pong was WRITTEN to the wire (RTC's own clock; 0 = none yet). Diagnostics only. */
+    @Volatile
+    private var lastPongWrittenAt = 0L
+
     /** tth-dywx: when the current socket's upgrade was started (0 = none). Diagnostics only. */
     @Volatile
     private var socketStartedAt = 0L
@@ -3443,11 +3447,12 @@ class RealTetherClient(
             // callback made inline would be safe too.
             socketListener = listener
             socketStartedAt = clock()
+            lastPongWrittenAt = 0L
             socketOrigin = serverOrigin(base.toString())
             // No redirects on the credential-bearing upgrade either (see authHttp).
             // ta-coik.16: the app's own WebSocket on authHttp's upgrade (same TLS, same credential),
             // which sends a message the server takes (up to 32 MiB) in fragments; OkHttp's could not.
-            listener.bindLocked(TetherWebSocket.connect(upgradeHttp, request, listener, onPing = { listener.onServerPing(it) }))
+            listener.bindLocked(TetherWebSocket.connect(upgradeHttp, request, listener, onPing = { listener.onServerPing(it) }, onPongWritten = { listener.onPongWritten() }))
             trace.mark("upgrade-sent")
         }
     }
@@ -3510,6 +3515,9 @@ class RealTetherClient(
         val ws = synchronized(lock) { socket } ?: return
         socketListener?.onServerPing(ws)
     }
+
+    /** Tests only: when the current socket's last pong was written (0 = none). */
+    internal fun lastPongWrittenAtForTest(): Long = lastPongWrittenAt
 
     /** Tests only: when the last server FRAME arrived (the stamp a WebSocket ping must not move). */
     internal fun lastServerFrameAtForTest(): Long = lastInboundAt
@@ -3604,6 +3612,11 @@ class RealTetherClient(
             }
         }
 
+        /** W7 H2: the fork wrote a pong (writer thread, no lock taken here). A retired socket's late write is ignored. */
+        fun onPongWritten() {
+            if (!retired) lastPongWrittenAt = clock()
+        }
+
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             synchronized(lock) { bindLocked(webSocket) }
             webSocket.close(1000, null)
@@ -3666,7 +3679,7 @@ class RealTetherClient(
             val cleanReason = reason?.filter { it.code in 0x20..0x7e }?.take(64) ?: ""
             // A callback of a socket already replaced: the stamps are the NEW socket's, so they are omitted.
             val ages = if (stale) "stale=true" else
-                "age=${since(socketStartedAt)} inbound=${since(lastWireInboundAt)} ping=${since(lastServerPingAt)}"
+                "age=${since(socketStartedAt)} inbound=${since(lastWireInboundAt)} ping=${since(lastServerPingAt)} pong=${since(lastPongWrittenAt)}"
             linkLog(
                 "socket-lost kind=$kind ex=${t?.javaClass?.simpleName ?: "-"} code=${code ?: "-"} reason=\"$cleanReason\" " +
                     "$ages fg=$foreground probe=$probePending",
