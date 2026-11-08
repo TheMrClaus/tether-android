@@ -211,7 +211,7 @@ object ConsentGuard {
             if (p.picks.any { it !in labels.indices } || p.picks.toSet().size != p.picks.size) return null
             if (slots.single[p.slot] == true && p.picks.size > 1) return null
             // I-3: an "Other" text is one line (an HTML text input holds no line break) and bounded.
-            if (p.other.length > MAX_OTHER_CHARS || p.other.any { it == '\r' || it == '\n' }) return null
+            if (p.other.codePointCount(0, p.other.length) > MAX_OTHER_CHARS || p.other.any { it == '\r' || it == '\n' }) return null
         }
         if (skipped.any { slots.slotOf.getOrNull(it) != it }) return null
         val answers = LinkedHashMap<String, String>()

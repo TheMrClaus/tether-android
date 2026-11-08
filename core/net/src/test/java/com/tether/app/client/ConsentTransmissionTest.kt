@@ -624,6 +624,17 @@ class ConsentGuardUnitTest {
         assertEquals(ConsentGuard.QuestionReply(mapOf("Env?" to "staging"), null), ConsentGuard.buildAnswers(questionRequest, listOf(pick(0, 0), pick(1, 0)), setOf(0)))
     }
 
+    @Test fun otherLimitCountsCharactersNotUtf16Units() {
+        // tth-9hvv #5: the card caps Other at MAX_OTHER_CHARS code points; 2001 emoji are 4002 UTF-16 units.
+        val emoji = "\uD83D\uDE00".repeat(2001)
+        assertEquals(4002, emoji.length)
+        val reply = ConsentGuard.buildAnswers(questionRequest, listOf(pick(0, other = emoji)), emptySet())
+        assertEquals(emoji, reply?.response?.lineSequence()?.first())
+        val max = "\uD83D\uDE00".repeat(ConsentGuard.MAX_OTHER_CHARS)
+        assertEquals(max, ConsentGuard.buildAnswers(questionRequest, listOf(pick(0, other = max)), emptySet())?.response?.lineSequence()?.first())
+        assertEquals(null, ConsentGuard.buildAnswers(questionRequest, listOf(pick(0, other = max + "\uD83D\uDE00")), emptySet()))
+    }
+
     @Test fun indicesTheRequestDidNotOfferAreRefused() {
         fun bad(picks: List<ConsentGuard.QuestionPick>, skipped: Set<Int> = emptySet()) =
             assertEquals("$picks / $skipped", null, ConsentGuard.buildAnswers(questionRequest, picks, skipped))
