@@ -436,7 +436,7 @@ internal fun QueuedMessages(
                     steerCapable = steerCapable,
                     handoverV151 = handoverV151,
                     onOpen = { openId = message.queueId },
-                    focusRequester = focusers.getOrPut(message.queueId) { FocusRequester() },
+                    focusRegistry = focusers,
                     onRemove = { onRemove(message.queueId) },
                     onInterruptNow = onInterruptNow,
                     interruptLock = interruptLock,
@@ -551,9 +551,17 @@ internal fun QueuedMessageRow(
     /** Spec §4.3 condition 2: whether this row's confirmation is the composer's open one (hoisted: it and the Stop panel never both show). */
     confirming: Boolean = false,
     onConfirmingChange: (Boolean) -> Unit = {},
-    focusRequester: FocusRequester? = null,
+    /** The strip's registry of open-area focus targets (keyed by queue id), so a sheet's close or Remove can return focus to a row. */
+    focusRegistry: MutableMap<String, FocusRequester>? = null,
 ) {
     val t = LocalTetherTokens.current
+    val focusRequester = remember { FocusRequester() }
+    if (focusRegistry != null) {
+        androidx.compose.runtime.DisposableEffect(message.queueId) {
+            focusRegistry[message.queueId] = focusRequester
+            onDispose { focusRegistry.remove(message.queueId) }
+        }
+    }
     val handoverRequest = message.isHandoverRequest
     val peer = message.isPeer
     val held = handedOff || message.held
@@ -578,7 +586,7 @@ internal fun QueuedMessageRow(
                     Modifier
                         .fillMaxWidth()
                         .heightIn(min = 44.dp)
-                        .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                        .focusRequester(focusRequester)
                         .then(if (handoverRequest) Modifier.testTag(HANDOVER_QUEUE_ROW_TAG) else Modifier)
                         .semantics(mergeDescendants = true) {
                             contentDescription = kindDescription
