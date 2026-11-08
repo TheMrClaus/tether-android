@@ -116,6 +116,32 @@ private const val TRIM_MEMORY_RUNNING_LOW = 10
 /** use-tether.ts:339, the web's word for any frame its `send` could not put on the link. */
 private const val LINK_RECONNECTING = "The secure link is reconnecting. Your input was not sent."
 
+/** At most one consent-refusal full resync per session in this window (tth-9hvv, #5). */
+private const val CONSENT_RESYNC_DEBOUNCE_MS = 10_000L
+
+/**
+ * Why a consent tap was refused, kept inside the client (the public ConsentResult is unchanged):
+ * it selects the operator line on the `errors` flow. Native-only wording: the web never refuses
+ * locally (it sends and the server answers). [resyncs]: the refusal proves the card on screen
+ * disagrees with this device's tree.
+ */
+internal enum class ConsentRefusal(val resyncs: Boolean) {
+    Answered(true),
+    NoTurn(true),
+    NotOpen(true),
+    Drift(false),
+    Decided(false),
+    ;
+
+    fun line(noun: String): String = when (this) {
+        Answered -> "That question was already answered. Your answer was not sent."
+        NoTurn -> "This device has no running turn. Your $noun was not sent."
+        NotOpen -> "That request is no longer open here. Your $noun was not sent."
+        Drift -> "The request on screen is out of date. Your $noun was not sent. Check it and try again."
+        Decided -> "Your earlier $noun was already sent. This one was not sent."
+    }
+}
+
 /** T8.2 (use-tether.ts 90fbb9f :73): BROWSE_TIMEOUT_MS = UNACKED_CLOSE_MS. */
 private const val BROWSE_TIMEOUT_MS: Long = PendingInput.UNACKED_CLOSE_MS
 
@@ -342,6 +368,19 @@ class RealTetherClient(
      */
     timing: (String) -> Unit = {},
     /**
+     * tth-dywx (#4): one line per socket loss (onFailure / onClosed): exception CLASS only, close
+     * code, a bounded printable-ASCII reason, socket age, ms since the last inbound frame and the
+     * last server ping, foreground, probe pending. Never a URL, host, token or message text. The app
+     * logs them under `TetherLink` (`adb logcat -s TetherLink`). Default: nothing.
+     */
+    private val linkLog: (String) -> Unit = {},
+    /**
+     * tth-1om0 (#3): where idle pooled connections and an abandoned socket are closed (a close
+     * writes TLS close_notify; Android 17's StrictMode refuses that on the main thread). Never the
+     * caller's thread.
+     */
+    private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    /**
      * ta-2vm7: the most the projections of the sessions this client keeps in memory may weigh (an
      * estimate from the frames' sizes). Default: a quarter of the heap limit.
      */
@@ -437,9 +476,46 @@ class RealTetherClient(
      * TCP + TLS handshake. Still one after the other: a sign-out while the probe is out means no
      * socket ever opens with that credential.
      */
-    private val probeHttp: OkHttpClient = authHttp.newBuilder()
+    @Volatile
+    private var probeHttp: OkHttpClient = authHttp.newBuilder()
         .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
         .build()
+
+    /**
+     * The client the upgrade runs on. Until a return after a long absence it is [authHttp] itself;
+     * after one it is [authHttp] on a pool of its own (see [retireLinkConnections]).
+     */
+    @Volatile
+    private var upgradeHttp: OkHttpClient = authHttp
+
+    /** The pool [probeHttp] and [upgradeHttp] use once [retireLinkConnections] has run; null before. */
+    private var linkPool: okhttp3.ConnectionPool? = null
+
+    /**
+     * tth-1om0 (#3): the connections made before an absence or a network change must not carry the
+     * new link, AND closing them must not happen on the caller's thread (main, on a return) AND the
+     * reconnect must not wait for it. A pool cannot be marked, so by construction: the probe and
+     * the upgrade move, synchronously, to a NEW empty pool (it cannot hold a reusable connection,
+     * whatever the old pool's eviction has or has not done yet); the old pools are evicted, and
+     * [abandoned] cancelled, on [ioDispatcher]. Only the link's own two calls moved: everything else
+     * keeps its pool, which is evicted in the same background step as before (a request reusing a
+     * dead idle one before that finishes waits out its read timeout, as on any network change).
+     */
+    private fun retireLinkConnections(abandoned: WebSocket?) {
+        val fresh = okhttp3.ConnectionPool()
+        val old = synchronized(lock) {
+            val previous = linkPool
+            linkPool = fresh
+            probeHttp = probeHttp.newBuilder().connectionPool(fresh).build()
+            upgradeHttp = authHttp.newBuilder().connectionPool(fresh).build()
+            previous
+        }
+        scope.launch(ioDispatcher) {
+            runCatching { httpClient.connectionPool.evictAll() }
+            runCatching { old?.evictAll() }
+            runCatching { abandoned?.cancel() }
+        }
+    }
 
     private val lock = Any()
 
@@ -578,6 +654,14 @@ class RealTetherClient(
      */
     @Volatile
     private var lastWireInboundAt = 0L
+
+    /** tth-dywx: when the server's last WebSocket ping reached a socket's reader (0 = none yet). Diagnostics only. */
+    @Volatile
+    private var lastServerPingAt = 0L
+
+    /** tth-dywx: when the current socket's upgrade was started (0 = none). Diagnostics only. */
+    @Volatile
+    private var socketStartedAt = 0L
 
     /**
      * ta-nl5m: the fresh connect attempt a return from the background starts may fail once for a
@@ -2863,8 +2947,8 @@ class RealTetherClient(
             if (fresh) {
                 // Idle pooled connections were made before the absence: a request reusing a dead one waits
                 // out the read timeout (as on a network change). The pool is shared; only idle ones go.
-                httpClient.connectionPool.evictAll()
-                abandoned?.cancel()
+                // tth-1om0: off this thread (main), and not waited for: see retireLinkConnections.
+                retireLinkConnections(abandoned)
             }
             // Web visibilitychange -> reconnectIfIdle: ping an open socket,
             // reconnect a dead one immediately.
@@ -2899,10 +2983,13 @@ class RealTetherClient(
         // ta-coik.32 (R4): pooled connections were made on the previous network. A request reusing
         // one would write into a dead socket and wait out the read timeout (10 s), so they go now
         // (a browser drops its sockets on a network change too). Idle ones only; the pool is shared.
-        httpClient.connectionPool.evictAll()
         var abandoned: WebSocket? = null
         val stale = synchronized(lock) {
-            if (haltedLocked()) return
+            // Halted (signed out, stopped, suspended): nothing reconnects, but what the old network made is still let go.
+            if (haltedLocked()) {
+                retireLinkConnections(null)
+                return
+            }
             if (socketOpen) return@synchronized socket
             // A probe or an upgrade still in flight on the previous network is abandoned (it does
             // nothing once stale), as is a backoff wait: a new attempt starts now.
@@ -2914,7 +3001,8 @@ class RealTetherClient(
             reconnectTask = null
             null
         }
-        abandoned?.cancel()
+        // tth-1om0: the eviction and the cancel are off this (connectivity) thread; see retireLinkConnections.
+        retireLinkConnections(abandoned)
         if (stale != null) replaceSocketNow(stale) else connectNow()
     }
 
@@ -3306,11 +3394,12 @@ class RealTetherClient(
             // (bindLocked is idempotent). The monitor is reentrant, so a
             // callback made inline would be safe too.
             socketListener = listener
+            socketStartedAt = clock()
             socketOrigin = serverOrigin(base.toString())
             // No redirects on the credential-bearing upgrade either (see authHttp).
             // ta-coik.16: the app's own WebSocket on authHttp's upgrade (same TLS, same credential),
             // which sends a message the server takes (up to 32 MiB) in fragments; OkHttp's could not.
-            listener.bindLocked(TetherWebSocket.connect(authHttp, request, listener, onPing = { listener.onServerPing(it) }))
+            listener.bindLocked(TetherWebSocket.connect(upgradeHttp, request, listener, onPing = { listener.onServerPing(it) }))
             trace.mark("upgrade-sent")
         }
     }
@@ -3460,7 +3549,11 @@ class RealTetherClient(
 
         /** ta-nl5m: a WebSocket ping from the server (its heartbeat) reached this socket's reader. */
         fun onServerPing(webSocket: WebSocket) {
-            if (synchronized(lock) { bindLocked(webSocket) }) lastWireInboundAt = clock()
+            if (synchronized(lock) { bindLocked(webSocket) }) {
+                val at = clock()
+                lastWireInboundAt = at
+                lastServerPingAt = at
+            }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -3471,7 +3564,8 @@ class RealTetherClient(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            synchronized(lock) { bindLocked(webSocket) }
+            val current = synchronized(lock) { bindLocked(webSocket) }
+            logSocketLoss("closed", null, code, reason, stale = !current)
             if (code == CLOSE_DEVICE_REVOKED || code == CLOSE_SESSION_REVOKED) {
                 handleRevokedClose(webSocket, code)
                 return
@@ -3480,7 +3574,8 @@ class RealTetherClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            synchronized(lock) { bindLocked(webSocket) }
+            val current = synchronized(lock) { bindLocked(webSocket) }
+            logSocketLoss("failure", t, null, null, stale = !current)
             handleSocketGone(webSocket)
         }
     }
@@ -3508,6 +3603,27 @@ class RealTetherClient(
                 "You were signed out of this server. Sign in again to reconnect."
             },
         )
+    }
+
+    /**
+     * tth-dywx (#4): the one diagnostic line per socket loss. Fixed fields only: the exception CLASS
+     * (never its message, which can carry a host), the close code, the server's reason cut to 64
+     * printable ASCII characters (it is server text: no injected log line), and ages in ms.
+     */
+    private fun logSocketLoss(kind: String, t: Throwable?, code: Int?, reason: String?, stale: Boolean) {
+        runCatching {
+            val now = clock()
+            val (foreground, probePending) = synchronized(lock) { inForeground to (pingTask != null) }
+            fun since(at: Long) = if (at == 0L) "none" else (now - at).toString()
+            val cleanReason = reason?.filter { it.code in 0x20..0x7e }?.take(64) ?: ""
+            // A callback of a socket already replaced: the stamps are the NEW socket's, so they are omitted.
+            val ages = if (stale) "stale=true" else
+                "age=${since(socketStartedAt)} inbound=${since(lastWireInboundAt)} ping=${since(lastServerPingAt)}"
+            linkLog(
+                "socket-lost kind=$kind ex=${t?.javaClass?.simpleName ?: "-"} code=${code ?: "-"} reason=\"$cleanReason\" " +
+                    "$ages fg=$foreground probe=$probePending",
+            )
+        }
     }
 
     private fun handleSocketGone(webSocket: WebSocket) {
@@ -4158,13 +4274,7 @@ class RealTetherClient(
             // projection shape (a JS reduce throws on the same malformed base). Never let that
             // take down the socket thread: drop the diverged base and ask for a FULL snapshot
             // (no afterSeq — a cursor-at-head attach would come back stateless).
-            val current = ifCurrent(webSocket) {
-                sessionStore.drop(message.sessionId)
-                setLiveLocked(message.sessionId, false)
-                // The reducer is the arbiter (§10 C5): the mirrored base goes too.
-                mirrorOriginLocked()?.let { mirrorLink?.drop(it, message.sessionId) }
-                forgetSavedCopyLocked(message.sessionId)
-            }
+            val current = ifCurrent(webSocket) { dropForFullResyncLocked(message.sessionId) }
             if (current) sendFrameOn(webSocket, ClientMessage.Attach(message.sessionId, null))
             return
         }
@@ -4222,6 +4332,24 @@ class RealTetherClient(
             if (mirrorLink != null) sessionStore.addDetails(message.sessionId, message.turns)
         }
     }
+
+    /**
+     * A FULL resync's local half (the reducer-throw recovery, and the consent refusals of tth-9hvv):
+     * drop the session's diverged base so the next `Attach(id, null)` rebuilds it from a full
+     * snapshot (a cursor-at-head attach would come back stateless). Caller holds [lock]. The consent
+     * ledger is untouched: nothing about an answer is resent after a resync.
+     */
+    private fun dropForFullResyncLocked(sessionId: String) {
+        sessionStore.drop(sessionId)
+        setLiveLocked(sessionId, false)
+        // The reducer is the arbiter (§10 C5): the mirrored base goes too.
+        mirrorOriginLocked()?.let { mirrorLink?.drop(it, sessionId) }
+        forgetSavedCopyLocked(sessionId)
+    }
+
+    /** When each session last had a consent-refusal full resync ([clock]): the 10 s debounce. */
+    private val lastConsentResyncAt = HashMap<String, Long>()
+
 
     /**
      * Run [write] (a write of the published per-server state) under [lock], and
@@ -5491,10 +5619,11 @@ class RealTetherClient(
     ): ConsentResult {
         // The wire type refuses both-or-neither and a grant without a choice; refuse before it throws.
         if ((choiceId == null) == (decision == null) || (grantedPermissions != null && choiceId == null)) {
+            emitError("Your decision was not sent. Pick an option and try again.")
             return ConsentResult.InvalidChoice
         }
         val message = ClientMessage.Approval(sessionId, requestId, choiceId, decision, grantedPermissions)
-        return transmitConsent(sessionId, requestId, expectedFingerprint, ConsentGuard::pendingApproval) { _, request ->
+        return transmitConsent(sessionId, requestId, expectedFingerprint, "decision", ConsentGuard::pendingApproval) { _, request ->
             ConsentGuard.checkApproval(request, choiceId, decision, grantedPermissions) ?: message
         }
     }
@@ -5506,10 +5635,10 @@ class RealTetherClient(
         picks: List<ConsentGuard.QuestionPick>,
         skipped: Set<Int>,
     ): ConsentResult =
-        transmitConsent(sessionId, requestId, expectedFingerprint, ConsentGuard::pendingQuestion) { tree, request ->
+        transmitConsent(sessionId, requestId, expectedFingerprint, "answer", ConsentGuard::pendingQuestion) { tree, request ->
             when {
                 // An answer already on record (question_answered, from this or another device) closes it.
-                ConsentGuard.isAnswered(tree, requestId) -> ConsentResult.NotPending
+                ConsentGuard.isAnswered(tree, requestId) -> ConsentRefusal.Answered
                 else -> ConsentGuard.buildAnswers(request, picks, skipped)?.let { reply ->
                     ClientMessage.Question(sessionId, requestId, reply.answers, reply.response)
                 } ?: ConsentResult.InvalidChoice
@@ -5530,10 +5659,13 @@ class RealTetherClient(
         sessionId: String,
         requestId: String,
         expectedFingerprint: String,
+        /** The card's own noun for the operator's tap: "decision" (approval) or "answer" (question). */
+        noun: String,
         pending: (JsObj?, String) -> JsObj?,
-        /** The frame to send ([ClientMessage]), or the refusal ([ConsentResult]). */
+        /** The frame to send ([ClientMessage]), or the refusal ([ConsentResult], [ConsentRefusal]). */
         decide: (JsObj?, JsObj) -> Any,
     ): ConsentResult {
+        var refusal: ConsentRefusal? = null
         val result = synchronized(lock) {
             val ws = socket
             val origin = socketOrigin
@@ -5545,18 +5677,28 @@ class RealTetherClient(
             // `error`, shown. The request must still be the one the card drew, in the copy this
             // client holds (an absent projection has no pending request).
             val tree = sessionStore.tree(sessionId)
-            val turnId = ConsentGuard.activeTurnId(tree) ?: return@synchronized ConsentResult.NotPending
-            val request = pending(tree, requestId) ?: return@synchronized ConsentResult.NotPending
+            val turnId = ConsentGuard.activeTurnId(tree) ?: run { refusal = ConsentRefusal.NoTurn; return@synchronized ConsentResult.NotPending }
+            val request = pending(tree, requestId) ?: run { refusal = ConsentRefusal.NotOpen; return@synchronized ConsentResult.NotPending }
             val fingerprint = ConsentGuard.fingerprint(origin, turnId, request)
-            if (fingerprint != expectedFingerprint) return@synchronized ConsentResult.NotPending
+            if (fingerprint != expectedFingerprint) {
+                refusal = ConsentRefusal.Drift
+                return@synchronized ConsentResult.NotPending
+            }
             val entry = ConsentLedger.Entry(origin, sessionId, turnId, requestId, fingerprint, epoch)
-            if (consentLedger.contains(entry)) return@synchronized ConsentResult.AlreadyDecided
+            if (consentLedger.contains(entry)) {
+                refusal = ConsentRefusal.Decided
+                return@synchronized ConsentResult.AlreadyDecided
+            }
             val text = when (val decided = decide(tree, request)) {
+                is ConsentRefusal -> { refusal = decided; return@synchronized ConsentResult.NotPending }
                 is ConsentResult -> return@synchronized decided
                 is ClientMessage -> decided.encode()
                 else -> return@synchronized ConsentResult.InvalidChoice
             }
-            if (!consentLedger.claim(entry, ::stillPendingLocked)) return@synchronized ConsentResult.AlreadyDecided
+            if (!consentLedger.claim(entry, ::stillPendingLocked)) {
+                refusal = ConsentRefusal.Decided
+                return@synchronized ConsentResult.AlreadyDecided
+            }
             if (!ws.send(text)) {
                 consentLedger.release(entry)
                 return@synchronized ConsentResult.NotConnected
@@ -5566,6 +5708,29 @@ class RealTetherClient(
         }
         // use-tether.ts:325-328: the web's words when the link is down; the decision is not kept.
         if (result == ConsentResult.NotConnected) emitError("The secure link is reconnecting. Your input was not sent.")
+        refusal?.let { why ->
+            // tth-9hvv (#5): the card on screen disagrees with this device's tree: ask for a FULL
+            // snapshot (never a cursor attach, never a resend of the answer), at most once per
+            // session per 10 s; the line says "Refreshing" only when this refusal issued it.
+            if (why.resyncs) {
+                val resyncWs = synchronized(lock) {
+                    val ws = socket
+                    val now = clock()
+                    val last = lastConsentResyncAt[sessionId]
+                    if (ws == null || !socketOpen || !handshakeDone || (last != null && now - last in 0 until CONSENT_RESYNC_DEBOUNCE_MS)) {
+                        null
+                    } else {
+                        lastConsentResyncAt[sessionId] = now
+                        dropForFullResyncLocked(sessionId)
+                        ws
+                    }
+                }
+                if (resyncWs != null) sendFrameOn(resyncWs, ClientMessage.Attach(sessionId, null))
+                emitError(why.line(noun) + if (resyncWs != null) " Refreshing this session." else "")
+            } else {
+                emitError(why.line(noun))
+            }
+        }
         return result
     }
 

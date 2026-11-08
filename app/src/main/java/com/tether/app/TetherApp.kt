@@ -143,6 +143,8 @@ class TetherApp : Application() {
                 // ta-delivery A2: a picked photo uploads in the background (WorkManager) and survives process death.
                 attachmentUploads = AttachmentUploads(File(context.noBackupFilesDir, "pending-uploads"), WorkManagerUploadScheduler(context)),
                 timing = { Log.i(TIMING_TAG, it) },
+                // tth-dywx (#4): one line per socket loss; `adb logcat -s TetherLink`.
+                linkLog = { Log.w("TetherLink", it) },
                 // ta-2vm7: the sessions kept in memory weigh at most a quarter of the app's heap class.
                 retentionBudgetBytes = ((context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)
                     ?.memoryClass?.toLong()?.times(1L shl 20) ?: Runtime.getRuntime().maxMemory()) / 4,

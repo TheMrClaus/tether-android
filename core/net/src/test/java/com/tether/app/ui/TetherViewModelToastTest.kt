@@ -79,6 +79,19 @@ class TetherViewModelToastTest {
         assertNull(vm.activeToast.value)
     }
 
+    /** tth-9hvv (#5): a refused consent tap's line rides `errors` and reaches the toast as the app's own words. */
+    @Test
+    fun aConsentRefusalLineReachesTheToast() = runTest(dispatcher) {
+        val client = ToastClient()
+        val vm = vm(client)
+        advanceUntilIdle()
+        val line = "That request is no longer open here. Your decision was not sent. Refreshing this session."
+        client.local.tryEmit(line)
+        advanceUntilIdle()
+        assertEquals(Toast(line, fromServer = false), vm.toast.value)
+        assertEquals(line, vm.activeToast.value)
+    }
+
     /** r2: a server's words never survive the switch to another server (configured or linked). */
     @Test
     fun aServerToastIsDroppedWhenTheServerChanges() = runTest(dispatcher) {
