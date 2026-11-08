@@ -184,6 +184,29 @@ class NoticeModelTest {
         assertEquals("Turn ended with an error", outcomeText("error", null, InterruptNoticeView("operator-stop", null, 0, 0)))
     }
 
+    /** tth-5i8m (D7 1, server 159): a requested engine restart. (a1) unknown outcome, (a2) honoured/Stop-shaped, (b) crash unchanged. */
+    @Test
+    fun aRequestedEngineRestartHasItsOwnWordsAndACrashKeepsTheOld() {
+        val at = 3_702_000.0 // 01:01:42 UTC
+        // (a1)
+        assertEquals(
+            "Outcome unknown — an engine restart ended the turn before it finished (it may have partially applied)",
+            outcomeText("outcome_unknown", null, null, cause = "engine_restart"),
+        )
+        // (a2) with the turn_interrupted notice, and without one
+        assertEquals(
+            "Interrupted at 01:01:42 by an engine restart · 1 tool stopped",
+            outcomeText("cancelled", null, InterruptNoticeView("operator-stop", at, 1, 0), ZoneOffset.UTC, cause = "engine_restart"),
+        )
+        assertEquals("Interrupted by an engine restart", outcomeText("cancelled", null, null, cause = "engine_restart"))
+        // (b) a crash and a plain Stop are unchanged
+        assertEquals(OUTCOME_COPY.getValue("outcome_unknown"), outcomeText("outcome_unknown", null, null, cause = null))
+        assertEquals(
+            "Interrupted at 01:01:42 by Stop · 1 tool stopped",
+            outcomeText("cancelled", null, InterruptNoticeView("operator-stop", at, 1, 0), ZoneOffset.UTC, cause = "interrupted"),
+        )
+    }
+
     @Test
     fun apiRetryReadsItsReasonAndAttempt() {
         assertEquals("the model is overloaded — retrying (attempt 2 of 5)", apiRetryText("overloaded", 2, 5))

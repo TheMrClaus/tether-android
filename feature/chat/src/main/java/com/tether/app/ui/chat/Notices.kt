@@ -46,8 +46,10 @@ internal fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier, i
         Vocab.OUTCOME_UNKNOWN -> t.warning
         else -> t.muted
     }
-    val interrupted = outcome == Vocab.OUTCOME_CANCELLED && interrupt != null
-    val text = outcomeText(outcome, turn.error, if (interrupted) interrupt else null, zone)
+    // tth-5i8m (D7 a2): a requested restart is Stop-shaped (CircleStop, role status) even with no turn_interrupted notice.
+    val restart = turn.errorCause == RESTART_TURN_CAUSE
+    val interrupted = outcome == Vocab.OUTCOME_CANCELLED && (interrupt != null || restart)
+    val text = outcomeText(outcome, turn.error, if (interrupted) interrupt else null, zone, cause = turn.errorCause)
     Row(
         modifier
             .background(t.tintXs, RoundedCornerShape(TetherDimens.radiusSm))

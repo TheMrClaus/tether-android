@@ -249,13 +249,14 @@ private val INTERRUPTED_BY_COPY = mapOf(
  * lib/interrupt-notice.mjs interruptedNoticeCopy: "Interrupted at 09:58:53 by your message · 1 tool
  * stopped · 2 background tasks killed" (the time in the device's zone, like the browser's).
  */
-internal fun interruptedNoticeCopy(notice: InterruptNoticeView?, zone: ZoneId = ZoneId.systemDefault()): String {
+internal fun interruptedNoticeCopy(notice: InterruptNoticeView?, zone: ZoneId = ZoneId.systemDefault(), restart: Boolean = false): String {
     notice ?: return ""
     val time = notice.at?.let { at ->
         val local = Instant.ofEpochMilli(at.toLong()).atZone(zone)
         "%02d:%02d:%02d".format(local.hour, local.minute, local.second)
     } ?: ""
-    val by = INTERRUPTED_BY_COPY[notice.by] ?: ""
+    // tth-5i8m (D7 1, a2): a requested engine restart replaces only the "by ..." phrase ("by Stop" -> "by an engine restart").
+    val by = if (restart) RESTART_TURN_BY else INTERRUPTED_BY_COPY[notice.by] ?: ""
     val head = listOf("Interrupted", if (time.isNotEmpty()) "at $time" else "", by).filter { it.isNotEmpty() }.joinToString(" ")
     val parts = mutableListOf(head)
     fun plural(n: Int, one: String, many: String) = "$n ${if (n == 1) one else many}"
@@ -264,6 +265,12 @@ internal fun interruptedNoticeCopy(notice: InterruptNoticeView?, zone: ZoneId = 
     if (notice.unstoppedBackground > 0) parts.add("${plural(notice.unstoppedBackground, "background task", "background tasks")} could not be stopped")
     return parts.joinToString(" · ")
 }
+
+/** tth-5i8m (D7 1, lib/restart-engine-ui.ts): the requested-restart words; the cause is `turn.errorCause` / `turn_end.cause`. */
+internal const val RESTART_TURN_CAUSE = "engine_restart"
+internal const val RESTART_TURN_BY = "by an engine restart"
+internal const val RESTART_TURN_STOPPED_COPY = "Interrupted by an engine restart"
+internal const val RESTART_TURN_UNKNOWN_COPY = "Outcome unknown — an engine restart ended the turn before it finished (it may have partially applied)"
 
 /** chat-view.tsx OUTCOME_COPY. */
 internal val OUTCOME_COPY = mapOf(
@@ -276,10 +283,13 @@ internal val OUTCOME_COPY = mapOf(
  * chat-view.tsx:3468-3471: the outcome row's words — the interrupt notice's account (a cancelled
  * turn only), else the turn's error, else the outcome's copy, else the raw outcome.
  */
-internal fun outcomeText(outcome: String, error: String?, interrupt: InterruptNoticeView?, zone: ZoneId = ZoneId.systemDefault()): String {
-    val interrupted = if (outcome == "cancelled") interruptedNoticeCopy(interrupt, zone) else ""
+internal fun outcomeText(outcome: String, error: String?, interrupt: InterruptNoticeView?, zone: ZoneId = ZoneId.systemDefault(), cause: String? = null): String {
+    val restart = cause == RESTART_TURN_CAUSE
+    val interrupted = if (outcome == "cancelled") interruptedNoticeCopy(interrupt, zone, restart) else ""
     return interrupted.ifEmpty { null }
+        ?: (if (restart && outcome == "cancelled") RESTART_TURN_STOPPED_COPY else null)
         ?: LabelText.clean(error, NOTICE_BODY_MAX).ifEmpty { null }
+        ?: (if (restart && outcome == "outcome_unknown") RESTART_TURN_UNKNOWN_COPY else null)
         ?: OUTCOME_COPY[outcome]
         ?: LabelText.label(outcome)
 }
