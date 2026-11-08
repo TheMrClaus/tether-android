@@ -554,6 +554,9 @@ class RealTetherClient(
     private val attachedThisEpoch = HashSet<String>()
     private var reconnectTask: Cancellable? = null
     private var pingTask: Cancellable? = null
+
+    /** W7 H1: the ONE foreground heartbeat run (armed at READY and on a foreground return; see [armHeartbeatLocked]). */
+    private var heartbeatTask: Cancellable? = null
     private var consecutiveTimeouts = 0
     private var sweeperJob: Job? = null
     private var baseUrlValue: HttpUrl? = null
@@ -658,6 +661,10 @@ class RealTetherClient(
     /** tth-dywx: when the server's last WebSocket ping reached a socket's reader (0 = none yet). Diagnostics only. */
     @Volatile
     private var lastServerPingAt = 0L
+
+    /** W7 H2: when the current socket's last WS pong was WRITTEN to the wire (RTC's own clock; 0 = none yet). Diagnostics only. */
+    @Volatile
+    private var lastPongWrittenAt = 0L
 
     /** tth-dywx: when the current socket's upgrade was started (0 = none). Diagnostics only. */
     @Volatile
@@ -2912,6 +2919,8 @@ class RealTetherClient(
                 inForeground = true
                 backgroundTask?.cancel()
                 backgroundTask = null
+                // W7 H1: a live READY socket is watched again from the return (a replaced one re-arms at its ready).
+                if (socketOpen && handshakeDone) armHeartbeatLocked()
                 val wasSuspended = backgroundSuspended
                 backgroundSuspended = false
                 if (wasSuspended) backoff.reset()
@@ -2972,6 +2981,7 @@ class RealTetherClient(
         synchronized(lock) {
             inForeground = false
             resumeRetryLeft = false
+            cancelHeartbeatLocked()
             if (backgroundedAt == null) backgroundedAt = clock()
             backgroundTask?.cancel()
             backgroundTask = scheduler.schedule(ConnectionTimings.BACKGROUND_GRACE_MS) { suspendForBackground() }
@@ -3085,6 +3095,47 @@ class RealTetherClient(
         reconnectTask = null
         pingTask?.cancel()
         pingTask = null
+        cancelHeartbeatLocked()
+    }
+
+    private fun cancelHeartbeatLocked() {
+        heartbeatTask?.cancel()
+        heartbeatTask = null
+    }
+
+    /**
+     * W7 H1: (re)arms the one heartbeat run for the current socket: only while the app is in front and the
+     * link is READY (handshake done). Idempotent: whatever was pending is cancelled first, so there is never
+     * more than one. Caller holds [lock].
+     */
+    private fun armHeartbeatLocked(delayMs: Long = ConnectionTimings.HEARTBEAT_INTERVAL_MS) {
+        cancelHeartbeatLocked()
+        val ws = socket ?: return
+        if (!inForeground || !socketOpen || !handshakeDone || haltedLocked()) return
+        heartbeatTask = scheduler.scheduleHeartbeat(delayMs) { runHeartbeat(ws) }
+    }
+
+    /**
+     * One heartbeat run (R-B3). Quiet q = now - lastInboundAt. q >= interval: probe unless one is outstanding
+     * (that probe's own deadline decides), look again in an interval. Otherwise send nothing and look again
+     * when the link will have been quiet an interval (at least [ConnectionTimings.HEARTBEAT_MIN_RESCHEDULE_MS]).
+     * The probe is the existing [probeLink] (never superseding, no new reconnect path, no resend).
+     */
+    private fun runHeartbeat(ws: WebSocket) {
+        var probe = false
+        synchronized(lock) {
+            heartbeatTask = null
+            if (socket !== ws || !socketOpen || !handshakeDone || !inForeground || haltedLocked()) return
+            val quiet = clock() - lastInboundAt
+            val next = if (quiet >= ConnectionTimings.HEARTBEAT_INTERVAL_MS) {
+                probe = pingTask == null
+                ConnectionTimings.HEARTBEAT_INTERVAL_MS
+            } else {
+                maxOf(ConnectionTimings.HEARTBEAT_INTERVAL_MS - quiet, ConnectionTimings.HEARTBEAT_MIN_RESCHEDULE_MS)
+            }
+            heartbeatTask = scheduler.scheduleHeartbeat(next) { runHeartbeat(ws) }
+        }
+        if (probe) probeLink(ConnectionTimings.PING_TIMEOUT_MS, supersede = false)
     }
 
     /**
@@ -3118,6 +3169,7 @@ class RealTetherClient(
         consentOriginState.value = null
         pingTask?.cancel()
         pingTask = null
+        cancelHeartbeatLocked()
         // Replies to node requests can only come on the socket that carried them:
         // every waiter ends now instead of at its timeout. Safe under the lock,
         // because a waiter resumes on Dispatchers.Default (nodeRequest), never
@@ -3395,11 +3447,12 @@ class RealTetherClient(
             // callback made inline would be safe too.
             socketListener = listener
             socketStartedAt = clock()
+            lastPongWrittenAt = 0L
             socketOrigin = serverOrigin(base.toString())
             // No redirects on the credential-bearing upgrade either (see authHttp).
             // ta-coik.16: the app's own WebSocket on authHttp's upgrade (same TLS, same credential),
             // which sends a message the server takes (up to 32 MiB) in fragments; OkHttp's could not.
-            listener.bindLocked(TetherWebSocket.connect(upgradeHttp, request, listener, onPing = { listener.onServerPing(it) }))
+            listener.bindLocked(TetherWebSocket.connect(upgradeHttp, request, listener, onPing = { listener.onServerPing(it) }, onPongWritten = { listener.onPongWritten() }))
             trace.mark("upgrade-sent")
         }
     }
@@ -3462,6 +3515,9 @@ class RealTetherClient(
         val ws = synchronized(lock) { socket } ?: return
         socketListener?.onServerPing(ws)
     }
+
+    /** Tests only: when the current socket's last pong was written (0 = none). */
+    internal fun lastPongWrittenAtForTest(): Long = lastPongWrittenAt
 
     /** Tests only: when the last server FRAME arrived (the stamp a WebSocket ping must not move). */
     internal fun lastServerFrameAtForTest(): Long = lastInboundAt
@@ -3556,6 +3612,11 @@ class RealTetherClient(
             }
         }
 
+        /** W7 H2: the fork wrote a pong (writer thread, no lock taken here). A retired socket's late write is ignored. */
+        fun onPongWritten() {
+            if (!retired) lastPongWrittenAt = clock()
+        }
+
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             synchronized(lock) { bindLocked(webSocket) }
             webSocket.close(1000, null)
@@ -3618,7 +3679,7 @@ class RealTetherClient(
             val cleanReason = reason?.filter { it.code in 0x20..0x7e }?.take(64) ?: ""
             // A callback of a socket already replaced: the stamps are the NEW socket's, so they are omitted.
             val ages = if (stale) "stale=true" else
-                "age=${since(socketStartedAt)} inbound=${since(lastWireInboundAt)} ping=${since(lastServerPingAt)}"
+                "age=${since(socketStartedAt)} inbound=${since(lastWireInboundAt)} ping=${since(lastServerPingAt)} pong=${since(lastPongWrittenAt)}"
             linkLog(
                 "socket-lost kind=$kind ex=${t?.javaClass?.simpleName ?: "-"} code=${code ?: "-"} reason=\"$cleanReason\" " +
                     "$ages fg=$foreground probe=$probePending",
@@ -3930,6 +3991,8 @@ class RealTetherClient(
             serverProtocolVersionState.value = message.protocolVersion
             handshakeDone = true
             handshakeAt = clock()
+            // W7 H1 (R-N3): the link is READY: from here a quiet link is probed while the app is in front.
+            armHeartbeatLocked()
             consentOriginState.value = socketOrigin
             publishConsentLocked()
             // A handshake the server accepted is the success that resets backoff.

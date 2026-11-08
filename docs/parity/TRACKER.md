@@ -26,6 +26,9 @@
 
 ## ▶ RESUME HERE
 
+**Next release (DRAFT, not published): 1.6.7 / code 71** - branch `release/1.6.7` from main `d9245931` (1.6.6 published) + the foreground connection heartbeat; curated notes in `docs/releases/1.6.7.md`.
+- Contents: while the app is open, the connection is probed regularly so a link that quietly dies is noticed and restored (tth-dywx, #4); each socket loss line also reports the age of the last pong.
+
 **Current release: 1.6.6 / code 70 - APK PUBLISHED** 2026-11-08 15:25Z (release `v1.6.6`, merged as `2f8f1920`; previous release 1.6.5). Public `app-release.apk` = the verified draft: 8877656 bytes, SHA-256 `e431b0fe38387a87804dd1ea7dcbab1bb81fe6edc5db9eaa4414c2dcbc45c70c`, same signing certificate as 1.6.5. Gates: full `:core:net` 1860 tests 0 failures; `:core:reducer:test`, `verifyRoborazziDebug` (goldens unchanged), unsigned `assembleRelease`, `:app:verifyGalleryNotInRelease`, `assembleDebug lint` BUILD SUCCESSFUL locally; `testDebugUnitTest` green except the known ShareFlowTest load flake (tth-by0r; green on rerun). Curated notes in `docs/releases/1.6.6.md`.
 - Contents: an answered question or decision no longer stays on "Answer sent" when the connection quietly stalls (tth-9hvv, #5): the link is probed after a consent send (a dead downlink is dropped and reconnected), and a closing event that leaves its request pending triggers one debounced full resync.
 

@@ -67,6 +67,18 @@ object ConnectionTimings {
     const val RESUME_PING_TIMEOUT_MS: Long = 3_000
 
     /**
+     * W7 / tether-android #4: while the app is in front and the link is READY, a quiet link is probed
+     * (the existing `ping`, never superseding another probe) once it has heard nothing for this long,
+     * so a link that died under a running turn is noticed without a tap. Worst case after the last inbound
+     * frame: this + [HEARTBEAT_MIN_RESCHEDULE_MS] + [PING_TIMEOUT_MS]. Never raises the load on a busy link
+     * (an inbound frame defers the next check), and nothing is ever re-sent on a drop.
+     */
+    const val HEARTBEAT_INTERVAL_MS: Long = 20_000
+
+    /** The shortest wait before the heartbeat looks again when the link was heard from recently. */
+    const val HEARTBEAT_MIN_RESCHEDULE_MS: Long = 1_000
+
+    /**
      * ta-coik.32 (R3): how long the re-attach of every other session waits for the open chat's
      * snapshot on a new socket before it goes anyway (that session may be gone server-side).
      */
@@ -85,6 +97,12 @@ fun interface Cancellable {
  */
 fun interface Scheduler {
     fun schedule(delayMs: Long, task: () -> Unit): Cancellable
+
+    /**
+     * The foreground heartbeat's task. Same as [schedule]; a separate entry only so a deterministic test
+     * scheduler can tell it from a reconnect delay without matching on a (variable) delay value.
+     */
+    fun scheduleHeartbeat(delayMs: Long, task: () -> Unit): Cancellable = schedule(delayMs, task)
 }
 
 /** Production [Scheduler]: a coroutine delay on [scope]. */

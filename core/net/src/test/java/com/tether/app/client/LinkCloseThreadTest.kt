@@ -187,7 +187,7 @@ class LinkLogTest {
         assertEquals("one line for the close: $closed", 1, closed.size)
         val line = closed.single()
         assertTrue(line, line.startsWith("socket-lost kind=closed ex=- code=1001 "))
-        assertTrue(line, "age=5250 inbound=250 ping=250 fg=true probe=false" in line)
+        assertTrue(line, "age=5250 inbound=250 ping=250 pong=none fg=true probe=false" in line)
         assertTrue("no newline injected: $line", '\n' !in line)
         assertTrue("reason bounded: $line", Regex("reason=\"([^\"]*)\"").find(line)!!.groupValues[1].length <= 64)
 

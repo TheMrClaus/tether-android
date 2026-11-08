@@ -30,7 +30,7 @@ import org.junit.Assert.fail
  * value and a synchronous step, never a real sleep.
  */
 class ManualScheduler : Scheduler {
-    class Task(val delayMs: Long, private val body: () -> Unit) {
+    class Task(val delayMs: Long, private val body: () -> Unit, val heartbeat: Boolean = false) {
         @Volatile var cancelled = false
         @Volatile var fired = false
         fun fire() {
@@ -42,17 +42,26 @@ class ManualScheduler : Scheduler {
 
     private val tasks = mutableListOf<Task>()
 
-    override fun schedule(delayMs: Long, task: () -> Unit): Cancellable {
-        val t = Task(delayMs, task)
+    override fun schedule(delayMs: Long, task: () -> Unit): Cancellable = add(Task(delayMs, task))
+
+    /** W7 H1 (R-N1): the foreground heartbeat is its own kind, so no test has to match a (variable) delay value. */
+    override fun scheduleHeartbeat(delayMs: Long, task: () -> Unit): Cancellable = add(Task(delayMs, task, heartbeat = true))
+
+    private fun add(t: Task): Cancellable {
         synchronized(tasks) { tasks += t }
         return Cancellable { t.cancelled = true }
     }
 
-    fun pending(): List<Task> = synchronized(tasks) { tasks.filter { !it.cancelled && !it.fired } }
+    /** Pending timers other than the heartbeat (which every ready foreground link now holds): see [pendingHeartbeats]. */
+    fun pending(): List<Task> = synchronized(tasks) { tasks.filter { !it.cancelled && !it.fired && !it.heartbeat } }
 
-    fun history(): List<Task> = synchronized(tasks) { tasks.toList() }
+    /** The heartbeat runs still pending: after any detach/background/stop there must be none, and never more than one. */
+    fun pendingHeartbeats(): List<Task> = synchronized(tasks) { tasks.filter { !it.cancelled && !it.fired && it.heartbeat } }
 
-    /** Waits (for client threads to get there, not for time) until a matching task is pending. */
+    /** Every timer ever scheduled except the heartbeat's. */
+    fun history(): List<Task> = synchronized(tasks) { tasks.filter { !it.heartbeat } }
+
+    /** Waits (for client threads to get there, not for time) until a matching task is pending. Never the heartbeat. */
     fun await(predicate: (Long) -> Boolean): Task {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
         while (System.nanoTime() < deadline) {
@@ -64,6 +73,7 @@ class ManualScheduler : Scheduler {
     }
 }
 
+// R-N1: the heartbeat is excluded from [isReconnectDelay]'s callers structurally, not by delay: ManualScheduler.pending / await never return it.
 /** Backoff delays with this base never collide with the ping (8 s) or grace (180 s) timers. */
 fun testBackoff() = Backoff(baseMs = 1_100, capMs = 30_000, random = { 0.0 })
 
