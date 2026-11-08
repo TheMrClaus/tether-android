@@ -26,7 +26,7 @@
 
 ## ▶ RESUME HERE
 
-**Next release (DRAFT, not published): 1.6.3 / code 67** - branch `release/1.6.3` from main `af405232` + the upload fix; curated notes in `docs/releases/1.6.3.md`.
+**Current release: 1.6.3 / code 67 - APK PUBLISHED** 2026-11-08 08:17Z (release `v1.6.3`, merged as `170184d2`; previous release 1.6.2). Public `app-release.apk` = the verified draft: 8861272 bytes, SHA-256 `a9bba297300cb93a7168a537ed1acdf89f73c6047700ab98890c6559cc863f63`. Gates: full `:core:net` 1835 tests 0 failures; `assembleDebug lint testDebugUnitTest`, `verifyRoborazziDebug`, `:app:verifyGalleryNotInRelease`, unsigned `assembleRelease` all BUILD SUCCESSFUL locally (CI run 42460996585 failed on an OOM compiling `:feature:chat`, a module this release does not change). Curated notes in `docs/releases/1.6.3.md`.
 - Contents: a photo upload refused by a sign-in gateway shows a failed-upload bubble with the reason and Send again; a held message with uploads in flight reads Uploading with a percent. Also carries the regenerated baseline and startup profiles (tth-om62), not listed in the notes.
 
 **Current release: 1.6.2 / code 66 — APK PUBLISHED (2026-11-07; SHIPPED WITH OPEN CRITERIA).**
