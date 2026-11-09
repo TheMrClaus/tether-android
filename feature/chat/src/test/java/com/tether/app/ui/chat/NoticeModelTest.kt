@@ -100,12 +100,12 @@ class NoticeModelTest {
 
     @Test
     fun aPeerReceiptOnTheSessionTailReadsTetherWithTheServersSentence() {
-        val words = "Your message to qtarget was delivered."
+        val words = "Your message to qtarget was withdrawn."
         for (provider in listOf("claude", "pi", "reasonix")) {
-            val n = receiptTail(provider, "peer_message_receipt", words).single().notice
+            val n = receiptTail(provider, "peer_message_receipt", words, level = "warning").single().notice
             assertEquals(provider, "Tether", n.heading)
             assertEquals(provider, words, n.message)
-            assertEquals(provider, "info", n.level)
+            assertEquals(provider, "warning", n.level)
             assertEquals(provider, "provider_notice:session:r-1", n.dismissKey)
         }
     }
@@ -115,7 +115,7 @@ class NoticeModelTest {
         val f = ChatFixtures.fold(
             ev("turn_started", "t1", ts = ChatFixtures.T_IDLE) { put("idempotencyKey", "k-t1") },
             ev("user_message_accepted", "t1", ts = ChatFixtures.T_IDLE) { put("text", "hi") },
-            ev("provider_notice", "t1", ts = ChatFixtures.T_IDLE) { put("noticeId", "r-2"); put("level", "info"); put("code", "peer_message_receipt"); put("message", "Your message to qtarget was withdrawn.") },
+            ev("provider_notice", "t1", ts = ChatFixtures.T_IDLE) { put("noticeId", "r-2"); put("level", "warning"); put("code", "peer_message_receipt"); put("message", "Your message to qtarget was withdrawn.") },
             ev("turn_end", "t1", ts = ChatFixtures.T_IDLE) { put("outcome", "ok") },
         )
         val n = items(f).filterIsInstance<ChatItem.ProviderNotice>().single().notice
@@ -124,8 +124,21 @@ class NoticeModelTest {
     }
 
     @Test
+    fun aSuccessReceiptShowsNothingButAFailureReceiptKeepsTheTetherRow() {
+        // D-GH-25 / D-GH-L14: code peer_message_receipt AND level info (delivered, carried) renders nothing, on every provider
+        // and on both tails; a warning receipt (withdrawn, held, archived, handover_failed) keeps the Tether row.
+        for (provider in listOf("claude", "dsh", "codex", "acp", "pi")) {
+            assertTrue(provider, receiptTail(provider, "peer_message_receipt", "Your message to q was delivered.").isEmpty())
+            assertTrue(provider, receiptTail(provider, "peer_message_receipt", "Your message to q was carried to the new lead.").isEmpty())
+            assertEquals(provider, "Tether", receiptTail(provider, "peer_message_receipt", "Your message to q was withdrawn.", level = "warning").single().notice.heading)
+        }
+        // another info notice on the same tail is not touched
+        assertEquals(1, receiptTail("claude", "some_code", "x").size)
+    }
+
+    @Test
     fun aPeerReceiptWithoutAMessageKeepsTheUsualHeading() {
-        for (raw in listOf("""{"noticeId":"r-3","code":"peer_message_receipt"}""", """{"noticeId":"r-3","code":"peer_message_receipt","message":""}""")) {
+        for (raw in listOf("""{"noticeId":"r-3","level":"warning","code":"peer_message_receipt"}""", """{"noticeId":"r-3","level":"warning","code":"peer_message_receipt","message":""}""")) {
             val n = providerNotices(JsCodec.parse("[$raw]"), "Pi").single()
             assertEquals("Pi · peer_message_receipt", n.heading)
         }
@@ -181,7 +194,7 @@ class NoticeModelTest {
     @Test
     fun sessionTailShowsPeerReceiptAndRestartOnEveryProvider() {
         for (provider in listOf("codex", "opencode", "dsh", "acp", "gemini", "claude", "pi", "reasonix")) {
-            assertEquals(provider, 1, receiptTail(provider, "peer_message_receipt", "Your message to q was delivered.").size)
+            assertEquals(provider, 1, receiptTail(provider, "peer_message_receipt", "Your message to q was withdrawn.", level = "warning").size)
             assertEquals(provider, 1, receiptTail(provider, "engine_restarted", "Engine restarted").size)
         }
     }

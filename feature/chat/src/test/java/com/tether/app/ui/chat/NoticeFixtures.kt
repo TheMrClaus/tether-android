@@ -85,8 +85,8 @@ object NoticeFixtures {
         ChatFixtures.fold(
             *ChatFixtures.turn("t1", "Ask qtarget to rerun the lint.", "I sent the request to qtarget.", TS),
             evNullTurn("provider_notice", seq = 10, ts = TS) {
-                put("noticeId", "peer-1"); put("level", "info"); put("code", "peer_message_receipt")
-                put("message", "Your message to qtarget was delivered.")
+                put("noticeId", "peer-1"); put("level", "warning"); put("code", "peer_message_receipt")
+                put("message", "Your message to qtarget was withdrawn.")
             },
         )
     }

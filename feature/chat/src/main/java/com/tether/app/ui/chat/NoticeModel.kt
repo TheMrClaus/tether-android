@@ -147,6 +147,9 @@ fun providerNotices(list: JsValue?, providerLabel: String, v151: Boolean = false
         val id = o["noticeId"].str()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
         val message = LabelText.clean(o["message"].str(), NOTICE_BODY_MAX)
         val level = o["level"].str().takeIf { it == "info" || it == "error" } ?: "warning"
+        // D-GH-25 / D-GH-L14: a success receipt (delivered, carried) is code + level "info" and shows nothing, on both tails;
+        // the failure receipts (level warning) keep the Tether row below. The same rule as the web.
+        if (o["code"].str() == PEER_MESSAGE_RECEIPT_CODE && o["level"].str() == "info") return@mapNotNull null
         if (o["code"].str() == ENGINE_RESTARTED_CODE) {
             // codex-rich-renderers.tsx:420-432: no heading, no code, the message (fallback words), the rotate icon, its own dismiss words.
             return@mapNotNull ProviderNoticeView(
