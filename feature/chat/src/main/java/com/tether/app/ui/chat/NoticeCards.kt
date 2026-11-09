@@ -248,7 +248,7 @@ fun ProviderNoticeRow(view: ProviderNoticeView, modifier: Modifier = Modifier) {
     }
     NoticeBox(edge, modifier.testTag("provider-notice")) {
         Icon(
-            if (view.level == "info") TetherIcons.CircleDot else TetherIcons.TriangleAlert,
+            if (view.restart) TetherIcons.RotateCcw else if (view.level == "info") TetherIcons.CircleDot else TetherIcons.TriangleAlert,
             contentDescription = levelWord,
             tint = iconTint,
             modifier = Modifier.padding(top = 2.dp).size(14.dp),
@@ -261,12 +261,12 @@ fun ProviderNoticeRow(view: ProviderNoticeView, modifier: Modifier = Modifier) {
                 },
             verticalArrangement = Arrangement.spacedBy((0.12f * TetherTypography.SP_PER_REM).dp),
         ) {
-            NoticeHeading(view.heading)
+            if (view.heading.isNotEmpty()) NoticeHeading(view.heading)
             if (view.message.isNotEmpty()) {
                 Text(view.message, style = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.78f), lineHeight = rem(0.78f) * 1.45f), color = t.muted)
             }
         }
-        view.dismissKey?.let { NoticeDismissButton(it, "Dismiss notice", Modifier.padding(start = 0.dp)) }
+        view.dismissKey?.let { NoticeDismissButton(it, view.dismissLabel, Modifier.padding(start = 0.dp)) }
     }
 }
 
