@@ -85,10 +85,37 @@ object NoticeFixtures {
         ChatFixtures.fold(
             *ChatFixtures.turn("t1", "Ask qtarget to rerun the lint.", "I sent the request to qtarget.", TS),
             evNullTurn("provider_notice", seq = 10, ts = TS) {
-                put("noticeId", "peer-1"); put("level", "info"); put("code", "peer_message_receipt")
-                put("message", "Your message to qtarget was delivered.")
+                put("noticeId", "peer-1"); put("level", "warning"); put("code", "peer_message_receipt")
+                put("message", "Your message to qtarget was withdrawn.")
             },
         )
+    }
+
+    private fun restartFixture(level: String, message: String): ChatFixtures.Folded {
+        val f = ChatFixtures.fold(
+            *ChatFixtures.turn("t1", "Carry on.", "Carrying on.", TS),
+            evNullTurn("provider_notice", seq = 10, ts = TS) {
+                put("noticeId", "restart-1"); put("level", level); put("code", "engine_restarted"); put("message", message)
+                put("dismissKey", "provider_notice:session:restart-1")
+            },
+        )
+        return f.copy(projection = f.projection.copy(provider = "dsh"))
+    }
+
+    /** GH #287 (1.6.9): the engine-restart line, nothing stopped (info) and with work stopped (warning), on a dsh session. */
+    val restartInfo: ChatFixtures.Folded by lazy { restartFixture("info", "Engine restarted") }
+    val restartWarning: ChatFixtures.Folded by lazy { restartFixture("warning", "Engine restarted \u00b7 1 subagent stopped") }
+
+    /** D-GH-21 (1.6.9): a session-tail provider notice on a dsh session (the web's E.3 shows it for every provider). */
+    val dshSessionTail: ChatFixtures.Folded by lazy {
+        val f = ChatFixtures.fold(
+            *ChatFixtures.turn("t1", "Ask qtarget to rerun the lint.", "I sent the request to qtarget.", TS),
+            evNullTurn("provider_notice", seq = 10, ts = TS) {
+                put("noticeId", "dsh-1"); put("level", "info"); put("code", "some_new_code")
+                put("message", "A note from the harness."); put("dismissKey", "provider_notice:session:dsh-1")
+            },
+        )
+        f.copy(projection = f.projection.copy(provider = "dsh"))
     }
 
     /** issue #184: a turn Tether interrupted (by the operator's next message), said at its outcome row. */

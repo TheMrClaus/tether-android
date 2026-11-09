@@ -31,6 +31,10 @@ data class ProviderNoticeView(
     val message: String,
     /** Null when the fold stamped none: the row then shows no X. */
     val dismissKey: String?,
+    /** The engine-restart line (GH #287): the web's RotateCcw icon, no heading. */
+    val restart: Boolean = false,
+    /** The dismiss button's accessible name. */
+    val dismissLabel: String = "Dismiss notice",
 )
 
 /** A Codex `context_compacted` record of one turn. */
@@ -126,6 +130,11 @@ internal fun handoverNoticeView(code: String?, v151: Boolean = false): HandoverN
 /** The code of a peer-message receipt (GH #265): the server tells the SENDER what became of its queued peer message. */
 private const val PEER_MESSAGE_RECEIPT_CODE = "peer_message_receipt"
 
+/** GH #287: the restart result notice; lib/restart-engine-ui.ts RESTART_NOTICE_CODE / RESTART_DISMISS_LABEL / restartNoticeView. */
+private const val ENGINE_RESTARTED_CODE = "engine_restarted"
+internal const val ENGINE_RESTART_DISMISS_LABEL = "Dismiss engine-restart notice"
+internal const val ENGINE_RESTART_FALLBACK = "Engine restarted"
+
 /** A `providerNotices` list (session- or turn-scoped), in order; rows without an id or message are skipped.
  *
  * A `peer_message_receipt` notice with a non-empty message reads as the plain "Tether" line, as on the web (tether
@@ -138,6 +147,16 @@ fun providerNotices(list: JsValue?, providerLabel: String, v151: Boolean = false
         val id = o["noticeId"].str()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
         val message = LabelText.clean(o["message"].str(), NOTICE_BODY_MAX)
         val level = o["level"].str().takeIf { it == "info" || it == "error" } ?: "warning"
+        // D-GH-25 / D-GH-L14: a success receipt (delivered, carried) is code + level "info" and shows nothing, on both tails;
+        // the failure receipts (level warning) keep the Tether row below. The same rule as the web.
+        if (o["code"].str() == PEER_MESSAGE_RECEIPT_CODE && o["level"].str() == "info") return@mapNotNull null
+        if (o["code"].str() == ENGINE_RESTARTED_CODE) {
+            // codex-rich-renderers.tsx:420-432: no heading, no code, the message (fallback words), the rotate icon, its own dismiss words.
+            return@mapNotNull ProviderNoticeView(
+                id, level, "", message.ifEmpty { ENGINE_RESTART_FALLBACK }, dismissKeyOf(o["dismissKey"]),
+                restart = true, dismissLabel = ENGINE_RESTART_DISMISS_LABEL,
+            )
+        }
         if (o["code"].str() == PEER_MESSAGE_RECEIPT_CODE && message.isNotEmpty()) {
             return@mapNotNull ProviderNoticeView(id, level, HANDOVER_NOTICE_HEADING, message, dismissKeyOf(o["dismissKey"]))
         }
@@ -169,6 +188,23 @@ internal fun noticeProviderLabel(provider: String?, richCodex: Boolean): String?
     provider == "pi" -> "Pi"
     provider == "reasonix" -> "Reasonix"
     else -> null
+}
+
+/**
+ * lib/provider-notice-label.ts (web E.3, tth-8d6; chat-view.tsx:3880-3887): the heading word of the SESSION tail's notice
+ * block, for every provider; an id this app does not know (a newer server) reads "Agent". Turn tails and compactions keep
+ * [noticeProviderLabel] / [turnNoticeProviderLabel].
+ */
+internal fun sessionNoticeProviderLabel(provider: String?): String = when (provider) {
+    "claude" -> "Claude"
+    "codex" -> "Codex"
+    "opencode" -> "opencode"
+    "pi" -> "Pi"
+    "reasonix" -> "Reasonix"
+    "dsh" -> "DeepSeek Harness"
+    "acp" -> "ACP"
+    "gemini" -> "Gemini"
+    else -> "Agent"
 }
 
 /**

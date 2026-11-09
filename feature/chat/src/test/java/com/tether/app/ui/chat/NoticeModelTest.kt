@@ -86,11 +86,11 @@ class NoticeModelTest {
         assertEquals("Pi · reasonix_mode_changed", providerNoticeHeading("Pi", "reasonix_mode_changed"))
     }
 
-    private fun receiptTail(provider: String, code: String, message: String?, dismissKey: String? = null): List<ChatItem.ProviderNotice> {
+    private fun receiptTail(provider: String, code: String, message: String?, dismissKey: String? = null, level: String = "info"): List<ChatItem.ProviderNotice> {
         val f = ChatFixtures.fold(
             *ChatFixtures.turn("t1", "hi", "hello", ChatFixtures.T_IDLE),
             evNullTurn("provider_notice", seq = 10, ts = ChatFixtures.T_IDLE) {
-                put("noticeId", "r-1"); put("level", "info"); put("code", code)
+                put("noticeId", "r-1"); put("level", level); put("code", code)
                 if (message != null) put("message", message)
                 if (dismissKey != null) put("dismissKey", dismissKey)
             },
@@ -100,12 +100,12 @@ class NoticeModelTest {
 
     @Test
     fun aPeerReceiptOnTheSessionTailReadsTetherWithTheServersSentence() {
-        val words = "Your message to qtarget was delivered."
+        val words = "Your message to qtarget was withdrawn."
         for (provider in listOf("claude", "pi", "reasonix")) {
-            val n = receiptTail(provider, "peer_message_receipt", words).single().notice
+            val n = receiptTail(provider, "peer_message_receipt", words, level = "warning").single().notice
             assertEquals(provider, "Tether", n.heading)
             assertEquals(provider, words, n.message)
-            assertEquals(provider, "info", n.level)
+            assertEquals(provider, "warning", n.level)
             assertEquals(provider, "provider_notice:session:r-1", n.dismissKey)
         }
     }
@@ -115,7 +115,7 @@ class NoticeModelTest {
         val f = ChatFixtures.fold(
             ev("turn_started", "t1", ts = ChatFixtures.T_IDLE) { put("idempotencyKey", "k-t1") },
             ev("user_message_accepted", "t1", ts = ChatFixtures.T_IDLE) { put("text", "hi") },
-            ev("provider_notice", "t1", ts = ChatFixtures.T_IDLE) { put("noticeId", "r-2"); put("level", "info"); put("code", "peer_message_receipt"); put("message", "Your message to qtarget was withdrawn.") },
+            ev("provider_notice", "t1", ts = ChatFixtures.T_IDLE) { put("noticeId", "r-2"); put("level", "warning"); put("code", "peer_message_receipt"); put("message", "Your message to qtarget was withdrawn.") },
             ev("turn_end", "t1", ts = ChatFixtures.T_IDLE) { put("outcome", "ok") },
         )
         val n = items(f).filterIsInstance<ChatItem.ProviderNotice>().single().notice
@@ -124,8 +124,21 @@ class NoticeModelTest {
     }
 
     @Test
+    fun aSuccessReceiptShowsNothingButAFailureReceiptKeepsTheTetherRow() {
+        // D-GH-25 / D-GH-L14: code peer_message_receipt AND level info (delivered, carried) renders nothing, on every provider
+        // and on both tails; a warning receipt (withdrawn, held, archived, handover_failed) keeps the Tether row.
+        for (provider in listOf("claude", "dsh", "codex", "acp", "pi")) {
+            assertTrue(provider, receiptTail(provider, "peer_message_receipt", "Your message to q was delivered.").isEmpty())
+            assertTrue(provider, receiptTail(provider, "peer_message_receipt", "Your message to q was carried to the new lead.").isEmpty())
+            assertEquals(provider, "Tether", receiptTail(provider, "peer_message_receipt", "Your message to q was withdrawn.", level = "warning").single().notice.heading)
+        }
+        // another info notice on the same tail is not touched
+        assertEquals(1, receiptTail("claude", "some_code", "x").size)
+    }
+
+    @Test
     fun aPeerReceiptWithoutAMessageKeepsTheUsualHeading() {
-        for (raw in listOf("""{"noticeId":"r-3","code":"peer_message_receipt"}""", """{"noticeId":"r-3","code":"peer_message_receipt","message":""}""")) {
+        for (raw in listOf("""{"noticeId":"r-3","level":"warning","code":"peer_message_receipt"}""", """{"noticeId":"r-3","level":"warning","code":"peer_message_receipt","message":""}""")) {
             val n = providerNotices(JsCodec.parse("[$raw]"), "Pi").single()
             assertEquals("Pi · peer_message_receipt", n.heading)
         }
@@ -148,7 +161,9 @@ class NoticeModelTest {
         }
         assertEquals("Reasonix · Mode changed", tail("reasonix").single().notice.heading)
         assertEquals("Pi · reasonix_mode_changed", tail("pi").single().notice.heading)
-        assertTrue(tail("opencode").isEmpty())
+        // D-GH-21 (1.6.9) FLIP 1: was `assertTrue(tail("opencode").isEmpty())`. The session tail now shows for every provider
+        // (web E.3, chat-view.tsx:3880-3887), so a session-level notice on opencode reads "opencode · <code>".
+        assertEquals("opencode · reasonix_mode_changed", tail("opencode").single().notice.heading)
     }
 
     @Test
@@ -157,11 +172,81 @@ class NoticeModelTest {
         assertEquals("Claude", noticeProviderLabel("claude", richCodex = false))
         assertNull(noticeProviderLabel("codex", richCodex = false))
         assertNull(noticeProviderLabel("opencode", richCodex = false))
-        // A non-rich opencode session shows no compactions (Codex-only) and no session-tail notices;
-        // its TURN notices do show (chat-view.tsx:3751-3768; see turnNoticesShowForPiOpencodeAndReasonix).
+        // A non-rich opencode session shows no compactions (Codex-only) and no TURN notices of a provider the web hides;
+        // D-GH-21 (1.6.9) FLIP 2: it used to also show no session-tail notices. The session tail now shows for every provider
+        // (see sessionTailLabelMatchesTheWeb), the turn tail and compactions are unchanged.
         val f = NoticeFixtures.codexNotices
         val asOpencode = f.copy(projection = f.projection.copy(provider = "opencode"))
-        assertTrue(items(asOpencode).none { it is ChatItem.Compaction || (it is ChatItem.ProviderNotice && it.turnId == null) })
+        assertTrue(items(asOpencode).none { it is ChatItem.Compaction })
+    }
+
+    @Test
+    fun sessionTailLabelMatchesTheWeb() {
+        // lib/provider-notice-label.ts: any codex is "Codex" (rich or not), an unknown id is "Agent".
+        val want = mapOf(
+            "claude" to "Claude", "codex" to "Codex", "opencode" to "opencode", "pi" to "Pi", "reasonix" to "Reasonix",
+            "dsh" to "DeepSeek Harness", "acp" to "ACP", "gemini" to "Gemini", "zzz" to "Agent",
+        )
+        for ((provider, label) in want) assertEquals(provider, label, sessionNoticeProviderLabel(provider))
+        assertEquals("Agent", sessionNoticeProviderLabel(null))
+    }
+
+    @Test
+    fun sessionTailShowsPeerReceiptAndRestartOnEveryProvider() {
+        for (provider in listOf("codex", "opencode", "dsh", "acp", "gemini", "claude", "pi", "reasonix")) {
+            assertEquals(provider, 1, receiptTail(provider, "peer_message_receipt", "Your message to q was withdrawn.", level = "warning").size)
+            assertEquals(provider, 1, receiptTail(provider, "engine_restarted", "Engine restarted").size)
+        }
+    }
+
+    @Test
+    fun aTurnScopedNoticeStillShowsNothingOnDshAcpAndPlainCodex() {
+        // Negative control (web parity, chat-view.tsx:3725-3746): turn notices show for claude/opencode/pi/reasonix/rich codex only.
+        for (provider in listOf("dsh", "acp", "codex")) {
+            val f = ChatFixtures.fold(
+                ev("turn_started", "t1", ts = ChatFixtures.T_IDLE) { put("idempotencyKey", "k-t1") },
+                ev("user_message_accepted", "t1", ts = ChatFixtures.T_IDLE) { put("text", "hi") },
+                ev("provider_notice", "t1", ts = ChatFixtures.T_IDLE) { put("noticeId", "tn-1"); put("level", "info"); put("code", "engine_restarted"); put("message", "x") },
+                ev("turn_end", "t1", ts = ChatFixtures.T_IDLE) { put("outcome", "ok") },
+            )
+            val rows = items(f.copy(projection = f.projection.copy(provider = provider))).filterIsInstance<ChatItem.ProviderNotice>()
+            assertTrue(provider, rows.isEmpty())
+        }
+    }
+
+    @Test
+    fun engineRestartedReadsLikeTheWebWithNoHeading() {
+        // codex-rich-renderers.tsx:408-432 + restartNoticeView: no heading, the message, level from the notice, its own dismiss words.
+        for (provider in listOf("claude", "pi", "reasonix", "dsh", "opencode")) {
+            val n = receiptTail(provider, "engine_restarted", "Engine restarted · 1 subagent stopped", "dk-1", level = "warning").single().notice
+            assertEquals(provider, "", n.heading)
+            assertEquals(provider, "Engine restarted · 1 subagent stopped", n.message)
+            assertEquals(provider, "warning", n.level)
+            assertTrue(provider, n.restart)
+            assertEquals(provider, "Dismiss engine-restart notice", n.dismissLabel)
+            assertTrue(provider, n.dismissKey!!.isNotEmpty())
+        }
+        val info = receiptTail("claude", "engine_restarted", "Engine restarted").single().notice
+        assertEquals("info", info.level)
+        assertTrue(info.restart)
+    }
+
+    @Test
+    fun engineRestartedWithoutAMessageFallsBackToEngineRestarted() {
+        // The fold keeps no notice without a message, so the fallback is exercised on the mapper (as the web's restartNoticeView is).
+        for (raw in listOf("""{"noticeId":"r-9","code":"engine_restarted"}""", """{"noticeId":"r-9","code":"engine_restarted","message":""}""")) {
+            val n = providerNotices(JsCodec.parse("[$raw]"), "Claude").single()
+            assertEquals("Engine restarted", n.message)
+            assertEquals("", n.heading)
+            assertTrue(n.restart)
+        }
+    }
+
+    @Test
+    fun otherNoticesKeepTheirOrdinaryDismissLabel() {
+        val n = receiptTail("claude", "some_code", "x").single().notice
+        assertEquals("Dismiss notice", n.dismissLabel)
+        assertTrue(!n.restart)
     }
 
     @Test

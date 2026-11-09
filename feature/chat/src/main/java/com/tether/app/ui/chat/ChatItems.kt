@@ -285,7 +285,7 @@ internal fun buildChatItems(
     // T6.4 (chat-view.tsx:3480-3528): finished background commands join the turns by launch time.
     // T6.6: whose provider notices show (a rich Codex session's, a Claude session's), and the
     // turn_interrupted accounts by turn.
-    val noticeLabel = noticeProviderLabel(projection.provider, richCodex)
+    val sessionNoticeLabel = sessionNoticeProviderLabel(projection.provider) // D-GH-21: the session tail shows for every provider (web E.3)
     val turnNoticeLabel = turnNoticeProviderLabel(projection.provider, richCodex)
     val interrupts = interruptNoticesByTurn(state)
     val finishedBg = finishedBackgroundCommands(state)
@@ -408,12 +408,10 @@ internal fun buildChatItems(
     // T6.7: the `lastError` row stays as the fallback for a server before v145 (no sessionErrors), only where no entry says it (R1).
     fallbackLastError(projection.lastError, sessionErrorEntries(projection, tree))?.let { items.add(ChatItem.SessionError(scope, it)) }
     // T6.6 (chat-view.tsx:3537-3539): the session's own provider notices, one `.notices` stack.
-    if (noticeLabel != null) {
-        var inStack = false
-        providerNotices(state["providerNotices"], noticeLabel, handoverV151).forEach {
-            items.add(ChatItem.ProviderNotice(scope, null, it, startsGroup = !inStack, tight = inStack))
-            inStack = true
-        }
+    var sessionStack = false
+    providerNotices(state["providerNotices"], sessionNoticeLabel, handoverV151).forEach {
+        items.add(ChatItem.ProviderNotice(scope, null, it, startsGroup = !sessionStack, tight = sessionStack))
+        sessionStack = true
     }
     placement.homeless.forEach { d -> items.add(denialItem(null, null, d, nested = false, startsGroup = true, tight = false)) }
     // T6.6 (chat-view.tsx:3555-3604): external advancement / background loss.
