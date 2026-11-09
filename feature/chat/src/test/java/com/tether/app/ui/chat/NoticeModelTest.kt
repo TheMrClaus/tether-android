@@ -1,6 +1,7 @@
 package com.tether.app.ui.chat
 
 import com.tether.app.protocol.tree.JsCodec
+import com.tether.app.protocol.reduce.ev
 import com.tether.app.protocol.reduce.evNullTurn
 import com.tether.app.protocol.tree.JsObj
 import kotlinx.serialization.json.put
@@ -83,6 +84,57 @@ class NoticeModelTest {
         assertEquals("Mode changed", reasonixNoticeTitle("reasonix_mode_changed"))
         // Other engines keep the raw code.
         assertEquals("Pi · reasonix_mode_changed", providerNoticeHeading("Pi", "reasonix_mode_changed"))
+    }
+
+    private fun receiptTail(provider: String, code: String, message: String?, dismissKey: String? = null): List<ChatItem.ProviderNotice> {
+        val f = ChatFixtures.fold(
+            *ChatFixtures.turn("t1", "hi", "hello", ChatFixtures.T_IDLE),
+            evNullTurn("provider_notice", seq = 10, ts = ChatFixtures.T_IDLE) {
+                put("noticeId", "r-1"); put("level", "info"); put("code", code)
+                if (message != null) put("message", message)
+                if (dismissKey != null) put("dismissKey", dismissKey)
+            },
+        )
+        return items(f.copy(projection = f.projection.copy(provider = provider))).filterIsInstance<ChatItem.ProviderNotice>()
+    }
+
+    @Test
+    fun aPeerReceiptOnTheSessionTailReadsTetherWithTheServersSentence() {
+        val words = "Your message to qtarget was delivered."
+        for (provider in listOf("claude", "pi", "reasonix")) {
+            val n = receiptTail(provider, "peer_message_receipt", words).single().notice
+            assertEquals(provider, "Tether", n.heading)
+            assertEquals(provider, words, n.message)
+            assertEquals(provider, "info", n.level)
+            assertEquals(provider, "provider_notice:session:r-1", n.dismissKey)
+        }
+    }
+
+    @Test
+    fun aPeerReceiptOnATurnTailReadsTetherToo() {
+        val f = ChatFixtures.fold(
+            ev("turn_started", "t1", ts = ChatFixtures.T_IDLE) { put("idempotencyKey", "k-t1") },
+            ev("user_message_accepted", "t1", ts = ChatFixtures.T_IDLE) { put("text", "hi") },
+            ev("provider_notice", "t1", ts = ChatFixtures.T_IDLE) { put("noticeId", "r-2"); put("level", "info"); put("code", "peer_message_receipt"); put("message", "Your message to qtarget was withdrawn.") },
+            ev("turn_end", "t1", ts = ChatFixtures.T_IDLE) { put("outcome", "ok") },
+        )
+        val n = items(f).filterIsInstance<ChatItem.ProviderNotice>().single().notice
+        assertEquals("Tether", n.heading)
+        assertEquals("Your message to qtarget was withdrawn.", n.message)
+    }
+
+    @Test
+    fun aPeerReceiptWithoutAMessageKeepsTheUsualHeading() {
+        for (raw in listOf("""{"noticeId":"r-3","code":"peer_message_receipt"}""", """{"noticeId":"r-3","code":"peer_message_receipt","message":""}""")) {
+            val n = providerNotices(JsCodec.parse("[$raw]"), "Pi").single()
+            assertEquals("Pi · peer_message_receipt", n.heading)
+        }
+    }
+
+    @Test
+    fun anotherCodeKeepsItsProviderHeading() {
+        assertEquals("Pi · some_other_code", receiptTail("pi", "some_other_code", "Something happened.").single().notice.heading)
+        assertEquals("Reasonix · Mode changed", receiptTail("reasonix", "reasonix_mode_changed", "Mode moved.").single().notice.heading)
     }
 
     @Test
