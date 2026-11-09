@@ -26,7 +26,7 @@
 
 ## ▶ RESUME HERE
 
-**Next release (DRAFT, not published): 1.6.8 / code 72** - branch `release/1.6.8` from main `13f222ad` (1.6.7 published) + the peer-message receipt heading; curated notes in `docs/releases/1.6.8.md`.
+**Current release: 1.6.8 / code 72 - APK PUBLISHED** 2026-11-09 02:28Z (release `v1.6.8`, merged as `6938d102`; previous release 1.6.7). Public `app-release.apk` = the verified draft: 8877656 bytes, SHA-256 `dc2e744ac83e2c71902a21ff7ebbfa196208589e2e9ac88158e13b2dd04a4a1a`, same signing certificate as 1.6.7. Gates: `:feature:chat:testDebugUnitTest`, `verifyRoborazziDebug`, `:app:assembleRelease :app:verifyGalleryNotInRelease`, `assembleDebug lint` BUILD SUCCESSFUL locally; all modules' `testDebugUnitTest` 8312 tests 0 failures after the known ShareFlowTest load flake (tth-by0r; green on rerun). Curated notes in `docs/releases/1.6.8.md`.
 - Contents: the note a sender sees about a message it sent another session reads "Tether" with the server's sentence, as on the web, instead of "<Provider> · peer_message_receipt".
 
 **Current release: 1.6.7 / code 71 - APK PUBLISHED** 2026-11-08 16:36Z (release `v1.6.7`, merged as `809c5f98`; previous release 1.6.6). Public `app-release.apk` = the verified draft: 8877656 bytes, SHA-256 `0b7655d2c68ee65808568f4c8973005cdd65d7450d6c3b7b5c969b149f62031d`, same signing certificate as 1.6.6. Gates: full `:core:net` 1871 tests 0 failures (lane head and release head); `:core:reducer:test`, `verifyRoborazziDebug` (goldens unchanged), unsigned `assembleRelease`, `:app:verifyGalleryNotInRelease`, `assembleDebug lint` BUILD SUCCESSFUL locally; `testDebugUnitTest` green except the known ShareFlowTest load flake (tth-by0r; green on rerun). Curated notes in `docs/releases/1.6.7.md`.
