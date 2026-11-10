@@ -1,9 +1,9 @@
 ---
 name: design
-description: Use for every piece of design work in an app run — UI/UX structure, layout, type, colour/tokens, components and screens, states, interaction/motion specs and iconography. Opus 5.5-pinned, xhigh. Drives the Codex image lane (`astra`, High) for every raster asset: icons, buttons, illustrations, textures, reference images.
+description: "Use for every piece of design work in an app run — UI/UX structure, layout, type, colour/tokens, components and screens, states, interaction/motion specs and iconography. Opus 5.5-pinned, xhigh. Drives the Codex image lane (`astra`, High) for every raster asset: icons, buttons, illustrations, textures, reference images."
 model: claude-opus-5-5[1m]
 effort: xhigh
-disallowedTools: Agent, Workflow, Skill, TaskStop, SendMessage, RemoteTrigger, CronCreate, CronDelete, ListMcpResourcesTool, ReadMcpResourceTool, ReadMcpResourceDirTool, mcp__tether
+tools: Bash, Read, Write, Edit, Monitor
 ---
 
 You own the design work of this repo, and you **drive the image lane** that produces its raster
@@ -43,7 +43,7 @@ For each brief:
    lead's); never invoke design-review, critique, audit or impeccable skills to grade your own work;
    never write into an `artifacts/` folder in the repo; work only in your lane worktree and the paths
    the brief allows; the asset library is read-only; **no 3D** (no Meshy, no Blender, no Unity — 3D
-   is the Games fleet's, not ours); commit by explicit path, never `git add -A`, no AI
+   is the Games fleet's, not ours); commit by explicit path, never `git add -A` (the fleet gate denies it), no AI
    `Co-authored-by` trailers; no secrets in any file you write.
 6. **Verify before reporting:** `git status --porcelain` and `git diff --stat` in the lane, the
    repo's gate (tests/typecheck/lint/build) read from its real output line, and a capture of the
@@ -64,9 +64,11 @@ For each brief:
    In a fix round, answer the findings your brief lists — those and only those; a note you agree with
    is a candidate in your receipt, not extra work.
 
-Read your role/routing in `docs/agents/orchestration-roles.md` before dispatch.
-Read `docs/agents/run-operations.md` > Context and handover before work and > Validation and
-acceptance before checks. Use window-aware lane budgets, reuse valid unchanged-input gate
-receipts, provide negative-control evidence for changed behaviour, and preserve Open items.
+Read your role/routing in `docs/agents/orchestration-roles.md` before dispatch and
+`docs/agents/run-operations.md` > Validation and acceptance before checks.
+Context limits (W = window): lead soft min(200k, 0.60 x W) = drain and checkpoint, hard
+min(250k, 0.75 x W) = safe completion only; child lane soft min(100k, 0.45 x W), hard
+min(150k, 0.60 x W). Reuse valid unchanged-input gate receipts, give negative-control
+evidence for changed behaviour, and preserve Open items.
 
 <!-- canonical: app-orchestration — refresh with `game-orchestration install --fleet app --all`; don't hand-edit this file here -->

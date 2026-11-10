@@ -8,6 +8,11 @@ Installed by game-orchestration; retain all host and repo-specific grants.
 - **The shared dev instance is single-instance: wait, never kill.** Only the lead starts or stops a
   long-running shared process (the deployed dev/preview instance, a seeded local service, a
   database container). A lane may run its own builds and tests — that is why lanes get worktrees.
+- **Host-heavy jobs are serialised — this box is shared with the game fleet, prod and the Hermes
+  stack.** A full build or test gate runs as `~/bin/heavy-lock build -- <command>` (the same
+  host-wide lock the game gates take), so two gates never compile at once. It waits (default
+  1800 s, `HEAVY_LOCK_WAIT` overrides) and **exits 75 without running the command** on timeout: a
+  75 is never a pass — report it and re-run.
 - **Never point anything at production.** Mutating scripts, migrations and tests run against a
   disposable local/dev target; a deploy is the lead's, and it is **verified against the served
   artifact** (build id/hash plus a real request to the live URL), never against a build log alone.
@@ -22,7 +27,8 @@ Installed by game-orchestration; retain all host and repo-specific grants.
   are wired into the env/config of the services that need them, files stay `600`, and only
   placeholders go into docs (`.env.example`). Public-repo hygiene: block dotfile/VCS paths at the
   proxy, never let a build copy them into a static bundle.
-- **Commit by explicit path; never `git add -A`/`git add .`/`commit -a`; no AI `Co-authored-by`
+- **Commit by explicit path; never `git add -A`/`git add .`/`commit -a` (the fleet gate denies
+  them); no AI `Co-authored-by`
   trailers.** Never discard uncommitted work in a shared checkout — the tree belongs to every
   workstream in the repo. Push the gated sha explicitly and check `git log origin/main..<sha>` for
   another workstream's unpushed commits before you do.

@@ -63,7 +63,7 @@ handle, timestamps, log/result paths, heartbeat or timeout, terminal result and 
 A small JSON record under the run directory is sufficient until a shared runner implements this.
 Jobs use QUEUED/RUNNING/PASS/FAIL/INCONCLUSIVE/CANCELLED; a lost or interrupted job is not a pass.
 Launch once and wait for completion. Check status on an event, timeout or recovery need, not in a
-sleep/status conversation loop. Respect tool wait limits and keep the operator informed.
+sleep/status conversation loop (the fleet gate denies one inside a fleet checkout). Respect tool wait limits and keep the operator informed.
 
 Use existing host-wide engine/build/browser/GPU locks. Set concurrency from measured CPU/RAM and
 conflict constraints; two full suites are allowed only with explicit capacity and isolation,

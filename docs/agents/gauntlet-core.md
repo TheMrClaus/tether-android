@@ -3,8 +3,15 @@
 Canonical, fleet-wide (installed by `~/bin/game-orchestration --fleet app`; don't hand-edit here).
 Each repo's **run doc** adds only what is specific to that run: scope and milestones, the named bar
 files, the rig table (gate, capture, deploy commands and paths), checkpoints and the paste-ready
-prompts. The roster and routing are in `docs/agents/orchestration.md`. Explicit owner rulings take precedence; run docs specialize scope and instruments. They do not
+prompts. The roster and routing are in `docs/agents/orchestration-roles.md`. Explicit owner rulings take precedence; run docs specialize scope and instruments. They do not
 silently override shared operating controls. Record any owner-authorized exception and its scope.
+
+## A Codex lead
+
+A session the owner starts with Codex as the lead runs this loop unchanged on the Codex model the
+owner picked, and **every agent it deploys is a Codex agent on a Codex model**: the roster's duties,
+read-only limits and independence rules still apply, its Claude pins do not
+(`orchestration.md` › A Codex lead).
 
 ## The loop
 
@@ -133,7 +140,8 @@ that record, never the chat.
 
 - The lead fans out and never implements (routing rule 3). The shared dev instance is the lead's:
   **"do not start or stop the dev server / deployed instance"** is in every brief.
-- **Git** — commit by explicit path only; **never `git add -A`**, `git add .` or `commit -a`; never
+- **Git** — commit by explicit path only; **never `git add -A`**, `git add .` or `commit -a` (the
+  fleet gate, `~/bin/fleet-gate.py`, denies them); never
   discard uncommitted work in a shared checkout (`checkout -- <path>`, `restore`, `stash drop`);
   work in a worktree (`~/git/<repo>-wt/<lane>`) when the work is parallel with another lane;
   `git show --stat <sha>` before pushing: deletions you didn't author mean you reverted someone;

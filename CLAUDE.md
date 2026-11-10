@@ -80,8 +80,12 @@ single-file, non-design, non-core edit itself (policy rule 3).
   rest are notes; the lead triages before dispatch (gauntlet-core › Findings). UI claims are verified with a real-browser capture at the run doc's viewports.
 - The lead keeps the build gates, the shared dev instance (single-instance: wait, never kill), the
   pushes and the deploys — and verifies a deploy against the served artifact.
-- **Window-aware context and evidence rules:** `docs/agents/run-operations.md` > Context and
-  handover; Validation and acceptance; State and findings. Check at clean points and before
-  dispatch. Hand-backs are <=1.5k-character pointers; always read `## Open items`.
+- **Started in Codex?** Then the lead model is the owner's choice (not Opus 5.5) and every agent
+  it spawns is a Codex agent on a Codex model — the `.claude/agents/` pins do not apply; every
+  other rule here does.
+- **Context limits (W = window):** lead soft min(200k, 0.60 x W) = drain and checkpoint, hard
+  min(250k, 0.75 x W) = safe completion only; child lane soft min(100k, 0.45 x W), hard min(150k,
+  0.60 x W). Check at clean points and before dispatch. Evidence rules: `docs/agents/run-operations.md`
+  > Validation and acceptance; State and findings. Hand-backs are <=1.5k-character pointers; always read `## Open items`.
 - Full policy: `docs/agents/orchestration.md`; how a run works: `docs/agents/gauntlet-core.md`.
 <!-- app-orchestration:end -->

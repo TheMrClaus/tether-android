@@ -63,5 +63,11 @@ Read `docs/agents/orchestration.md` and follow it: orchestrate, don't implement 
 non-run session may make one small single-file, non-design, non-core edit); dispatch the repo roster
 in `.claude/agents/` by name with no model/effort override; all design work goes to `design`; every
 raster asset goes to the Codex image lane (`astra`, High) the design lane drives; no 3D in this
-fleet; no agent grades its own work. Commit by explicit path, never `git add -A`.
+fleet; no agent grades its own work. Commit by explicit path, never `git add -A` (the fleet gate denies it).
+**Context limits (W = window)**: lead soft min(200k, 0.60 x W) = drain and checkpoint, hard
+min(250k, 0.75 x W) = safe completion only; child lane soft min(100k, 0.45 x W), hard min(150k,
+0.60 x W).
+**If you were started with Codex as the lead**: run the Codex model the owner picked (not Opus
+5.5) and deploy **Codex agents only** — every role keeps its duties, the `.claude/agents/` pins
+do not apply; everything else here does.
 <!-- app-orchestration:end -->

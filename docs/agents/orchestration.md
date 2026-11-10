@@ -11,6 +11,18 @@ app --all` for drift). What a run is — the bar, waves and the standing brief r
 repo-local agent with a pinned model+effort, and **no piece is judged by the agent that made it**.
 A run's lead never builds; an interactive session may make one small edit itself (rule 3).
 
+## A Codex lead — owner starts the session in Codex
+
+**This policy binds a Codex lead exactly as any other lead.** Two exceptions, and no others:
+
+- **The lead model is the owner's choice.** It runs the Codex model the owner selected, never claims
+  to be Opus 5.5, and rule 6's model proof reads the Codex model ids it actually runs.
+- **It deploys Codex agents only.** Every role keeps its duties, read-only limits and independence
+  rules, but every agent it spawns is a Codex agent on a Codex model; it never applies the Claude
+  pins (the roster in `orchestration-roles.md`): read each role's duty, not its model.
+
+It stays ask-first like every app lead.
+
 ## Roster
 
 Before the first dispatch read `orchestration-roles.md` > Roster and Routing rules.
@@ -45,7 +57,7 @@ separately. Do not infer plan charges or equal cache prices across models from t
    remaining LEAD work and hard-limit reserve; do not hand over early solely on that forecast.
 5. **Wait on events.** Start a job once, retain its handle/log, use a blocking wait or completion
    notification. Never alternate model turns between sleep and status/tail calls, including
-   `clock.sleep`. Use bounded tool waits when the host requires them; communicate meaningful
+   `clock.sleep` (the fleet gate denies a sleep-then-poll inside a fleet checkout). Use bounded tool waits when the host requires them; communicate meaningful
    progress without adding redundant status probes. Durable job and resource rules are in
    `run-operations.md` > Jobs and environments.
 6. **Verify independently; reuse execution evidence.** A verifier challenges the acceptance
@@ -71,6 +83,18 @@ separately. Do not infer plan charges or equal cache prices across models from t
 
 Read run-operations by section. Use `game-orchestration checkpoint` at boundaries (see
 `docs/agents/checkpoint.md`); one current state plus a handover delta avoids duplicate setup.
+
+## One live lead per run
+
+Two leads writing one run's plan, tracker and lanes corrupt it, so a run has exactly one live lead,
+enforced by a lock in the run-artefacts dir (`~/bin/lead-lock`, host-wide):
+
+- At run start the lead runs `~/bin/lead-lock claim <run-artefacts-dir>`.
+- A successor (a handover, a restart) runs `~/bin/lead-lock takeover <dir> --from <predecessor session id>`
+  — the id the handover prompt names. With no lock present, takeover simply claims.
+- **Exit 2 means another live lead holds the lock: stop and ask the owner.** Never delete the lock by
+  hand.
+- `~/bin/lead-lock release <dir>` at run end.
 
 ## Verification discipline (every claim)
 
