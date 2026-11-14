@@ -265,6 +265,8 @@ fun Composer(
     onWarmControls: () -> Unit = {},
     /** ta-coik.19: this session's unresolved sends (the send-status row above the well). */
     sendRows: List<com.tether.app.client.PendingSendRow> = emptyList(),
+    /** v154 `supervisor_status` down: the composer holds (draft stays) and the "Agents are restarting" row shows. */
+    supervisorDown: Boolean = false,
     /** T8.4: the attach sheet's "Add issue or PR" reads (null: the row is not drawn). */
     github: ComposerGitHub? = null,
     /** T11.2: text shared from another app for this session, added to the end of the draft once it is hydrated. */
@@ -811,6 +813,10 @@ fun Composer(
 
     fun submit() {
         if (session == null) return
+        if (supervisorDown) {
+            flash(com.tether.app.client.SUPERVISOR_DOWN_BANNER, TetherIcons.TriangleAlert)
+            return
+        }
         // The live field, not the composition-time [draft] (see [liveMenu]).
         val text = field.text.trim()
         val hasAttachments = picked.isNotEmpty()
@@ -1082,6 +1088,7 @@ fun Composer(
 
                 // ta-coik.19 (chat-view.tsx 90fbb9f :3754-3768): the operator never watches an idle-looking
                 // chat while a send is unresolved.
+                ComposerSupervisorRow(supervisorDown)
                 ComposerSendRow(sendRows)
 
                 if (projection != null && session != null) {

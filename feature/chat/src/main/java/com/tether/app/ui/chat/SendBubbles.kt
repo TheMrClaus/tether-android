@@ -36,7 +36,10 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -181,6 +184,9 @@ fun failedSendLabel(row: FailedSend): String {
         }
     }
     val summary = attachmentSummary(row.attachmentCount, row.imageCount, row.bytes)
+    if (row.reason == FailedSendReason.SupervisorDown) {
+        return if (summary.isNotEmpty()) "${com.tether.app.client.SUPERVISOR_DOWN_NOT_SENT} · $summary" else com.tether.app.client.SUPERVISOR_DOWN_NOT_SENT
+    }
     return if (row.reason == FailedSendReason.Link) {
         if (summary.isNotEmpty()) "Not sent — the link was down ($summary)" else "Not sent — the link was down"
     } else {
@@ -208,6 +214,11 @@ const val PENDING_SEND_TAG = "pending-send"
 const val FAILED_SEND_TAG = "failed-send"
 const val SEND_ROW_TAG = "composer-send-row"
 const val SEND_AGAIN_TAG = "failed-send-again"
+const val SUPERVISOR_ROW_TAG = "composer-supervisor-row"
+
+/** Approved D1 strings (S4D.3 #3 + #4): the hold panel's lead and body, word for word. */
+const val SUPERVISOR_HOLD_LEAD = "Agents are restarting."
+const val SUPERVISOR_HOLD_BODY = "Sending is paused — your draft stays here. Send it when they’re back."
 
 private val DISMISS_TARGET = 44.dp
 
@@ -411,5 +422,32 @@ internal fun UploadProgressBar(percent: Int, style: TextStyle, ink: Color, modif
         }
         // The bar's range info is the one place the value is exposed; the printed number is not read a second time.
         Text("$shown%", style = style, color = ink, modifier = Modifier.clearAndSetSemantics {})
+    }
+}
+
+/**
+ * v154: the "Agents are restarting" row above the composer while `supervisor_status` is down — the same
+ * `.chat-send-row` look as the waiting state (violet + the alert icon + words, never colour alone),
+ * a polite live region. Nothing is drawn while the supervisor is up.
+ */
+@Composable
+internal fun ComposerSupervisorRow(down: Boolean, modifier: Modifier = Modifier) {
+    if (!down) return
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Row(
+        modifier.padding(horizontal = 4.dp).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }.testTag(SUPERVISOR_ROW_TAG),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    ) {
+        Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(SUPERVISOR_HOLD_LEAD) }
+                append(' ').append(SUPERVISOR_HOLD_BODY)
+            },
+            style = TextStyle(fontFamily = type.body.fontFamily, fontSize = (0.8f * TetherTypography.SP_PER_REM).sp, fontWeight = FontWeight(620)),
+            color = t.violet,
+        )
     }
 }

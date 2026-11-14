@@ -345,6 +345,7 @@ fun ChatScreen(
     // given-up sends. Dismiss is the failed bubble's one action (use-tether.ts :473-478): local only.
     val pendingSends by vm.client.pendingSends.collectAsStateWithLifecycle()
     val failedSends by vm.client.failedSends.collectAsStateWithLifecycle()
+    val supervisorDown by vm.client.supervisorDown.collectAsStateWithLifecycle()
     val sends = remember(session?.id, pendingSends, failedSends, vm) {
         SendBubbles.forSession(session?.id, pendingSends, failedSends, { key -> vm.client.sendAgain(key) }) { key -> vm.client.dismissFailedSend(key) }
     }
@@ -575,6 +576,7 @@ fun ChatScreen(
                 runActions = runActions,
                 onWarmControls = { session?.let { vm.client.requestWarmSessionControls(it.id) } },
                 sendRows = sends.pending,
+                supervisorDown = supervisorDown,
                 github = composerGitHub,
                 takeover = takeover,
                 browser = composerBrowser,
