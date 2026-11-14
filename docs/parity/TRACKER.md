@@ -26,6 +26,9 @@
 
 ## ▶ RESUME HERE
 
+**Next release (DRAFT, not published): 1.6.10 / code 74** - PR #7 (agents-restarting states, #6) on main `a7660a60` (1.6.9 published); curated notes in `docs/releases/1.6.10.md`.
+- Contents: the `supervisor_down` final refusal and the `supervisor_status` hold row for the Tether v0.2.0 two-process server.
+
 **Current release: 1.6.9 / code 73 - APK PUBLISHED** 2026-11-09 12:07Z (release `v1.6.9`, merged as `3d308226`; previous release 1.6.8). Public `app-release.apk` = the verified draft: 8877656 bytes, SHA-256 `e159568430a13f2d046af34a03a94a07dddb5bad18cbdb73f3c7e05b753d8aec`, same signing certificate as 1.6.8. Gates: `./gradlew --continue :feature:chat:testDebugUnitTest verifyRoborazziDebug :app:assembleRelease :app:verifyGalleryNotInRelease assembleDebug lint testDebugUnitTest` BUILD SUCCESSFUL, 0 failed (after the known ShareFlowTest load flake rerun, tth-by0r). Curated notes in `docs/releases/1.6.9.md`.
 - Contents: after an engine restart the chat shows the same short "Engine restarted" line as the web, including what was stopped; session notes (undelivered messages, handovers, restarts) appear on every engine; a delivered or carried peer-message receipt (code `peer_message_receipt`, level info) shows nothing, failures keep the Tether row.
 
