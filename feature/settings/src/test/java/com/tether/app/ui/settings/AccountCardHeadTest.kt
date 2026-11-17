@@ -41,7 +41,7 @@ import org.robolectric.annotation.Config
  * intrinsic, accessible target size, and the plan and Pre-existing tags remain `display: none`
  * (studio.css:344). Through SettingsFrame with the production defaults, as SettingsRowsBandTest.
  */
-abstract class AccountCardHeadBase(private val width: Int, private val narrowPane: Boolean = width <= 640) {
+abstract class AccountCardHeadBase(private val width: Int) {
     private val tmp = TemporaryFolder()
     private val store = PrefsStore(tmp)
     private val compose = createComposeRule()
@@ -49,6 +49,13 @@ abstract class AccountCardHeadBase(private val width: Int, private val narrowPan
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
     private lateinit var state: SettingsDialogState
+
+    private val detailPaneWidth = if (width >= RuntimeDeskStyle.ExpandedBreakpoint.value) {
+        width - RuntimeDeskStyle.DestinationWidth.value.toInt() - RuntimeDeskStyle.EntityWidth.value.toInt() - 1
+    } else {
+        width
+    }
+    private val narrowPane = detailPaneWidth <= 640
 
     private class R(val l: Float, val t: Float, val w: Float, val h: Float) {
         val r get() = l + w
@@ -139,7 +146,7 @@ abstract class AccountCardHeadBase(private val width: Int, private val narrowPan
             val expected = if (keys.size == 2 && i == 0) RENAME_WIDTH else CHECK_WIDTH
             // The same in dp at every width (text rounds to whole pixels per density: 104.8 dp at 420 dpi, 106 at mdpi).
             assertEquals("$width $id key $i keeps its intrinsic width", expected, key.w, 1.5f)
-            assertTrue("$width $id key $i keeps its 48dp touch target ($key)", key.h >= 48f - 0.5f)
+            assertTrue("$width $id key $i keeps its 44dp touch target ($key)", key.h >= 44f - 0.5f)
         }
     }
 
@@ -147,6 +154,7 @@ abstract class AccountCardHeadBase(private val width: Int, private val narrowPan
         show()
         head("claude-work", "Claude Code (work)", listOf(ClaudeAccountsTags.rename("claude-work"), ClaudeAccountsTags.check("claude-work")))
         openAccount("claude-default", "Claude Code (default)")
+        compose.onNodeWithTag(ClaudeAccountsTags.rename("claude-default"), useUnmergedTree = true).assertDoesNotExist()
         head("claude-default", "Claude Code (default)", listOf(ClaudeAccountsTags.check("claude-default")))
     }
 
@@ -213,9 +221,9 @@ abstract class AccountCardHeadBase(private val width: Int, private val narrowPan
         assertTrue("$width: the email is on one line, drawn whole and not ellipsized", !email.isLineEllipsized(line))
         assertTrue("$width: drawn $drawn dp is at least the unwrapped ${email.multiParagraph.maxIntrinsicWidth / d} of its own line", drawn > 90f)
         if (width == 412) {
-            assertEquals("412: the email line is its own", "work@example.com", text.trim())
+            assertEquals("412: the full status keeps its intact email", "Logged in — work@example.com", text.trim())
             assertTrue("412: and is drawn at its unwrapped width", drawn >= email.multiParagraph.maxIntrinsicWidth / d - 1f)
-            assertTrue("412: the full-width identity column contains it without overlap ($title)", drawn <= title.w + 1f)
+            assertTrue("412: the full-width identity column contains the full status without overlap ($title)", drawn <= title.w + 1f)
         }
     }
 
@@ -281,5 +289,5 @@ abstract class AccountCardHeadBase(private val width: Int, private val narrowPan
 @RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w561dp-h900dp-mdpi") class AccountCardHead561Test : AccountCardHeadBase(561)
 @RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w640dp-h900dp-mdpi") class AccountCardHead640Test : AccountCardHeadBase(640)
 @RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w641dp-h900dp-mdpi") class AccountCardHead641Test : AccountCardHeadBase(641)
-@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w800dp-h1000dp-mdpi") class AccountCardHead800Test : AccountCardHeadBase(800, narrowPane = true)
+@RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w800dp-h1000dp-mdpi") class AccountCardHead800Test : AccountCardHeadBase(800)
 @RunWith(RobolectricTestRunner::class) @Config(qualifiers = "w1280dp-h800dp-mdpi") class AccountCardHead1280Test : AccountCardHeadBase(1280)

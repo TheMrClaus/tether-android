@@ -362,6 +362,7 @@ private fun ClaudeAccountsSyncSection(c: ClaudeAccountsController, view: ClaudeA
         narrow,
         last = true,
     ) {
+        if (c.ownerNeeded) OwnerNeeded()
         when {
             view.notice != null -> ListNotice(view.notice, narrow, c::reload)
             view.loading || view.sync == null -> Text(
