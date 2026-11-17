@@ -2,6 +2,7 @@ package com.tether.app.ui.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,9 +41,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,6 +89,15 @@ fun RuntimeDeskScaffold(
     val t = LocalTetherTokens.current
     val selectedDestination = items.firstOrNull { it.id == selected }?.label ?: "Settings"
     val selectedDetail = entities.firstOrNull { it.id == selectedEntity }?.label ?: selectedDestination
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val compactBack = {
+        if (level == RuntimeDeskLevel.Detail) {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+        }
+        onBack()
+    }
 
     BoxWithConstraints(
         Modifier
@@ -93,7 +106,7 @@ fun RuntimeDeskScaffold(
             .windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime)),
     ) {
         val expanded = maxWidth >= RuntimeDeskStyle.ExpandedBreakpoint
-        BackHandler { if (expanded || level == RuntimeDeskLevel.Destinations) onReturn() else onBack() }
+        BackHandler { if (expanded || level == RuntimeDeskLevel.Destinations) onReturn() else compactBack() }
 
         if (expanded) {
             ExpandedRuntimeDesk(
@@ -122,7 +135,7 @@ fun RuntimeDeskScaffold(
                 level = level,
                 selectedDestination = selectedDestination,
                 selectedDetail = selectedDetail,
-                onBack = onBack,
+                onBack = compactBack,
                 onReturn = onReturn,
                 entityTrailing = entityTrailing,
                 banner = banner,
@@ -240,7 +253,11 @@ private fun CompactRuntimeDesk(
         RuntimeDeskLevel.Detail -> selectedDetail
     }
     val paneFocus = remember { FocusRequester() }
+    val detailScroll = rememberScrollState()
     LaunchedEffect(effectiveLevel, selected, selectedEntity) { runCatching { paneFocus.requestFocus() } }
+    LaunchedEffect(effectiveLevel, selected, selectedEntity) {
+        if (effectiveLevel == RuntimeDeskLevel.Detail) detailScroll.scrollTo(0)
+    }
 
     Column(Modifier.fillMaxSize().background(t.graphite).semantics { paneTitle = title }) {
         val backLabel = if (effectiveLevel == RuntimeDeskLevel.Detail && entities.isNotEmpty()) selectedDestination else "Settings"
@@ -253,7 +270,8 @@ private fun CompactRuntimeDesk(
             if (effectiveLevel == RuntimeDeskLevel.Detail) paneFocus else null,
         )
         banner?.invoke()
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            val detailWidth = maxWidth
             when (effectiveLevel) {
                 RuntimeDeskLevel.Destinations -> Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(RuntimeDeskStyle.PanePadding)) {
                     RuntimeDeskList(items, selected, onSelect, dark = false, showChevron = true, selectedFocus = paneFocus)
@@ -261,10 +279,15 @@ private fun CompactRuntimeDesk(
                 RuntimeDeskLevel.Entities -> Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     RuntimeDeskEntityList(entities, selectedEntity, onEntity, true, entityTrailing, paneFocus)
                 }
-                RuntimeDeskLevel.Detail -> BoxWithConstraints(Modifier.fillMaxSize()) {
-                    val detailWidth = maxWidth
-                    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { detail(detailWidth) }
-                }
+                RuntimeDeskLevel.Detail -> Unit
+            }
+            Box(
+                Modifier
+                    .keepRuntimeDeskMounted(effectiveLevel == RuntimeDeskLevel.Detail)
+                    .fillMaxSize()
+                    .verticalScroll(detailScroll),
+            ) {
+                detail(detailWidth)
             }
         }
         footer?.let {
@@ -463,11 +486,19 @@ private fun RuntimeDeskItem(
             .clip(shape)
             .background(if (active) activeBackground else Color.Transparent)
             .then(if (active && selectedFocus != null) Modifier.focusRequester(selectedFocus) else Modifier)
-            .selectable(
-                selected = active,
-                enabled = item.enabled,
-                role = Role.Tab,
-                onClick = onClick,
+            .then(
+                if (showChevron) {
+                    Modifier
+                        .semantics { selected = active }
+                        .clickable(enabled = item.enabled, role = Role.Button, onClick = onClick)
+                } else {
+                    Modifier.selectable(
+                        selected = active,
+                        enabled = item.enabled,
+                        role = Role.Tab,
+                        onClick = onClick,
+                    )
+                },
             )
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

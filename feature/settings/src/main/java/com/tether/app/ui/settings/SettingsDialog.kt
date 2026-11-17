@@ -488,7 +488,6 @@ fun SettingsFrame(
             val detailContent = remember {
                 movableContentOf<RuntimeDeskDetailInputs> { input -> RuntimeDeskDetail(input) }
             }
-            val expanded = windowWidthDp() >= 768
             RuntimeDeskScaffold(
                 items = RuntimeDeskDestinations.items,
                 selected = route.destination,
@@ -538,11 +537,6 @@ fun SettingsFrame(
                 SideEffect { detailNarrow = measuredNarrow }
                 CompositionLocalProvider(LocalSettingsRowsStack provides (rowsStack || detailWidth <= SETTINGS_ROWS_STACK_MAX_DP.dp)) {
                     detailContent(detailInputs(measuredNarrow))
-                }
-            }
-            if (!expanded && route.level != RuntimeDeskLevel.Detail) {
-                CompositionLocalProvider(LocalSettingsRowsStack provides rowsStack) {
-                    Box(Modifier.keepRuntimeDeskMounted(false)) { detailContent(detailInputs(narrow)) }
                 }
             }
         }

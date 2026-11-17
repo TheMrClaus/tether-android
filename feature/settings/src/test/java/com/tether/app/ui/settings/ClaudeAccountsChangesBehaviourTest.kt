@@ -84,6 +84,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
             SettingsUnderTest(store.prefs, state, layout = layout, claudeAccounts = binding)
         }
         compose.waitUntil(5_000) { state.draft != null }
+        revealDetail(entity)
         waitFor(wait ?: if (entity == RuntimeDeskEntities.Credentials) "Provider accounts" else "Claude Code (work)")
     }
 
@@ -114,6 +115,23 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         .fetchSemanticsNodes()
         .any { it.boundsInRoot.width > 0f && it.boundsInRoot.height > 0f }
 
+    private fun isComposed(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+
+    private fun detailMarker(entity: String): String = when (entity) {
+        RuntimeDeskEntities.Credentials -> ClaudeAccountsTags.Add
+        RuntimeDeskEntities.AccountSync -> ClaudeAccountsTags.Sync
+        else -> ClaudeAccountsTags.card(requireNotNull(accountEntityParts(entity)).accountId)
+    }
+
+    private fun revealDetail(entity: String) {
+        val marker = detailMarker(entity)
+        compose.waitUntil(5_000) { isComposed(marker) }
+        tag(marker).performScrollTo()
+        compose.waitUntil(5_000) { exists(marker) }
+    }
+
     private fun openEntity(entity: String, label: String) {
         if (layout == TetherLayoutClass.Phone && state.route.level == RuntimeDeskLevel.Detail) {
             compose.onNodeWithContentDescription("Back to Accounts", substring = true).performClick()
@@ -122,6 +140,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         compose.onNode(hasText(label) and hasClickAction()).performClick()
         compose.waitUntil(5_000) { state.route.entity == entity && state.route.level == RuntimeDeskLevel.Detail }
         compose.waitForIdle()
+        revealDetail(entity)
     }
 
     private fun openAccount(id: String, label: String) {
@@ -187,6 +206,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         tag(ClaudeAccountsTags.rename("claude-default")).assertDoesNotExist()
         openAccount("claude-work", "Claude Code (work)")
         tap(ClaudeAccountsTags.rename("claude-work"))
+        compose.waitUntil(5_000) { exists(ClaudeAccountsTags.renameField("claude-work")) }
         assertEquals("work", tag(ClaudeAccountsTags.renameField("claude-work")).fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         tag(ClaudeAccountsTags.renameField("claude-work")).performTextReplacement("job")
         tap(ClaudeAccountsTags.renameSave("claude-work"))
@@ -344,7 +364,9 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         waitForCall(actions, "remove")
         assertEquals("remove($ORIGIN, host-login deleteCredentials=false)", actions.calls.single().toString())
         actions.answer("remove", SecurityResult.Ok(removedKept, ORIGIN, null))
-        waitFor(ClaudeAccountsCopy.removedKeptLogin("Host login"))
+        compose.waitUntil(5_000) { isComposed(ClaudeAccountsTags.Line) }
+        tag(ClaudeAccountsTags.Line).performScrollTo()
+        waitFor(ClaudeAccountsCopy.removed("Host login"))
     }
 
     /** settings-dialog.tsx `doLogout` (:1541-1555): sent on the tap, nothing asked first; then the status is read again. */
@@ -703,7 +725,9 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         waitForCall(actions, "runSync")
         compose.onNodeWithTag(ClaudeAccountsTags.OwnerNeeded).assertDoesNotExist()
         actions.answer("runSync", SecurityResult.OwnerSignInNeeded(ORIGIN))
-        compose.waitUntil(5_000) { exists(ClaudeAccountsTags.OwnerNeeded) }
+        compose.waitUntil(5_000) { isComposed(ClaudeAccountsTags.OwnerNeeded) }
+        compose.onNodeWithTag(ClaudeAccountsTags.OwnerNeeded).performScrollTo()
+        assertTrue(everything().contains(ClaudeAccountsCopy.OWNER_NEEDED))
     }
 
     @Test fun anOwnerRefusalOfTheLoginDropsItsPanel() {
