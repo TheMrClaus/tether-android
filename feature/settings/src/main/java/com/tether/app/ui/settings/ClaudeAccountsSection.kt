@@ -473,13 +473,12 @@ private fun AccountHeadRow(titleBasis: Int, stackActions: Boolean, content: @Com
             val keysP = keys.measure(Constraints(maxWidth = constraints.maxWidth))
             val identityHeight = maxOf(glyphP.height, titleP.height)
             val height = identityHeight + gap + keysP.height
-            layout(constraints.maxWidth, height) {
+            return@Layout layout(constraints.maxWidth, height) {
                 val center = Alignment.CenterVertically
                 glyphP.place(0, center.align(glyphP.height, identityHeight))
                 titleP.place(glyphBasis + gap, center.align(titleP.height, identityHeight))
                 keysP.place(constraints.maxWidth - keysP.width, identityHeight + gap)
             }
-            return@Layout
         }
         val keysP = keys.measure(Constraints())
         val avail = (constraints.maxWidth - keysP.width - 2 * gap).coerceAtLeast(0)
