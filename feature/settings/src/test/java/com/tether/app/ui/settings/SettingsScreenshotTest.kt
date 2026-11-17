@@ -63,6 +63,8 @@ enum class SettingsShot(
     val own: Boolean = false,
 ) {
     Desk("runtime-desk", SettingsTab.General),
+    EngineList("runtime-desk-engines", SettingsTab.Engines, server = ServerShot.Engines),
+    AccountCombined("runtime-desk-account", SettingsTab.Engines, accounts = AccountsShot.Loaded, profiles = ProfilesShot.Account),
     General("settings-general", SettingsTab.General),
     Appearance("settings-appearance", SettingsTab.Appearance),
     Devices("settings-devices", SettingsTab.Devices, devices = DevicesShot.Top),
@@ -121,11 +123,22 @@ enum class SettingsShot(
 
 private fun SettingsShot.runtimeRoute(): RuntimeDeskRoute = when {
     this == SettingsShot.Desk -> RuntimeDeskRoute.Root
+    this == SettingsShot.EngineList -> RuntimeDeskRoute(RuntimeDeskDestinations.Engines, "claude", RuntimeDeskLevel.Entities)
+    this == SettingsShot.AccountCombined -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.account("claude", "claude-work"), RuntimeDeskLevel.Detail)
     accounts == AccountsShot.Sync -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.AccountSync, RuntimeDeskLevel.Detail)
-    accounts != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail)
+    accounts in setOf(AccountsShot.Loading, AccountsShot.Blocked, AccountsShot.Error, AccountsShot.Adding) ->
+        RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail)
+    accounts != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.account("claude", "claude-work"), RuntimeDeskLevel.Detail)
+    profiles != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Engines, RuntimeDeskEntities.CustomProfiles, RuntimeDeskLevel.Detail)
     this == SettingsShot.AdvancedLifecycle || this == SettingsShot.AdvancedDefaults || tab == SettingsTab.Metadata ->
         RuntimeDeskRoute(RuntimeDeskDestinations.SessionsRouting, level = RuntimeDeskLevel.Detail)
-    this == SettingsShot.AdvancedCli || tab == SettingsTab.Engines ->
+    this == SettingsShot.AdvancedCli ->
+        RuntimeDeskRoute(RuntimeDeskDestinations.Engines, RuntimeDeskEntities.ClaudeCli, RuntimeDeskLevel.Detail)
+    this == SettingsShot.EnginesMissing ->
+        RuntimeDeskRoute(RuntimeDeskDestinations.Engines, com.tether.app.client.EngineCard.Opencode.id, RuntimeDeskLevel.Detail)
+    this == SettingsShot.EnginesLocked ->
+        RuntimeDeskRoute(RuntimeDeskDestinations.Engines, com.tether.app.client.EngineCard.Codex.id, RuntimeDeskLevel.Detail)
+    tab == SettingsTab.Engines ->
         RuntimeDeskRoute(RuntimeDeskDestinations.Engines, "claude", RuntimeDeskLevel.Detail)
     else -> RuntimeDeskRoute.fromLegacyTab(tab)
 }
@@ -216,12 +229,26 @@ enum class DevicesShot(val scrollTo: String?) {
  * acp card), `-env` the env editor, its value shown as the web's plain field shows it (an obviously
  * FAKE key; ta-coik.5).
  */
-enum class ProfilesShot(val scrollTo: String) {
+enum class ProfilesShot(val scrollTo: String?) {
     Loaded(ProfileTags.Section),
     Env(ProfileTags.row("gemini", ProfileTags.ENV)),
+    Account(null),
     ;
 
-    fun binding() = ProvidersBinding(ProfileFixtures.list(), ProfileFixtures.ORIGIN, NeverWritesProviders)
+    fun binding() = ProvidersBinding(
+        if (this == Account) {
+            ProfileFixtures.list(
+                ProfileFixtures.profiles(
+                    """{"id":"claude-work","extends":"claude","label":"Claude Code (work)","env":{"CLAUDE_CONFIG_DIR":"/fake/work","FAKE_TEAM":"blue"},"homeDir":"/fake/work","dropEnv":["ANTHROPIC"],"disallowedTools":["WebSearch"],"enabled":true,"order":2,"models":[{"id":"opus","isDefault":true}]}""",
+                    ProfileFixtures.gemini(),
+                ),
+            )
+        } else {
+            ProfileFixtures.list()
+        },
+        ProfileFixtures.ORIGIN,
+        NeverWritesProviders,
+    )
 }
 
 /** The providers writer behind a seeded shot: a write is a timing dependency (and a bug), so it fails the shot. */
@@ -471,6 +498,26 @@ fun ComposeContentTestRule.snapSettings(
             devices = devicesController?.let { DevicesBinding(it, now = { DevicesFixtures.NOW }) } ?: DevicesBinding.None,
             github = github?.let { GitHubBinding(it) } ?: GitHubBinding.None,
             push = androidx.compose.runtime.remember { FakePushRegistration(shot.push) },
+            accountLimitEntities = if (shot == SettingsShot.AccountCombined) {
+                listOf(RuntimeDeskNavItem(RuntimeDeskEntities.usage("claude", "claude-work"), "Claude Code (work)", "Usage only"))
+            } else {
+                emptyList()
+            },
+            accountsLimits = { target ->
+                if (shot == SettingsShot.AccountCombined) {
+                    SettingsRow(
+                        kind = RowKind.Server,
+                        narrow = size == "phone",
+                        text = { modifier ->
+                            SettingsRowText(
+                                "5 hour limit",
+                                androidx.compose.ui.text.AnnotatedString("42% used · resets in 2h 18m · ${target.activeEntity}"),
+                                modifier,
+                            )
+                        },
+                    )
+                }
+            },
         )
     }
     mainClock.advanceTimeBy(600)

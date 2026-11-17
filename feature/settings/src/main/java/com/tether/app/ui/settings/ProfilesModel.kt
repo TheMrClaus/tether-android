@@ -86,7 +86,7 @@ data class ProvidersBinding(
 
 /** The Custom providers section (settings-dialog.tsx 887c222 :621-1000 `ProfilesEditor`), the web's words verbatim. */
 object ProfileRows {
-    const val TITLE = "Custom providers"
+    const val TITLE = "Custom profiles"
 
     // :640 the caption, with its code spans.
     const val CAPTION_1 = "Declarative profiles extending the built-in engines — different credentials, binaries, or (later) model lists and tool allowlists per profile. Every entry needs an "

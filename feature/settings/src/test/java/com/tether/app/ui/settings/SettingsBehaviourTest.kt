@@ -120,14 +120,14 @@ class SettingsBehaviourTest {
             RuntimeDeskDestinations.AccessDevices to "Passkeys",
             RuntimeDeskDestinations.HostsNodes to NodesCopy.TITLE,
             RuntimeDeskDestinations.Engines to EngineRows.TITLE,
-            RuntimeDeskDestinations.Accounts to ClaudeAccountsPresentation.TITLE,
+            RuntimeDeskDestinations.Accounts to "Provider accounts",
             RuntimeDeskDestinations.SessionsRouting to MetadataRows.GENERATION,
             RuntimeDeskDestinations.ServerIntegrations to "Server settings",
         )
         RuntimeDeskDestinations.items.forEach { item ->
             compose.onNodeWithText(item.label).performClick()
             if (item.id == RuntimeDeskDestinations.Engines) compose.onNodeWithText("Claude Code").performClick()
-            if (item.id == RuntimeDeskDestinations.Accounts) compose.onNodeWithText("Credentials").performClick()
+            if (item.id == RuntimeDeskDestinations.Accounts) compose.onNodeWithText("Connect accounts").performClick()
             compose.waitForIdle()
             compose.onNodeWithText(uniqueContent.getValue(item.id)).performScrollTo().assertExists()
             compose.onNodeWithContentDescription("Back", substring = true).performClick()

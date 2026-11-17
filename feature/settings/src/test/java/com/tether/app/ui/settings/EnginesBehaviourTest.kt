@@ -88,6 +88,13 @@ class EnginesBehaviourTest {
         compose.waitForIdle()
     }
 
+    private fun selectTask(entity: String) {
+        compose.runOnUiThread {
+            state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Engines, entity, RuntimeDeskLevel.Detail)
+        }
+        compose.waitForIdle()
+    }
+
     private fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
 
     private fun exists(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
@@ -137,6 +144,10 @@ class EnginesBehaviourTest {
         val labels = EngineCard.entries.map { it.label }
         val positions = labels.map { label -> rail.indexOf(label).also { assertTrue("$label missing from the entity rail", it >= 0) } }
         assertEquals(positions.sorted(), positions)
+        val taskLabels = listOf("Custom profiles", "Host config", "Claude CLI")
+        val taskPositions = taskLabels.map { label -> rail.indexOf(label).also { assertTrue("$label missing from the entity rail", it >= 0) } }
+        assertEquals(taskPositions.sorted(), taskPositions)
+        assertTrue("engine settings follow built-in engines", taskPositions.first() > positions.last())
 
         val statuses = mapOf(
             EngineCard.Claude to "2.1.284 · host install",
@@ -153,7 +164,7 @@ class EnginesBehaviourTest {
 
         select(EngineCard.Codex)
         val all = texts()
-        for (text in listOf("Dedicated credential home", "CLI binary name or path", "Enable Codex", "Codex command", "Custom providers", "Host config", "Share host config")) {
+        for (text in listOf("Dedicated credential home", "CLI binary name or path", "Enable Codex", "Codex command")) {
             assertTrue(text, all.contains(text))
         }
         assertTrue(all.any { it.startsWith("Not the same as Claude account sync above") && it.contains("TETHER_CLAUDE_HOME") })
@@ -167,6 +178,9 @@ class EnginesBehaviourTest {
         tag(EngineTags.switch(EngineCard.Pi)).assertIsOff()
         select(EngineCard.Opencode)
         assertTrue(texts().contains("/home/op/.config/opencode"))
+        selectTask(RuntimeDeskEntities.HostConfig)
+        assertTrue(texts().contains("Host config"))
+        assertTrue(texts().contains("Share host config"))
     }
 
     @Test fun beforeTheServerRepliesTheEnginesWait() {
@@ -175,12 +189,14 @@ class EnginesBehaviourTest {
         tag(ServerSettingsTags.Loading).assertExists()
         assertFalse(exists(EngineTags.Scan))
         assertFalse(exists(EngineTags.card(EngineCard.Claude)))
+        selectTask(RuntimeDeskEntities.HostConfig)
         assertFalse(exists(EngineTags.HostConfig))
     }
 
     @Test fun signedOutNoEngineIsDrawn() {
         show(ServerFixtures.binding(origin = null))
         assertFalse(exists(EngineTags.card(EngineCard.Codex)))
+        selectTask(RuntimeDeskEntities.HostConfig)
         assertFalse(exists(EngineTags.HostConfig))
     }
 
@@ -250,11 +266,16 @@ class EnginesBehaviourTest {
         tag(EngineTags.Scan).assertIsNotEnabled()
         tag(ServerSettingsTags.input(ServerSetting.CodexCommand)).assertIsNotEnabled()
         tag(ServerSettingsTags.input(ServerSetting.CodexHome)).assertIsNotEnabled()
-        // Each forced row: its lock and "Set by environment" (Codex home, Codex command, Share host config).
+        // The two Codex fields and the retained Host config row remain locked.
         assertEquals(3, compose.onAllNodesWithTag(SettingsTags.EnvLock, useUnmergedTree = true).fetchSemanticsNodes().size)
         assertTrue(texts().count { it == ServerRowCopy.SET_BY_ENV } >= 3)
+        selectTask(RuntimeDeskEntities.HostConfig)
+        // Navigating to Host config keeps the Codex detail mounted without changing the lock set.
+        assertEquals(3, compose.onAllNodesWithTag(SettingsTags.EnvLock, useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertTrue(texts().contains(ServerRowCopy.SET_BY_ENV))
         // Taps on what is locked do nothing.
         tag(ServerSettingsTags.row(ServerSetting.ShareHostConfig)).performScrollTo().performClick()
+        select(EngineCard.Pi)
         tag(EngineTags.switch(EngineCard.Pi)).performScrollTo().performClick()
         compose.waitForIdle()
         assertEquals(emptyList<Any>(), writer.patches)
@@ -264,6 +285,7 @@ class EnginesBehaviourTest {
     @Test fun shareHostConfigWritesAtOnce() {
         val writer = answering()
         showWith(writer)
+        selectTask(RuntimeDeskEntities.HostConfig)
         flip(tag(ServerSettingsTags.row(ServerSetting.ShareHostConfig)))
         waitForWrites(writer, 1)
         assertEquals(frames("""{"shareHostConfig":false}"""), writer.frames())

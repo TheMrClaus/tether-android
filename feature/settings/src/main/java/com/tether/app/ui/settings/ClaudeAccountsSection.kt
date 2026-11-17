@@ -159,6 +159,9 @@ internal class ClaudeAccountsHostScope(
     private val narrow: Boolean,
     private val opener: LoginLinkOpener,
 ) {
+    val accounts: List<ClaudeAccount> get() = controller.state.accounts.orEmpty()
+    val loading: Boolean get() = view.loading
+
     val entities: List<RuntimeDeskNavItem>
         get() = listOf(
             RuntimeDeskNavItem(RuntimeDeskEntities.Credentials, "Credentials", "API keys and tokens"),
@@ -171,6 +174,32 @@ internal class ClaudeAccountsHostScope(
     @Composable
     fun Credentials(accountId: String? = null) {
         ClaudeAccountsSection(controller, view, narrow, opener, accountId = accountId, includeSync = false)
+    }
+
+    @Composable
+    fun Connect() {
+        ClaudeAccountsSection(controller, view, narrow, opener, includeSync = false, overviewOnly = true)
+    }
+
+    @Composable
+    fun Access(accountId: String) {
+        ClaudeAccountsSection(
+            controller,
+            view,
+            narrow,
+            opener,
+            accountId = accountId,
+            includeSync = false,
+            accessDetail = true,
+            includeRemove = false,
+        )
+    }
+
+    @Composable
+    fun Remove(accountId: String) {
+        if (accountId != ClaudeAccountsPresentation.HOST_DEFAULT_ID) {
+            ClaudeAccountRemovalSection(controller, view, narrow, accountId)
+        }
     }
 
     @Composable
@@ -252,16 +281,29 @@ private fun ClaudeAccountsSection(
     opener: LoginLinkOpener,
     accountId: String? = null,
     includeSync: Boolean = true,
+    overviewOnly: Boolean = false,
+    accessDetail: Boolean = false,
+    includeRemove: Boolean = true,
 ) {
     SettingsSection(
-        ClaudeAccountsPresentation.TITLE,
-        AnnotatedString(ClaudeAccountsPresentation.INTRO),
+        when {
+            accessDetail -> "Access"
+            overviewOnly -> "Provider accounts"
+            else -> ClaudeAccountsPresentation.TITLE
+        },
+        AnnotatedString(
+            when {
+                accessDetail -> "Sign-in state, credential home, account actions, and terminal access for this provider account."
+                overviewOnly -> "Connect and manage the provider accounts Tether uses, then review their limits and balances."
+                else -> ClaudeAccountsPresentation.INTRO
+            },
+        ),
         narrow,
         modifier = Modifier.testTag(ClaudeAccountsTags.Section),
     ) {
         if (c.ownerNeeded) OwnerNeeded()
+        view.notice?.let { ListNotice(it, narrow, c::reload) }
         when {
-            view.notice != null -> ListNotice(view.notice, narrow, c::reload)
             view.loading -> {
                 RowRule()
                 Text(
@@ -271,16 +313,44 @@ private fun ClaudeAccountsSection(
                     modifier = Modifier.testTag(ClaudeAccountsTags.Loading).padding(vertical = 17.dp),
                 )
             }
+            overviewOnly -> {
+                Text(
+                    if (view.cards.isEmpty()) "No provider accounts connected." else "Choose an account from the Accounts list to manage its access and usage together.",
+                    color = LocalTetherTokens.current.muted,
+                    style = settingsText(LocalTetherTypography.current.ui, 12f, 400, lineHeight = 1.6f),
+                    modifier = Modifier.padding(vertical = 17.dp),
+                )
+            }
             else -> Column(verticalArrangement = Arrangement.spacedBy(if (narrow) 16.dp else 20.dp)) {
                 val accounts = c.state.accounts.orEmpty().associateBy { it.id }
                 view.cards.filter { accountId == null || it.id == accountId }.forEach { card ->
-                    accounts[card.id]?.let { AccountCard(card, it, c, narrow, opener) }
+                    accounts[card.id]?.let { AccountCard(card, it, c, narrow, opener, includeRemove) }
                 }
             }
         }
         if (accountId == null) AddRow(c, narrow, topGap = view.cards.isNotEmpty())
         c.line?.let { NoteLine(it, ClaudeAccountsTags.Line) }
         if (includeSync) view.sync?.let { SyncRows(it, c, narrow) }
+    }
+}
+
+@Composable
+private fun ClaudeAccountRemovalSection(
+    c: ClaudeAccountsController,
+    view: ClaudeAccountsPresentation.View,
+    narrow: Boolean,
+    accountId: String,
+) {
+    val account = c.state.accounts.orEmpty().firstOrNull { it.id == accountId } ?: return
+    val card = view.cards.firstOrNull { it.id == accountId } ?: return
+    SettingsSection(
+        "Remove account",
+        AnnotatedString("Deletes the profile entry from Tether."),
+        narrow,
+        last = true,
+    ) {
+        AccountRemoveControls(card, account, c, narrow)
+        c.lines[accountId]?.let { NoteLine(it, ClaudeAccountsTags.cardLine(accountId)) }
     }
 }
 
@@ -372,23 +442,45 @@ private fun ListNotice(notice: ClaudeAccountsPresentation.Notice, narrow: Boolea
 }
 
 /**
- * `.engine-card-head`: one nowrap, centre-aligned flex row with a 12 gap (globals.css:3128-3129 under
- * studio.css:643). Three items, in order: the glyph (`flex: 0 1 32px`, its floor the C's min-content
- * width), the title column (`flex: 1 1 auto; min-width: 0`, basis [titleBasis], its max-content width)
- * and the keys (one item here, frozen at their max-content width: a key's label is nowrap, so its
- * min-content is its max-content).
+ * At wide detail-pane widths, `.engine-card-head` remains one nowrap, centre-aligned flex row with a
+ * 12 gap (globals.css:3128-3129 under studio.css:643). Three items, in order: the glyph (`flex: 0 1
+ * 32px`, its floor the C's min-content width), the title column (`flex: 1 1 auto; min-width: 0`, basis
+ * [titleBasis], its max-content width) and the keys (one item here, frozen at max-content width).
  *
  * When glyph and title do not fit beside the keys, the shortfall comes off the two in proportion to
  * their bases (CSS Flexbox 9.7): the glyph narrows (it stays 32 tall), the title with it; a glyph
  * that reaches its floor is frozen there and the title takes the rest. With room, the title takes the
- * free space (grow 1), so the keys end at the content edge.
+ * free space (grow 1), so the keys end at the content edge. A narrow detail pane keeps the identity
+ * on the first row at full available width and places the keys on a second, end-aligned row.
  */
 @Composable
-private fun AccountHeadRow(titleBasis: Int, content: @Composable () -> Unit) {
+private fun AccountHeadRow(titleBasis: Int, stackActions: Boolean, content: @Composable () -> Unit) {
     Layout(content) { measurables, constraints ->
         val (glyph, title, keys) = measurables
         val gap = 12.dp.roundToPx()
         val glyphBasis = 32.dp.roundToPx()
+        if (stackActions) {
+            val titleW = (constraints.maxWidth - glyphBasis - gap).coerceAtLeast(0)
+            val glyphP = glyph.measure(
+                Constraints(
+                    minWidth = glyphBasis,
+                    maxWidth = glyphBasis,
+                    minHeight = glyphBasis,
+                    maxHeight = glyphBasis,
+                ),
+            )
+            val titleP = title.measure(Constraints(minWidth = titleW, maxWidth = titleW))
+            val keysP = keys.measure(Constraints(maxWidth = constraints.maxWidth))
+            val identityHeight = maxOf(glyphP.height, titleP.height)
+            val height = identityHeight + gap + keysP.height
+            layout(constraints.maxWidth, height) {
+                val center = Alignment.CenterVertically
+                glyphP.place(0, center.align(glyphP.height, identityHeight))
+                titleP.place(glyphBasis + gap, center.align(titleP.height, identityHeight))
+                keysP.place(constraints.maxWidth - keysP.width, identityHeight + gap)
+            }
+            return@Layout
+        }
         val keysP = keys.measure(Constraints())
         val avail = (constraints.maxWidth - keysP.width - 2 * gap).coerceAtLeast(0)
         val glyphFloor = glyph.minIntrinsicWidth(32.dp.roundToPx()).coerceIn(0, glyphBasis)
@@ -418,19 +510,26 @@ private fun AccountHeadRow(titleBasis: Int, content: @Composable () -> Unit) {
  * with the status and organization lines, Rename and Check; then the rename row, the Sign-in row
  * (the CLAUDE_CONFIG_DIR, by the path rule) with the login panel, and the Remove row.
  *
- * The head is one nowrap, centre-aligned row with a 12 gap at every width (studio.css:643
- * `:root .engine-card-head { gap: 12px }` over globals.css:3128-3129): the keys keep their intrinsic
- * width beside the title, which shrinks and wraps (`flex: 1 1 auto; min-width: 0`). There is no
- * narrow fold. The plan and Pre-existing tags are hidden (studio.css:344), so they are not drawn.
+ * The wide head follows the web's nowrap row. On a narrow native detail pane, the identity/status
+ * keeps the first row and the two actions move below instead of squeezing or covering it. The plan
+ * and Pre-existing tags are hidden (studio.css:344), so they are not drawn.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAccount, c: ClaudeAccountsController, narrow: Boolean, opener: LoginLinkOpener) {
+private fun AccountCard(
+    card: ClaudeAccountsPresentation.Card,
+    account: ClaudeAccount,
+    c: ClaudeAccountsController,
+    narrow: Boolean,
+    opener: LoginLinkOpener,
+    includeRemove: Boolean,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val id = card.id
+    val syntheticHostDefault = id == ClaudeAccountsPresentation.HOST_DEFAULT_ID
     val can = c.canChange && account.checkable
-    val renaming = c.renaming == id
+    val renaming = !syntheticHostDefault && c.renaming == id
     val login = c.logins[id]
     Column(
         Modifier
@@ -440,7 +539,7 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
             .padding(if (narrow) 16.dp else 20.dp),
     ) {
         val keys: @Composable () -> Unit = {
-            if (card.canRename) {
+            if (!syntheticHostDefault && card.canRename) {
                 TetherKey(
                     onClick = { if (renaming) c.cancelRename() else c.startRename(account) },
                     enabled = renaming || can,
@@ -477,7 +576,7 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
                 card.organization?.let { AnnotatedString(it) to smallStyle },
             ).maxOf { (text, style) -> measurer.measure(text, style, softWrap = false).size.width }
         }
-        AccountHeadRow(titleBasis = basis) {
+        AccountHeadRow(titleBasis = basis, stackActions = narrow) {
             // `.provider-glyph.provider-claude` with the letter C (aria-hidden), Studio's raised square
             // (studio.css 340: 0.45rem corner, no border): flex 0 1 32px, 32 tall, its floor the C.
             Box(
@@ -572,46 +671,61 @@ private fun AccountCard(card: ClaudeAccountsPresentation.Card, account: ClaudeAc
             }
         }
         login?.let { LoginRows(card, it, c, narrow, opener) }
-        CardRow(narrow = narrow, title = "Remove account", caption = AnnotatedString("Deletes the profile entry from Tether")) {
-            val removing = c.busy(AccountsAction.Remove, id)
-            val armed = c.armedRemove == id
-            val controls: @Composable () -> Unit = {
-                AccountCheckbox(
-                    label = ClaudeAccountsCopy.ALSO_DELETE,
-                    checked = c.deleteCredentials[id] == true,
-                    enabled = can,
-                    description = "Also delete stored login for ${card.title}",
-                    tag = ClaudeAccountsTags.deleteCredentials(id),
-                    onChange = { c.setDeleteCredentials(id, it) },
-                )
-                // settings-dialog.tsx `armRemove`: tap, then "Confirm remove" within 4 s (r2: it names the profile id when the card does).
-                ChangeKey(
-                    when {
-                        removing -> ClaudeAccountsCopy.REMOVING
-                        armed -> ClaudeAccountsCopy.CONFIRM_REMOVE
-                        else -> ClaudeAccountsCopy.REMOVE
-                    },
-                    TetherIcons.Trash2,
-                    if (armed) ClaudeAccountsCopy.confirmRemoveLabel(card.title, card.idLine) else "Remove ${card.title}",
-                    ClaudeAccountsTags.remove(id),
-                    enabled = can && !removing,
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) {
-                    c.tapRemove(account, card.title)
-                }
-            }
-            if (narrow) {
-                FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) { controls() }
-            } else {
-                controls()
+        if (includeRemove && !syntheticHostDefault) {
+            CardRow(narrow = narrow, title = "Remove account", caption = AnnotatedString("Deletes the profile entry from Tether")) {
+                AccountRemoveControls(card, account, c, narrow)
             }
         }
         AliasRows(card, c, narrow)
-        c.lines[id]?.let { NoteLine(it, ClaudeAccountsTags.cardLine(id)) }
+        if (includeRemove && !syntheticHostDefault) c.lines[id]?.let { NoteLine(it, ClaudeAccountsTags.cardLine(id)) }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AccountRemoveControls(
+    card: ClaudeAccountsPresentation.Card,
+    account: ClaudeAccount,
+    c: ClaudeAccountsController,
+    narrow: Boolean,
+) {
+    val id = card.id
+    val can = c.canChange && account.checkable
+    val removing = c.busy(AccountsAction.Remove, id)
+    val armed = c.armedRemove == id
+    val controls: @Composable () -> Unit = {
+        AccountCheckbox(
+            label = ClaudeAccountsCopy.ALSO_DELETE,
+            checked = c.deleteCredentials[id] == true,
+            enabled = can,
+            description = "Also delete stored login for ${card.title}",
+            tag = ClaudeAccountsTags.deleteCredentials(id),
+            onChange = { c.setDeleteCredentials(id, it) },
+        )
+        // settings-dialog.tsx `armRemove`: tap, then "Confirm remove" within 4 s (r2: it names the profile id when the card does).
+        ChangeKey(
+            when {
+                removing -> ClaudeAccountsCopy.REMOVING
+                armed -> ClaudeAccountsCopy.CONFIRM_REMOVE
+                else -> ClaudeAccountsCopy.REMOVE
+            },
+            TetherIcons.Trash2,
+            if (armed) ClaudeAccountsCopy.confirmRemoveLabel(card.title, card.idLine) else "Remove ${card.title}",
+            ClaudeAccountsTags.remove(id),
+            enabled = can && !removing,
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) {
+            c.tapRemove(account, card.title)
+        }
+    }
+    if (narrow) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) { controls() }
+    } else {
+        controls()
     }
 }
 

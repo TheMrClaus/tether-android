@@ -175,7 +175,7 @@ fun SettingsScreen(
     initialTab: SettingsTab = SettingsTab.General,
     initialRoute: RuntimeDeskRoute? = null,
     accountLimitEntities: List<RuntimeDeskNavItem> = emptyList(),
-    accountsLimits: @Composable () -> Unit = {},
+    accountsLimits: @Composable (RuntimeDeskUsageTarget) -> Unit = {},
 ) {
     val serverSettings by client.serverSettings.collectAsStateWithLifecycle()
     val connection by client.connection.collectAsStateWithLifecycle()
@@ -305,7 +305,7 @@ fun SettingsDialog(
     initialTab: SettingsTab = SettingsTab.General,
     initialRoute: RuntimeDeskRoute? = null,
     accountLimitEntities: List<RuntimeDeskNavItem> = emptyList(),
-    accountsLimits: @Composable () -> Unit = {},
+    accountsLimits: @Composable (RuntimeDeskUsageTarget) -> Unit = {},
 ) = SettingsScreen(
     client = client,
     prefs = prefs,
@@ -366,7 +366,7 @@ fun SettingsFrame(
     github: GitHubBinding = GitHubBinding.None,
     /** Shell-owned usage rows and body; settings never depends on feature:shell. */
     accountLimitEntities: List<RuntimeDeskNavItem> = emptyList(),
-    accountsLimits: @Composable () -> Unit = {},
+    accountsLimits: @Composable (RuntimeDeskUsageTarget) -> Unit = {},
     /**
      * ta-coik.52: the server whose preferences these are (the web's are per origin); null URL: no
      * server configured.
@@ -406,7 +406,7 @@ fun SettingsFrame(
         mutableStateOf(
             route.entity?.takeIf {
                 it == RuntimeDeskEntities.Credentials || it == RuntimeDeskEntities.AccountSync || it == RuntimeDeskEntities.LimitsBalance ||
-                    it.startsWith("credential:") || it.startsWith("usage:")
+                    it.startsWith("credential:") || it.startsWith("account:") || it.startsWith("usage:")
             } ?: RuntimeDeskEntities.Credentials,
         )
     }
@@ -421,9 +421,14 @@ fun SettingsFrame(
             id = engine.id,
             label = engine.label,
             supporting = serverSettings.settings?.detection(engine)?.let(EngineRows::status) ?: "Waiting for runtime status",
-            state = if (engine.id in serverSettings.settings?.headlessModes.orEmpty()) "Enabled" else null,
+            state = serverSettings.settings?.let { if (engine.id in it.headlessModes) "Enabled" else "Disabled" },
+            group = "Built-in engines",
         )
-    }
+    } + listOf(
+        RuntimeDeskNavItem(RuntimeDeskEntities.CustomProfiles, "Custom profiles", "Alternate homes, commands, and models", group = "Engine settings"),
+        RuntimeDeskNavItem(RuntimeDeskEntities.HostConfig, "Host config", "Shared configuration from this host", group = "Engine settings"),
+        RuntimeDeskNavItem(RuntimeDeskEntities.ClaudeCli, "Claude CLI", "Version and binary selection", group = "Engine settings"),
+    )
     Box(
         modifier
             .fillMaxSize()
@@ -433,7 +438,26 @@ fun SettingsFrame(
             .pointerInput(Unit) { detectTapGestures { } },
     ) {
         ClaudeAccountsHostContent(claudeAccounts, detailNarrow) { accountHost ->
-            val accountEntities = accountHost.entities + accountLimitEntities
+            val accountProjection = SettingsAccountProjector.project(
+                credentials = accountHost.accounts,
+                usageItems = accountLimitEntities,
+                providers = providers.list,
+            )
+            val accountEntities = listOf(
+                RuntimeDeskNavItem(RuntimeDeskEntities.Credentials, "Connect accounts", "Add a Claude account", group = "Account tasks"),
+                RuntimeDeskNavItem(RuntimeDeskEntities.AccountSync, "Account sync", "Sync configuration across accounts", group = "Account tasks"),
+                RuntimeDeskNavItem(RuntimeDeskEntities.LimitsBalance, "Limits & balance", "Usage, quotas, and balances", group = "Account tasks"),
+            ) + accountProjection.entities
+            val requestedAccountEntity = if (route.destination == RuntimeDeskDestinations.Accounts) {
+                accountProjection.canonicalEntity(route.entity ?: lastAccountEntity)
+            } else {
+                accountProjection.canonicalEntity(lastAccountEntity)
+            }
+            val selectedAccountEntity = requestedAccountEntity?.takeIf { requested ->
+                accountEntities.any { it.id == requested } ||
+                    (accountHost.loading && accountEntityParts(requested) != null)
+            }
+                ?: RuntimeDeskEntities.Credentials
             val entities = when (route.destination) {
                 RuntimeDeskDestinations.Engines -> engineEntities
                 RuntimeDeskDestinations.Accounts -> accountEntities
@@ -454,8 +478,9 @@ fun SettingsFrame(
                     serverSettings = serverSettings,
                     providers = providers,
                     accountHost = accountHost,
+                    accountProjection = accountProjection,
                     engineEntity = if (route.destination == RuntimeDeskDestinations.Engines) route.entity ?: lastEngineEntity else lastEngineEntity,
-                    accountEntity = if (route.destination == RuntimeDeskDestinations.Accounts) route.entity ?: lastAccountEntity else lastAccountEntity,
+                    accountEntity = selectedAccountEntity,
                     accountsLimits = accountsLimits,
                     github = github,
                 )
@@ -476,7 +501,10 @@ fun SettingsFrame(
                     }
                 },
                 entities = entities,
-                selectedEntity = route.entity,
+                selectedEntity = when (route.destination) {
+                    RuntimeDeskDestinations.Accounts -> selectedAccountEntity
+                    else -> route.entity
+                },
                 onEntity = { entity ->
                     when (route.destination) {
                         RuntimeDeskDestinations.Engines -> lastEngineEntity = entity
@@ -485,7 +513,7 @@ fun SettingsFrame(
                     state.route = state.route.selectEntity(entity)
                 },
                 entityTrailing = { id ->
-                    if (route.destination == RuntimeDeskDestinations.Engines) {
+                    if (route.destination == RuntimeDeskDestinations.Engines && id in RuntimeDeskRoute.BUILT_IN_ENGINE_IDS) {
                         com.tether.app.client.EngineCard.entries.firstOrNull { it.id == id }?.let { EngineEntityToggle(it, serverSettings) }
                     }
                 },
@@ -534,9 +562,10 @@ private class RuntimeDeskDetailInputs(
     val serverSettings: ServerSettingsBinding,
     val providers: ProvidersBinding,
     val accountHost: ClaudeAccountsHostScope,
+    val accountProjection: SettingsAccountProjection,
     val engineEntity: String,
     val accountEntity: String,
-    val accountsLimits: @Composable () -> Unit,
+    val accountsLimits: @Composable (RuntimeDeskUsageTarget) -> Unit,
     val github: GitHubBinding,
 )
 
@@ -570,12 +599,38 @@ private fun RuntimeDeskDetail(input: RuntimeDeskDetailInputs) {
             }
             if (RuntimeDeskDestinations.Engines in mountedDestinations) {
                 Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.Engines)) {
-                    RuntimeEnginesPanel(input.engineEntity, input.narrow, input.serverSettings, input.providers)
+                    RuntimeEnginesPanel(
+                        input.engineEntity,
+                        input.narrow,
+                        input.serverSettings,
+                        input.providers,
+                        onOpenAccount = { accountId ->
+                            input.state.route = RuntimeDeskRoute(
+                                RuntimeDeskDestinations.Accounts,
+                                RuntimeDeskEntities.account("claude", accountId),
+                                RuntimeDeskLevel.Detail,
+                            )
+                        },
+                    )
                 }
             }
             if (RuntimeDeskDestinations.Accounts in mountedDestinations) {
                 Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.Accounts)) {
-                    RuntimeAccountsPanel(input.accountHost, input.accountEntity, input.accountsLimits)
+                    RuntimeAccountsPanel(
+                        input.accountHost,
+                        input.accountEntity,
+                        input.accountProjection,
+                        input.providers,
+                        input.narrow,
+                        input.accountsLimits,
+                        onOpenCustomProfiles = {
+                            input.state.route = RuntimeDeskRoute(
+                                RuntimeDeskDestinations.Engines,
+                                RuntimeDeskEntities.CustomProfiles,
+                                RuntimeDeskLevel.Detail,
+                            )
+                        },
+                    )
                 }
             }
             if (RuntimeDeskDestinations.SessionsRouting in mountedDestinations) {
@@ -596,29 +651,131 @@ private fun RuntimeDeskDetail(input: RuntimeDeskDetailInputs) {
 private fun RuntimeAccountsPanel(
     host: ClaudeAccountsHostScope,
     selected: String?,
-    accountsLimits: @Composable () -> Unit,
+    projection: SettingsAccountProjection,
+    providers: ProvidersBinding,
+    narrow: Boolean,
+    accountsLimits: @Composable (RuntimeDeskUsageTarget) -> Unit,
+    onOpenCustomProfiles: () -> Unit,
 ) {
-    val credential = selected?.takeIf { it.startsWith("credential:") }?.removePrefix("credential:")
-    val credentialsVisible = selected != RuntimeDeskEntities.AccountSync && selected != RuntimeDeskEntities.LimitsBalance && selected?.startsWith("usage:") != true
-    val usageVisible = selected == RuntimeDeskEntities.LimitsBalance || selected?.startsWith("usage:") == true
+    val canonical = projection.canonicalEntity(selected) ?: selected
+    val account = accountEntityParts(canonical)
+    val credentialsVisible = canonical == RuntimeDeskEntities.Credentials
+    val syncVisible = canonical == RuntimeDeskEntities.AccountSync
+    val usageVisible = canonical == RuntimeDeskEntities.LimitsBalance
+    val accountVisible = account != null
     val mountedEntities = remember { mutableSetOf<String>() }
     mountedEntities += when {
         credentialsVisible -> RuntimeDeskEntities.Credentials
-        selected == RuntimeDeskEntities.AccountSync -> RuntimeDeskEntities.AccountSync
-        else -> RuntimeDeskEntities.LimitsBalance
+        syncVisible -> RuntimeDeskEntities.AccountSync
+        usageVisible -> RuntimeDeskEntities.LimitsBalance
+        else -> canonical.orEmpty()
     }
     if (RuntimeDeskEntities.Credentials in mountedEntities) {
-        Box(Modifier.keepRuntimeDeskMounted(credentialsVisible)) { host.Credentials(credential) }
+        Column(Modifier.keepRuntimeDeskMounted(credentialsVisible)) {
+            host.Connect()
+            SettingsSection(
+                "Custom profiles",
+                androidx.compose.ui.text.AnnotatedString(
+                    "Profiles without a provider account stay under Engines, where their commands, homes, environment values, and models can be edited safely.",
+                ),
+                narrow,
+                last = true,
+            ) {
+                TetherKey(
+                    onClick = onOpenCustomProfiles,
+                    classes = KeyClasses.ButtonSecondary,
+                    label = "Open Custom profiles",
+                )
+            }
+        }
     }
     if (RuntimeDeskEntities.AccountSync in mountedEntities) {
-        Box(Modifier.keepRuntimeDeskMounted(selected == RuntimeDeskEntities.AccountSync)) { host.Sync() }
+        Box(Modifier.keepRuntimeDeskMounted(syncVisible)) { host.Sync() }
     }
     if (RuntimeDeskEntities.LimitsBalance in mountedEntities) {
-        Box(Modifier.keepRuntimeDeskMounted(usageVisible)) { accountsLimits() }
+        Box(Modifier.keepRuntimeDeskMounted(usageVisible)) {
+            accountsLimits(RuntimeDeskUsageTarget(visibleClaudeAccountIds = projection.visibleClaudeUsageIds))
+        }
+    }
+    mountedEntities.filter { accountEntityParts(it) != null }.forEach { mountedEntity ->
+        androidx.compose.runtime.key(mountedEntity) {
+            accountEntityParts(mountedEntity)?.let { mountedAccount ->
+                Column(Modifier.keepRuntimeDeskMounted(accountVisible && mountedEntity == canonical)) {
+                    val credential = if (mountedAccount.provider == "claude") projection.credential(mountedAccount.accountId) else null
+                    val syntheticHostDefault = mountedAccount.provider == "claude" &&
+                        mountedAccount.accountId == SettingsAccountProjector.SyntheticHostDefault
+                    val accountProfile = if (mountedAccount.provider == "claude" && !syntheticHostDefault) {
+                        projection.accountProfile(mountedAccount.accountId)
+                    } else {
+                        null
+                    }
+                    if (credential != null) {
+                        host.Access(credential.id)
+                    } else if (host.loading && mountedAccount.provider == "claude") {
+                        host.Access(mountedAccount.accountId)
+                    } else {
+                        AccountAccessUnavailable(narrow, mountedAccount.provider, accountProfile != null)
+                    }
+                    SettingsSection(
+                        "Usage",
+                        androidx.compose.ui.text.AnnotatedString("Limits, reset times, grants, balances, and freshness for this account."),
+                        narrow,
+                    ) {
+                        accountsLimits(
+                            RuntimeDeskUsageTarget(
+                                activeEntity = projection.usageEntity(mountedEntity),
+                                visibleClaudeAccountIds = projection.visibleClaudeUsageIds,
+                                accountDetail = true,
+                            ),
+                        )
+                    }
+                    accountProfile?.let { profile ->
+                        ProfilesSection(
+                            binding = providers,
+                            narrow = narrow,
+                            last = credential == null,
+                            profileIds = setOf(profile.id),
+                            mode = ProfilesSectionMode.AccountOverrides,
+                        )
+                    }
+                    if (credential != null && !syntheticHostDefault) host.Remove(credential.id)
+                }
+            }
+        }
     }
 }
 
-private fun Modifier.keepRuntimeDeskMounted(visible: Boolean): Modifier = if (visible) {
+data class RuntimeDeskUsageTarget(
+    val activeEntity: String? = null,
+    val visibleClaudeAccountIds: Set<String> = emptySet(),
+    val accountDetail: Boolean = false,
+)
+
+@Composable
+private fun AccountAccessUnavailable(narrow: Boolean, provider: String, hasProfile: Boolean) {
+    SettingsSection(
+        "Access",
+        androidx.compose.ui.text.AnnotatedString("Sign-in state, credential home, account actions, and terminal access for this provider account."),
+        narrow,
+    ) {
+        SettingsRow(
+            kind = RowKind.Server,
+            narrow = narrow,
+            text = { modifier ->
+                SettingsRowText(
+                    if (hasProfile) "Credentials unavailable" else "Usage only",
+                    androidx.compose.ui.text.AnnotatedString(
+                        if (provider == "claude") "No credential counterpart is available for this provider reading."
+                        else "This provider exposes usage here but does not have account access controls.",
+                    ),
+                    modifier,
+                )
+            },
+        )
+    }
+}
+
+internal fun Modifier.keepRuntimeDeskMounted(visible: Boolean): Modifier = if (visible) {
     this
 } else {
     this

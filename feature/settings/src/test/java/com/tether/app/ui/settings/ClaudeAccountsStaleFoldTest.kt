@@ -71,7 +71,8 @@ class ClaudeAccountsStaleFoldTest {
         })
         compose.setContent { SettingsUnderTest(store.prefs, state, claudeAccounts = ClaudeAccountsBinding(reads, ORIGIN, AccountsFixtures.TIME, actions = actions)) }
         compose.waitUntil(5_000) { state.draft != null }
-        compose.waitUntil(5_000) { has("Claude Code (work)") }
+        compose.waitUntil(5_000) { reads.calls.count { it == "list" } == 1 }
+        compose.waitForIdle()
         // Add -> Ok -> the list is read again (held at the gate)
         tag(ClaudeAccountsTags.Add).performScrollTo().performClick()
         tag(ClaudeAccountsTags.AddField).performTextReplacement("x")
@@ -105,7 +106,8 @@ class ClaudeAccountsStaleFoldTest {
         })
         compose.setContent { SettingsUnderTest(store.prefs, state, claudeAccounts = ClaudeAccountsBinding(reads, ORIGIN, AccountsFixtures.TIME, actions = actions)) }
         compose.waitUntil(5_000) { state.draft != null }
-        compose.waitUntil(5_000) { has("Claude Code (work)") }
+        compose.waitUntil(5_000) { reads.calls.count { it == "list" } == 1 }
+        compose.waitForIdle()
         tag(ClaudeAccountsTags.Add).performScrollTo().performClick()
         tag(ClaudeAccountsTags.AddField).performTextReplacement("x")
         tag(ClaudeAccountsTags.AddSubmit).performScrollTo().performClick()

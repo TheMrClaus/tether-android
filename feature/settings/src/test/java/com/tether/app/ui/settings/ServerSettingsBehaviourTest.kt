@@ -87,7 +87,7 @@ class ServerSettingsBehaviourTest {
     }
 
     private fun sessions() = destination(RuntimeDeskDestinations.SessionsRouting)
-    private fun engines() = destination(RuntimeDeskDestinations.Engines, "claude")
+    private fun claudeCli() = destination(RuntimeDeskDestinations.Engines, RuntimeDeskEntities.ClaudeCli)
 
     private fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
 
@@ -177,7 +177,7 @@ class ServerSettingsBehaviourTest {
         // A7: the "Message while busy" row is gone (the server always queues), though the fixture's reply still carries the key.
         assertFalse(texts().contains("Message while busy"))
         assertTrue(texts().contains("2 allowed folders"))
-        engines()
+        claudeCli()
         assertTrue(texts().contains("Claude CLI"))
         assertTrue(texts().contains("Claude CLI version"))
         assertTrue(texts().contains("Auto resolves to 2.1.225 (newest installed)"))
@@ -187,7 +187,7 @@ class ServerSettingsBehaviourTest {
         show(ServerFixtures.binding(view = null, advanced = null))
         tag(ServerSettingsTags.Loading).assertExists()
         tag(ServerSettingsTags.row(ServerSetting.Host)).assertDoesNotExist()
-        engines()
+        claudeCli()
         tag(ServerSettingsTags.CliPicker).performScrollTo()
         compose.onNodeWithContentDescription(ClaudeCliCopy.PICKER_TITLE).assertIsNotEnabled()
         assertTrue(texts().contains("Applies to sessions started after the change"))
@@ -249,7 +249,6 @@ class ServerSettingsBehaviourTest {
     @Test fun aNumberFieldCommitsAsTheBrowsersNumberInput() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(writer = writer))
-        sessions()
         val port = tag(ServerSettingsTags.input(ServerSetting.Port))
         for (bad in listOf("4 173", "١٢")) {
             port.performTextReplacement(bad)
@@ -341,7 +340,7 @@ class ServerSettingsBehaviourTest {
     @Test fun theCliPickerSendsSetAdvancedSettingsAtOnceLikeTheWeb() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(writer = writer))
-        engines()
+        claudeCli()
         openSelect(ClaudeCliCopy.PICKER_TITLE)
         pick("2.1.220")
         assertEquals(listOf("""{"type":"set-advanced-settings","claudeCliVersion":"2.1.220"}"""), writer.cli.map { it.first.encode() })
@@ -353,7 +352,7 @@ class ServerSettingsBehaviourTest {
     @Test fun switchingBackToAutoSendsNull() {
         val writer = RecordingWriter()
         show(ServerFixtures.binding(advanced = ServerFixtures.ADVANCED.copy(claudeCliVersion = "2.1.220", effectiveSource = "picker", effectiveVersion = "2.1.220"), writer = writer))
-        engines()
+        claudeCli()
         openSelect(ClaudeCliCopy.PICKER_TITLE)
         pick("Auto — newest installed")
         assertEquals(listOf("""{"type":"set-advanced-settings","claudeCliVersion":null}"""), writer.cli.map { it.first.encode() })
@@ -379,7 +378,7 @@ class ServerSettingsBehaviourTest {
         tag(ServerSettingsTags.remove(ServerSetting.AllowedRoots, "/srv/work")).assertDoesNotExist()
         tag(ServerSettingsTags.add(ServerSetting.AllowedRoots)).assertDoesNotExist()
         // The CLI forced by env: its path, no picker.
-        engines()
+        claudeCli()
         tag(ServerSettingsTags.CliForced).performScrollTo()
         tag(ServerSettingsTags.CliPicker).assertDoesNotExist()
         assertTrue(allSemantics().contains("Forced by env — /opt/claude/bin/claude"))

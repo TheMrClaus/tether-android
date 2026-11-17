@@ -231,6 +231,9 @@ fun UsageAccountsContent(
     onUseCredit: (CodexResetRequest) -> Unit,
     onUseGrant: (ClaudeResetRequest) -> Unit,
     modifier: Modifier = Modifier,
+    activeEntity: String? = null,
+    visibleClaudeAccountIds: Set<String>? = null,
+    accountDetail: Boolean = false,
 ) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val width = maxWidth
@@ -245,6 +248,9 @@ fun UsageAccountsContent(
                 modifier = Modifier.fillMaxWidth(),
                 scrollable = false,
                 embedded = true,
+                activeEntity = activeEntity,
+                visibleClaudeAccountIds = visibleClaudeAccountIds,
+                accountDetail = accountDetail,
             )
         }
     }
@@ -280,11 +286,17 @@ private fun Body(
     modifier: Modifier,
     scrollable: Boolean = true,
     embedded: Boolean = false,
+    activeEntity: String? = null,
+    visibleClaudeAccountIds: Set<String>? = null,
+    accountDetail: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val env = LocalUsageEnv.current
     val data = state.data
+    val active = activeEntity?.let { Regex("^usage:(claude|codex|deepseek):(.+)$").matchEntire(it) }
+    val activeProvider = active?.groupValues?.get(1)
+    val activeId = active?.groupValues?.get(2)
     Column(
         modifier
             .fillMaxWidth()
@@ -303,18 +315,35 @@ private fun Body(
             }
             EmptyNote(text, Modifier.testTag(AccountsTags.Error).semantics { liveRegion = LiveRegionMode.Polite })
         }
-        if (embedded) {
-            SectionTitle("Claude accounts", embedded = true) { RefreshUsageKey(state, 48.dp) }
+        val embeddedRefreshTitle = when {
+            !embedded -> null
+            active == null -> "Claude accounts"
+            activeProvider == "codex" -> "Codex"
+            activeProvider == "deepseek" -> "DeepSeek"
+            else -> null
+        }
+        embeddedRefreshTitle?.let { title ->
+            SectionTitle(title, embedded = true) { RefreshUsageKey(state, 48.dp) }
         }
         if (data != null) androidx.compose.runtime.CompositionLocalProvider(LocalCardPadding provides if (narrow) 18.dp else 20.dp) {
             // `.usage-accounts-grid`: auto-fill columns of at least 15rem (one ≤ 640).
             val inner = width - if (narrow) 40.dp else 56.dp
             val columns = if (narrow) 1 else maxOf(1, ((inner + 20.dp) / (240.dp + 20.dp)).toInt())
-            if (!embedded) {
+            val claude = data.claude.filter { entry ->
+                (visibleClaudeAccountIds == null || entry.id in visibleClaudeAccountIds) &&
+                    (activeProvider == null || (activeProvider == "claude" && entry.id == activeId))
+            }
+            val codexEntries = data.codex.filter { activeProvider == null || (activeProvider == "codex" && it.id == activeId) }
+            val deepseekAccounts = data.deepseek?.accounts.orEmpty().filter { activeProvider == null || (activeProvider == "deepseek" && it.id == activeId) }
+            val selectedFound = active == null || claude.isNotEmpty() || codexEntries.isNotEmpty() || deepseekAccounts.isNotEmpty()
+            if (accountDetail && !selectedFound) {
+                SelectedUsageUnavailable(state)
+            }
+            if (!embedded && claude.isNotEmpty()) {
                 SectionTitle("Claude accounts")
             }
-            Grid(columns) {
-                data.claude.map { entry ->
+            if (claude.isNotEmpty()) Grid(columns) {
+                claude.map { entry ->
                     {
                         AccountCard(
                             entry = entry,
@@ -342,28 +371,31 @@ private fun Body(
                     }
                 }
             }
-            SectionTitle("Codex", embedded = embedded)
-            val codex = data.codex.firstOrNull()
-            Grid(columns) {
+            if (codexEntries.isNotEmpty() && !(embedded && activeProvider == "codex")) SectionTitle("Codex", embedded = embedded)
+            if (codexEntries.isNotEmpty()) Grid(columns) {
                 buildList<@Composable () -> Unit> {
-                    if (codex != null) add { AccountCard(codex, data.generatedAt, UsageAccountsModel.codexFallback(codex)) }
-                    val credits = codex?.resetCredits
-                    if (codex != null && credits != null && credits.availableCount > 0) {
-                        add {
-                            BankedResets(credits) {
-                                onUseCredit(CodexResetRequest(credits.availableCount, credits.credits, codex.windows, onDone = { state.refresh() }))
+                    codexEntries.forEach { codex ->
+                        add { AccountCard(codex, data.generatedAt, UsageAccountsModel.codexFallback(codex)) }
+                        val credits = codex.resetCredits
+                        if (activeProvider == null && credits != null && credits.availableCount > 0) {
+                            add {
+                                BankedResets(credits) {
+                                    onUseCredit(CodexResetRequest(credits.availableCount, credits.credits, codex.windows, onDone = { state.refresh() }))
+                                }
                             }
                         }
                     }
                 }
             }
-            data.deepseek?.let { deepseek ->
-                SectionTitle("DeepSeek", embedded = embedded)
-                Grid(columns) { deepSeekCards(deepseek, data.generatedAt) }
+            data.deepseek?.takeIf { activeProvider == null || activeProvider == "deepseek" }?.let { deepseek ->
+                val selectedDeepseek = deepseek.copy(accounts = deepseekAccounts, unavailable = if (activeProvider == null) deepseek.unavailable else emptyList())
+                if (activeProvider != null && deepseekAccounts.isEmpty()) return@let
+                if (!(embedded && activeProvider == "deepseek")) SectionTitle("DeepSeek", embedded = embedded)
+                Grid(columns) { deepSeekCards(selectedDeepseek, data.generatedAt) }
                 // Issue #193: the balance is half the picture; the rate in force and its card.
                 DeepSeekRateCard()
             }
-            Row(
+            if (active == null) Row(
                 Modifier.padding(top = 16.dp).semantics(mergeDescendants = true) {}.testTag(AccountsTags.Note),
                 horizontalArrangement = Arrangement.spacedBy(6.4.dp),
             ) {
@@ -380,6 +412,36 @@ private fun Body(
             }
         }
         if (data == null && state.error.isEmpty()) EmptyNote("Loading usage…", Modifier.testTag(AccountsTags.Loading))
+    }
+}
+
+@Composable
+private fun SelectedUsageUnavailable(state: UsageAccountsState) {
+    SettingsUsageUnavailableFrame {
+        state.refresh("all")
+    }
+}
+
+@Composable
+private fun SettingsUsageUnavailableFrame(onRetry: () -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Usage unavailable", color = t.ink, style = cssText(type.ui, 0.875f, 650))
+            Text("No usage reading is available for this account.", color = t.muted, style = cssText(type.ui, 0.75f, 400, lineHeight = 1.6f))
+        }
+        TetherKey(
+            onClick = onRetry,
+            classes = KeyClasses.ButtonSecondary,
+            label = "Try again",
+            icon = TetherIcons.RefreshCw,
+            iconSize = 14.dp,
+        )
     }
 }
 

@@ -15,13 +15,13 @@ object RuntimeDeskDestinations {
     const val ServerIntegrations = "server-integrations"
 
     val items = listOf(
-        RuntimeDeskNavItem(Preferences, "Preferences", "Workspace, appearance, and notifications", icon = TetherIcons.Settings),
-        RuntimeDeskNavItem(AccessDevices, "Access & devices", "Passkeys, sessions, and paired devices", icon = TetherIcons.Laptop),
-        RuntimeDeskNavItem(HostsNodes, "Hosts & nodes", "Node registry and credentials", icon = TetherIcons.Network),
-        RuntimeDeskNavItem(Engines, "Engines", "Runtime detection and configuration", icon = TetherIcons.SquareTerminal),
-        RuntimeDeskNavItem(Accounts, "Accounts", "Credentials, sync, limits, and balances", icon = TetherIcons.UserRound),
-        RuntimeDeskNavItem(SessionsRouting, "Sessions & routing", "Metadata, lifecycle, and defaults", icon = TetherIcons.GitBranch),
-        RuntimeDeskNavItem(ServerIntegrations, "Server & integrations", "Network, storage, secrets, and GitHub", icon = TetherIcons.ServerCog),
+        RuntimeDeskNavItem(Preferences, "Preferences", "Choose startup, session behavior, appearance, sign-in screen, and notifications", icon = TetherIcons.Settings, group = "Set up Tether"),
+        RuntimeDeskNavItem(AccessDevices, "Access & devices", "Secure Tether sign-in; manage passkeys, signed-in sessions, and paired devices", icon = TetherIcons.Laptop, group = "Set up Tether"),
+        RuntimeDeskNavItem(Engines, "Engines", "Set up engines, custom profiles, host config, and Claude CLI", icon = TetherIcons.SquareTerminal, group = "Run agents"),
+        RuntimeDeskNavItem(Accounts, "Accounts", "Connect provider accounts; sync and review limits and balances", icon = TetherIcons.UserRound, group = "Run agents"),
+        RuntimeDeskNavItem(SessionsRouting, "Sessions & routing", "Control metadata, lifecycle, session defaults, and contextual providers", icon = TetherIcons.GitBranch, group = "Run agents"),
+        RuntimeDeskNavItem(HostsNodes, "Hosts & nodes", "Add, probe, and remove nodes; check status, versions, and credentials", icon = TetherIcons.Network, group = "Manage infrastructure"),
+        RuntimeDeskNavItem(ServerIntegrations, "Server & integrations", "Configure network, authentication, storage, and GitHub", icon = TetherIcons.ServerCog, group = "Manage infrastructure"),
     )
 
     fun hasEntities(destination: String): Boolean = destination == Engines || destination == Accounts
@@ -31,6 +31,11 @@ object RuntimeDeskEntities {
     const val Credentials = "credentials"
     const val AccountSync = "account-sync"
     const val LimitsBalance = "limits-balance"
+    const val CustomProfiles = "custom-profiles"
+    const val HostConfig = "host-config"
+    const val ClaudeCli = "claude-cli"
+    fun account(provider: String, accountId: String) = "account:$provider:$accountId"
+    fun usage(provider: String, accountId: String) = "usage:$provider:$accountId"
     fun credential(accountId: String) = "credential:$accountId"
 }
 
@@ -47,6 +52,7 @@ data class RuntimeDeskRoute(
                     it == RuntimeDeskEntities.AccountSync ||
                     it == RuntimeDeskEntities.LimitsBalance ||
                     it.startsWith("credential:") ||
+                    it.startsWith("account:") ||
                     it.startsWith("usage:")
             } ?: RuntimeDeskEntities.Credentials
             else -> null
@@ -72,7 +78,9 @@ data class RuntimeDeskRoute(
 
     companion object {
         val Root = RuntimeDeskRoute()
-        val ENGINE_IDS = listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh")
+        val BUILT_IN_ENGINE_IDS = listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh")
+        val ENGINE_TASK_IDS = listOf(RuntimeDeskEntities.CustomProfiles, RuntimeDeskEntities.HostConfig, RuntimeDeskEntities.ClaudeCli)
+        val ENGINE_IDS = BUILT_IN_ENGINE_IDS + ENGINE_TASK_IDS
         val Saver: Saver<RuntimeDeskRoute, Any> = listSaver(
             save = { listOf(it.destination, it.entity.orEmpty(), it.level.name) },
             restore = {

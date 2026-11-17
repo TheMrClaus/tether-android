@@ -162,8 +162,16 @@ internal class ProfileActions(
  * - r2 (security F4): a write that is refused says so (on the field, or on the card), and one the
  *   server never confirms within [com.tether.app.client.ProvidersInFlight.TIMEOUT_MS] says so too.
  */
+internal enum class ProfilesSectionMode { CustomProfiles, AccountOverrides }
+
 @Composable
-internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: Boolean) {
+internal fun ProfilesSection(
+    binding: ProvidersBinding,
+    narrow: Boolean,
+    last: Boolean,
+    profileIds: Set<String>? = null,
+    mode: ProfilesSectionMode = ProfilesSectionMode.CustomProfiles,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val list = binding.list?.takeIf { binding.origin != null }
@@ -202,19 +210,15 @@ internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: B
             else -> Unit
         }
     }
-    val caption = buildAnnotatedString {
-        val code = SpanStyle(fontFamily = type.mono)
-        append(ProfileRows.CAPTION_1)
-        withStyle(code) { append("id") }
-        append(ProfileRows.CAPTION_2)
-        withStyle(code) { append("extends") }
-        append(ProfileRows.CAPTION_3)
-        withStyle(code) { append("env") }
-        append(ProfileRows.CAPTION_4)
-        withStyle(code) { append("providers.json") }
-        append(ProfileRows.CAPTION_5)
-    }
-    SettingsSection(ProfileRows.TITLE, caption, narrow, modifier = Modifier.testTag(ProfileTags.Section), last = last) {
+    val caption = AnnotatedString(
+        if (mode == ProfilesSectionMode.AccountOverrides) {
+            "Adjust how this account launches. Changes apply immediately to future launches."
+        } else {
+            "Create alternate ways to run an engine with different homes, commands, environment values, or model lists. Use Provider accounts when you want to connect another login. Changes apply immediately to future launches."
+        },
+    )
+    val title = if (mode == ProfilesSectionMode.AccountOverrides) "Advanced profile settings" else ProfileRows.TITLE
+    SettingsSection(title, caption, narrow, modifier = Modifier.testTag(ProfileTags.Section), last = last) {
         if (list == null) {
             RowRule()
             Text(
@@ -226,26 +230,38 @@ internal fun ProfilesSection(binding: ProvidersBinding, narrow: Boolean, last: B
             return@SettingsSection
         }
         notices[""]?.let { NoticeLine(it, ProfileTags.Notice, Modifier.padding(bottom = 16.dp)) }
-        if (list.profiles.isEmpty()) {
+        val shownProfiles = list.profiles.filter { profileIds == null || it.id in profileIds }
+        if (shownProfiles.isEmpty()) {
             // `.telemetry-empty`: the muted line.
             Text(
-                ProfileRows.EMPTY,
+                if (mode == ProfilesSectionMode.AccountOverrides) "No execution overrides are configured for this account." else ProfileRows.EMPTY,
                 color = t.muted,
                 style = settingsText(type.ui, 13f, 400, lineHeight = 1.6f),
                 modifier = Modifier.testTag(ProfileTags.Empty).padding(bottom = 16.dp),
             )
         }
-        list.profiles.forEachIndexed { index, profile ->
-            key(index, profile.id) { ProfileCard(profile, actions, narrow, notices[profile.id]) }
+        shownProfiles.forEachIndexed { index, profile ->
+            key(index, profile.id) {
+                ProfileCard(
+                    profile,
+                    actions,
+                    narrow,
+                    notices[profile.id],
+                    showIdentity = mode == ProfilesSectionMode.CustomProfiles,
+                    allowRemove = mode == ProfilesSectionMode.CustomProfiles,
+                )
+            }
         }
-        TetherKey(
-            onClick = { actions.send("", ProfileEdit.Add) },
-            classes = KeyClasses.ButtonSecondary,
-            label = ProfileRows.ADD,
-            icon = TetherIcons.Plus,
-            iconSize = 14.dp,
-            modifier = Modifier.testTag(ProfileTags.Add),
-        )
+        if (mode == ProfilesSectionMode.CustomProfiles) {
+            TetherKey(
+                onClick = { actions.send("", ProfileEdit.Add) },
+                classes = KeyClasses.ButtonSecondary,
+                label = ProfileRows.ADD,
+                icon = TetherIcons.Plus,
+                iconSize = 14.dp,
+                modifier = Modifier.testTag(ProfileTags.Add),
+            )
+        }
     }
 }
 
@@ -269,7 +285,14 @@ private fun NoticeLine(text: String, tag: String, modifier: Modifier = Modifier)
 
 /** `.engine-card` (:642-834): the head (glyph, name, engine and command, the switch), then the body's rows. */
 @Composable
-private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, notice: String?) {
+private fun ProfileCard(
+    p: Profile,
+    actions: ProfileActions,
+    narrow: Boolean,
+    notice: String?,
+    showIdentity: Boolean,
+    allowRemove: Boolean,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val latest by rememberUpdatedState(actions)
@@ -326,31 +349,32 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
         Spacer(Modifier.height(t.css.spaceSm + 12.dp))
         RowRule()
         Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(5.6.dp)) {
-            ProfileTextRow(p, ProfileTags.LABEL, ProfileRows.LABEL, AnnotatedString(ProfileRows.LABEL_CAPTION), p.label, true, narrow, first = true) {
-                ProfileRows.outcome(latest.send(p.id, ProfileEdit.Label(p.id, it), quiet = true))
+            if (showIdentity) {
+                ProfileTextRow(p, ProfileTags.LABEL, ProfileRows.LABEL, AnnotatedString(ProfileRows.LABEL_CAPTION), p.label, true, narrow, first = true) {
+                    ProfileRows.outcome(latest.send(p.id, ProfileEdit.Label(p.id, it), quiet = true))
+                }
+                ProfileTextRow(p, ProfileTags.ID, ProfileRows.ID, AnnotatedString(ProfileRows.ID_CAPTION), p.id, true, narrow) {
+                    ProfileRows.outcome(latest.send(p.id, ProfileEdit.Rename(p.id, it), quiet = true))
+                }
+                SettingsRow(
+                    kind = RowKind.Server,
+                    narrow = narrow,
+                    modifier = Modifier.testTag(ProfileTags.row(p.id, ProfileTags.EXTENDS)),
+                    text = { m -> SettingsRowText(ProfileRows.EXTENDS, AnnotatedString(ProfileRows.EXTENDS_CAPTION), m) },
+                    control = { m ->
+                        Box(m) {
+                            TetherSelect(
+                                options = ProfileLimits.EXTENDS.map { TetherSelectOption(it, it) },
+                                selectedValue = p.extends,
+                                onSelect = { choice -> latest.send(p.id, ProfileEdit.Extends(p.id, choice.value)) },
+                                placeholder = LabelText.visibleValue(p.extends),
+                                contentDescription = ProfileRows.field(p, ProfileTags.EXTENDS),
+                                modifier = (if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth(0.52f) else Modifier.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ProfileTags.field(p.id, ProfileTags.EXTENDS)),
+                            )
+                        }
+                    },
+                )
             }
-            ProfileTextRow(p, ProfileTags.ID, ProfileRows.ID, AnnotatedString(ProfileRows.ID_CAPTION), p.id, true, narrow) {
-                ProfileRows.outcome(latest.send(p.id, ProfileEdit.Rename(p.id, it), quiet = true))
-            }
-            SettingsRow(
-                kind = RowKind.Server,
-                narrow = narrow,
-                modifier = Modifier.testTag(ProfileTags.row(p.id, ProfileTags.EXTENDS)),
-                text = { m -> SettingsRowText(ProfileRows.EXTENDS, AnnotatedString(ProfileRows.EXTENDS_CAPTION), m) },
-                control = { m ->
-                    Box(m) {
-                        TetherSelect(
-                            options = ProfileLimits.EXTENDS.map { TetherSelectOption(it, it) },
-                            selectedValue = p.extends,
-                            // :696: another engine is written at once.
-                            onSelect = { choice -> latest.send(p.id, ProfileEdit.Extends(p.id, choice.value)) },
-                            placeholder = LabelText.visibleValue(p.extends),
-                            contentDescription = ProfileRows.field(p, ProfileTags.EXTENDS),
-                            modifier = (if (LocalSettingsRowsStack.current) Modifier.fillMaxWidth(0.52f) else Modifier.maxWidthFraction(if (narrow) 0.52f else 0.50f)).testTag(ProfileTags.field(p.id, ProfileTags.EXTENDS)),
-                        )
-                    }
-                },
-            )
             if (p.extends != "claude") {
                 val caption = buildAnnotatedString {
                     append(ProfileRows.COMMAND_CAPTION_1)
@@ -371,7 +395,7 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
             // fills the home with the folder chosen, written at once.
             val picker = LocalHomeFolderPicker.current
             ProfileTextRow(
-                p, ProfileTags.HOME, ProfileRows.HOME, homeCaption, p.homeDir.orEmpty(), true, narrow, placeholder = ProfileRows.HOME_PLACEHOLDER,
+                p, ProfileTags.HOME, ProfileRows.HOME, homeCaption, p.homeDir.orEmpty(), true, narrow, first = !showIdentity, placeholder = ProfileRows.HOME_PLACEHOLDER,
                 trailing = {
                     TetherKey(
                         onClick = {
@@ -434,13 +458,15 @@ private fun ProfileCard(p: Profile, actions: ProfileActions, narrow: Boolean, no
                     control = { m -> ModelListEditor(p, list, actions, narrow, m) },
                 )
             }
-            TetherKey(
-                onClick = { latest.send(p.id, ProfileEdit.Remove(p.id)) },
-                classes = KeyClasses.ButtonSecondary,
-                label = ProfileRows.REMOVE,
-                contentDescription = "${ProfileRows.REMOVE} ${ProfileRows.name(p)}",
-                modifier = Modifier.padding(top = 12.dp).testTag(ProfileTags.remove(p.id)),
-            )
+            if (allowRemove) {
+                TetherKey(
+                    onClick = { latest.send(p.id, ProfileEdit.Remove(p.id)) },
+                    classes = KeyClasses.ButtonSecondary,
+                    label = ProfileRows.REMOVE,
+                    contentDescription = "${ProfileRows.REMOVE} ${ProfileRows.name(p)}",
+                    modifier = Modifier.padding(top = 12.dp).testTag(ProfileTags.remove(p.id)),
+                )
+            }
         }
     }
 }

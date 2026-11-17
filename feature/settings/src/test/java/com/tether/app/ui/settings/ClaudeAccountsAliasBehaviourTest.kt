@@ -5,6 +5,10 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -39,7 +43,13 @@ class ClaudeAccountsAliasBehaviourTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    private val state = SettingsDialogState(route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail))
+    private val state = SettingsDialogState(
+        route = RuntimeDeskRoute(
+            RuntimeDeskDestinations.Accounts,
+            RuntimeDeskEntities.account("claude", "claude-work"),
+            RuntimeDeskLevel.Detail,
+        ),
+    )
 
     private val line = """alias claude-work='CLAUDE_CONFIG_DIR="/srv/tether/state/claude-accounts/claude-work" claude'"""
     private val snippet = """[ -f "/srv/tether/state/claude-aliases.sh" ] && . "/srv/tether/state/claude-aliases.sh""""
@@ -52,7 +62,9 @@ class ClaudeAccountsAliasBehaviourTest {
 
     private fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
 
-    private fun exists(t: String) = runCatching { tag(t).assertExists() }.isSuccess
+    private fun exists(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .any { it.boundsInRoot.width > 0f && it.boundsInRoot.height > 0f }
 
     private fun texts(t: String): String {
         val out = StringBuilder()
@@ -66,6 +78,17 @@ class ClaudeAccountsAliasBehaviourTest {
 
     private fun tap(t: String) {
         tag(t).performScrollTo().performClick()
+        compose.waitForIdle()
+    }
+
+    private fun openAccount(id: String, label: String) {
+        compose.onNodeWithContentDescription("Back to Accounts", substring = true).performClick()
+        compose.waitUntil(5_000) { state.route.level == RuntimeDeskLevel.Entities }
+        compose.onNode(hasText(label) and hasClickAction()).performClick()
+        compose.waitUntil(5_000) {
+            state.route.entity == RuntimeDeskEntities.account("claude", id) &&
+                state.route.level == RuntimeDeskLevel.Detail
+        }
         compose.waitForIdle()
     }
 
@@ -117,6 +140,7 @@ class ClaudeAccountsAliasBehaviourTest {
         assertEquals(1, fake.calls.count { it.startsWith("alias") })
 
         // Opening another account's closes this one (one `aliasOpenId`).
+        openAccount("claude-fresh", "Claude Code (fresh)")
         tap(ClaudeAccountsTags.alias("claude-fresh"))
         compose.waitUntil(5_000) { !exists(ClaudeAccountsTags.aliasLine("claude-work")) }
     }

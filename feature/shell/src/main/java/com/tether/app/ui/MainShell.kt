@@ -1010,15 +1010,24 @@ private fun ShellSettings(
     val preferences by remember(prefs, vm.client) { prefs.preferencesFor(vm.client.serverUrl) }.collectAsStateWithLifecycle(initialValue = com.tether.app.ui.prefs.TetherPreferences.Default)
     val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
     val current = com.tether.app.ui.sidebar.SidebarController.resolveCurrentWorkspace(picked, preferences, workspaceRoot)
+    // One refresh per Settings mount. Moving between destination/entity/detail panes reuses this
+    // shell-owned state and never starts another fetch loop.
+    LaunchedEffect(accounts) { accounts.refresh() }
     val usageEntities = buildList {
         accounts.data?.claude.orEmpty().forEach { account ->
-            add(com.tether.app.ui.settings.RuntimeDeskNavItem("usage:claude:${account.id}", com.tether.app.client.LabelText.label(account.label).ifEmpty { "Claude account" }, "Claude limits"))
+            add(
+                com.tether.app.ui.settings.RuntimeDeskNavItem(
+                    com.tether.app.ui.settings.RuntimeDeskEntities.usage("claude", account.id),
+                    com.tether.app.client.LabelText.label(account.label).ifEmpty { if (account.id == "default") "Claude Code (default)" else "Claude account" },
+                    "Usage only",
+                ),
+            )
         }
         accounts.data?.codex.orEmpty().forEach { account ->
-            add(com.tether.app.ui.settings.RuntimeDeskNavItem("usage:codex:${account.id}", com.tether.app.client.LabelText.label(account.label).ifEmpty { "Codex" }, "Codex limits"))
+            add(com.tether.app.ui.settings.RuntimeDeskNavItem(com.tether.app.ui.settings.RuntimeDeskEntities.usage("codex", account.id), com.tether.app.client.LabelText.label(account.label).ifEmpty { "Codex" }, "Usage only"))
         }
-        accounts.data?.deepseek?.accounts.orEmpty().forEach { account ->
-            add(com.tether.app.ui.settings.RuntimeDeskNavItem("usage:deepseek:${account.id}", com.tether.app.client.LabelText.label(account.identity).ifEmpty { "DeepSeek" }, "Balance"))
+        accounts.data?.deepseek?.accounts.orEmpty().forEachIndexed { index, account ->
+            add(com.tether.app.ui.settings.RuntimeDeskNavItem(com.tether.app.ui.settings.RuntimeDeskEntities.usage("deepseek", account.id), "DeepSeek ${index + 1}", "Usage only"))
         }
     }
     com.tether.app.ui.settings.SettingsScreen(
@@ -1028,12 +1037,14 @@ private fun ShellSettings(
         onReturn = onReturn,
         initialRoute = route,
         accountLimitEntities = usageEntities,
-        accountsLimits = {
-            LaunchedEffect(accounts) { accounts.refresh() }
+        accountsLimits = { target ->
             com.tether.app.ui.usage.UsageAccountsContent(
                 accounts,
                 onUseCredit = { codexReset.open(it) },
                 onUseGrant = { claudeReset.open(it) },
+                activeEntity = target.activeEntity,
+                visibleClaudeAccountIds = target.visibleClaudeAccountIds,
+                accountDetail = target.accountDetail,
             )
         },
     )

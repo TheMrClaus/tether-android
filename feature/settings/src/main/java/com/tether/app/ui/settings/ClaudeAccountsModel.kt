@@ -215,7 +215,8 @@ object ClaudeAccountsPresentation {
         val fault = state.listFault
         if (fault != null) {
             val notice = if (fault is AccountsFault.Blocked) Notice(true, BLOCKED, BLOCKED_DETAIL) else Notice(false, listError(fault))
-            return View(notice, loading = false, cards = emptyList(), sync = null)
+            val accounts = state.accounts.orEmpty()
+            return View(notice, loading = false, cards = cards(accounts, state.statuses), sync = sync(accounts, state.sync, timeOf))
         }
         val accounts = state.accounts ?: return View(null, loading = true, cards = emptyList(), sync = null)
         return View(null, loading = false, cards = cards(accounts, state.statuses), sync = sync(accounts, state.sync, timeOf))
