@@ -6,6 +6,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -92,7 +93,9 @@ class SettingsBehaviourTest {
         show()
         compose.onNodeWithContentDescription("Back", substring = true).performClick()
         RuntimeDeskDestinations.items.forEach { item ->
-            compose.onNodeWithText(item.label).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
+            compose.onNodeWithText(item.label)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+                .assertHasClickAction()
         }
         compose.onNodeWithText("Preferences").performClick()
         compose.waitForIdle()
