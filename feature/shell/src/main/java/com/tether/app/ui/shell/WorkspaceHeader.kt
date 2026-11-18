@@ -704,7 +704,7 @@ fun SessionLinksPopover(
 }
 
 /**
- * #273 (U1-spec §3, A1 §1): "Hand over to a new lead", the links menu's last row. Enabled it is plain ink and acts; blocked
+ * #273 (U1-spec §3, A1 §1): "Hand over to a new session", the links menu's last row. Enabled it is plain ink and acts; blocked
  * it stays in the keyboard and TalkBack order (never removed, never a tooltip), muted, with the reason in words under the
  * label, and does nothing. One merged node: "Hand over to a new lead, <reason>, disabled".
  */
@@ -760,7 +760,7 @@ internal fun HandoverMenuRow(state: com.tether.app.client.Handover.MenuState, on
                 when {
                     stop != null -> com.tether.app.client.Handover.STOP_LABEL
                     stopping -> com.tether.app.client.Handover.STOPPING_LABEL
-                    else -> "Hand over to a new lead"
+                    else -> "Hand over to a new session"
                 },
                 color = if (inert) t.muted else t.ink,
                 style = cssText(type.ui, 0.82f, 650),

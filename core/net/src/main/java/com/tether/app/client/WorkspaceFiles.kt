@@ -87,6 +87,15 @@ interface WorkspaceFiles {
     suspend fun readRange(path: String, offset: Long, length: Int, pinnedOrigin: String? = null): FilesResult<RangeRead> =
         FilesResult.Failed(FilesCopy.FILE_FALLBACK)
 
+    /**
+     * `POST /api/files/exists {paths}` (one request: at most [ExistsBatches.MAX_PATHS] paths and [ExistsBatches.MAX_BODY]
+     * characters; see [ExistsBatches.split]). Ok only for a 200 JSON answer whose `exists` array has one entry per path;
+     * an entry is the server's explicit true / false, or null when it is anything else. Every other outcome (an older
+     * server's 404, a 401/403, a gateway's page, a network error) is a failure: the caller keeps what it had.
+     * Default body: an implementation that cannot ask (a fake in a test) fails the call.
+     */
+    suspend fun exists(paths: List<String>): FilesResult<List<Boolean?>> = FilesResult.Failed(FilesCopy.FILE_FALLBACK)
+
     /** No server / not signed in: every call fails without touching the network. */
     object Unavailable : WorkspaceFiles {
         private fun <T> no(fallback: String): FilesResult<T> = FilesResult.Failed(fallback)

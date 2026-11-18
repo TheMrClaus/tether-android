@@ -189,7 +189,7 @@ object HelperAdapters {
         reg("draft-form", "replyMatchesRequest") { DraftForm.replyMatchesRequest(it.v(0), it.v(1)) }
         reg("draft-form", "resolveDefaultModelId") { DraftForm.resolveDefaultModelId(it.v(0), it.v(1)) }
         reg("draft-form", "resolveCanonicalModelId") { DraftForm.resolveCanonicalModelId(it.v(0), it.v(1)) }
-        reg("draft-form", "resolveReasoningEffortForModel") { DraftForm.resolveReasoningEffortForModel(it.v(0), it.v(1), it.v(2)) }
+        reg("draft-form", "resolveReasoningEffortForModel") { DraftForm.resolveReasoningEffortForModel(it.v(0), it.v(1), it.v(2), it.v(3)) }
         reg("draft-form", "resolveDraftForm") { DraftForm.resolveDraftForm(it.v(0), it.v(1), it.v(2)) }
         reg("draft-form", "reduceDraftForm") { undef(DraftForm.reduceDraftForm(it.v(0), it.v(1))) }
 

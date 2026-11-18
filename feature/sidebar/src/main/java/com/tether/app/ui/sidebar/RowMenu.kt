@@ -344,9 +344,9 @@ private fun HandoverItem(
                 onDisarm(); onDismiss(); onStopHandover()
             }
         is Handover.MenuState.Blocked ->
-            MenuItem(RowMenuItemId.Handover, TetherIcons.ArrowRightLeft, "Hand over to a new lead", desc = state.reason, disabled = true, focusRequester = req) { }
+            MenuItem(RowMenuItemId.Handover, TetherIcons.ArrowRightLeft, "Hand over to a new session", desc = state.reason, disabled = true, focusRequester = req) { }
         Handover.MenuState.Enabled ->
-            MenuItem(RowMenuItemId.Handover, TetherIcons.ArrowRightLeft, "Hand over to a new lead", focusRequester = req) { onDisarm(); onDismiss(); onHandOver() }
+            MenuItem(RowMenuItemId.Handover, TetherIcons.ArrowRightLeft, "Hand over to a new session", focusRequester = req) { onDisarm(); onDismiss(); onHandOver() }
     }
 }
 

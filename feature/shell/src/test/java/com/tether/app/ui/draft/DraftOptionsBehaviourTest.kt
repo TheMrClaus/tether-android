@@ -37,6 +37,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.rules.TemporaryFolder
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.performClick
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -47,7 +49,16 @@ internal object OptionsFixtures {
 
     val catalog: List<ProviderCatalogEntry> = DraftFixtures.catalog.map { e ->
         when (e.key) {
-            "work", "claude" -> e.copy(models = e.models.map { if (it.value == "m1") it.copy(variants = variants) else it })
+            // #292: Claude's m3 is a row the server reports as having no effort (supportsEffort false); m2 is a data gap.
+            "work", "claude" -> e.copy(
+                models = e.models.map {
+                    when {
+                        it.value == "m1" -> it.copy(variants = variants)
+                        it.value == "m3" && e.key == "claude" -> it.copy(supportsEffort = false)
+                        else -> it
+                    }
+                },
+            )
             "codex" -> e.copy(models = e.models.map { if (it.value == "m1") it.copy(variants = listOf(ModelVariantOption("high", "High"))) else it })
             "opencode" -> e.copy(status = "ready", models = listOf(SessionModelOption("m1", "Big Pickle")))
             else -> e
@@ -198,17 +209,33 @@ class DraftOptionsPhoneBehaviourTest : DraftOptionsHarness(412, 915) {
     }
 
     @Test
-    fun effortIsHiddenWhenTheModelHasNoVariant() {
+    fun effortIsNeverHiddenForClaudeAGapIsDefaultOnlyAndKnownNoneIsDisabledWithTheHint() {
         open()
         pick("claude", "m2")
         tap(DraftOptionsTags.SettingsChip)
         awaitTag(DraftOptionsTags.hubRow("Mode"))
-        assertFalse(exists(DraftOptionsTags.hubRow("Effort")))
-        // Back to a model with variants: Effort appears.
+        // A gap (no levels, no signal): the row is there and reads Default; no claim about the model.
+        assertEquals("Effort: Default", spoken(DraftOptionsTags.hubRow("Effort")))
+        tap(DraftOptionsTags.hubRow("Effort"))
+        awaitTag(DraftOptionsTags.option(""))
+        assertFalse(exists(DraftOptionsTags.option("high")))
+        // Known-none (m3): present, disabled, the hint; a tap opens nothing.
+        rule.onNodeWithTag(DraftOptionsTags.Sheet, useUnmergedTree = true).assertExists()
+        tap(DraftOptionsTags.option(""))
+        awaitTag(DraftOptionsTags.hubRow("Model"))
+        tap(DraftOptionsTags.hubRow("Model"))
+        awaitTag(ModelBrowserTags.row("claude", "m3"))
+        tap(ModelBrowserTags.row("claude", "m3"))
+        awaitTag(DraftOptionsTags.hubRow("Effort"))
+        assertEquals("Effort: This model has no effort setting", spoken(DraftOptionsTags.hubRow("Effort")))
+        rule.onNodeWithTag(DraftOptionsTags.hubRow("Effort"), useUnmergedTree = true).assertIsNotEnabled()
+        rule.onNodeWithTag(DraftOptionsTags.hubRow("Effort"), useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        assertTrue("a tap opens no Effort view", exists(DraftOptionsTags.hubRow("Mode")))
+        // Back to a model with levels: the row is the choosable one again.
         tap(DraftOptionsTags.hubRow("Model"))
         awaitTag(ModelBrowserTags.row("claude", "m1"))
         tap(ModelBrowserTags.row("claude", "m1"))
-        // Picked from the hub: the sheet returns to the hub (not closed).
         awaitTag(DraftOptionsTags.hubRow("Effort"))
         assertTrue(exists(DraftOptionsTags.Sheet))
     }
@@ -376,11 +403,22 @@ class DraftOptionsTabletBehaviourTest : DraftOptionsHarness(1280, 800) {
     }
 
     @Test
-    fun effortIsHiddenWithoutVariantsAndOtherProvidersHaveNoMode() {
+    fun effortIsNeverHiddenForClaudeAndOtherProvidersWithNoVariantHaveNone() {
         open()
         pick("claude", "m3")
         awaitTag(DraftOptionsTags.Mode)
-        assertFalse(exists(DraftOptionsTags.Effort))
+        // Known-none: the pill is there, not choosable, the reason is its value.
+        assertEquals("Reasoning effort: This model has no effort setting", spoken(DraftOptionsTags.Effort))
+        rule.onNodeWithTag(DraftOptionsTags.Effort, useUnmergedTree = true).assertIsNotEnabled()
+        rule.onNodeWithTag(DraftOptionsTags.Effort, useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        assertFalse("a tap opens no menu", exists(DraftOptionsTags.option("high")))
+        // A gap: Default only.
+        pick("claude", "m2")
+        until("the gap's Default pill") { spoken(DraftOptionsTags.Effort) == "Reasoning effort: Default" }
+        // Another provider with no variant has none (today's rule).
+        pick("opencode")
+        until("no Effort") { !exists(DraftOptionsTags.Effort) }
         // Effort appears with a model that offers one variant (issue #44).
         pick("codex")
         awaitTag(DraftOptionsTags.Effort)

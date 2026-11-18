@@ -95,9 +95,9 @@ internal const val HANDOVER_NOTICE_HEADING = "Tether"
 private val HANDOVER_NOTICE_QUIET = setOf("handover_scheduled", "handover_done", "handover_from")
 private val HANDOVER_NOTICE_WORDS = mapOf(
     "handover_cancelled" to "The handover did not complete. Nothing more will be sent automatically.",
-    "handover_not_delivered" to "The handover prompt was not delivered to the new lead.",
+    "handover_not_delivered" to "The handover prompt was not delivered to the new session.",
     "handover_prompt_failed" to "The handover prompt could not be started.",
-    "handover_row_not_moved" to "A queued message could not be moved to the new lead.",
+    "handover_row_not_moved" to "A queued message could not be moved to the new session.",
 )
 internal const val HANDOVER_NOTICE_GENERIC = "The handover did not complete as planned."
 

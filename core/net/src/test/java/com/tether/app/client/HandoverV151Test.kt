@@ -46,8 +46,8 @@ class HandoverV151Test {
     }
 
     @Test fun at151UnderwayIsTheStopRowWithTheStageLine() {
-        assertEquals(MenuState.Stop("Handover under way. The lead is writing its handover prompt."), menu(s { it.copy(handoverPending = true) }, 151))
-        assertEquals(MenuState.Stop("Handover under way. The lead is writing its handover prompt."), menu(s(), 151, requested = true))
+        assertEquals(MenuState.Stop("Handover under way. This session is writing its handover prompt."), menu(s { it.copy(handoverPending = true) }, 151))
+        assertEquals(MenuState.Stop("Handover under way. This session is writing its handover prompt."), menu(s(), 151, requested = true))
         assertEquals(MenuState.Stop("Handover prompt written. The new session is starting."), menu(staged("scheduled"), 151))
         assertEquals(MenuState.Stopping, menu(staged("scheduled"), 151, stopping = true))
         assertEquals(MenuState.Stopping, menu(s(), 151, requested = true, stopping = true))
@@ -74,10 +74,10 @@ class HandoverV151Test {
         fun v(session: AgentSession, row: Boolean = false, turn: Boolean = false, requested: Boolean = false, stopping: Boolean = false) =
             Handover.handoverStageView(session, row, turn, requested, stopping)
         assertEquals(
-            Handover.StageView(StageKey.RequestedQueued, StageKey.RequestedQueued, "Handover requested. Tether asks the lead to write its handover prompt when this turn ends."),
+            Handover.StageView(StageKey.RequestedQueued, StageKey.RequestedQueued, "Handover requested. Tether asks this session to write its handover prompt when this turn ends."),
             v(staged("requested"), row = true),
         )
-        assertEquals("Handover under way. The lead is writing its handover prompt.", v(staged("requested"))!!.line)
+        assertEquals("Handover under way. This session is writing its handover prompt.", v(staged("requested"))!!.line)
         assertEquals(StageKey.RequestedWriting, v(staged("requested"))!!.key)
         assertEquals("Handover prompt written. The new session starts when this turn ends.", v(staged("scheduled"), turn = true)!!.line)
         assertEquals("Handover prompt written. The new session is starting.", v(staged("scheduled"))!!.line)
@@ -86,8 +86,8 @@ class HandoverV151Test {
         assertEquals("Handover prompt written. Waiting for 1 background task to finish, then the new session starts.", v(staged("waiting_background", tasks = 1))!!.line)
         assertEquals("Handover prompt written. Waiting for 3 background tasks to finish, then the new session starts.", v(staged("waiting_background", tasks = 3))!!.line)
         // pending with no stage, a local request, and an unknown future stage all read as "writing"
-        assertEquals("Handover under way. The lead is writing its handover prompt.", v(s { it.copy(handoverPending = true) })!!.line)
-        assertEquals("Handover under way. The lead is writing its handover prompt.", v(s(), requested = true)!!.line)
+        assertEquals("Handover under way. This session is writing its handover prompt.", v(s { it.copy(handoverPending = true) })!!.line)
+        assertEquals("Handover under way. This session is writing its handover prompt.", v(s(), requested = true)!!.line)
         assertEquals(StageKey.RequestedWriting, v(staged("a_future_stage"))!!.key)
         // stopping keeps the stage beneath it (queue rows keep their pre-stop label)
         assertEquals(Handover.StageView(StageKey.Stopping, StageKey.Scheduled, "Stopping the handover…"), v(staged("scheduled"), turn = true, stopping = true))

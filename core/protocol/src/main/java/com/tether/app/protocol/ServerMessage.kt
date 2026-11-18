@@ -616,6 +616,10 @@ data class SessionModelOption(
     val legacy: Boolean? = null,
     val providerLabel: String? = null,
     val supportsFastMode: Boolean? = null,
+    /** #292 (v160): `false` on a Claude row the harness reports as having no effort setting; absent = has levels, unknown, or a data gap. */
+    val supportsEffort: Boolean? = null,
+    /** The sessionless catalog's reported effort levels; an empty list is the same known-none signal. */
+    val supportedEffortLevels: List<String>? = null,
 )
 
 /** TS ModelVariantOption: `value` is what the engine accepts, `label` the display string. */

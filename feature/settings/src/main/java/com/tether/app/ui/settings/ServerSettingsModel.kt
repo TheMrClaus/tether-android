@@ -311,7 +311,6 @@ object EngineRows {
     const val LAUNCH = "Launch command"
     const val COMMAND_CAPTION = "CLI binary name or path"
     const val HOME_PLACEHOLDER = "/path/to/home"
-    const val LAUNCH_EXAMPLE = "jean-claude run -- claude"
     const val DETECTED_HOME = "Detected home"
 
     const val USE_DETECTED = "Use detected"

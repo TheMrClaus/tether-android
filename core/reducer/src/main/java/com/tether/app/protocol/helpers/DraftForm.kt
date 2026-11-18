@@ -219,12 +219,44 @@ object DraftForm {
         return rows.firstOrNull { strictEquals(it["resolvedModel"], modelId) }
     }
 
-    // lib/draft-form.ts:392 — the requested effort when the model offers it, else "" (engine default).
-    fun resolveReasoningEffortForModel(models: JsValue?, modelId: JsValue?, requested: JsValue?): String {
+    /** lib/draft-form.ts EFFORT_NONE_HINT: the one hint for a Claude model the harness reports as having no effort setting. */
+    const val EFFORT_NONE_HINT = "This model has no effort setting"
+
+    /**
+     * lib/draft-form.ts DraftEffortState (#292, owner ruling D2): what the Effort control shows for the selected model.
+     * [Levels] = the row's variants; [None] = a Claude row the server explicitly reports as having none; [Gap] = a Claude row
+     * with neither variants nor that signal (no claim is made); [Absent] = another provider with no variants.
+     */
+    sealed interface EffortState {
+        data class Levels(val variants: JsArr) : EffortState
+        data object None : EffortState
+        data object Gap : EffortState
+        data object Absent : EffortState
+    }
+
+    // lib/draft-form.ts draftEffortState. The signal is an empty reported list or `supportsEffort: false`; an absent one is unknown, not none.
+    fun draftEffortState(provider: String?, models: JsValue?, modelId: String): EffortState {
+        val rows = models.arrOrEmpty()
+        val model = modelDefinition(models, JsStr(modelId)) ?: rows.firstOrNull { isDefaultRow(it) } ?: rows.firstOrNull()
+        val variants = model["variants"].arrOrEmpty()
+        if (variants.toList().isNotEmpty()) return EffortState.Levels(variants)
+        if (provider != "claude") return EffortState.Absent
+        val reported = model["supportedEffortLevels"] as? JsArr
+        if ((reported != null && reported.toList().isEmpty()) || model["supportsEffort"] == JsBool.FALSE) return EffortState.None
+        return EffortState.Gap
+    }
+
+    /** lib/draft-form.ts effortToSend: nothing for a known-none Claude model (the remembered value stays in the form, unsent). */
+    fun effortToSend(provider: String?, models: JsValue?, modelId: String, effort: String): String =
+        if (draftEffortState(provider, models, modelId) == EffortState.None) "" else effort
+
+    // lib/draft-form.ts resolveReasoningEffortForModel — the requested effort when the model offers it, else "" (engine default).
+    // A Claude model never drops the requested value for lack of variants (#292: it survives a trip through a known-none model).
+    fun resolveReasoningEffortForModel(models: JsValue?, modelId: JsValue?, requested: JsValue?, provider: JsValue? = null): String {
         val model = modelDefinition(models, modelId)
         val variants = model["variants"].arrOrEmpty()
-        if (variants.isEmpty()) return ""
         val normalized = normalizeId(requested)
+        if (variants.toList().isEmpty()) return if (provider.isStr("claude")) normalized else ""
         if (normalized.isNotEmpty() && variants.any { it["value"].isStr(normalized) }) return normalized
         return ""
     }
@@ -268,7 +300,7 @@ object DraftForm {
     ): String {
         if (entry == null) return ""
         val requested: JsValue? = if (truthy(userModified)) current else JsStr(normalizeId(initial).ifEmpty { normalizeId(preferred) })
-        return resolveReasoningEffortForModel(entryModels(entry), modelId, requested)
+        return resolveReasoningEffortForModel(entryModels(entry), modelId, requested, entry["provider"])
     }
 
     // lib/draft-form.ts:474
@@ -376,7 +408,7 @@ object DraftForm {
                 val models = entryModels(entry)
                 val model = resolveCanonicalModelId(models, action["modelId"]).ifEmpty { resolveDefaultModelId(models, entry["defaultModel"]) }
                 val prefs = preferences["providerPreferences"][jsToString(entry["key"])]
-                val reasoningEffort = resolveReasoningEffortForModel(models, JsStr(model), JsStr(normalizeId(prefs["reasoningEffort"])))
+                val reasoningEffort = resolveReasoningEffortForModel(models, JsStr(model), JsStr(normalizeId(prefs["reasoningEffort"])), entry["provider"])
                 val mode = normalizeId(prefs["mode"]).ifEmpty { defaultModeFor(entry["provider"]) }
                 val autoMode = (prefs["autoMode"] as? JsBool)?.value ?: false
                 withCodexCurrent(
@@ -403,7 +435,7 @@ object DraftForm {
             "SET_MODEL_FROM_USER" -> {
                 val models = entryModels(entry)
                 val model = resolveCanonicalModelId(models, action["modelId"]).ifEmpty { resolveDefaultModelId(models, entry["defaultModel"]) }
-                val reasoningEffort = resolveReasoningEffortForModel(models, JsStr(model), form["reasoningEffort"])
+                val reasoningEffort = resolveReasoningEffortForModel(models, JsStr(model), form["reasoningEffort"], entry["provider"])
                 withForm(
                     form.with("model" to JsStr(model), "reasoningEffort" to JsStr(reasoningEffort)),
                     userModified.put("model", JsBool.TRUE),

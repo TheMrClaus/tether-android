@@ -67,7 +67,7 @@ class HandoverV151UiBehaviourTest {
         rule.onNodeWithText(Handover.CANCEL_LABEL).assertExists()
         rule.onNodeWithText("Change settings…").assertExists()
         rule.onNodeWithText("Hand over as is").assertExists()
-        val choice = "Hand over as is keeps the same settings and permissions. Change settings lets you pick them first — the lead writes nothing until you confirm there."
+        val choice = "Hand over as is keeps the same settings and permissions. Change settings lets you pick them first — this session writes nothing until you confirm there."
         rule.onNodeWithText(choice).assertExists()
     }
 
@@ -158,8 +158,8 @@ class HandoverV151UiBehaviourTest {
     @Test
     fun theStageLineIsInkAndOneLinePerKeyWithTheNewSubLine() {
         val cases = mapOf(
-            HandoverV151Fixtures.requestedQueued to "Handover requested. Tether asks the lead to write its handover prompt when this turn ends.",
-            HandoverV151Fixtures.requestedWriting to "Handover under way. The lead is writing its handover prompt.",
+            HandoverV151Fixtures.requestedQueued to "Handover requested. Tether asks this session to write its handover prompt when this turn ends.",
+            HandoverV151Fixtures.requestedWriting to "Handover under way. This session is writing its handover prompt.",
             HandoverV151Fixtures.scheduled to "Handover prompt written. The new session starts when this turn ends.",
             HandoverV151Fixtures.waitingBackground to "Handover prompt written. Waiting for 2 background tasks to finish, then the new session starts.",
         )
@@ -185,8 +185,8 @@ class HandoverV151UiBehaviourTest {
     fun at150TheLegacyNoticeIsUntouched() {
         composer(HandoverV151Fixtures.scheduled, v151 = false)
         rule.waitForIdle()
-        rule.onNodeWithText("Handover under way — a new lead takes over when this lead finishes.").assertExists()
-        rule.onNodeWithText("Stop cancels it · new messages go to the new lead.").assertExists()
+        rule.onNodeWithText("Handover under way — a new session takes over when this session finishes.").assertExists()
+        rule.onNodeWithText("Stop cancels it · new messages go to the new session.").assertExists()
         rule.onAllNodesWithTag(HANDOFF_STAGE_LINE_TAG).assertCountEquals(0)
     }
 
