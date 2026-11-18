@@ -6,6 +6,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -92,7 +93,9 @@ class SettingsBehaviourTest {
         show()
         compose.onNodeWithContentDescription("Back", substring = true).performClick()
         RuntimeDeskDestinations.items.forEach { item ->
-            compose.onNodeWithText(item.label).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
+            compose.onNodeWithText(item.label)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+                .assertHasClickAction()
         }
         compose.onNodeWithText("Preferences").performClick()
         compose.waitForIdle()
@@ -120,14 +123,14 @@ class SettingsBehaviourTest {
             RuntimeDeskDestinations.AccessDevices to "Passkeys",
             RuntimeDeskDestinations.HostsNodes to NodesCopy.TITLE,
             RuntimeDeskDestinations.Engines to EngineRows.TITLE,
-            RuntimeDeskDestinations.Accounts to ClaudeAccountsPresentation.TITLE,
+            RuntimeDeskDestinations.Accounts to "Provider accounts",
             RuntimeDeskDestinations.SessionsRouting to MetadataRows.GENERATION,
             RuntimeDeskDestinations.ServerIntegrations to "Server settings",
         )
         RuntimeDeskDestinations.items.forEach { item ->
             compose.onNodeWithText(item.label).performClick()
             if (item.id == RuntimeDeskDestinations.Engines) compose.onNodeWithText("Claude Code").performClick()
-            if (item.id == RuntimeDeskDestinations.Accounts) compose.onNodeWithText("Credentials").performClick()
+            if (item.id == RuntimeDeskDestinations.Accounts) compose.onNodeWithText("Connect accounts").performClick()
             compose.waitForIdle()
             compose.onNodeWithText(uniqueContent.getValue(item.id)).performScrollTo().assertExists()
             compose.onNodeWithContentDescription("Back", substring = true).performClick()

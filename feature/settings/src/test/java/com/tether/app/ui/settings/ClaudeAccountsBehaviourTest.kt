@@ -9,11 +9,12 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -65,9 +66,19 @@ class ClaudeAccountsBehaviourTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    private val state = SettingsDialogState(route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail))
+    private val state = SettingsDialogState(
+        route = RuntimeDeskRoute(
+            RuntimeDeskDestinations.Accounts,
+            RuntimeDeskEntities.account("claude", "claude-work"),
+            RuntimeDeskLevel.Detail,
+        ),
+    )
 
-    private fun show(binding: ClaudeAccountsBinding) {
+    private fun show(
+        binding: ClaudeAccountsBinding,
+        entity: String = RuntimeDeskEntities.account("claude", "claude-work"),
+    ) {
+        state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, entity, RuntimeDeskLevel.Detail)
         compose.setContent { SettingsUnderTest(store.prefs, state, claudeAccounts = binding) }
         compose.waitUntil(5_000) { state.draft != null }
         compose.waitForIdle()
@@ -78,6 +89,7 @@ class ClaudeAccountsBehaviourTest {
     private fun everything(): List<String> {
         val out = mutableListOf<String>()
         fun walk(node: SemanticsNode) {
+            if (node.boundsInRoot.width <= 0f || node.boundsInRoot.height <= 0f) return
             node.config.getOrNull(SemanticsProperties.Text)?.forEach { out += it.text }
             node.config.getOrNull(SemanticsProperties.EditableText)?.let { out += it.text }
             node.config.getOrNull(SemanticsProperties.ContentDescription)?.let { out += it }
@@ -91,11 +103,23 @@ class ClaudeAccountsBehaviourTest {
 
     private fun waitFor(text: String) = compose.waitUntil(5_000) { everything().any { it.contains(text) } }
 
-    private fun openAccountSync() {
-        compose.onNodeWithContentDescription("Back", substring = true).performClick()
-        compose.onNodeWithText("Account sync").performClick()
+    private fun openEntity(entity: String, label: String) {
+        if (state.route.level == RuntimeDeskLevel.Detail) {
+            compose.onNodeWithContentDescription("Back to Accounts", substring = true).performClick()
+            compose.waitUntil(5_000) { state.route.level == RuntimeDeskLevel.Entities }
+        }
+        compose.onNode(hasText(label) and hasClickAction()).performClick()
+        compose.waitUntil(5_000) { state.route.entity == entity && state.route.level == RuntimeDeskLevel.Detail }
         compose.waitForIdle()
     }
+
+    private fun openAccount(id: String, label: String) {
+        openEntity(RuntimeDeskEntities.account("claude", id), label)
+    }
+
+    private fun openAccountSync() = openEntity(RuntimeDeskEntities.AccountSync, "Account sync")
+
+    private fun openConnectAccounts() = openEntity(RuntimeDeskEntities.Credentials, "Connect accounts")
 
     @Test fun openingTheTabReadsTheListAndTheSyncStateOnceAndNothingElse() {
         val fake = FakeAccounts()
@@ -123,19 +147,34 @@ class ClaudeAccountsBehaviourTest {
     @Test fun eachAccountShowsItsLabelPlanOrganizationStatusAndPath() {
         show(FakeAccounts().binding())
         waitFor("Claude Code (work)")
-        val all = everything()
-        for (text in listOf("Claude Code (default)", "Claude Code (work)", "Claude Code (fresh)", "Brainrocket")) {
-            assertTrue(text, all.contains(text))
-        }
+        val byAccount = linkedMapOf("claude-work" to everything())
+        openAccount("claude-default", "Claude Code (default)")
+        byAccount["claude-default"] = everything()
+        openAccount("claude-fresh", "Claude Code (fresh)")
+        byAccount["claude-fresh"] = everything()
+        val all = byAccount.values.flatten()
+        assertTrue("Claude Code (work)", byAccount.getValue("claude-work").contains("Claude Code (work)"))
+        assertTrue("Claude Code (default)", byAccount.getValue("claude-default").contains("Claude Code (default)"))
+        assertTrue("Claude Code (fresh)", byAccount.getValue("claude-fresh").contains("Claude Code (fresh)"))
+        assertTrue("Brainrocket", byAccount.getValue("claude-default").contains("Brainrocket"))
         // The web hides `.mode-tag` (studio.css:344, display:none), so neither the plan nor Pre-existing is drawn,
         // and display:none is absent from the accessibility tree: no tag node and no "Plan:" description.
         for (text in listOf("Team Premium 5x", "Team Standard", "Pre-existing")) {
             assertTrue(text, all.none { it.contains(text) })
         }
         assertTrue(all.none { it.startsWith("Plan:") })
-        assertEquals(3, all.count { it == "Status unknown" })
-        for (id in listOf("claude-default", "claude-work", "claude-fresh")) tag(ClaudeAccountsTags.plan(id)).assertDoesNotExist()
+        assertEquals(3, byAccount.values.sumOf { account -> account.count { it == "Status unknown" } })
+        for ((id, label) in listOf(
+            "claude-work" to "Claude Code (work)",
+            "claude-default" to "Claude Code (default)",
+            "claude-fresh" to "Claude Code (fresh)",
+        )) {
+            openAccount(id, label)
+            tag(ClaudeAccountsTags.plan(id)).assertDoesNotExist()
+        }
+        openAccount("claude-default", "Claude Code (default)")
         tag(ClaudeAccountsTags.organization("claude-default")).assertExists()
+        openAccount("claude-work", "Claude Code (work)")
         tag(ClaudeAccountsTags.organization("claude-work")).assertDoesNotExist()
         // The CLAUDE_CONFIG_DIR, only in the Sign-in row and only when the server says there is one.
         assertTrue(all.contains("/srv/tether/state/claude-accounts/claude-work"))
@@ -177,14 +216,26 @@ class ClaudeAccountsBehaviourTest {
         show(FakeAccounts().binding().copy(actions = FakeAccountActions()))
         waitFor("Claude Code (work)")
         tag(ClaudeAccountsTags.OwnerNeeded).assertDoesNotExist()
-        for (id in listOf("claude-default", "claude-work", "claude-fresh")) {
+        for ((id, label) in listOf(
+            "claude-work" to "Claude Code (work)",
+            "claude-fresh" to "Claude Code (fresh)",
+        )) {
+            openAccount(id, label)
             tag(ClaudeAccountsTags.login(id)).assertIsEnabled()
             tag(ClaudeAccountsTags.logout(id)).assertIsEnabled()
             tag(ClaudeAccountsTags.remove(id)).assertIsEnabled()
             tag(ClaudeAccountsTags.check(id)).assertIsEnabled()
         }
+        openAccount("claude-default", "Claude Code (default)")
+        tag(ClaudeAccountsTags.login("claude-default")).assertIsEnabled()
+        tag(ClaudeAccountsTags.logout("claude-default")).assertIsEnabled()
+        tag(ClaudeAccountsTags.check("claude-default")).assertIsEnabled()
+        tag(ClaudeAccountsTags.remove("claude-default")).assertDoesNotExist()
+        openAccount("claude-work", "Claude Code (work)")
         tag(ClaudeAccountsTags.rename("claude-work")).assertIsEnabled()
+        openAccount("claude-default", "Claude Code (default)")
         tag(ClaudeAccountsTags.rename("claude-default")).assertDoesNotExist()
+        openConnectAccounts()
         tag(ClaudeAccountsTags.Add).assertIsEnabled()
         openAccountSync()
         tag(ClaudeAccountsTags.SyncNow).assertIsEnabled()
@@ -192,12 +243,14 @@ class ClaudeAccountsBehaviourTest {
 
     /** An account whose id cannot be put in a path is listed, but nothing may change it. */
     @Test fun anAccountThatCannotBeNamedOffersNoChange() {
-        val json = """{"accounts":[{"id":"Bad/Id","label":"Odd"},{"id":"claude-work","label":"Claude Code (work)"}]}"""
+        val json = """{"accounts":[{"id":"Bad/Id","label":"Odd","managed":true},{"id":"claude-work","label":"Claude Code (work)","managed":true}]}"""
         show(FakeAccounts(lists = listOf(ClaudeAccountsResult.Ok(AccountsFixtures.decode(json), ORIGIN))).binding().copy(actions = FakeAccountActions()))
-        waitFor("Odd")
+        waitFor("Claude Code (work)")
+        openAccount("Bad/Id", "Odd")
         for (key in listOf(ClaudeAccountsTags.login("Bad/Id"), ClaudeAccountsTags.logout("Bad/Id"), ClaudeAccountsTags.remove("Bad/Id"), ClaudeAccountsTags.rename("Bad/Id"))) {
             tag(key).assertIsNotEnabled()
         }
+        openAccount("claude-work", "Claude Code (work)")
         tag(ClaudeAccountsTags.login("claude-work")).assertIsEnabled()
     }
 
@@ -239,14 +292,17 @@ class ClaudeAccountsBehaviourTest {
             compose.waitUntil(5_000) { state.draft != null }
             waitFor("Claude Code (work)")
             compose.waitUntil(5_000) { "GET /api/claude-accounts/sync" in arrived }
+            openConnectAccounts()
             tag(ClaudeAccountsTags.Add).performScrollTo().performClick()
             compose.onNodeWithTag(ClaudeAccountsTags.AddField, useUnmergedTree = true).performTextReplacement("home")
             tag(ClaudeAccountsTags.AddSubmit).performScrollTo().performClick()
             compose.waitUntil(5_000) { compose.onAllNodesWithTag(ClaudeAccountsTags.AddField, useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
             // Log out goes at once (no confirmation, as on the web); its status re-read follows it.
+            openAccount("claude-work", "Claude Code (work)")
             tag(ClaudeAccountsTags.logout("claude-work")).performScrollTo().performClick()
             compose.waitUntil(5_000) { "GET /api/claude-accounts/claude-work/status" in arrived }
             // Remove: the first tap arms it ("Confirm remove"), the second sends it.
+            openAccount("claude-fresh", "Claude Code (fresh)")
             tag(ClaudeAccountsTags.remove("claude-fresh")).performScrollTo().performClick()
             waitFor(ClaudeAccountsCopy.CONFIRM_REMOVE)
             assertFalse("one tap sends nothing", arrived.any { it.startsWith("DELETE") })
@@ -285,10 +341,12 @@ class ClaudeAccountsBehaviourTest {
         waitFor("Claude Code (work)")
         tag(ClaudeAccountsTags.check("claude-work")).performScrollTo().performClick()
         waitFor("Logged in — work@example.com")
+        openAccount("claude-fresh", "Claude Code (fresh)")
         tag(ClaudeAccountsTags.check("claude-fresh")).performScrollTo().performClick()
         waitFor("Status unknown — No such Claude account.")
         assertEquals(listOf("status:claude-work", "status:claude-fresh"), fake.calls.filter { it.startsWith("status") })
         // The others are untouched.
+        openAccount("claude-default", "Claude Code (default)")
         assertTrue(everything().contains("Status unknown"))
     }
 
@@ -352,27 +410,30 @@ class ClaudeAccountsBehaviourTest {
     /** r2: two accounts whose titles could pass for each other each show their profile id, by the one-line rule. */
     @Test fun lookAlikeAccountsShowTheirIds() {
         val json = """{"accounts":[
-            {"id":"claude-work","label":"Work"},
-            {"id":"claude-work-2","label":"W\u043Erk"},
-            {"id":"claude-home","label":"Home"}]}"""
+            {"id":"claude-work","label":"Work","managed":true},
+            {"id":"claude-work-2","label":"W\u043Erk","managed":true},
+            {"id":"claude-home","label":"Home","managed":true}]}"""
         show(FakeAccounts(lists = listOf(ClaudeAccountsResult.Ok(AccountsFixtures.decode(json), ORIGIN))).binding())
-        waitFor("Home")
-        for (id in listOf("claude-work", "claude-work-2")) {
+        waitFor("Work")
+        for ((id, label) in listOf("claude-work" to "Work", "claude-work-2" to "W\u043Erk")) {
+            openAccount(id, label)
             val node = tag(ClaudeAccountsTags.id(id)).fetchSemanticsNode()
             val drawn = node.config[SemanticsProperties.Text].joinToString("") { it.text }
             // Breakable anywhere, but the whole id, end included.
             assertEquals(id, drawn.replace("\u2060\u200B", ""))
             assertEquals("profile $id", node.config[SemanticsProperties.ContentDescription].single())
         }
+        openAccount("claude-home", "Home")
         tag(ClaudeAccountsTags.id("claude-home")).assertDoesNotExist()
     }
 
-    @Test fun whileLoadingItSaysSo() {
+    @Test fun aRequestedAccountStaysSelectedWhileItsListLoads() {
         show(FakeAccounts(hangList = true).binding())
         tag(ClaudeAccountsTags.Loading).assertExists()
         assertTrue(everything().contains(ClaudeAccountsPresentation.LOADING))
-        // r3: the web's "Add Claude account" sits outside the list's conditional (settings-dialog.tsx:1838-1862).
-        tag(ClaudeAccountsTags.Add).assertIsEnabled()
+        assertEquals(RuntimeDeskEntities.account("claude", "claude-work"), state.route.entity)
+        assertFalse(everything().contains("Provider accounts"))
+        tag(ClaudeAccountsTags.Add).assertDoesNotExist()
     }
 
     /**
@@ -386,7 +447,7 @@ class ClaudeAccountsBehaviourTest {
 
     private fun addWithoutAList(reads: FakeAccounts, shown: String) {
         val actions = FakeAccountActions(auto = { if (it == "add") com.tether.app.client.SecurityResult.Ok(Unit, ORIGIN, null) else null })
-        show(reads.binding().copy(actions = actions))
+        show(reads.binding().copy(actions = actions), RuntimeDeskEntities.Credentials)
         waitFor(shown)
         tag(ClaudeAccountsTags.Add).performScrollTo().performClick()
         compose.onNodeWithTag(ClaudeAccountsTags.AddField, useUnmergedTree = true).performTextReplacement("home")
@@ -431,7 +492,10 @@ class ClaudeAccountsBehaviourTest {
     @Test fun aSeedIsShownAtOnceAndOnlyForItsServer() {
         val seeded = ClaudeAccountsState(origin = ORIGIN, accounts = AccountsFixtures.LIST.take(1))
         val fake = FakeAccounts()
-        show(ClaudeAccountsBinding(fake, ORIGIN, AccountsFixtures.TIME, initial = seeded))
+        show(
+            ClaudeAccountsBinding(fake, ORIGIN, AccountsFixtures.TIME, initial = seeded),
+            RuntimeDeskEntities.account("claude", "claude-default"),
+        )
         assertTrue(everything().contains("Claude Code (default)"))
         assertFalse(everything().contains("Claude Code (work)"))
         assertTrue(fake.calls.isEmpty())
@@ -480,6 +544,11 @@ class ClaudeAccountsBehaviourTest {
             origin = OTHER_ORIGIN,
             lists = listOf(ClaudeAccountsResult.Ok(AccountsFixtures.LIST.take(1), OTHER_ORIGIN)),
         )
+        state.route = RuntimeDeskRoute(
+            RuntimeDeskDestinations.Accounts,
+            RuntimeDeskEntities.account("claude", "claude-default"),
+            RuntimeDeskLevel.Detail,
+        )
         var binding by mutableStateOf(first.binding())
         compose.setContent { SettingsUnderTest(store.prefs, state, claudeAccounts = binding) }
         compose.waitUntil(5_000) { "list" in first.calls }
@@ -496,7 +565,10 @@ class ClaudeAccountsBehaviourTest {
     /** Server text by the text rules: the label rule for names, the path rule for a CLAUDE_CONFIG_DIR. */
     @Test fun serverTextIsDrawnSafely() {
         val json = """{"accounts":[{"id":"claude-x","label":"Claude Code (\u202Ekrow)","configDir":"/srv/\u202Eevil\u2066dir","hasConfigDir":true,"plan":{"label":"Max\u200B 20x","organizationName":"Acme\u202E Corp","source":"profile","raw":{}}}]}"""
-        show(FakeAccounts(lists = listOf(ClaudeAccountsResult.Ok(AccountsFixtures.decode(json), ORIGIN))).binding())
+        show(
+            FakeAccounts(lists = listOf(ClaudeAccountsResult.Ok(AccountsFixtures.decode(json), ORIGIN))).binding(),
+            RuntimeDeskEntities.account("claude", "claude-x"),
+        )
         waitFor("Claude Code (krow)")
         val all = everything()
         // The plan name is a `.mode-tag`, hidden on the web (studio.css:344): it is not drawn at all.

@@ -78,7 +78,11 @@ abstract class SettingsRowsBandBase(private val width: Int) {
         val stored = runBlocking { store.prefs.preferences.first() }
         val route = routeOverride ?: when {
             accounts == AccountsShot.Sync -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.AccountSync, RuntimeDeskLevel.Detail)
-            accounts != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail)
+            accounts != null -> RuntimeDeskRoute(
+                RuntimeDeskDestinations.Accounts,
+                RuntimeDeskEntities.account("claude", "claude-work"),
+                RuntimeDeskLevel.Detail,
+            )
             else -> RuntimeDeskRoute.fromLegacyTab(tab)
         }
         val state = SettingsDialogState(tab, GeneralDraft.of(stored), route)
@@ -164,7 +168,15 @@ abstract class SettingsRowsBandBase(private val width: Int) {
     }
 
     @Test fun theCliSelectIsCappedAtItsShareOfTheRow() {
-        show(SettingsTab.Engines, server = ServerShot.Cli.binding())
+        show(
+            SettingsTab.Engines,
+            server = ServerShot.Cli.binding(),
+            routeOverride = RuntimeDeskRoute(
+                RuntimeDeskDestinations.Engines,
+                RuntimeDeskEntities.ClaudeCli,
+                RuntimeDeskLevel.Detail,
+            ),
+        )
         val title = text(ClaudeCliCopy.PICKER_TITLE)
         val select = tag(ServerSettingsTags.CliPicker)
         val row = rowWidth()

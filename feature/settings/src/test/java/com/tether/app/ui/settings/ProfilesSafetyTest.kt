@@ -57,7 +57,13 @@ class ProfilesSafetyTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    private val state = SettingsDialogState(SettingsTab.Engines)
+    private val state = SettingsDialogState(
+        route = RuntimeDeskRoute(
+            RuntimeDeskDestinations.Engines,
+            RuntimeDeskEntities.CustomProfiles,
+            RuntimeDeskLevel.Detail,
+        ),
+    )
     private var providers by mutableStateOf(ProvidersBinding.None)
 
     private val withPath = gemini(extraEnv = ""","PATH":"/usr/bin"""")
@@ -302,7 +308,11 @@ class ProfilesSafetyTest {
             override fun cliVersion(message: com.tether.app.protocol.ClientMessage.SetAdvancedSettings, origin: String) = false
             override fun detectEngines(origin: String) = false
         }
-        state.tab = SettingsTab.Advanced
+        state.route = RuntimeDeskRoute(
+            RuntimeDeskDestinations.ServerIntegrations,
+            null,
+            RuntimeDeskLevel.Detail,
+        )
         compose.setContent { SettingsUnderTest(store.prefs, state, serverSettings = ServerFixtures.binding(writer = refusing)) }
         compose.waitUntil(5_000) { state.draft != null }
         val host = ServerSettingsTags.input(com.tether.app.client.ServerSetting.Host)

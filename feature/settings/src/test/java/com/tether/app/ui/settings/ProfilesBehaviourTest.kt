@@ -86,7 +86,7 @@ class ProfilesBehaviourTest {
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    private val state = SettingsDialogState(SettingsTab.Engines)
+    private val state = customProfilesState()
     private var providers by mutableStateOf(ProvidersBinding.None)
     private var shown by mutableStateOf(true)
     private val registry = SaveableStateRegistry(restoredValues = null, canBeSaved = { true })
@@ -205,7 +205,7 @@ class ProfilesBehaviourTest {
         )
         val at = order.map { text -> all.indexOf(text).also { assertTrue("$text missing", it >= 0) } }
         assertEquals(at.sorted(), at)
-        assertTrue(all.any { it.startsWith("Declarative profiles extending the built-in engines") && it.contains("providers.json") && it.contains("(0600)") })
+        assertTrue(all.contains("Create alternate ways to run an engine with different homes, commands, environment values, or model lists. Use Provider accounts when you want to connect another login. Changes apply immediately to future launches."))
         for (text in listOf(ProfileRows.LABEL_CAPTION, ProfileRows.ID_CAPTION, ProfileRows.EXTENDS_CAPTION, ProfileRows.ENV_CAPTION, ProfileRows.ORDER_CAPTION,
             ProfileRows.MODELS_CAPTION, ProfileRows.ADDITIONAL_CAPTION, ProfileRows.HOME_ACP, "Enable Gemini CLI", "gemini label", "gemini command", "gemini home")) {
             assertTrue(text, all.contains(text))
@@ -714,7 +714,7 @@ class ProfilesRecreationTest {
     private val writer = RecordingProvidersWriter(newest = { list })
 
     private fun showIt() {
-        val state = SettingsDialogState(SettingsTab.Engines)
+        val state = customProfilesState()
         val binding = ProfileFixtures.binding(list, writer)
         compose.setContent { SettingsUnderTest(store.prefs, state, providers = binding) }
         compose.waitUntil(5_000) { state.draft != null }
@@ -778,7 +778,7 @@ class ProfilesRotationTest {
         val restoration = StateRestorationTester(compose)
         val binding = ProfileFixtures.binding(ProfileFixtures.list(profiles(gemini(env = SENTINEL), WORK, zai())))
         restoration.setContent {
-            val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Engines) }
+            val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { customProfilesState() }
             SettingsUnderTest(store.prefs, state, providers = binding)
         }
         compose.waitForIdle()
@@ -808,7 +808,7 @@ class ProfilesTypedStateRotationTest {
         val binding = ProfileFixtures.binding(ProfileFixtures.list(profiles(gemini(env = SENTINEL), WORK, zai())))
         var saved: String? = null
         restoration.setContent {
-            val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { SettingsDialogState(SettingsTab.Engines) }
+            val state = androidx.compose.runtime.saveable.rememberSaveable(saver = SettingsDialogState.Saver) { customProfilesState() }
             SettingsUnderTest(store.prefs, state, providers = binding)
             val registry = LocalSaveableStateRegistry.current
             androidx.compose.runtime.SideEffect { saved = registry?.performSave()?.toString() }
@@ -828,3 +828,11 @@ class ProfilesTypedStateRotationTest {
         assertTrue("the label is in the saved state (the check can see strings)", saved.orEmpty().contains("Hal-label"))
     }
 }
+
+private fun customProfilesState() = SettingsDialogState(
+    route = RuntimeDeskRoute(
+        RuntimeDeskDestinations.Engines,
+        RuntimeDeskEntities.CustomProfiles,
+        RuntimeDeskLevel.Detail,
+    ),
+)

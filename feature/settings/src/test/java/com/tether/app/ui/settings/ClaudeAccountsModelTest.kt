@@ -154,7 +154,7 @@ class ClaudeAccountsModelTest {
         assertNull(loading.notice)
         val error = ClaudeAccountsPresentation.view(loaded().copy(listFault = AccountsFault.Unavailable(500)), time)
         assertEquals(ClaudeAccountsPresentation.Notice(false, "Could not load Claude accounts."), error.notice)
-        assertTrue(error.cards.isEmpty())
+        assertEquals(listOf("Claude Code (default)", "Claude Code (work)", "Claude Code (fresh)"), error.cards.map { it.title })
         // r2: the list shows no server sentence, ever: fixed copy for every failure.
         val refused = ClaudeAccountsPresentation.view(loaded().copy(listFault = AccountsFault.Refused(ClaudeAccountRefusal.NoSuchAccount)), time)
         assertEquals(ClaudeAccountsPresentation.LIST_ERROR, refused.notice!!.text)

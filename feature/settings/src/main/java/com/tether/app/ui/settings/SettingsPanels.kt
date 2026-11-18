@@ -1,6 +1,7 @@
 package com.tether.app.ui.settings
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
@@ -112,13 +113,68 @@ internal fun RuntimeEnginesPanel(
     narrow: Boolean,
     serverSettings: ServerSettingsBinding,
     providers: ProvidersBinding,
+    onOpenAccount: (String) -> Unit,
 ) {
-    val loaded = serverSettings.settings != null && serverSettings.origin != null
     Column {
-        key(serverSettings.origin) { EngineDetails(serverSettings, selectedId, narrow) }
-        key(providers.origin) { ProfilesSection(providers, narrow, last = !loaded) }
-        key(serverSettings.origin) { HostConfigSection(serverSettings, narrow) }
-        ClaudeCliSection(serverSettings, narrow)
+        key(serverSettings.origin) {
+            Box(Modifier.keepRuntimeDeskMounted(selectedId in RuntimeDeskRoute.BUILT_IN_ENGINE_IDS)) {
+                EngineDetails(serverSettings, selectedId, narrow)
+            }
+        }
+        key(providers.origin) {
+            Box(Modifier.keepRuntimeDeskMounted(selectedId == RuntimeDeskEntities.CustomProfiles)) {
+                Column {
+                    val profiles = providers.list?.profiles.orEmpty()
+                    val accountProfiles = profiles.filter(SettingsAccountProjector::isAccountBacked)
+                    ProfilesSection(
+                        providers,
+                        narrow,
+                        last = accountProfiles.isEmpty(),
+                        profileIds = profiles.filterNot(SettingsAccountProjector::isAccountBacked).mapTo(linkedSetOf()) { it.id },
+                    )
+                    if (accountProfiles.isNotEmpty()) {
+                        SettingsSection(
+                            "Account-backed profiles",
+                            AnnotatedString(
+                                "These profiles belong to provider accounts. Open the canonical account detail to manage access, usage, and advanced execution settings together.",
+                            ),
+                            narrow,
+                            last = true,
+                        ) {
+                            accountProfiles.forEach { profile ->
+                                SettingsRow(
+                                    kind = RowKind.Server,
+                                    narrow = narrow,
+                                    text = { modifier ->
+                                        SettingsRowText(
+                                            ProfileRows.name(profile),
+                                            AnnotatedString("${profile.id} · ${profile.extends}"),
+                                            modifier,
+                                        )
+                                    },
+                                    control = { modifier ->
+                                        TetherKey(
+                                            onClick = { onOpenAccount(profile.id) },
+                                            classes = KeyClasses.ButtonSecondary,
+                                            label = "Open account",
+                                            modifier = modifier,
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        key(serverSettings.origin) {
+            Box(Modifier.keepRuntimeDeskMounted(selectedId == RuntimeDeskEntities.HostConfig)) {
+                HostConfigSection(serverSettings, narrow)
+            }
+        }
+        Box(Modifier.keepRuntimeDeskMounted(selectedId == RuntimeDeskEntities.ClaudeCli)) {
+            ClaudeCliSection(serverSettings, narrow)
+        }
     }
 }
 

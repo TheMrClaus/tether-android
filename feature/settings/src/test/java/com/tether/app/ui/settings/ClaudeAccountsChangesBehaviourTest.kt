@@ -10,11 +10,12 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -60,19 +61,31 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
 
     @get:Rule val chain: RuleChain = RuleChain.outerRule(tmp).around(store).around(compose)
 
-    private val state = SettingsDialogState(route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail))
+    private val state = SettingsDialogState(
+        route = RuntimeDeskRoute(
+            RuntimeDeskDestinations.Accounts,
+            RuntimeDeskEntities.account("claude", "claude-work"),
+            RuntimeDeskLevel.Detail,
+        ),
+    )
     private val fast = LoginPollPace(first = 20, next = 20, afterFailure = 20)
     private val link = ClaudeLoginLink.parse("https://claude.ai/oauth/authorize?code=true&client_id=FAKE&state=FAKE-STATE")!!
 
     private fun binding(reads: FakeAccounts, actions: FakeAccountActions, opener: LoginLinkOpener = LoginLinkOpener.None, origin: String = ORIGIN) =
         ClaudeAccountsBinding(reads, origin, AccountsFixtures.TIME, actions = actions, opener = opener, pace = fast)
 
-    private fun show(binding: ClaudeAccountsBinding, wait: String = "Claude Code (work)") {
+    private fun show(
+        binding: ClaudeAccountsBinding,
+        wait: String? = null,
+        entity: String = RuntimeDeskEntities.account("claude", "claude-work"),
+    ) {
+        state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, entity, RuntimeDeskLevel.Detail)
         compose.setContent {
             SettingsUnderTest(store.prefs, state, layout = layout, claudeAccounts = binding)
         }
         compose.waitUntil(5_000) { state.draft != null }
-        waitFor(wait)
+        revealDetail(entity)
+        waitFor(wait ?: if (entity == RuntimeDeskEntities.Credentials) "Provider accounts" else "Claude Code (work)")
     }
 
     private fun tag(t: String) = compose.onNodeWithTag(t, useUnmergedTree = true)
@@ -85,6 +98,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     private fun everything(): List<String> {
         val out = mutableListOf<String>()
         fun walk(node: SemanticsNode) {
+            if (node.boundsInRoot.width <= 0f || node.boundsInRoot.height <= 0f) return
             node.config.getOrNull(SemanticsProperties.Text)?.forEach { out += it.text }
             node.config.getOrNull(SemanticsProperties.EditableText)?.let { out += it.text }
             node.config.getOrNull(SemanticsProperties.ContentDescription)?.let { out += it }
@@ -97,13 +111,45 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
 
     private fun waitFor(text: String) = compose.waitUntil(5_000) { everything().any { it.contains(text) } }
     private fun waitForCall(actions: FakeAccountActions, name: String) = compose.waitUntil(5_000) { actions.pending(name) }
-    private fun exists(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+    private fun exists(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .any { it.boundsInRoot.width > 0f && it.boundsInRoot.height > 0f }
 
-    private fun openAccountSync() {
-        if (layout == TetherLayoutClass.Phone) compose.onNodeWithContentDescription("Back", substring = true).performClick()
-        compose.onNodeWithText("Account sync").performClick()
-        compose.waitForIdle()
+    private fun isComposed(t: String) = compose.onAllNodesWithTag(t, useUnmergedTree = true)
+        .fetchSemanticsNodes()
+        .isNotEmpty()
+
+    private fun detailMarker(entity: String): String = when (entity) {
+        RuntimeDeskEntities.Credentials -> ClaudeAccountsTags.Add
+        RuntimeDeskEntities.AccountSync -> ClaudeAccountsTags.Sync
+        else -> ClaudeAccountsTags.card(requireNotNull(accountEntityParts(entity)).accountId)
     }
+
+    private fun revealDetail(entity: String) {
+        val marker = detailMarker(entity)
+        compose.waitUntil(5_000) { isComposed(marker) }
+        tag(marker).performScrollTo()
+        compose.waitUntil(5_000) { exists(marker) }
+    }
+
+    private fun openEntity(entity: String, label: String) {
+        if (layout == TetherLayoutClass.Phone && state.route.level == RuntimeDeskLevel.Detail) {
+            compose.onNodeWithContentDescription("Back to Accounts", substring = true).performClick()
+            compose.waitUntil(5_000) { state.route.level == RuntimeDeskLevel.Entities }
+        }
+        compose.onNode(hasText(label) and hasClickAction()).performClick()
+        compose.waitUntil(5_000) { state.route.entity == entity && state.route.level == RuntimeDeskLevel.Detail }
+        compose.waitForIdle()
+        revealDetail(entity)
+    }
+
+    private fun openAccount(id: String, label: String) {
+        openEntity(RuntimeDeskEntities.account("claude", id), label)
+    }
+
+    private fun openAccountSync() = openEntity(RuntimeDeskEntities.AccountSync, "Account sync")
+
+    private fun openConnectAccounts() = openEntity(RuntimeDeskEntities.Credentials, "Connect accounts")
 
     private val removedKept = ClaudeAccountRemoved(removed = true, credentialsDeleted = false)
 
@@ -112,7 +158,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     @Test fun addSendsTheTrimmedNicknameForThisServerAndReadsTheListAgain() {
         val reads = FakeAccounts()
         val actions = FakeAccountActions()
-        show(binding(reads, actions))
+        show(binding(reads, actions), entity = RuntimeDeskEntities.Credentials)
         tap(ClaudeAccountsTags.Add)
         tag(ClaudeAccountsTags.AddField).performTextReplacement("  work2 ")
         tap(ClaudeAccountsTags.AddSubmit)
@@ -126,7 +172,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
 
     @Test fun aBlankNicknameSendsNothingAndCancelClosesTheRow() {
         val actions = FakeAccountActions()
-        show(binding(FakeAccounts(), actions))
+        show(binding(FakeAccounts(), actions), entity = RuntimeDeskEntities.Credentials)
         tap(ClaudeAccountsTags.Add)
         tag(ClaudeAccountsTags.AddField).performTextReplacement("   ")
         tag(ClaudeAccountsTags.AddSubmit).assertIsNotEnabled()
@@ -140,7 +186,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     /** A refusal of the server's own (a 400 sentence) is shown by the label rule, under the row. */
     @Test fun aRefusedAddSaysWhy() {
         val actions = FakeAccountActions()
-        show(binding(FakeAccounts(), actions))
+        show(binding(FakeAccounts(), actions), entity = RuntimeDeskEntities.Credentials)
         tap(ClaudeAccountsTags.Add)
         tag(ClaudeAccountsTags.AddField).performTextReplacement("work")
         tap(ClaudeAccountsTags.AddSubmit)
@@ -156,8 +202,11 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         val actions = FakeAccountActions()
         show(binding(reads, actions))
         // The host default has nothing to rename (settings-dialog.tsx:1688): no key at all.
+        openAccount("claude-default", "Claude Code (default)")
         tag(ClaudeAccountsTags.rename("claude-default")).assertDoesNotExist()
+        openAccount("claude-work", "Claude Code (work)")
         tap(ClaudeAccountsTags.rename("claude-work"))
+        compose.waitUntil(5_000) { exists(ClaudeAccountsTags.renameField("claude-work")) }
         assertEquals("work", tag(ClaudeAccountsTags.renameField("claude-work")).fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
         tag(ClaudeAccountsTags.renameField("claude-work")).performTextReplacement("job")
         tap(ClaudeAccountsTags.renameSave("claude-work"))
@@ -174,7 +223,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
      */
     @Test fun twoTapsInOneFrameSendOnce() {
         val actions = FakeAccountActions()
-        show(binding(FakeAccounts(), actions))
+        show(binding(FakeAccounts(), actions), entity = RuntimeDeskEntities.Credentials)
         tap(ClaudeAccountsTags.Add)
         tag(ClaudeAccountsTags.AddField).performTextReplacement("work2")
         compose.waitForIdle()
@@ -188,6 +237,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         tag(ClaudeAccountsTags.AddSubmit).assertIsNotEnabled()
         waitFor(ClaudeAccountsCopy.ADDING)
         // The web keeps every other row usable while an Add is in flight.
+        openAccount("claude-work", "Claude Code (work)")
         tag(ClaudeAccountsTags.login("claude-work")).assertIsEnabled()
         tag(ClaudeAccountsTags.remove("claude-work")).assertIsEnabled()
         tag(ClaudeAccountsTags.logout("claude-work")).assertIsEnabled()
@@ -245,7 +295,11 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     /** The arm lapses after 4 s (the web's timer): a tap after that arms again and sends nothing. */
     @Test fun anArmedRemoveLapsesAfterFourSeconds() {
         val actions = FakeAccountActions()
-        show(binding(FakeAccounts(), actions))
+        show(
+            binding(FakeAccounts(), actions),
+            wait = "Claude Code (fresh)",
+            entity = RuntimeDeskEntities.account("claude", "claude-fresh"),
+        )
         tap(ClaudeAccountsTags.remove("claude-fresh"))
         compose.waitUntil(5_000) { removeKeyText("claude-fresh").contains(ClaudeAccountsCopy.CONFIRM_REMOVE) }
         compose.mainClock.advanceTimeBy(ClaudeAccountsCopy.REMOVE_ARM_MS + 200)
@@ -265,11 +319,13 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         val actions = FakeAccountActions()
         show(binding(FakeAccounts(), actions))
         tap(ClaudeAccountsTags.remove("claude-work"))
+        openAccount("claude-fresh", "Claude Code (fresh)")
         tap(ClaudeAccountsTags.remove("claude-fresh"))
         assertTrue(actions.calls.isEmpty())
         compose.waitUntil(5_000) { removeKeyText("claude-fresh").contains(ClaudeAccountsCopy.CONFIRM_REMOVE) }
-        assertFalse(removeKeyText("claude-work").contains(ClaudeAccountsCopy.CONFIRM_REMOVE))
         // claude-work is no longer armed: its tap arms it again, it removes nothing.
+        openAccount("claude-work", "Claude Code (work)")
+        assertFalse(removeKeyText("claude-work").contains(ClaudeAccountsCopy.CONFIRM_REMOVE))
         tap(ClaudeAccountsTags.remove("claude-work"))
         assertTrue(actions.calls.isEmpty())
         tap(ClaudeAccountsTags.remove("claude-work"))
@@ -277,14 +333,40 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         assertEquals("remove($ORIGIN, claude-work deleteCredentials=false)", actions.calls.single().toString())
     }
 
-    @Test fun theHostDefaultsRemovalSaysItsLoginIsNeverDeleted() {
+    @Test fun theSyntheticHostDefaultHasNoRemovableRecordOrAction() {
         val actions = FakeAccountActions()
-        show(binding(FakeAccounts(), actions))
-        tap(ClaudeAccountsTags.remove("claude-default"))
-        tap(ClaudeAccountsTags.remove("claude-default"))
+        show(
+            binding(FakeAccounts(), actions),
+            wait = "Claude Code (default)",
+            entity = RuntimeDeskEntities.account("claude", "claude-default"),
+        )
+        tag(ClaudeAccountsTags.remove("claude-default")).assertDoesNotExist()
+        tag(ClaudeAccountsTags.deleteCredentials("claude-default")).assertDoesNotExist()
+        assertTrue(actions.calls.isEmpty())
+    }
+
+    @Test fun aPersistedImportedHostProfileRemainsRemovableWithoutCredentialDeletion() {
+        val imported = AccountsFixtures.decode(
+            """{"accounts":[{"id":"host-login","label":"Host login","configDir":"/srv/tether/.claude","hasConfigDir":true,"managed":false,"imported":true,"syncEligible":true}]}""",
+        )
+        val actions = FakeAccountActions()
+        show(
+            binding(
+                FakeAccounts(lists = listOf(com.tether.app.client.ClaudeAccountsResult.Ok(imported, ORIGIN))),
+                actions,
+            ),
+            wait = "Host login",
+            entity = RuntimeDeskEntities.account("claude", "host-login"),
+        )
+        tag(ClaudeAccountsTags.deleteCredentials("host-login")).assertExists()
+        tap(ClaudeAccountsTags.remove("host-login"))
+        tap(ClaudeAccountsTags.remove("host-login"))
         waitForCall(actions, "remove")
-        actions.answer("remove", SecurityResult.Ok(ClaudeAccountRemoved(removed = false, credentialsDeleted = false), ORIGIN, null))
-        waitFor(ClaudeAccountsCopy.notRemoved("Claude Code (default)"))
+        assertEquals("remove($ORIGIN, host-login deleteCredentials=false)", actions.calls.single().toString())
+        actions.answer("remove", SecurityResult.Ok(removedKept, ORIGIN, null))
+        compose.waitUntil(5_000) { isComposed(ClaudeAccountsTags.Line) }
+        tag(ClaudeAccountsTags.Line).performScrollTo()
+        waitFor(ClaudeAccountsCopy.removed("Host login"))
     }
 
     /** settings-dialog.tsx `doLogout` (:1541-1555): sent on the tap, nothing asked first; then the status is read again. */
@@ -608,7 +690,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
     @Test fun aServerWithoutTheOwnerGradeChangeIsSaidAndNothingBreaks() {
         val reads = FakeAccounts()
         val actions = FakeAccountActions()
-        show(binding(reads, actions))
+        show(binding(reads, actions), entity = RuntimeDeskEntities.Credentials)
         tag(ClaudeAccountsTags.OwnerNeeded).assertDoesNotExist()
         tap(ClaudeAccountsTags.Add)
         tag(ClaudeAccountsTags.AddField).performTextReplacement("work2")
@@ -617,12 +699,22 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         actions.answer("add", SecurityResult.OwnerSignInNeeded(ORIGIN))
         compose.waitUntil(5_000) { exists(ClaudeAccountsTags.OwnerNeeded) }
         assertTrue(everything().contains(ClaudeAccountsCopy.OWNER_NEEDED))
-        for (id in listOf("claude-default", "claude-work", "claude-fresh")) {
+        for ((id, label) in listOf(
+            "claude-work" to "Claude Code (work)",
+            "claude-fresh" to "Claude Code (fresh)",
+        )) {
+            openAccount(id, label)
             tag(ClaudeAccountsTags.login(id)).assertIsEnabled()
             tag(ClaudeAccountsTags.logout(id)).assertIsEnabled()
             tag(ClaudeAccountsTags.remove(id)).assertIsEnabled()
             tag(ClaudeAccountsTags.check(id)).assertIsEnabled()
         }
+        openAccount("claude-default", "Claude Code (default)")
+        tag(ClaudeAccountsTags.login("claude-default")).assertIsEnabled()
+        tag(ClaudeAccountsTags.logout("claude-default")).assertIsEnabled()
+        tag(ClaudeAccountsTags.check("claude-default")).assertIsEnabled()
+        tag(ClaudeAccountsTags.remove("claude-default")).assertDoesNotExist()
+        openAccount("claude-work", "Claude Code (work)")
         tap(ClaudeAccountsTags.check("claude-work"))
         waitFor("Logged in — work@example.com")
         assertEquals(listOf("add"), actions.names())
@@ -633,7 +725,9 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         waitForCall(actions, "runSync")
         compose.onNodeWithTag(ClaudeAccountsTags.OwnerNeeded).assertDoesNotExist()
         actions.answer("runSync", SecurityResult.OwnerSignInNeeded(ORIGIN))
-        compose.waitUntil(5_000) { exists(ClaudeAccountsTags.OwnerNeeded) }
+        compose.waitUntil(5_000) { isComposed(ClaudeAccountsTags.OwnerNeeded) }
+        compose.onNodeWithTag(ClaudeAccountsTags.OwnerNeeded).performScrollTo()
+        assertTrue(everything().contains(ClaudeAccountsCopy.OWNER_NEEDED))
     }
 
     @Test fun anOwnerRefusalOfTheLoginDropsItsPanel() {
@@ -786,6 +880,7 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
 
     /** Add, then hold the list re-read it triggers; return the gate that releases it. */
     private fun addWithTheReReadHeld(reads: () -> Int, actions: FakeAccountActions) {
+        openConnectAccounts()
         tap(ClaudeAccountsTags.Add)
         tag(ClaudeAccountsTags.AddField).performTextReplacement("x")
         tap(ClaudeAccountsTags.AddSubmit)
@@ -857,7 +952,9 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         compose.waitUntil(5_000) { !actions.pending("saveSync") }
         compose.waitForIdle()
         gate.complete(Unit)
+        openAccount("claude-work", "Claude Code (work)")
         waitFor("Logged in — work@example.com")
+        openAccountSync()
         assertEquals(ToggleableState.On, hooks())
     }
 
@@ -953,16 +1050,20 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
      * pass for (the control) has neither.
      */
     @Test fun aLookAlikesArmedRemoveNamesItsProfileId() {
-        val json = """{"accounts":[{"id":"claude-work","label":"Work"},{"id":"claude-work-2","label":"W\u043Erk"},{"id":"claude-home","label":"Home"}]}"""
+        val json = """{"accounts":[{"id":"claude-work","label":"Work","managed":true},{"id":"claude-work-2","label":"W\u043Erk","managed":true},{"id":"claude-home","label":"Home","managed":true}]}"""
         val actions = FakeAccountActions()
-        show(binding(FakeAccounts(lists = listOf(com.tether.app.client.ClaudeAccountsResult.Ok(AccountsFixtures.decode(json), ORIGIN))), actions), wait = "Home")
+        show(binding(FakeAccounts(lists = listOf(com.tether.app.client.ClaudeAccountsResult.Ok(AccountsFixtures.decode(json), ORIGIN))), actions), wait = "Work")
         tag(ClaudeAccountsTags.id("claude-work")).assertExists()
+        openAccount("claude-work-2", "W\u043Erk")
         tag(ClaudeAccountsTags.id("claude-work-2")).assertExists()
+        openAccount("claude-home", "Home")
         tag(ClaudeAccountsTags.id("claude-home")).assertDoesNotExist()
+        openAccount("claude-work-2", "W\u043Erk")
         tap(ClaudeAccountsTags.remove("claude-work-2"))
         compose.waitUntil(5_000) { removeKeyText("claude-work-2").contains(ClaudeAccountsCopy.CONFIRM_REMOVE) }
         assertTrue(removeKeyText("claude-work-2"), removeKeyText("claude-work-2").contains("profile claude-work-2"))
         // The control: the unique title's armed key names no profile.
+        openAccount("claude-home", "Home")
         tap(ClaudeAccountsTags.remove("claude-home"))
         compose.waitUntil(5_000) { removeKeyText("claude-home").contains(ClaudeAccountsCopy.CONFIRM_REMOVE) }
         assertFalse(removeKeyText("claude-home"), removeKeyText("claude-home").contains("profile"))
@@ -1004,7 +1105,13 @@ abstract class ClaudeAccountsChangesBehaviourBase(private val layout: TetherLayo
         tag(ClaudeAccountsTags.code("claude-work")).performTextReplacement("FAKE-LEFT-BEHIND")
         compose.runOnUiThread { state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Preferences, level = RuntimeDeskLevel.Detail) }
         compose.waitForIdle()
-        compose.runOnUiThread { state.route = RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail) }
+        compose.runOnUiThread {
+            state.route = RuntimeDeskRoute(
+                RuntimeDeskDestinations.Accounts,
+                RuntimeDeskEntities.account("claude", "claude-work"),
+                RuntimeDeskLevel.Detail,
+            )
+        }
         compose.waitUntil(5_000) { everything().any { it.contains("Claude Code (work)") } }
         assertTrue(everything().any { it.contains("FAKE-LEFT-BEHIND") })
         tag(ClaudeAccountsTags.loginPanel("claude-work")).assertExists()

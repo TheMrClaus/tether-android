@@ -91,6 +91,8 @@ fun SettingsUnderTest(
     nodes: NodesBinding = NodesBinding.None,
     devices: DevicesBinding = DevicesBinding.None,
     github: GitHubBinding = GitHubBinding.None,
+    accountLimitEntities: List<RuntimeDeskNavItem> = emptyList(),
+    accountsLimits: @Composable (RuntimeDeskUsageTarget) -> Unit = {},
     /** ta-coik.52: the server the preferences are kept for (null: the frame's default, no server). */
     serverUrl: kotlinx.coroutines.flow.StateFlow<String?>? = null,
     /** T12.2: the push registration the Devices tab's push row reads (registered by default). */
@@ -113,6 +115,8 @@ fun SettingsUnderTest(
                 nodes = nodes,
                 devices = devices,
                 github = github,
+                accountLimitEntities = accountLimitEntities,
+                accountsLimits = accountsLimits,
             )
         }
     }

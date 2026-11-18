@@ -7,6 +7,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
@@ -197,5 +198,104 @@ class RuntimeDeskBehaviourTest {
         val retained = compose.onNodeWithTag(command, useUnmergedTree = true)
             .fetchSemanticsNode().config[SemanticsProperties.EditableText].text
         assertEquals("claude-retained", retained)
+    }
+
+    @Test fun agentSettingsTasksAreDistinctAndCustomProfilesExcludeAccountProfiles() {
+        val state = SettingsDialogState(
+            draft = GeneralDraft.of(com.tether.app.ui.prefs.TetherPreferences.Default),
+            route = RuntimeDeskRoute(RuntimeDeskDestinations.Engines, RuntimeDeskEntities.CustomProfiles, RuntimeDeskLevel.Detail),
+        )
+        val providers = ProfileFixtures.binding(
+            ProfileFixtures.list(
+                ProfileFixtures.profiles(
+                    """{"id":"work","extends":"claude","label":"Claude Work","env":{"CLAUDE_CONFIG_DIR":"/fake/work"},"enabled":true}""",
+                    """{"id":"alternate","extends":"codex","label":"Alternate Codex","homeDir":"/fake/codex","enabled":true}""",
+                ),
+            ),
+        )
+        compose.setContent {
+            SettingsUnderTest(store.prefs, state, serverSettings = ServerFixtures.binding(), providers = providers)
+        }
+
+        compose.onNodeWithTag(ProfileTags.Section).assertExists()
+        compose.onNodeWithTag(ProfileTags.card("alternate")).assertExists()
+        compose.onNodeWithTag(ProfileTags.card("work")).assertDoesNotExist()
+        compose.onNodeWithTag(EngineTags.Section).assertDoesNotExist()
+        compose.onNodeWithTag(EngineTags.HostConfig).assertDoesNotExist()
+
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
+        compose.onNode(hasText("Host config") and hasClickAction()).performClick()
+        compose.onNodeWithTag(EngineTags.HostConfig).assertExists()
+        compose.onNodeWithTag(ProfileTags.Section).assertDoesNotExist()
+
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
+        compose.onNode(hasText("Claude CLI") and hasClickAction()).performClick()
+        compose.onNodeWithTag(ServerSettingsTags.section("cli")).assertExists()
+        compose.onNodeWithTag(EngineTags.HostConfig).assertDoesNotExist()
+    }
+
+    @Test fun canonicalAccountDetailCombinesAccessUsageAndAdvancedOverrides() {
+        val state = SettingsDialogState(
+            draft = GeneralDraft.of(com.tether.app.ui.prefs.TetherPreferences.Default),
+            route = RuntimeDeskRoute(
+                RuntimeDeskDestinations.Accounts,
+                RuntimeDeskEntities.account("claude", "claude-work"),
+                RuntimeDeskLevel.Detail,
+            ),
+        )
+        val accounts = ClaudeAccountsBinding(
+            source = com.tether.app.client.ClaudeAccountsSource.Unavailable,
+            origin = AccountsFixtures.ORIGIN,
+            initial = ClaudeAccountsState(origin = AccountsFixtures.ORIGIN, accounts = AccountsFixtures.LIST),
+        )
+        val providers = ProfileFixtures.binding(
+            ProfileFixtures.list(
+                ProfileFixtures.profiles(
+                    """{"id":"claude-work","extends":"claude","label":"Claude Code (work)","env":{"CLAUDE_CONFIG_DIR":"/fake/work","FAKE_FLAG":"1"},"homeDir":"/fake/home","dropEnv":["ANTHROPIC"],"disallowedTools":["WebSearch"],"enabled":true,"order":3,"models":[{"id":"opus","isDefault":true}],"additionalModels":[{"id":"sonnet"}]}""",
+                    """{"id":"ordinary","extends":"claude","label":"Ordinary","enabled":true}""",
+                ),
+            ),
+        )
+        val usage = listOf(RuntimeDeskNavItem(RuntimeDeskEntities.usage("claude", "claude-work"), "Claude Code (work)", "Usage only"))
+        compose.setContent {
+            SettingsUnderTest(
+                store.prefs,
+                state,
+                claudeAccounts = accounts,
+                providers = providers,
+                accountLimitEntities = usage,
+                accountsLimits = { target ->
+                    Text("Selected usage ${target.activeEntity}")
+                },
+            )
+        }
+
+        compose.onNodeWithText("Access").assertExists()
+        compose.onNodeWithTag(ClaudeAccountsTags.card("claude-work")).assertExists()
+        compose.onNodeWithText("Usage").assertExists()
+        compose.onNodeWithText("Selected usage usage:claude:claude-work").assertExists()
+        compose.onNodeWithText("Advanced profile settings").assertExists()
+        compose.onNodeWithTag(ProfileTags.card("claude-work")).assertExists()
+        compose.onNodeWithTag(ProfileTags.card("ordinary")).assertDoesNotExist()
+        compose.onNodeWithTag(ProfileTags.remove("claude-work")).assertDoesNotExist()
+        compose.onNodeWithTag(ProfileTags.field("claude-work", ProfileTags.ID)).assertDoesNotExist()
+    }
+
+    @Test fun connectAccountsLinksOrdinaryProfilesBackToTheirEngineTask() {
+        val state = SettingsDialogState(
+            draft = GeneralDraft.of(com.tether.app.ui.prefs.TetherPreferences.Default),
+            route = RuntimeDeskRoute(
+                RuntimeDeskDestinations.Accounts,
+                RuntimeDeskEntities.Credentials,
+                RuntimeDeskLevel.Detail,
+            ),
+        )
+        compose.setContent { SettingsUnderTest(store.prefs, state) }
+
+        compose.onNodeWithText("Open Custom profiles").performClick()
+
+        assertEquals(RuntimeDeskDestinations.Engines, state.route.destination)
+        assertEquals(RuntimeDeskEntities.CustomProfiles, state.route.entity)
+        assertEquals(RuntimeDeskLevel.Detail, state.route.level)
     }
 }
