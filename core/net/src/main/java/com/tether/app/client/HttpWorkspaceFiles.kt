@@ -137,6 +137,20 @@ class HttpWorkspaceFiles(
         }
     }
 
+    override suspend fun exists(paths: List<String>): FilesResult<List<Boolean?>> {
+        val fallback = FilesCopy.FILE_FALLBACK
+        val body = ExistsBatches.body(paths).toRequestBody(JSON)
+        return call(fallback, { route("/api/files/exists").header("Accept", "application/json").post(body) }) { response ->
+            if (response.code != 200) return@call FilesResult.Failed(fallback, response.code)
+            val text = readCapped(response, ERROR_BODY_CAP) ?: return@call FilesResult.Failed(fallback, response.code)
+            val answers = (parseObject(text)?.get("exists") as? JsonArray)
+                ?.takeIf { it.size == paths.size }
+                ?: return@call FilesResult.Failed(fallback, response.code)
+            // Only an explicit true / false is an answer; anything else in a slot is "not answered".
+            FilesResult.Ok(answers.map { (it as? JsonPrimitive)?.takeIf { p -> !p.isString }?.booleanOrNull })
+        }
+    }
+
     override suspend fun probe(path: String): FilesResult<Unit> {
         val fallback = FilesCopy.FILE_FALLBACK
         return call(fallback, { route("/api/files", "path" to path).header("Range", "bytes=0-0").header("Accept-Encoding", "identity") }, streaming = true) { response ->

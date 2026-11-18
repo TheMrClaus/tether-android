@@ -111,7 +111,7 @@ private const val CODE_TAG = "md-code"
 internal const val FILE_LINK_TAG = "file:"
 
 /** ta-9jnm: how a run of prose draws its file mentions: the host's opener and a budget the run shares. */
-internal class FileLinkDraw(val host: WorkspaceFileLinks, val anchor: FileMentionAnchor? = null) {
+internal class FileLinkDraw(val host: WorkspaceFileLinks, val anchor: FileMentionAnchor? = null, val existence: MentionExistence? = null) {
     private var left = FileLinks.MAX_LINKS
 
     init {
@@ -131,7 +131,9 @@ internal class FileLinkDraw(val host: WorkspaceFileLinks, val anchor: FileMentio
 
     /** The mentions in [text] ([source]); each one drawn spends from the budget. */
     fun detect(text: String, source: FileLinkSource): List<FileLinkRange> {
-        val found = FileLinks.detect(text, source, host.cwd, left)
+        // A relative mention asks the server whether its file exists; only an explicit "missing" answer unlinks it.
+        val exists = existence?.let { e -> { path: String -> e.request(path); e.get(path) } }
+        val found = FileLinks.detect(text, source, host.cwd, left, exists)
         left -= found.size
         return found
     }

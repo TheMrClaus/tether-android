@@ -210,6 +210,14 @@ private fun ChatTranscriptBody(
     // the main thread (the last result shows meanwhile); the first build for a session is synchronous.
     // Everything the build reads is captured here, on the main thread, as immutable values: the toggles
     // as a snapshot of the map, never `groupToggles::resolve`.
+    // A relative file mention is asked about again when the session's turn ends (active -> not active).
+    val mentionExistence = LocalMentionExistence.current
+    val turnActive = projection.activeTurnId != null
+    val wasActive = remember(consentSessionId, mentionExistence) { booleanArrayOf(turnActive) }
+    SideEffect {
+        if (wasActive[0] && !turnActive) mentionExistence?.endTurn()
+        wasActive[0] = turnActive
+    }
     val observer = LocalChatDerivationObserver.current
     val rowInputs = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentSessionId, observer, handedOffFrom, handoverV151) {
         ChatRowsInputs(projection, tree, showThinking, zone, richCodex, showApprovals, consentSessionId, observer, handedOffFrom, handoverV151)
