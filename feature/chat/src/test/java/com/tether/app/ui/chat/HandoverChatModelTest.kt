@@ -65,9 +65,9 @@ class HandoverChatModelTest {
         assertEquals(
             listOf(
                 "The handover did not complete. Nothing more will be sent automatically.",
-                "The handover prompt was not delivered to the new lead.",
+                "The handover prompt was not delivered to the new session.",
                 "The handover prompt could not be started.",
-                "A queued message could not be moved to the new lead.",
+                "A queued message could not be moved to the new session.",
                 "The handover did not complete as planned.",
             ),
             out.map { it.message },
@@ -87,7 +87,7 @@ class HandoverChatModelTest {
             listOf(
                 "You stopped the handover. Nothing was sent.",
                 "The handover could not continue and has ended. Nothing was sent to a new session; waiting messages run here.",
-                "The handover prompt was not delivered to the new lead.",
+                "The handover prompt was not delivered to the new session.",
             ),
             out.map { it.message },
         )

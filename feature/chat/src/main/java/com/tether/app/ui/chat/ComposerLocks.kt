@@ -97,8 +97,8 @@ internal enum class HandoffVariant(val tag: String) {
     From("handoff-notice-from"),
 }
 
-internal const val HANDOFF_PENDING_LINE = "Handover under way — a new lead takes over when this lead finishes."
-internal const val HANDOFF_PENDING_SUB = "Stop cancels it · new messages go to the new lead."
+internal const val HANDOFF_PENDING_LINE = "Handover under way — a new session takes over when this session finishes."
+internal const val HANDOFF_PENDING_SUB = "Stop cancels it · new messages go to the new session."
 
 internal const val HANDOFF_STAGE_LINE_TAG = "handoff-stage-line"
 internal const val HANDOFF_STAGE_SUB_TAG = "handoff-stage-sub"

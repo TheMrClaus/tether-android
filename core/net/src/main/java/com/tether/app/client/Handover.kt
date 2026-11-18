@@ -28,9 +28,9 @@ object Handover {
 
     const val GENERIC_REASON = "This session can't hand over right now."
     const val UNDER_WAY = "Handover under way."
-    const val DIALOG_TITLE = "Hand this session over to a new lead?"
+    const val DIALOG_TITLE = "Hand this session over to a new session?"
     const val DIALOG_BODY =
-        "Tether will ask the current lead to write a handover prompt and stop. A new session with the same settings and " +
+        "Tether will ask this session to write a handover prompt and stop. A new session with the same settings and " +
             "permissions will take over the run from that prompt. The current session becomes read-only."
 
     /** The web's recent-request window: a refusal-shaped error this soon after a request is the request's. */
@@ -60,7 +60,7 @@ object Handover {
         "handover_pending", "handover_in_progress" -> UNDER_WAY
         "already_handed_off" -> "Already handed off to ${successorName?.takeIf { it.isNotEmpty() } ?: "another session"}."
         "read_only" -> "Read-only — Tether isn't driving this session."
-        "ineligible_source" -> "Only a top-level lead can hand over."
+        "ineligible_source" -> "Only a top-level session can hand over."
         "archived" -> "Archived sessions can't hand over."
         "provider_no_bridge", "unsupported_engine" -> "This engine can't hand over yet."
         "handover_first_turn" -> "A turn started by a handover can't hand over again — try after the next turn."
@@ -178,8 +178,8 @@ object Handover {
     data class StageView(val key: StageKey, val underlyingKey: StageKey, val line: String)
 
     const val STOPPING_LINE = "Stopping the handover\u2026"
-    private const val LINE_REQUESTED_QUEUED = "Handover requested. Tether asks the lead to write its handover prompt when this turn ends."
-    private const val LINE_REQUESTED_WRITING = "Handover under way. The lead is writing its handover prompt."
+    private const val LINE_REQUESTED_QUEUED = "Handover requested. Tether asks this session to write its handover prompt when this turn ends."
+    private const val LINE_REQUESTED_WRITING = "Handover under way. This session is writing its handover prompt."
     private const val LINE_SCHEDULED = "Handover prompt written. The new session starts when this turn ends."
     private const val LINE_SCHEDULED_NOW = "Handover prompt written. The new session is starting."
 
@@ -219,7 +219,7 @@ object Handover {
 
     /** What the strip above the composer shows: the W33 pending notice (server below 151) or a v151 stage line. */
     sealed interface Strip {
-        /** Protocol 150: "Handover under way — a new lead takes over when this lead finishes." exactly as shipped. */
+        /** Protocol 150: "Handover under way — a new session takes over when this session finishes." exactly as shipped. */
         data object Legacy : Strip
         data class Stage(val view: StageView) : Strip
     }
@@ -251,19 +251,19 @@ object Handover {
 
     // ---- the 3-key dialog and the handover composer's copy (hu:8-44), verbatim ----
     const val DIALOG_BODY_V151 =
-        "Tether asks the current lead to write a handover prompt and stop. A new session takes over the run from that prompt, and this one becomes read-only."
+        "Tether asks this session to write a handover prompt and stop. A new session takes over the run from that prompt, and this one becomes read-only."
     const val CHOICE_AS_IS = "Hand over as is"
     const val CHOICE_CHANGE = "Change settings"
     const val CHOICE_TAIL_AS_IS = " keeps the same settings and permissions. "
-    const val CHOICE_TAIL_CHANGE = " lets you pick them first \u2014 the lead writes nothing until you confirm there."
+    const val CHOICE_TAIL_CHANGE = " lets you pick them first \u2014 this session writes nothing until you confirm there."
     const val CANCEL_LABEL = "Cancel"
     const val CHANGE_LABEL = "Change settings\u2026"
     const val AS_IS_LABEL = "Hand over as is"
     const val NO_ENGINE_LINE = "This session\u2019s engine isn\u2019t available here, so its settings can\u2019t be changed. Hand over as is instead."
-    const val MODE_SUBTITLE = "The new lead starts with this session's settings. Change anything, then hand over."
+    const val MODE_SUBTITLE = "The new session starts with this session's settings. Change anything, then hand over."
     const val MODE_CLOSE_LABEL = "Close \u2014 nothing is handed over"
     const val ISOLATION_NOTE = "Works in this folder \u2014 a handover never creates a worktree."
-    const val EXPLAINER_TITLE = "The current lead writes the first message"
+    const val EXPLAINER_TITLE = "This session writes the first message"
     const val PI_NOTE = "Pi can't hand over yet, so the new session won't be able to pass the run on."
     const val CTA_LABEL = "Hand over"
     const val PENDING_LABEL = "Handing over\u2026"
@@ -307,7 +307,7 @@ object Handover {
     /** handoverInterruptTitle: Interrupt's description per stage; null when the stage has no running turn to interrupt. */
     fun interruptTitle(key: StageKey): String? = when (key) {
         StageKey.RequestedQueued -> "Interrupt the current turn \u2014 the handover instruction then runs"
-        StageKey.RequestedWriting -> "Interrupt \u2014 the lead stops before writing its handover prompt, so the handover ends"
+        StageKey.RequestedWriting -> "Interrupt \u2014 this session stops before writing its handover prompt, so the handover ends"
         StageKey.Scheduled -> "Interrupt the current turn \u2014 the handover then starts right away"
         else -> null
     }
