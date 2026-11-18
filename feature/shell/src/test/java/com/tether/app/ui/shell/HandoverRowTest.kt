@@ -64,7 +64,7 @@ class HandoverRowTest {
         show(Handover.MenuState.Blocked(reason))
         val node = rule.onNodeWithTag(ShellTags.HandoverRow).fetchSemanticsNode()
         val text = node.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString(" ") { it.text }
-        assertTrue(text, text.contains("Hand over to a new lead") && text.contains(reason))
+        assertTrue(text, text.contains("Hand over to a new session") && text.contains(reason))
         assertEquals(androidx.compose.ui.semantics.Role.Button, node.config.getOrNull(SemanticsProperties.Role))
         assertTrue("disabled", node.config.contains(SemanticsProperties.Disabled))
         // Focusable, so a keyboard and TalkBack still reach it (it is never removed or hidden).

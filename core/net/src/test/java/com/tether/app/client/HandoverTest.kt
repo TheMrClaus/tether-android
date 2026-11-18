@@ -9,6 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** ta-ozn2.3: the pure rules, ported from lib/handover-ui.mjs at fe4aa8c0. */
+// Copy pins re-pinned to "new session" / "this session" wording: issue #303, owner instruction 2026-11-18 (generic user-visible copy).
 class HandoverTest {
     private fun s(id: String = "a", name: String = id, block: (AgentSession) -> AgentSession = { it }) =
         block(AgentSession(id = id, provider = "claude", name = name, cwd = "/w", status = "idle", startedAt = 1, updatedAt = 1))
@@ -21,7 +22,7 @@ class HandoverTest {
     @Test fun everyServerCodeHasItsCopy() {
         val table = mapOf(
             "unknown_session" to Handover.GENERIC_REASON,
-            "ineligible_source" to "Only a top-level lead can hand over.",
+            "ineligible_source" to "Only a top-level session can hand over.",
             "read_only" to "Read-only — Tether isn't driving this session.",
             "archived" to "Archived sessions can't hand over.",
             "already_handed_off" to "Already handed off to another session.",
@@ -59,9 +60,9 @@ class HandoverTest {
         val a = s("a") { it.copy(handedOffTo = "b", readOnly = true) }
         assertEquals(MenuState.Blocked("Already handed off to Successor."), state(a, all = listOf(a, b)))
         assertEquals(MenuState.Blocked("Read-only — Tether isn't driving this session."), state(s { it.copy(readOnly = true, parentSessionId = "p") }))
-        assertEquals(MenuState.Blocked("Only a top-level lead can hand over."), state(s { it.copy(parentSessionId = "p", runtimeArchived = true) }))
+        assertEquals(MenuState.Blocked("Only a top-level session can hand over."), state(s { it.copy(parentSessionId = "p", runtimeArchived = true) }))
         for (via in listOf("api-agent", "delegate", "adopted")) {
-            assertEquals(via, MenuState.Blocked("Only a top-level lead can hand over."), state(s { it.copy(createdVia = JsonPrimitive(via)) }))
+            assertEquals(via, MenuState.Blocked("Only a top-level session can hand over."), state(s { it.copy(createdVia = JsonPrimitive(via)) }))
         }
         assertEquals(MenuState.Enabled, state(s { it.copy(createdVia = JsonPrimitive("handoff")) }))
         assertEquals(MenuState.Blocked("Archived sessions can't hand over."), state(s { it.copy(runtimeArchived = true, handoverBlockedReason = JsonPrimitive("locked")) }))

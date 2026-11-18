@@ -61,9 +61,9 @@ class HandoverUiBehaviourTest {
             }
         }
         rule.waitForIdle()
-        rule.onNodeWithText("Hand this session over to a new lead?").assertExists()
+        rule.onNodeWithText("Hand this session over to a new session?").assertExists()
         rule.onNodeWithText(
-            "Tether will ask the current lead to write a handover prompt and stop. A new session with the same settings and permissions " +
+            "Tether will ask this session to write a handover prompt and stop. A new session with the same settings and permissions " +
                 "will take over the run from that prompt. The current session becomes read-only.",
         ).assertExists()
         rule.onNodeWithTag(HANDOVER_CANCEL_TAG).assertIsFocused()
@@ -169,8 +169,8 @@ class HandoverUiBehaviourTest {
         rule.setContent(composer(ComposerFixtures.session, underWay = true))
         rule.waitForIdle()
         rule.onNodeWithTag("handoff-notice-pending").assertExists()
-        rule.onNodeWithText("Handover under way — a new lead takes over when this lead finishes.").assertExists()
-        rule.onNodeWithText("Stop cancels it · new messages go to the new lead.").assertExists()
+        rule.onNodeWithText("Handover under way — a new session takes over when this session finishes.").assertExists()
+        rule.onNodeWithText("Stop cancels it · new messages go to the new session.").assertExists()
         rule.onAllNodes(hasSetTextAction()).assertCountEquals(1)
     }
 
