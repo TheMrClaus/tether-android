@@ -180,4 +180,22 @@ class FileLinkDetectionTest {
         assertTrue(parseInline("![shot](/tmp/a.png)").single() is MdInline.Image)
         assertEquals(listOf(MdInline.Span(listOf(MdInline.Text("shot")))), parseInline("![shot](ftp://h/x.png)"))
     }
+
+    // ---- the server's existence answer ----------------------------------------------------------
+
+    @Test fun onlyAnExplicitFalseDropsARelativeMention() {
+        fun with(answer: Boolean?) =
+            FileLinks.detect("src/a.kt", FileLinkSource.Code, cwd, exists = { answer }).map { it.path }
+        assertEquals(listOf("/w/p/src/a.kt"), with(true))
+        assertEquals(listOf("/w/p/src/a.kt"), with(null))
+        assertEquals(emptyList<String>(), with(false))
+    }
+
+    @Test fun theAnswerIsAskedForTheResolvedAbsolutePathAndNeverForAnAbsoluteMention() {
+        val asked = ArrayList<String>()
+        val found = FileLinks.detect("`../x.md`", FileLinkSource.Code, cwd, exists = { asked += it; true }) +
+            FileLinks.detect("/home/u/a.png", FileLinkSource.Text, cwd, exists = { asked += it; false })
+        assertEquals(listOf("/w/x.md"), asked)
+        assertEquals(listOf("/home/u/a.png"), found.map { it.path }.drop(found.size - 1))
+    }
 }

@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filter
@@ -115,6 +116,10 @@ fun ChatScreen(
     val context = LocalContext.current
     val serverUrl by vm.client.serverUrl.collectAsStateWithLifecycle()
     val mediaLoader = remember(vm.client, serverUrl) { ToolMediaRepository(vm.client.toolMedia, context.cacheDir, serverUrl, files = vm.client.files, remote = HttpPublicImages()) }
+    // A relative file mention links only unless the server says its file is missing (POST /api/files/exists).
+    val mentionScope = remember(vm.client, serverUrl) { kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO) }
+    androidx.compose.runtime.DisposableEffect(mentionScope) { onDispose { mentionScope.cancel() } }
+    val mentionExistence = remember(mentionScope) { MentionExistence(vm.client.files, mentionScope) }
     // ta-coik.68: the session's playing clips live outside composition (a rotation keeps them; the transcript
     // scrolls them away without stopping them) and are released on leaving the session, sign-out and a server switch.
     val toolClips = viewModel(key = "tool-clips") {
@@ -432,7 +437,7 @@ fun ChatScreen(
             floor = if (transcriptShown) spacingNow.padding.calculateTopPadding() + spacingNow.padding.calculateBottomPadding() else 0.dp,
             wellColor = if (transcriptShown) chatWellColor(t) else androidx.compose.ui.graphics.Color.Unspecified,
             transcript = {
-            CompositionLocalProvider(LocalToolMediaLoader provides mediaLoader, LocalToolClips provides toolClips.registry, LocalCardStates provides cardStates) {
+            CompositionLocalProvider(LocalToolMediaLoader provides mediaLoader, LocalToolClips provides toolClips.registry, LocalCardStates provides cardStates, LocalMentionExistence provides mentionExistence) {
             when {
                 session == null -> EmptyCentered(
                     title = "No session selected",

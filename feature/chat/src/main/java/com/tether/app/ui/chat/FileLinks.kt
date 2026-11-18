@@ -40,7 +40,7 @@ internal enum class FileLinkSource { Text, Code }
 
 /**
  * ta-9jnm: the detector for a file path in agent prose (the extension lists are public so the shell can check them against the file browser's). Pure and lexical: no network, no file system.
- * A path is only ever a candidate; the server decides at tap time (its words are shown verbatim).
+ * A path is only ever a candidate; the server decides at tap time (its words are shown verbatim). A relative mention may also be dropped by an explicit server answer that the file is missing (see [detect]).
  */
 object FileLinks {
     /** At most this many links are drawn in one run of prose. */
@@ -77,8 +77,18 @@ object FileLinks {
      * The links in [text]. [Text][FileLinkSource.Text]: every space, tab, line-feed or no-break-space
      * separated token. [Code][FileLinkSource.Code]: the whole trimmed span. A relative path
      * only links from inline code, and only when [cwd] is known.
+     *
+     * [exists] answers, for the absolute path a relative mention resolves to, what the server said about it: an explicit
+     * `false` drops that mention (plain text); `true`, `null` (not known: pending, refused, unreachable, too long to ask)
+     * and no [exists] at all keep it, as drawn before. Absolute mentions and hrefs never consult it.
      */
-    internal fun detect(text: String, source: FileLinkSource, cwd: String, limit: Int = MAX_LINKS): List<FileLinkRange> {
+    internal fun detect(
+        text: String,
+        source: FileLinkSource,
+        cwd: String,
+        limit: Int = MAX_LINKS,
+        exists: ((String) -> Boolean?)? = null,
+    ): List<FileLinkRange> {
         if (limit <= 0) return emptyList()
         val out = ArrayList<FileLinkRange>()
         when (source) {
@@ -87,7 +97,7 @@ object FileLinks {
                 var e = text.length
                 while (s < e && text[s].isWhitespace()) s++
                 while (e > s && text[e - 1].isWhitespace()) e--
-                analyse(text, s, e, source, cwd)?.let(out::add)
+                analyse(text, s, e, source, cwd, exists)?.let(out::add)
             }
             FileLinkSource.Text -> {
                 var i = 0
@@ -95,7 +105,7 @@ object FileLinks {
                     while (i < text.length && isSeparator(text[i])) i++
                     val s = i
                     while (i < text.length && !isSeparator(text[i])) i++
-                    if (i > s) analyse(text, s, i, source, cwd)?.let(out::add)
+                    if (i > s) analyse(text, s, i, source, cwd, exists)?.let(out::add)
                 }
             }
         }
@@ -123,7 +133,7 @@ object FileLinks {
         return normalize(path)
     }
 
-    private fun analyse(text: String, from: Int, to: Int, source: FileLinkSource, cwd: String): FileLinkRange? {
+    private fun analyse(text: String, from: Int, to: Int, source: FileLinkSource, cwd: String, exists: ((String) -> Boolean?)?): FileLinkRange? {
         var s = from
         while (s < to && text[s] in LEADING) s++
         val e = stripTrailing(text, s, to)
@@ -141,7 +151,9 @@ object FileLinks {
             if (source != FileLinkSource.Code || cwd.isEmpty() || !cwd.startsWith("/")) return null
             if (path.endsWith("/") || !knownFile(path)) return null
             mention = mentionOf(path)
-            normalize("$cwd/$path") ?: return null
+            val abs = normalize("$cwd/$path") ?: return null
+            if (exists?.invoke(abs) == false) return null
+            abs
         }
         return FileLinkRange(s, e, resolved, mention)
     }

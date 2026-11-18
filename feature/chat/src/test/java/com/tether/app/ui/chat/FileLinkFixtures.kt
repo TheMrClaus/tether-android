@@ -63,8 +63,8 @@ object FileLinkFixtures {
 
 /** The transcript of [fixture] with [opener] provided (null: none), the way the shell hosts it. */
 @Composable
-internal fun FileLinkBoard(fixture: ChatFixtures.Folded, opener: WorkspaceFileLinks?, showFind: Boolean = false) {
-    CompositionLocalProvider(LocalWorkspaceFileOpener provides opener) {
+internal fun FileLinkBoard(fixture: ChatFixtures.Folded, opener: WorkspaceFileLinks?, showFind: Boolean = false, existence: MentionExistence? = null) {
+    CompositionLocalProvider(LocalWorkspaceFileOpener provides opener, LocalMentionExistence provides existence) {
         ChatTranscript(
             projection = fixture.projection,
             tree = fixture.tree,
@@ -83,12 +83,35 @@ fun ComposeContentTestRule.showFileLinks(
     wellHeight: Dp = WellHeightPhone,
     wellWidth: Dp? = null,
     layoutDirection: LayoutDirection = LayoutDirection.Ltr,
+    existence: MentionExistence? = null,
 ) {
     val fixture = FileLinkFixtures.folded(reply)
     setContent {
         CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
-            ChatHost(skin, wellHeight, wellWidth) { FileLinkBoard(fixture, opener) }
+            ChatHost(skin, wellHeight, wellWidth) { FileLinkBoard(fixture, opener, existence = existence) }
         }
     }
     waitForIdle()
+}
+
+/** A files service that answers `exists` from [present] (a path in it is true, any other false), or fails like [failure]. */
+internal class FakeExistsFiles(
+    private val present: Set<String> = emptySet(),
+    private val failure: com.tether.app.client.FilesResult.Failed? = null,
+    private val unanswered: Boolean = false,
+) : com.tether.app.client.WorkspaceFiles by com.tether.app.client.WorkspaceFiles.Unavailable {
+    val asked = java.util.concurrent.CopyOnWriteArrayList<List<String>>()
+
+    override suspend fun exists(paths: List<String>): com.tether.app.client.FilesResult<List<Boolean?>> {
+        asked += paths
+        failure?.let { return it }
+        return com.tether.app.client.FilesResult.Ok(paths.map { if (unanswered) null else it in present })
+    }
+}
+
+/** A checker whose answers for [paths] are already in (it asks on the calling thread, with no wait). */
+internal fun answeredExistence(files: com.tether.app.client.WorkspaceFiles, vararg paths: String): MentionExistence {
+    val existence = MentionExistence(files, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined), batchMs = 0)
+    paths.forEach(existence::request)
+    return existence
 }

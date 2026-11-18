@@ -68,6 +68,14 @@ class FileLinkRenderTest {
         assertEquals(FileLinkFixtures.OPENED.size, drawnLinks)
     }
 
+    @Test fun aMentionTheServerSaysIsMissingIsPlainAndAnExistingOneStaysALink() {
+        theme()
+        val line = parseMarkdown("`src/there.kt`, `src/gone.kt` and `/abs/kept.kt`").filterIsInstance<MdBlock.Paragraph>().flatMap { it.lines }.first()
+        val existence = answeredExistence(FakeExistsFiles(setOf("/w/p/src/there.kt")), "/w/p/src/there.kt", "/w/p/src/gone.kt")
+        val s = inlineAnnotated(line, t, type, 400, {}, null, FileLinkDraw(WorkspaceFileLinks(FileLinkFixtures.CWD) {}, existence = existence))
+        assertEquals(listOf("src/there.kt", "/abs/kept.kt"), s.getLinkAnnotations(0, s.length).sortedBy { it.start }.map { s.substring(it.start, it.end) })
+    }
+
     @Test fun aLinkCoversTheTokenWithoutItsPunctuation() {
         theme()
         val all = lines().flatMap { line ->

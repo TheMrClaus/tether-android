@@ -247,9 +247,12 @@ internal fun MdInlines(
     val pieces = remember(lines) { proseTextPieces(lines) }
     val fileHost = LocalFileLinkDraw.current
     val fileAnchor = LocalFileMentionAnchor.current
-    val texts: List<AnnotatedString?> = remember(pieces, t, type, weight, cursorKey, fileHost, fileAnchor) {
+    val existence = if (fileHost != null) LocalMentionExistence.current else null
+    // Read in composition: a stored answer rebuilds the prose, so a mention the server says is missing turns plain.
+    val existenceVersion = existence?.version
+    val texts: List<AnnotatedString?> = remember(pieces, t, type, weight, cursorKey, fileHost, fileAnchor, existence, existenceVersion) {
         val cursor = newCursor()
-        val files = fileHost?.let { FileLinkDraw(it, fileAnchor) }
+        val files = fileHost?.let { FileLinkDraw(it, fileAnchor, existence) }
         pieces.map { piece ->
             (piece as? ProsePiece.Text)?.let { p ->
                 buildAnnotatedString {
