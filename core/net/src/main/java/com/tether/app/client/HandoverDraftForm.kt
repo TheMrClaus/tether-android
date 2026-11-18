@@ -62,7 +62,7 @@ object HandoverDraftForm {
         val model = if (sourceModel.isNotEmpty()) canonical.ifEmpty { sourceModel } else ""
         val extraModel = if (sourceModel.isNotEmpty() && canonical.isEmpty()) sourceModel else null
         val known: JsArr = if (canonical.isNotEmpty()) models else JsArr.of(listOf(JsObj.of("value" to JsStr(model), "displayName" to JsStr(model))) + models.toList())
-        val effort = DraftForm.resolveReasoningEffortForModel(known, JsStr(model), JsStr(normalizeId(source.reasoningEffort)))
+        val effort = DraftForm.resolveReasoningEffortForModel(known, JsStr(model), JsStr(normalizeId(source.reasoningEffort)), JsStr(entry.provider))
         var mode = ""
         var current: CodexCurrent? = null
         when (entry.provider) {
@@ -155,7 +155,8 @@ object HandoverDraftForm {
         val model = f("model")
         if (model != seedModel) out["model"] = JsonPrimitive(model.ifEmpty { "default" })
         else if (model.isNotEmpty()) out["model"] = JsonPrimitive(model)
-        val effort = f("reasoningEffort")
+        // lib/draft-form.ts:952 effortToSend: nothing for a known-none Claude model (the remembered value stays in the form, unsent).
+        val effort = DraftForm.effortToSend(provider, entry.toDraftEntry()["models"], f("model"), f("reasoningEffort"))
         if (effort != seedEffort) out["reasoningEffort"] = JsonPrimitive(effort.ifEmpty { "default" })
         else if (effort.isNotEmpty()) out["reasoningEffort"] = JsonPrimitive(effort)
         val mode = f("mode")

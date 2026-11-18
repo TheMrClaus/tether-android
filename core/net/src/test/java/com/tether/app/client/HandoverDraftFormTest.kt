@@ -164,9 +164,11 @@ class HandoverDraftFormTest {
         "claude", "opus", "low", "bypassPermissions",
     )
 
-    @Test fun seedClaudeKeepsAnUnlistedModelAsExtraAndNeverPinsAnEffort() = assertSeed(
+    // #292 (lib/draft-form.ts:862, the 4th `provider` argument): a Claude model with no variants keeps the source's effort,
+    // so an unlisted model's own effort is carried, not dropped.
+    @Test fun seedClaudeKeepsAnUnlistedModelAsExtraAndItsEffort() = assertSeed(
         seed(entry("claude"), src { it.copy(model = "weird-model-9", reasoningEffort = "high", permissionMode = "acceptEdits") }),
-        "claude", "weird-model-9", "", "acceptEdits", extra = "weird-model-9",
+        "claude", "weird-model-9", "high", "acceptEdits", extra = "weird-model-9",
     )
 
     @Test fun seedCodexMatchingAPresetSelectsIt() {

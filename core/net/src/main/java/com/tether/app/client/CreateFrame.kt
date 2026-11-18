@@ -67,7 +67,8 @@ object CreateFrame {
         }
         val approvalsReviewer = if (isCodex && (codexPreset["approvalsReviewer"] as? JsStr)?.value == "auto_review") "auto_review" else null
         val model = form.s("model")
-        val effort = form.s("reasoningEffort")
+        // use-draft-composer.ts:575 effortToSend: nothing for a known-none Claude model (the remembered value stays in the form, unsent).
+        val effort = DraftForm.effortToSend(provider, entry.toDraftEntry()["models"], model, form.s("reasoningEffort"))
         return ClientMessage.Create(
             provider = provider,
             cwd = form.s("cwd"),
@@ -115,6 +116,8 @@ fun ProviderCatalogEntry.toDraftEntry(): JsObj = JsObj.of(
                 "value" to JsStr(m.value),
                 "displayName" to JsStr(m.displayName),
                 "resolvedModel" to m.resolvedModel?.let(::JsStr),
+                "supportsEffort" to m.supportsEffort?.let { JsBool.of(it) },
+                "supportedEffortLevels" to m.supportedEffortLevels?.let { ls -> JsArr.of(ls.map(::JsStr)) },
                 "variants" to m.variants?.let { vs -> JsArr.of(vs.map { v -> JsObj.of("value" to JsStr(v.value), "label" to JsStr(v.label)) }) },
             )
         },

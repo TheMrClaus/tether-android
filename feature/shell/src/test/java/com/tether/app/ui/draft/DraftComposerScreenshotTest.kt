@@ -85,6 +85,12 @@ enum class OptionsShot(val id: String) {
     Claude("draft-options-claude"),
     Codex("draft-options-codex"),
     Opencode("draft-options-opencode"),
+
+    /** #292: a Claude model the server reports as having no effort: the Effort row stays, disabled, with the hint. */
+    ClaudeNone("draft-options-claude-none"),
+
+    /** #292: a Claude model with no levels and no signal (a data gap): a Default-only Effort, no hint. */
+    ClaudeGap("draft-options-claude-gap"),
 }
 
 /**
@@ -95,6 +101,8 @@ enum class SettingsShot(val id: String, val options: OptionsShot, val view: Draf
     Hub("draft-settings-hub", OptionsShot.Claude, DraftSettingsView.Root),
     CodexMode("draft-settings-codex-mode", OptionsShot.Codex, DraftSettingsView.Mode),
     OpencodeMode("draft-settings-opencode-mode", OptionsShot.Opencode, DraftSettingsView.Mode),
+    HubNone("draft-settings-hub-none", OptionsShot.ClaudeNone, DraftSettingsView.Root),
+    HubGap("draft-settings-hub-gap", OptionsShot.ClaudeGap, DraftSettingsView.Root),
 }
 
 enum class DraftShot(val id: String) {
@@ -153,6 +161,8 @@ private class Seed(shot: DraftShot, val browser: BrowserShot? = null, val option
                     model.selectProviderAndModel("claude", "m1")
                     check(model.selectEffort("high"))
                 }
+                OptionsShot.ClaudeNone -> model.selectProviderAndModel("claude", "m3")
+                OptionsShot.ClaudeGap -> model.selectProviderAndModel("claude", "m2")
                 OptionsShot.Codex -> {
                     model.selectProviderAndModel("codex", "m1")
                     check(model.selectMode("auto-review", "codex"))

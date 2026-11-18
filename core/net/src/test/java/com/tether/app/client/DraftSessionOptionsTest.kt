@@ -159,7 +159,9 @@ class DraftSessionOptionsTest {
         val opus = options("claude", "opus")
         assertEquals(listOf("low", "medium", "high"), opus.effort!!.options.map { it.value })
         assertNull("untouched: no row is current (the pill reads Default)", opus.effort!!.current)
-        assertNull("a model with no variant hides Effort", options("claude", "haiku").effort)
+        // #292: Claude is never hidden: a model with no variant and no signal is a Default-only select (the gap).
+        assertEquals("a Claude model with no variant keeps a Default-only Effort", listOf(""), options("claude", "haiku").effort!!.options.map { it.value })
+        assertNull("another provider with no variant has none", options("opencode", "oc").effort)
         // issue #44: one variant is enough.
         assertEquals(listOf("high"), options("codex", "gpt-5").effort!!.options.map { it.value })
         // An untouched model ("") uses the default row, else the first row.
