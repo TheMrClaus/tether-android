@@ -172,7 +172,7 @@ class EnginesBehaviourTest {
         assertEquals("codex", editable(ServerSetting.CodexCommand))
         assertEquals("/srv/homes/codex", editable(ServerSetting.CodexHome))
         select(EngineCard.Claude)
-        assertTrue(texts().any { it.startsWith("Full wrapper command — its last token is the claude binary, e.g. jean-claude run -- claude.") })
+        assertTrue(texts().any { it.startsWith("Full wrapper command — its last token is the claude binary. Applies to every spawned session.") })
         tag(EngineTags.switch(EngineCard.Claude)).assertIsOn()
         select(EngineCard.Pi)
         tag(EngineTags.switch(EngineCard.Pi)).assertIsOff()

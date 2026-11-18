@@ -290,13 +290,9 @@ private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding
                 val caption = if (view.forced(launch)) {
                     AnnotatedString(ServerRowCopy.SET_BY_ENV)
                 } else {
-                    buildAnnotatedString {
-                        append("Full wrapper command — its last token is the claude binary, e.g. ")
-                        withStyle(SpanStyle(fontFamily = type.mono)) { append(EngineRows.LAUNCH_EXAMPLE) }
-                        append(". Applies to every spawned session.")
-                    }
+                    AnnotatedString("Full wrapper command — its last token is the claude binary. Applies to every spawned session.")
                 }
-                EngineValueRow(engine, launch, view, binding, narrow, title = EngineRows.LAUNCH, caption = caption, placeholder = EngineRows.LAUNCH_EXAMPLE)
+                EngineValueRow(engine, launch, view, binding, narrow, title = EngineRows.LAUNCH, caption = caption, placeholder = "")
             }
         }
     }
