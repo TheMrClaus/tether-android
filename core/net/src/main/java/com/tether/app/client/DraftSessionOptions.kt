@@ -1,6 +1,8 @@
 package com.tether.app.client
 
 import com.tether.app.protocol.helpers.CodexModePresets
+import com.tether.app.protocol.helpers.DraftForm
+import com.tether.app.protocol.helpers.get
 import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.protocol.tree.JsStr
@@ -24,7 +26,7 @@ import com.tether.app.protocol.tree.JsStr
 data class DraftSessionOptions(
     /** The picked row's engine ("" while no row is picked). */
     val provider: String,
-    /** The Effort select, or null when the selected model offers no variant. */
+    /** The Effort select, or null when it is absent (another provider with no variant) or known-none ([effortNoneHint]). */
     val effort: SelectControl?,
     /** The Mode select, or null for a provider with no Mode row (or no row picked). */
     val mode: SelectControl?,
@@ -34,9 +36,11 @@ data class DraftSessionOptions(
     val modeDanger: Boolean,
     /** opencode's standalone Auto chip (issue #48), or null where Auto is a Mode row or not offered. */
     val auto: AutoToggle?,
+    /** #292 (owner ruling D2): the hint of the present-but-disabled Effort row of a Claude model KNOWN to have no effort; null otherwise. */
+    val effortNoneHint: String? = null,
 ) {
     /** draft-composer.tsx `hasOtherSettings` minus Model: the phone's settings chip is drawn. */
-    val hasSettings: Boolean get() = effort != null || mode != null
+    val hasSettings: Boolean get() = effort != null || effortNoneHint != null || mode != null
 
     /**
      * The elevated posture in force, in words, for the phone's settings chip (app addition: the web
@@ -121,15 +125,26 @@ object DraftSessionOptionsModel {
         // draft-composer.tsx:153: the form's mode as it is (a value no row lists draws as itself).
         val mode = (form["mode"] as? JsStr)?.value.orEmpty()
 
-        val variants = offeredEfforts(entry, model)
-        val effortControl = if (variants.isEmpty()) {
-            null
-        } else {
-            SelectControl(
+        // lib/draft-form.ts draftEffortState + draft-composer.tsx:177-189 (#292, owner ruling D2): never hidden for a Claude model.
+        val state = DraftForm.draftEffortState(provider, entry.toDraftEntry()["models"], model)
+        val effortControl = when (state) {
+            is DraftForm.EffortState.Levels -> SelectControl(
                 value = effort,
-                options = variants.map { v -> ControlOption(v.value, LabelText.label(v.label).ifEmpty { LabelText.visibleValue(v.value) }) },
+                options = state.variants.toList().map { v ->
+                    val value = (v["value"] as? JsStr)?.value.orEmpty()
+                    val label = (v["label"] as? JsStr)?.value.orEmpty()
+                    ControlOption(value, LabelText.label(label).ifEmpty { LabelText.visibleValue(value) })
+                },
             )
+            // A gap makes no claim about the model: Default plus the remembered value when there is one.
+            DraftForm.EffortState.Gap -> SelectControl(
+                value = effort,
+                options = listOf(ControlOption("", "Default")) +
+                    if (effort.isEmpty()) emptyList() else listOf(ControlOption(effort, LabelText.label(effort).ifEmpty { LabelText.visibleValue(effort) })),
+            )
+            DraftForm.EffortState.None, DraftForm.EffortState.Absent -> null
         }
+        val noneHint = if (state == DraftForm.EffortState.None) DraftForm.EFFORT_NONE_HINT else null
 
         val rows = DraftModes.options(provider)
         val shown = DraftModes.display(provider, mode)
@@ -141,6 +156,7 @@ object DraftSessionOptionsModel {
         return DraftSessionOptions(
             provider = provider,
             effort = effortControl,
+            effortNoneHint = noneHint,
             mode = modeControl,
             modeAriaLabel = if (provider == "codex") CODEX_ARIA else PERMISSION_ARIA,
             modeDanger = current?.danger == true,
@@ -150,8 +166,8 @@ object DraftSessionOptionsModel {
 
     /**
      * draft-composer.tsx:119-125 effortVariants: the variants of the model whose value is [model],
-     * else the CLI-default row ("" or "default"), else the first row; none when that row lists none
-     * (the Effort control is then hidden). Every variant as the catalog sends it.
+     * else the CLI-default row ("" or "default"), else the first row; none when that row lists none.
+     * Every variant as the catalog sends it. (The control itself follows [DraftForm.draftEffortState], #292.)
      */
     fun offeredEfforts(entry: ProviderCatalogEntry, model: String): List<com.tether.app.protocol.ModelVariantOption> {
         val models = entry.models

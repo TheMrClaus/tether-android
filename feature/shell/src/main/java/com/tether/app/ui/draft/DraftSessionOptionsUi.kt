@@ -74,6 +74,7 @@ import com.tether.app.ui.chat.ControlOptionRow
 import com.tether.app.ui.chat.ControlPill
 import com.tether.app.ui.chat.ControlSelect
 import com.tether.app.ui.chat.HubRow
+import com.tether.app.ui.chat.UnavailableHubRow
 import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.LocalKeyboardInset
@@ -159,6 +160,20 @@ internal fun DraftLiveRow(inputs: DraftSheetInputs, actions: DraftSheetActions) 
                     lockCopy = null,
                     onSelect = actions.onSelectEffort,
                     emptyLabel = EFFORT_DEFAULT,
+                    testTag = DraftOptionsTags.Effort,
+                )
+            }
+        }
+        options.effortNoneHint?.let { hint ->
+            Named("Effort", Modifier.align(Alignment.CenterVertically)) {
+                // #292: a Claude model known to have no effort: the row stays, not choosable, the reason is its value.
+                ControlPill(
+                    label = hint,
+                    enabled = true,
+                    contentDescription = "Reasoning effort: $hint",
+                    onClick = {},
+                    chevron = false,
+                    unavailable = true,
                     testTag = DraftOptionsTags.Effort,
                 )
             }
@@ -449,6 +464,7 @@ fun DraftSettingsFrame(
                         options.effort?.let { effort ->
                             HubRow(TetherIcons.Brain, "Effort", effort.current?.label ?: EFFORT_DEFAULT) { state.view = DraftSettingsView.Effort }
                         }
+                        options.effortNoneHint?.let { hint -> UnavailableHubRow(TetherIcons.Brain, "Effort", hint) }
                         options.mode?.let { mode ->
                             val value = if (autoOn) AUTO_LABEL else mode.current?.label.orEmpty()
                             HubRow(TetherIcons.Shield, "Mode", value, danger = autoOn || options.modeDanger) { state.view = DraftSettingsView.Mode }

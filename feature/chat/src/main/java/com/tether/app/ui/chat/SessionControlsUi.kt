@@ -363,6 +363,11 @@ fun ControlPill(
     labelInName: Boolean = false,
     /** ta-y3dw (opt-in): the click action's label; null keeps [label]. */
     clickLabel: String? = null,
+    /**
+     * #292 (`.chat-mode-select.is-unavailable`, aria-disabled): present and focusable but not choosable, the text in
+     * `--muted` at full opacity (never dimmed, so the reason stays readable); a tap does nothing.
+     */
+    unavailable: Boolean = false,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -370,6 +375,7 @@ fun ControlPill(
     val pressed by interaction.collectIsPressedAsState()
     val shape = RoundedCornerShape(999.dp)
     val ink = when {
+        unavailable -> t.muted
         danger -> t.warning
         active -> t.violetDeep
         else -> t.white
@@ -386,7 +392,7 @@ fun ControlPill(
                 this.contentDescription = contentDescription
                 stateDescription?.let { this.stateDescription = it }
                 if (labelInName) this.text = AnnotatedString(label)
-                if (!enabled) disabled() else onClick(clickLabel ?: label) { onClick(); true }
+                if (!enabled || unavailable) disabled() else onClick(clickLabel ?: label) { onClick(); true }
                 testTag?.let { this.testTag = it }
             },
         contentAlignment = Alignment.Center,
@@ -1012,6 +1018,48 @@ internal fun SessionSettingsSheet(
 
 @Composable
 private fun t() = LocalTetherTokens.current
+
+/**
+ * #292 (`.settings-sheet-row.is-unavailable`, aria-disabled): the Effort row of a Claude model KNOWN to have none. The
+ * [HubRow] in the same place and at the same height, with the hint as a full-contrast sub-label under the label and an
+ * em dash as the value; icon, label, value and chevron at the sheet's disabled opacity. A tap does nothing.
+ */
+@Composable
+fun UnavailableHubRow(icon: ImageVector, label: String, hint: String) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 58.dp)
+            .clearAndSetSemantics {
+                role = Role.Button
+                contentDescription = "$label: $hint"
+                disabled()
+                testTag = "sheet-row-$label"
+            }
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(t.css.spaceSm),
+    ) {
+        Box(Modifier.width(20.dp).graphicsLayer { alpha = DisabledOpacity }, contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = type.body.copy(fontSize = 14.sp, fontWeight = FontWeight(600), lineHeight = 1.2.em), color = t.white, modifier = Modifier.graphicsLayer { alpha = DisabledOpacity })
+            Text(
+                hint,
+                style = type.body.copy(fontSize = 11.2.sp, fontWeight = FontWeight(500), lineHeight = 1.3.em),
+                color = t.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag("sheet-row-$label-hint"),
+            )
+        }
+        Text("\u2014", style = type.body.copy(fontSize = 12.sp, fontWeight = FontWeight(500)), color = t.muted, modifier = Modifier.graphicsLayer { alpha = DisabledOpacity })
+        Icon(TetherIcons.ChevronRight, contentDescription = null, tint = t.faint, modifier = Modifier.size(16.dp).graphicsLayer { alpha = DisabledOpacity })
+    }
+}
 
 /**
  * `.settings-sheet-row`: a raised pill row (≥44dp, `--radius-md`, `--graphite-raised`, 1px
