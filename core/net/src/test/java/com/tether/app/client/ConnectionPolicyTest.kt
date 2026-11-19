@@ -49,7 +49,7 @@ class ConnectionPolicyTest {
     fun windowAcceptsFloorToServerVersionInclusive() {
         assertNull(Compatibility.evaluate(143, 143))
         assertNull(Compatibility.evaluate(145, 100))
-        // W2: the server numbers 163 (agentHandoverChoice) and 164 (handoverChange) are additive and keep the native floor: still served.
+        // Server versions 163 (agent handover choice) and 164 (handover change) are additive and keep the app's minimum: still served.
         assertNull(Compatibility.evaluate(163, 129))
         assertNull(Compatibility.evaluate(164, 129))
         assertNull(Compatibility.evaluate(serverProtocolVersion = null, nativeProtocolFloor = 129))
