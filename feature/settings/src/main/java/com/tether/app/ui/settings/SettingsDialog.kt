@@ -210,6 +210,7 @@ fun SettingsScreen(
     // a write runs on this scope so an answer after Back closed its dialog still lands.
     val secretsState = rememberServerSecretsState(origin)
     val secretsScope = androidx.compose.runtime.rememberCoroutineScope()
+    val steerProtocol by client.serverProtocolVersion.collectAsStateWithLifecycle()
     val serverBinding = ServerSettingsBinding(
         // r2: signed out (no origin), no settings: the client also drops the frames then.
         settings = view,
@@ -219,6 +220,7 @@ fun SettingsScreen(
         replies = replies,
         secrets = secretsState,
         scope = secretsScope,
+        serverProtocol = steerProtocol,
     )
     // ta-q6p: the custom-providers registry, asked for on open (the web asks on connect); every
     // write goes through the client's set-providers check, built from its newest list.

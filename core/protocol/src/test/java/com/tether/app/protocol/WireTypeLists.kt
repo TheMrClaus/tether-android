@@ -28,6 +28,8 @@ object WireTypeLists {
         "overview-delta", "overview-snapshot",
         // v154 (tether-android#6): the agent supervisor's down/up; not in the 19c56e25 corpus or the matrix
         "supervisor_status",
+        // v165 (steer a queued message)
+        "queue_steer_result",
     )
 
     val CLIENT_TYPES: Set<String> = setOf(
@@ -46,18 +48,23 @@ object WireTypeLists {
         "worktree-diff", "worktree-inspect", "worktree-logs", "worktree-script", "worktree-scripts",
         // v131 (opt-in Overview feed)
         "overview-subscribe", "overview-unsubscribe",
+        // v165 (steer a queued message)
+        "queue-steer",
     )
 
     /**
      * Types added after the reducer/helpers base (887c222): none now. The wire corpus is re-vendored at 19c56e25 (v152), which
      * carries them all (W48), so both SINCE_PARITY_BASE_* sets are empty and stay as the hook for the next re-vendor.
      */
-    val SINCE_PARITY_BASE_SERVER: Set<String> = setOf("supervisor_status")
+    val SINCE_PARITY_BASE_SERVER: Set<String> = setOf("supervisor_status", "queue_steer_result")
     /**
      * Server types newer than docs/parity/matrix.json, which is generated at tether 29537e0 (PROTOCOL 143) and so lacks the v144
      * `server-settings-result`; it joins the matrix when the matrix is rebuilt at a newer base (the S0 corpus slice).
      */
-    val SINCE_MATRIX_SERVER: Set<String> = setOf("server-settings-result", "supervisor_status")
+    val SINCE_MATRIX_SERVER: Set<String> = setOf("server-settings-result", "supervisor_status", "queue_steer_result")
 
-    val SINCE_PARITY_BASE_CLIENT: Set<String> = emptySet()
+    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("queue-steer")
+
+    /** Client types newer than docs/parity/matrix.json (PROTOCOL 143): the v165 `queue-steer`. */
+    val SINCE_MATRIX_CLIENT: Set<String> = setOf("queue-steer")
 }

@@ -61,6 +61,8 @@ data class ServerSettingsBinding(
     val scope: kotlinx.coroutines.CoroutineScope? = null,
     /** v144: a password change signs the other sessions out: the Devices tab's Signed-in sessions are read again. */
     val onPasswordChanged: () -> Unit = {},
+    /** v165: the CONNECTED SERVER's protocol; the "Messages sent during a turn" row is drawn only at 165 or above. */
+    val serverProtocol: Int? = null,
 ) {
     /** v144: send the open credential dialog's write to the server this binding was drawn from. */
     fun submitSecret() {
@@ -133,6 +135,12 @@ object AdvancedRows {
     val warmSweepMs = ServerRow(ServerSetting.WarmSweepMs, "Sweep interval (ms)", "How often the eviction sweeper runs", "How frequently Tether checks for idle or expired warm sessions. Lower values detect idle sessions faster but use more CPU. Requires restart. Default: 60000 (1 min).", "60000")
     val shutdownDrainMs = ServerRow(ServerSetting.ShutdownDrainMs, "Shutdown drain (ms)", "Grace period for background work on shutdown", "How long to wait for background tasks to finish during a graceful server shutdown. Set to 0 to shut down immediately. Requires restart. Default: 0.", "0")
     val claudeModelFallback = ServerRow(ServerSetting.ClaudeModelFallback, "Claude model fallback", "Whether the Claude CLI may switch a turn to a fallback model", "When the model you picked fails with a capacity or availability error, the Claude CLI can re-run the rest of that turn on the fallback model configured in your Claude settings (fallbackModel). 'Let the CLI decide' keeps that behaviour (the default); Tether shows a notice whenever it happens. 'Never — fail the turn' sets CLAUDE_CODE_NO_MODEL_FALLBACK so the turn fails visibly instead of being downgraded. Applies when a Claude engine next starts: a warm session keeps its current CLI until it is evicted or restarted. Issue #179.")
+    val queueSteerMode = ServerRow(
+        ServerSetting.QueueSteerMode,
+        "Messages sent during a turn",
+        "Steer them in at the agent\u2019s next step, or hold each one until you press Steer",
+        "Steer automatically (the default) puts a message you queue during a turn into that turn at the agent\u2019s next step, on harnesses that can take it. Hold until I press Steer keeps it queued until you press Steer on its row, or until the turn ends. Either way every waiting message has its own Steer button. Messages with attachments, and harnesses that cannot steer, offer Interrupt and send instead.",
+    )
     val autoArchiveIdleDays = ServerRow(ServerSetting.AutoArchiveIdleDays, "Auto-archive idle sessions (days)", "Archive sessions idle longer than this (0 = off)", "Unattended version of Archive idle sessions. Skips pinned sessions and any with a turn in progress, a pending approval or question, or background work. Each archived session gets a journal notice and stays restorable. Archived sessions beyond the newest 100 are still pruned by retention.", "0")
     val archiveOnMerge = ServerRow(ServerSetting.ArchiveOnMerge, "Archive on merge", "Archive a session when its linked pull request is observed merged", "When on, a session whose linked pull request is observed MERGED (on open or an explicit refresh in the inspector) is archived automatically, and its worktree is removed if it is clean and merged — the same rule a manual archive already applies. Off by default. Never fires on an ambiguous read: a failed PR lookup stays unknown, never merged. Applies immediately. Issue #159.")
 
@@ -163,6 +171,10 @@ object AdvancedRows {
 
     // lib/protocol.ts option lists as the Settings rows map them (settings-dialog.tsx 90fbb9f :2354-2355
     // keep `value` and `label` only, so no option is drawn as danger here).
+    val queueSteerModes = listOf(
+        ServerChoice("auto", "Steer automatically"),
+        ServerChoice("hold", "Hold until I press Steer"),
+    )
     val claudeModelFallbacks = listOf(
         ServerChoice("cli", "Let the CLI decide"),
         ServerChoice("never", "Never — fail the turn"),

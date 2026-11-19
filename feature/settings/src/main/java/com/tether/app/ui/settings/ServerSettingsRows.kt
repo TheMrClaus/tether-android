@@ -583,10 +583,12 @@ internal fun ServerSelectRow(
     description: String = row.description,
     tip: String = row.tip,
     label: String = row.label,
+    /** What an absent value means (the server's default), so the row shows it rather than an empty choice. */
+    fallback: String = "",
 ) {
     val s = row.setting
     val forced = view.forced(s)
-    val current = view.choice(s)
+    val current = view.choice(s).ifEmpty { fallback }
     SettingsRow(
         kind = RowKind.Server,
         narrow = narrow,

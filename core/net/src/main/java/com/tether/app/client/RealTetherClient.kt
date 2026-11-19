@@ -1859,6 +1859,8 @@ class RealTetherClient(
         changeRequestsState.value = emptyMap()
         worktreeLogsState.value = emptyMap()
         failedInterruptsState.value = emptyMap()
+        synchronized(lock) { steerSessions.clear() }
+        queueSteerStatesFlow.value = emptyMap()
         requestedGitFileDiffs.clear()
         sidebarSync.clear()
         createdState.value = null
@@ -3802,6 +3804,7 @@ class RealTetherClient(
             is ServerMessage.Event -> onEvent(webSocket, message)
             is ServerMessage.TurnsDetail -> onTurnsDetail(webSocket, message)
             is ServerMessage.InterruptResult -> onInterruptResult(webSocket, message)
+            is ServerMessage.QueueSteerResult -> onQueueSteerResult(webSocket, message)
             is ServerMessage.SupervisorStatus -> ifCurrent(webSocket) {
                 when (message.state) {
                     "down" -> supervisorDownState.value = true
@@ -5655,7 +5658,10 @@ class RealTetherClient(
     override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String): InterruptResult =
         interrupt(sessionId, expectedOrigin, expectedTurnId, stopBackground = false)
 
-    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String, stopBackground: Boolean): InterruptResult {
+    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String, stopBackground: Boolean): InterruptResult =
+        interrupt(sessionId, expectedOrigin, expectedTurnId, stopBackground, null)
+
+    override fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String, stopBackground: Boolean, queueId: String?): InterruptResult {
         if (sessionId.isEmpty()) return InterruptResult.Locked
         val result = synchronized(lock) {
             val ws = socket
@@ -5669,7 +5675,9 @@ class RealTetherClient(
             if (!isCurrentTurn(sessionStore.tree(sessionId), expectedTurnId)) return@synchronized InterruptResult.NotCurrentTurn
             // v156: `stopBackground` rides the frame only to a server that speaks it (tether lib/protocol-schema-lu.ts:296), read under the lock.
             val alsoStop = stopBackground && QueueWait.stopBackgroundSupported(serverProtocolVersionState.value)
-            if (!ws.send(ClientMessage.Interrupt(sessionId, alsoStop).encode())) return@synchronized InterruptResult.NotConnected
+            // v165: the row that is sent next rides the frame only to a server that speaks it; below 165 this is a plain interrupt.
+            val rowId = queueId?.takeIf { QueueWait.steerSupported(serverProtocolVersionState.value) }
+            if (!ws.send(ClientMessage.Interrupt(sessionId, alsoStop, rowId).encode())) return@synchronized InterruptResult.NotConnected
             val bound = interruptsBound.getOrPut(sessionId) { ArrayDeque() }
             if (bound.size >= INTERRUPTS_REMEMBERED) bound.removeFirst()
             bound.addLast(expectedTurnId)
@@ -5677,6 +5685,55 @@ class RealTetherClient(
         }
         if (result == InterruptResult.NotConnected) emitError(LINK_RECONNECTING)
         return result
+    }
+
+    private val queueSteerStatesFlow = MutableStateFlow<Map<String, QueueRowSteer>>(emptyMap())
+    override val queueSteerStates: StateFlow<Map<String, QueueRowSteer>> = queueSteerStatesFlow
+
+    /** queueId -> sessionId of the Steer presses in flight or refused, so [forgetQueueSteer] and an answer find their rows. Guarded by [lock]. */
+    private val steerSessions = HashMap<String, String>()
+
+    override fun queueSteer(sessionId: String, queueId: String): Boolean {
+        if (sessionId.isEmpty() || queueId.isEmpty()) return false
+        synchronized(lock) {
+            // Below 165 the server has no such frame: nothing is sent, as before this feature.
+            if (!QueueWait.steerSupported(serverProtocolVersionState.value)) return false
+            val ws = (if (socketOpen && handshakeDone && !haltedLocked()) socket else null) ?: return false
+            if (!ws.send(ClientMessage.QueueSteer(sessionId, queueId).encode())) return false
+            steerSessions[queueId] = sessionId
+            queueSteerStatesFlow.value = queueSteerStatesFlow.value + (queueId to QueueRowSteer.Pending)
+        }
+        return true
+    }
+
+    override fun forgetQueueSteer(sessionId: String) {
+        synchronized(lock) {
+            val gone = steerSessions.filterValues { it == sessionId }.keys
+            if (gone.isEmpty()) return
+            gone.forEach(steerSessions::remove)
+            queueSteerStatesFlow.value = queueSteerStatesFlow.value - gone
+        }
+    }
+
+    /**
+     * `queue_steer_result`: `not_steerable` marks the row refused (it stays queued and never interrupts by itself); `steered`
+     * (the row leaves through the journal events), `uncertain` (the journal holds the row) and `unavailable` (or a status this app
+     * does not know) clear the pending mark and change nothing else.
+     */
+    private fun onQueueSteerResult(webSocket: WebSocket, message: ServerMessage.QueueSteerResult) {
+        synchronized(lock) {
+            if (socket !== webSocket) return
+            when (QueueSteerStatus.of(message.status)) {
+                QueueSteerStatus.NotSteerable -> {
+                    steerSessions[message.queueId] = message.sessionId
+                    queueSteerStatesFlow.value = queueSteerStatesFlow.value + (message.queueId to QueueRowSteer.Refused)
+                }
+                else -> {
+                    steerSessions.remove(message.queueId)
+                    queueSteerStatesFlow.value = queueSteerStatesFlow.value - message.queueId
+                }
+            }
+        }
     }
 
     /** T6.7: [turnId] is [tree]'s open active turn (`activeTurnId`, its status not "done"). */

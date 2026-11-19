@@ -60,6 +60,8 @@ enum class ServerSetting(val key: String, val kind: SettingKind, val maxBytes: I
     ShutdownDrainMs("shutdownDrainMs", SettingKind.Number),
     MessageInterruptMode("messageInterruptMode", SettingKind.Choice),
     ClaudeModelFallback("claudeModelFallback", SettingKind.Choice),
+    /** v165: "auto" (default; a message queued during a turn goes in on its own) or "hold" (it waits for Steer or the turn end). */
+    QueueSteerMode("queueSteerMode", SettingKind.Choice),
     /** v142 (tether #244 part D): archive sessions idle longer than this many days, unattended; 0 = off (the default). */
     AutoArchiveIdleDays("autoArchiveIdleDays", SettingKind.Number),
     ArchiveOnMerge("archiveOnMerge", SettingKind.Toggle),
@@ -358,3 +360,9 @@ object ServerSettingsPatch {
     fun fits(setting: ServerSetting, value: String): Boolean =
         setting.maxBytes <= 0 || value.toByteArray(Charsets.UTF_8).size <= setting.maxBytes
 }
+
+/** v165: whether the connected server speaks Steer and the `queueSteerMode` setting (one gate with the Steer frame, [com.tether.app.protocol.helpers.QueueWait.steerSupported]). */
+fun queueSteerSupported(serverProtocol: Int?): Boolean = com.tether.app.protocol.helpers.QueueWait.steerSupported(serverProtocol)
+
+/** v165: what an absent `queueSteerMode` means: a message queued during a turn goes in on its own. */
+const val QUEUE_STEER_MODE_DEFAULT = "auto"

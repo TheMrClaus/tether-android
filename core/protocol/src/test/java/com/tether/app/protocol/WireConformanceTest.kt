@@ -153,7 +153,7 @@ class WireConformanceTest {
         val protocolVersion = TetherJson.parseToJsonElement(matrixFile.readText()).jsonObject["protocolVersion"]!!.jsonPrimitive.int
         assertTrue("the matrix was rebuilt (PROTOCOL $protocolVersion): empty WireTypeLists.SINCE_MATRIX_SERVER", protocolVersion <= 143)
         assertEquals("matrix.json now lists these: empty SINCE_MATRIX_SERVER", emptySet<String>(), WireTypeLists.SINCE_MATRIX_SERVER.intersect(kind("server-msg")))
-        assertEquals(kind("client-msg"), WireTypeLists.CLIENT_TYPES)
+        assertEquals(kind("client-msg"), WireTypeLists.CLIENT_TYPES - WireTypeLists.SINCE_MATRIX_CLIENT)
     }
 
     /** Optional: parse the live TS unions when TETHER_PROTOCOL_TS names lib/protocol.ts. */

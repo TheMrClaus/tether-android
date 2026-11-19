@@ -223,6 +223,16 @@ fun Composer(
     persistentSessions: Boolean = false,
     /** AW.3.3: Stop that also asks the server to stop background work (`stopBackground = true`); the box's commit only. */
     onInterruptStopBackground: (turnId: String) -> InterruptResult = onInterrupt,
+    /** v165: the `queueSteerMode` setting ("auto" or "hold"; null = automatic). Only read at a server speaking 165. */
+    queueSteerMode: String? = null,
+    /** v165: what a Steer press on each waiting row is doing (pending, or refused by the agent), by queue id. */
+    queueSteerStates: Map<String, com.tether.app.client.QueueRowSteer> = emptyMap(),
+    /** v165: Steer on one waiting row. */
+    onQueueSteer: (queueId: String) -> Unit = {},
+    /** v165: "Interrupt and send" on one waiting row: that row is the next turn. Defaults to a plain interrupt. */
+    onInterruptRow: (queueId: String, turnId: String) -> InterruptResult = { _, turnId -> onInterrupt(turnId) },
+    /** v165: the turn the refused rows were refused in ended (or the session changed). */
+    onForgetSteer: () -> Unit = {},
     modifier: Modifier = Modifier,
     /**
      * T7.4: the staged attachments of this session, staging picks, and the ONE send that carries
@@ -341,6 +351,9 @@ fun Composer(
     // unless the server said that interrupt failed: then they unlock for a retry.
     val interruptLock = liveness.interruptLock
         ?: if (activeTurn?.status == Vocab.TURN_CANCELLING && liveness.failedInterruptTurn != interruptTurnId) INTERRUPTING_LOCK_COPY else null
+    fun interruptRow(queueId: String, drawnFor: String) {
+        interruptRefusalCopy(onInterruptRow(queueId, drawnFor))?.let(::flash)
+    }
     fun interruptTurn(drawnFor: String, stopBackground: Boolean = false) {
         interruptRefusalCopy(if (stopBackground) onInterruptStopBackground(drawnFor) else onInterrupt(drawnFor))?.let(::flash)
     }
@@ -382,6 +395,10 @@ fun Composer(
     val stoppableCount = QueueWait.stoppableTotal(stoppable)
     // Delivery (spec §1 V5, §4.1a A): the engine can steer; and how many queued messages already went INTO this turn.
     val steerCapable = steerCapableEngine
+    // v165: every waiting row gets the action (not only the next one), and the setting may hold rows until Steer.
+    val steerEnabled = QueueWait.steerSupported(serverProtocol)
+    val steerHold = QueueWait.steerHeld(queueSteerMode, serverProtocol)
+    LaunchedEffect(interruptTurnId) { onForgetSteer() }
     val steeredInTurn = remember(activeTurn?.blocksById) { activeTurn?.blocksById?.values?.count { it.steered == true } ?: 0 }
     fun costSentence(alsoStop: QueueWait.BackgroundStoppable?) = listOf(
         QueueWait.interruptCostCopy(liveWork, stopFacts.foregroundCertain, stopFacts.backgroundVisible, stopFacts.backgroundSpared, stopFacts.backgroundTail, alsoStop),
@@ -398,7 +415,7 @@ fun Composer(
     val stopBoxShown = stopPanelOpen && stoppableCount > 0
     val stopChecked = stopBoxShown && stopOpen?.stopBackground == true
     val rowConfirmId = (openConfirm as? OpenConfirm.Row)?.takeIf { it.turnId == interruptTurnId && interruptLock == null }?.queueId
-    val confirmStale = openConfirm != null && !stopPanelOpen && (rowConfirmId == null || rowConfirmId != QueueWait.interruptAndSendRowId(projection?.queuedMessages.orEmpty()))
+    val confirmStale = openConfirm != null && !stopPanelOpen && (rowConfirmId == null || projection?.queuedMessages.orEmpty().none { it.queueId == rowConfirmId && QueueWait.rowOffersAction(it, steerEnabled, QueueWait.interruptAndSendRowId(projection?.queuedMessages.orEmpty())) })
     // AW.3.5 focus: keyboard input mode only; never the soft keyboard on touch.
     val inputModeManager = LocalInputModeManager.current
     val stopKeyFocus = remember { FocusRequester() }
@@ -1174,6 +1191,11 @@ fun Composer(
                         liveWork = liveWork,
                         interruptSendId = QueueWait.interruptAndSendRowId(projection?.queuedMessages.orEmpty()),
                         steerCapable = steerCapable,
+                        steerEnabled = steerEnabled,
+                        steerHold = steerHold,
+                        steerStates = queueSteerStates,
+                        onSteer = onQueueSteer,
+                        onInterruptRow = ::interruptRow,
                         provider = session?.provider,
                         steeredInTurn = steeredInTurn,
                         stopFacts = stopFacts,
@@ -1258,7 +1280,7 @@ fun Composer(
                         },
                         placeholder = when {
                             handoverHolding -> if (metrics.phone) com.tether.app.client.Handover.PLACEHOLDER_COARSE else com.tether.app.client.Handover.PLACEHOLDER_FINE
-                            busy -> if (steerCapable) PLACEHOLDER_BUSY_STEER else PLACEHOLDER_BUSY
+                            busy -> if (steerCapable && steerHold) PLACEHOLDER_BUSY_HOLD else if (steerCapable) PLACEHOLDER_BUSY_STEER else PLACEHOLDER_BUSY
                             else -> PLACEHOLDER_IDLE
                         },
                         enabled = session != null,

@@ -11,6 +11,10 @@ import com.tether.app.client.TetherClient
 internal class InterruptActions(
     val interrupt: (String) -> InterruptResult,
     val interruptStopBackground: (String) -> InterruptResult,
+    /** v165: "Interrupt and send" on ONE waiting row: the row's queue id, then the turn the button was drawn for. */
+    val interruptRow: (String, String) -> InterruptResult,
+    /** v165: Steer on ONE waiting row (its queue id). */
+    val steerRow: (String) -> Unit,
 )
 
 internal fun interruptActionsFor(client: TetherClient, sessionId: String?, drawnFor: String?): InterruptActions =
@@ -21,4 +25,12 @@ internal fun interruptActionsFor(client: TetherClient, sessionId: String?, drawn
         interruptStopBackground = { turnId ->
             if (sessionId != null) client.interrupt(sessionId, drawnFor, turnId, stopBackground = true) else InterruptResult.Locked
         },
+        interruptRow = { queueId, turnId ->
+            if (sessionId != null) client.interrupt(sessionId, drawnFor, turnId, stopBackground = false, queueId = queueId) else InterruptResult.Locked
+        },
+        steerRow = { queueId -> if (sessionId != null) client.queueSteer(sessionId, queueId) },
     )
+
+/** v165: the session's `queueSteerMode` ("auto" or "hold") out of the last `server-settings` frame; null = none seen (automatic). */
+internal fun queueSteerModeOf(frame: com.tether.app.protocol.ServerMessage.ServerSettings?): String? =
+    (frame?.settings?.get("queueSteerMode") as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content

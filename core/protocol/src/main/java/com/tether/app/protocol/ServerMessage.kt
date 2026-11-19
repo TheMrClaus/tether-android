@@ -390,6 +390,12 @@ sealed interface ServerMessage {
         val recordKey: String? get() = idempotencyKey ?: queueId
     }
 
+    /**
+     * v165 `queue_steer_result`: the answer to one `queue-steer`. [status] is "steered" | "not_steerable" | "uncertain" | "unavailable"
+     * (a client reads any other value as "unavailable"); [reason] is the server's short reason, when it gave one.
+     */
+    data class QueueSteerResult(val sessionId: String, val queueId: String, val status: String, val reason: String? = null) : ServerMessage
+
     /** v154 `supervisor_status`: the agent supervisor is [state] "down" or "up" (any other value is carried, acted on by none). */
     data class SupervisorStatus(val state: String) : ServerMessage
 
@@ -998,6 +1004,7 @@ private object ServerDecoders {
                 queueId = r.o.str("queueId"),
             )
         },
+        "queue_steer_result" to { r -> ServerMessage.QueueSteerResult(r.str("sessionId"), r.str("queueId"), r.str("status"), r.o.str("reason")) },
         "supervisor_status" to { r -> ServerMessage.SupervisorStatus(r.str("state")) },
         "overview-snapshot" to { r ->
             ServerMessage.OverviewSnapshot(
