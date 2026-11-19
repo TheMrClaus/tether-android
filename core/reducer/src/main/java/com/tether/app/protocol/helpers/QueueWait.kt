@@ -258,7 +258,7 @@ object QueueWait {
     const val QUEUED_STEER_COPY = "Queued on the server \u00B7 goes into this turn at the agent\u2019s next step"
     const val QUEUED_HOLD_COPY = "Queued on the server \u00B7 waits for Steer or the end of this turn"
     const val QUEUED_NOT_STEERED_COPY = "Queued on the server \u00B7 the agent could not take it into this turn; it sends when this turn ends"
-    const val NOT_STEERED_LEAD = "Not steered"
+    const val NOT_STEERED_LABEL = "Not steered"
     const val NOT_STEERED_META = "Not steered \u00B7 sends when this turn ends"
     const val HOLD_META = "Waits for Steer or the turn end"
 
@@ -408,7 +408,7 @@ object QueueWait {
             return QueueRowSummary(QueueRowGlyph.Clock, "To new session", QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message"), "Queued message", "Goes to the new session")
         }
         if (steerRefused) {
-            return QueueRowSummary(QueueRowGlyph.Clock, NOT_STEERED_LEAD, QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message, not steered"), "Queued message", NOT_STEERED_META)
+            return QueueRowSummary(QueueRowGlyph.Clock, NOT_STEERED_LABEL, QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message, not steered"), "Queued message", NOT_STEERED_META)
         }
         if (steer) {
             return QueueRowSummary(QueueRowGlyph.CornerDownRight, "Into this turn", QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message"), "Queued message", "Goes into this turn")

@@ -5,6 +5,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -120,6 +122,18 @@ class QueueSteerBehaviourTest {
         rule.onAllNodesWithTag(QUEUE_STEER_TAG).assertCountEquals(1)
         rule.onAllNodesWithTag(QUEUE_INTERRUPT_TAG).assertCountEquals(1)
         assertTrue("a refused steer never interrupts by itself", interrupts.isEmpty() && plainInterrupts.isEmpty())
+    }
+
+    @Test fun theSheetOfARefusedRowShowsTheNotSteeredWordsAndTheRefusedWaitLabel() {
+        show(ComposerFixtures.delivery(QueueSpec("a"), QueueSpec("b")))
+        rule.runOnIdle { states = mapOf("a" to QueueRowSteer.Refused) }
+        frames()
+        rule.openRowSheet(0)
+        frames()
+        rule.mainClock.advanceTimeBy(SETTLE_MS)
+        fun textOf(tag: String) = rule.onNodeWithTag(tag).fetchSemanticsNode().config.getOrNull(SemanticsProperties.Text)!!.joinToString("") { it.text }
+        assertEquals("Not steered · sends when this turn ends", textOf(QUEUE_SHEET_META_TAG))
+        assertEquals("Queued on the server · the agent could not take it into this turn; it sends when this turn ends", textOf(QUEUE_SHEET_WAIT_TAG))
     }
 
     @Test fun aSteerWaitingForItsAnswerCannotBePressedAgain() {

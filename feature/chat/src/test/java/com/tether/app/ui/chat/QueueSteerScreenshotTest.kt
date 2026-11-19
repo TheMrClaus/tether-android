@@ -15,7 +15,7 @@ import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /** v165 boards at the phone size (412 x 915 dp): the strip with Steer on every waiting row, in each mode, and the sheet's two footers. */
-enum class QueueSteerShot(val id: String) { StripAuto("strip-auto"), StripHold("strip-hold"), SheetSteer("sheet-steer"), SheetInterrupt("sheet-interrupt") }
+enum class QueueSteerShot(val id: String) { StripAuto("strip-auto"), StripHold("strip-hold"), SheetSteer("sheet-steer"), SheetInterrupt("sheet-interrupt"), SheetRefused("sheet-refused") }
 
 private val steerRows = listOf(
     QueuedMessage(queueId = "a", text = "Then fix the snapshot test and rerun only that suite."),
@@ -42,6 +42,16 @@ fun androidx.compose.ui.test.junit4.ComposeContentTestRule.snapQueueSteer(shot: 
                         steerEnabled = true,
                         steerHold = hold,
                         steerStates = if (hold) emptyMap() else mapOf("c" to QueueRowSteer.Refused),
+                    )
+                }
+                QueueSteerShot.SheetRefused -> {
+                    val message = steerRows[2]
+                    QueuedMessageSheetSurface(
+                        message = message,
+                        summary = QueueWait.queueRowSummary(message, steer = true, steerRefused = true),
+                        waitLabel = queueWaitLabel(message, handedOff = false, handoverWaitLabel = null, steerCapable = true, steerRefused = true),
+                        offerInterruptAndSend = true,
+                        rowAction = QueueWait.rowAction(true, message, refused = true),
                     )
                 }
                 QueueSteerShot.SheetSteer, QueueSteerShot.SheetInterrupt -> {
