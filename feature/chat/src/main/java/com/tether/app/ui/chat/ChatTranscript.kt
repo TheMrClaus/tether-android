@@ -160,11 +160,13 @@ internal fun ChatTranscript(
     onOpenSession: (String) -> Unit = {},
     /** W34: the server speaks protocol >= 151: the handover notices read the web's new words. */
     handoverV151: Boolean = false,
+    /** #301: what the shown session's own handover changed (the "Continued from" strip's change row); null = none. */
+    handoverChange: HandoverChangeView? = null,
 ) {
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
     CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground, reviewFocus, onReviewShown, handedOffFrom, handoffPeer, onOpenSession, handoverV151)
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground, reviewFocus, onReviewShown, handedOffFrom, handoffPeer, onOpenSession, handoverV151, handoverChange)
     }
 }
 
@@ -197,6 +199,7 @@ private fun ChatTranscriptBody(
     handoffPeer: AgentSession?,
     onOpenSession: (String) -> Unit,
     handoverV151: Boolean,
+    handoverChange: HandoverChangeView?,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -491,7 +494,7 @@ private fun ChatTranscriptBody(
         ) {
             if (fromStrip == 1) {
                 item(key = "handoff-from", contentType = "handoff-from") {
-                    HandoffNotice(HandoffVariant.From, handoffPeer, onOpenSession, Modifier.padding(top = t.css.spaceMd))
+                    HandoffNotice(HandoffVariant.From, handoffPeer, onOpenSession, Modifier.padding(top = t.css.spaceMd), change = handoverChange)
                 }
             }
             if (roster != null) {

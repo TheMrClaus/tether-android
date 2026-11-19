@@ -402,6 +402,10 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHu
     // ta-xki: so does the phone's settings sheet (which embeds its own browser).
     val settings = rememberSaveable(origin, saver = DraftSettingsState.Saver) { DraftSettingsState() }
     val wideRow = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= LIVE_ROW_MIN_WIDTH_DP
+    // model-browser.tsx onOpen / session-settings-sheet.tsx (model view): opening the browser asks the server for a fresh
+    // catalog (the same request frame; the due lists are probed server-side and pushed back). Once per opening.
+    val browserShown = if (wideRow) browser.open else settings.open && settings.view == DraftSettingsView.Model
+    LaunchedEffect(browserShown) { if (browserShown) client.requestProviderCatalog() }
     val collator = remember { com.tether.app.ui.chat.IcuJsCollator.forLocale() }
 
     val scope = rememberCoroutineScope()

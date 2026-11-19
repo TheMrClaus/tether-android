@@ -49,6 +49,9 @@ class ConnectionPolicyTest {
     fun windowAcceptsFloorToServerVersionInclusive() {
         assertNull(Compatibility.evaluate(143, 143))
         assertNull(Compatibility.evaluate(145, 100))
+        // W2: the server numbers 163 (agentHandoverChoice) and 164 (handoverChange) are additive and keep the native floor: still served.
+        assertNull(Compatibility.evaluate(163, 129))
+        assertNull(Compatibility.evaluate(164, 129))
         assertNull(Compatibility.evaluate(serverProtocolVersion = null, nativeProtocolFloor = 129))
         // The window is inclusive at both ends, for any client version.
         assertNull(Compatibility.evaluate(129, 129, clientVersion = 129))

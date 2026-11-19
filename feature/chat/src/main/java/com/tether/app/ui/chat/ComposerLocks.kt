@@ -27,11 +27,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -104,10 +106,14 @@ internal const val HANDOFF_STAGE_LINE_TAG = "handoff-stage-line"
 internal const val HANDOFF_STAGE_SUB_TAG = "handoff-stage-sub"
 
 /** The notice's one sentence for [variant] and [peer], the words a screen reader reads (the link's name included). */
-internal fun handoffNoticeText(variant: HandoffVariant, peer: AgentSession?): String = when (variant) {
-    HandoffVariant.Pending -> "$HANDOFF_PENDING_LINE $HANDOFF_PENDING_SUB"
-    HandoffVariant.To -> peer?.let { "Handed off to ${LabelText.label(it.name).ifEmpty { "another session" }}" } ?: "Handed off to another session"
-    HandoffVariant.From -> peer?.let { "Continued from ${LabelText.label(it.name).ifEmpty { "an earlier session" }}" } ?: "Continued from an earlier session"
+internal fun handoffNoticeText(variant: HandoffVariant, peer: AgentSession?, change: HandoverChangeView? = null): String {
+    val line = when (variant) {
+        HandoffVariant.Pending -> return "$HANDOFF_PENDING_LINE $HANDOFF_PENDING_SUB"
+        HandoffVariant.To -> peer?.let { "Handed off to ${LabelText.label(it.name).ifEmpty { "another session" }}" } ?: "Handed off to another session"
+        HandoffVariant.From -> peer?.let { "Continued from ${LabelText.label(it.name).ifEmpty { "an earlier session" }}" } ?: "Continued from an earlier session"
+    }
+    // A change reads as sentences after the first line (the web's hidden ". " after line 1).
+    return if (change == null) line else "$line. ${change.spoken}"
 }
 
 /**
@@ -127,6 +133,8 @@ internal fun HandoffNotice(
     linkFocus: FocusRequester? = null,
     /** W34 (server protocol >= 151): the Pending notice's stage line (null = the W33 two lines, as shipped). */
     stage: com.tether.app.client.Handover.StageView? = null,
+    /** #301 (To / From only): what the handover changed on the successor's model / effort and the agent's reason; null draws today's banner. */
+    change: HandoverChangeView? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -164,31 +172,78 @@ internal fun HandoffNotice(
             }
         } else {
             val lead = if (variant == HandoffVariant.To) "Handed off to" else "Continued from"
-            if (peer == null) {
-                Text(handoffNoticeText(variant, null), style = style, color = t.muted)
-            } else {
-                val name = LabelText.label(peer.name).ifEmpty { if (variant == HandoffVariant.To) "another session" else "an earlier session" }
-                val interaction = remember { MutableInteractionSource() }
-                val focused by interaction.collectIsFocusedAsState()
-                val linkShape = RoundedCornerShape(t.radiusSm)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
-                    Text("$lead ", style = style, color = t.muted)
-                    Row(
-                        Modifier
-                            .heightIn(min = 48.dp)
-                            .then(if (linkFocus != null) Modifier.focusRequester(linkFocus) else Modifier)
-                            .focusRing(focused, linkShape, t.violet)
-                            .clickable(interaction, indication = null, role = Role.Button, onClickLabel = "Open $name") { onOpenSession(peer.id) }
-                            .padding(horizontal = t.css.spaceXs)
-                            .testTag("handoff-link"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(name, style = style.copy(fontWeight = FontWeight(650), textDecoration = TextDecoration.Underline), color = t.white, modifier = Modifier.weight(1f, fill = false))
-                        if (variant == HandoffVariant.To) Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.white, modifier = Modifier.size(14.dp))
+            Column(Modifier.weight(1f, fill = false)) {
+                if (peer == null) {
+                    Text(handoffNoticeText(variant, null), style = style, color = t.muted)
+                } else {
+                    val name = LabelText.label(peer.name).ifEmpty { if (variant == HandoffVariant.To) "another session" else "an earlier session" }
+                    val interaction = remember { MutableInteractionSource() }
+                    val focused by interaction.collectIsFocusedAsState()
+                    val linkShape = RoundedCornerShape(t.radiusSm)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("$lead ", style = style, color = t.muted)
+                        Row(
+                            Modifier
+                                .heightIn(min = 48.dp)
+                                .then(if (linkFocus != null) Modifier.focusRequester(linkFocus) else Modifier)
+                                .focusRing(focused, linkShape, t.violet)
+                                .clickable(interaction, indication = null, role = Role.Button, onClickLabel = "Open $name") { onOpenSession(peer.id) }
+                                .padding(horizontal = t.css.spaceXs)
+                                .testTag("handoff-link"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(name, style = style.copy(fontWeight = FontWeight(650), textDecoration = TextDecoration.Underline), color = t.white, modifier = Modifier.weight(1f, fill = false))
+                            if (variant == HandoffVariant.To) Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.white, modifier = Modifier.size(14.dp))
+                        }
                     }
                 }
+                if (change != null) HandoverChangeBlock(change)
             }
+        }
+    }
+}
+
+internal const val HANDOFF_CHANGE_TAG = "handoff-change"
+
+/**
+ * `.handoff-notice-change` + `.handoff-notice-reason` (web, #301): one item per changed setting, model first ("Model A -> B"),
+ * then the agent's own words ("Reason: "..."") in full (no clamp). Label and arrow muted, values ink at weight 650; the block sits
+ * below the peer link's 48dp target (no negative margin). Read as one node: "Model A to B. Effort C to D. Reason: ...".
+ */
+@Composable
+private fun HandoverChangeBlock(change: HandoverChangeView) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val small = TextStyle(fontFamily = type.body.fontFamily, fontSize = rem(0.75f), lineHeight = rem(0.75f * 1.45f))
+    Column(
+        Modifier
+            .semantics(mergeDescendants = true) { contentDescription = change.spoken }
+            .testTag(HANDOFF_CHANGE_TAG),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(t.css.spaceMd),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            change.items.forEach { item ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${item.label} ", style = small, color = t.muted)
+                    Text(item.from, style = small.copy(fontWeight = FontWeight(650)), color = t.ink)
+                    Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.muted, modifier = Modifier.padding(horizontal = 4.dp).size(12.dp))
+                    Text(item.to, style = small.copy(fontWeight = FontWeight(650)), color = t.ink)
+                }
+            }
+        }
+        change.reason?.let { reason ->
+            Text(
+                androidx.compose.ui.text.buildAnnotatedString {
+                    withStyle(androidx.compose.ui.text.SpanStyle(color = t.muted)) { append("Reason: \u201C") }
+                    withStyle(androidx.compose.ui.text.SpanStyle(color = t.ink)) { append(reason) }
+                    withStyle(androidx.compose.ui.text.SpanStyle(color = t.muted)) { append("\u201D") }
+                },
+                style = small,
+            )
         }
     }
 }

@@ -526,6 +526,7 @@ fun ChatScreen(
                     handedOffFrom = session.handedOffFrom,
                     handoffPeer = handoffSource,
                     handoverV151 = com.tether.app.client.Handover.v151(chatProtocol),
+                    handoverChange = HandoverChangeModel.of(session, controlsMap[session.id]),
                     onOpenSession = { id -> vm.selectSession(id) },
                 ) } }
             }
@@ -573,6 +574,7 @@ fun ChatScreen(
                 // ta-coik.55: written to the record of the server this picker reads (chat-view.tsx 90fbb9f :2281-2286).
                 onToggleModelPin = { id -> prefsScope.launchPreferenceWrite { prefs.toggleModelPin(com.tether.app.client.serverOrigin(serverUrl), id) } },
                 handoffTarget = handoffTarget,
+                handoverChange = HandoverChangeModel.of(session, session?.let { controlsMap[it.id] }),
                 // #273: following "Handed off to" ends this device's claim on the source (the focus rule's own navigation).
                 onOpenSession = { id -> vm.openHandoverPeer(session?.id, id) },
                 handoverUnderWay = handoverUnderWay,

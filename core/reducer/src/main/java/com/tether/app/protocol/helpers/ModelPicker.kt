@@ -75,7 +75,7 @@ object ModelPicker {
     }
 
     // lib/model-picker.mjs:95
-    private val CLAUDE_EFFORT_LABELS = mapOf(
+    val CLAUDE_EFFORT_LABELS = mapOf(
         "off" to "Off",
         "low" to "Low",
         "medium" to "Medium",

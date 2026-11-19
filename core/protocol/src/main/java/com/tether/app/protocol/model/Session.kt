@@ -113,6 +113,12 @@ data class AgentSession(
      * (not Reasonix, a cold engine, or a legacy-shimmed client) is NOT "ask".
      */
     val toolApproval: JsonElement? = null,
+    /**
+     * v164 (#301): what a completed handover changed on the successor's model / effort, `{ model?: {from, to}, effort?: {from, to}, reason? }`,
+     * set on BOTH the source and the successor, absent when nothing changed. Raw so a malformed value never drops the session row; read it
+     * with the chat module's `HandoverChangeModel`.
+     */
+    val handoverChange: JsonElement? = null,
     /** v146 r4 (w3:112): Reasonix's live mode id (additive, reasonix only). Raw; read it with [agentModeId]. */
     val agentMode: JsonElement? = null,
 ) {

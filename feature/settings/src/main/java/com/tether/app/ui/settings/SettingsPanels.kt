@@ -460,6 +460,7 @@ private fun SessionSettingsPanel(narrow: Boolean, binding: ServerSettingsBinding
             ServerRootsRow(AdvancedRows.allowedRoots, view, binding, narrow)
             ServerRootsRow(AdvancedRows.spawnExtraWritableRoots, view, binding, narrow)
             ServerSelectRow(AdvancedRows.preferSpawnAgent, AdvancedRows.preferSpawnAgents, view, binding, narrow)
+            ServerToggleRow(AdvancedRows.agentHandoverChoice, view, binding, narrow)
         }
     }
 }

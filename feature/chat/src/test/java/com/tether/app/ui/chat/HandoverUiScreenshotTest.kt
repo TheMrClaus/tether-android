@@ -26,7 +26,7 @@ import org.robolectric.annotation.Config
  */
 enum class HandoverShot(val id: String) {
     Confirm("handover-confirm"), Busy("handover-busy"), To("handoff-to"), ToUnlisted("handoff-to-unlisted"),
-    From("handoff-from"), InstructionRow("handover-instruction-row"), NoticeCancelled("handover-notice-cancelled"),
+    From("handoff-from"), ToChange("handoff-to-change"), FromChange("handoff-from-change"), InstructionRow("handover-instruction-row"), NoticeCancelled("handover-notice-cancelled"),
 }
 
 private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
@@ -36,7 +36,7 @@ private val exact = RoborazziOptions(compareOptions = RoborazziOptions.CompareOp
 class HandoverUiScreenshotTest(private val shot: HandoverShot, private val skin: TetherSkin) {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
-    private fun composerShot(session: com.tether.app.protocol.model.AgentSession, target: com.tether.app.protocol.model.AgentSession?, folded: ChatFixtures.Folded, underWay: Boolean) {
+    private fun composerShot(session: com.tether.app.protocol.model.AgentSession, target: com.tether.app.protocol.model.AgentSession?, folded: ChatFixtures.Folded, underWay: Boolean, change: HandoverChangeView? = null) {
         rule.setContent {
             ComposerHost(skin) {
                 Composer(
@@ -52,12 +52,13 @@ class HandoverUiScreenshotTest(private val shot: HandoverShot, private val skin:
                     liveness = ComposerLiveness.Live,
                     handoffTarget = target,
                     handoverUnderWay = underWay,
+                    handoverChange = change,
                 )
             }
         }
     }
 
-    private fun transcriptShot(folded: ChatFixtures.Folded, from: String?, peer: com.tether.app.protocol.model.AgentSession?) {
+    private fun transcriptShot(folded: ChatFixtures.Folded, from: String?, peer: com.tether.app.protocol.model.AgentSession?, change: HandoverChangeView? = null) {
         rule.setContent {
             ChatHost(skin) {
                 ChatTranscript(
@@ -70,6 +71,7 @@ class HandoverUiScreenshotTest(private val shot: HandoverShot, private val skin:
                     showTimeline = false,
                     handedOffFrom = from,
                     handoffPeer = peer,
+                    handoverChange = change,
                     richCodex = shot == HandoverShot.NoticeCancelled,
                 )
             }
@@ -92,6 +94,8 @@ class HandoverUiScreenshotTest(private val shot: HandoverShot, private val skin:
             HandoverShot.To -> composerShot(ComposerFixtures.session.copy(handedOffTo = target.id), target, ComposerFixtures.idle, false)
             HandoverShot.ToUnlisted -> composerShot(ComposerFixtures.session.copy(handedOffTo = "gone"), null, ComposerFixtures.idle, false)
             HandoverShot.From -> transcriptShot(HandoverUiFixtures.successorTranscript, "src-1", HandoverUiFixtures.source)
+            HandoverShot.ToChange -> composerShot(ComposerFixtures.session.copy(handedOffTo = target.id), target, ComposerFixtures.idle, false, CHANGE)
+            HandoverShot.FromChange -> transcriptShot(HandoverUiFixtures.successorTranscript, "src-1", HandoverUiFixtures.source, CHANGE)
             HandoverShot.InstructionRow -> transcriptShot(HandoverUiFixtures.instructionTranscript(ChatFixtures.idle.projection.tetherSessionId), null, null)
             HandoverShot.NoticeCancelled -> transcriptShot(HandoverUiFixtures.cancelledNotice, null, null)
         }
@@ -109,12 +113,18 @@ class HandoverUiScreenshotTest(private val shot: HandoverShot, private val skin:
         val path = "src/test/screenshots/${shot.id}/${skin.id}-phone.png"
         when (shot) {
             HandoverShot.Confirm -> captureScreenRoboImage(path, roborazziOptions = exact)
-            HandoverShot.Busy, HandoverShot.To, HandoverShot.ToUnlisted -> rule.onNodeWithTag(ComposerTag).captureRoboImage(path, roborazziOptions = exact)
+            HandoverShot.Busy, HandoverShot.To, HandoverShot.ToUnlisted, HandoverShot.ToChange -> rule.onNodeWithTag(ComposerTag).captureRoboImage(path, roborazziOptions = exact)
             else -> rule.onNodeWithTag(WellTag).captureRoboImage(path, roborazziOptions = exact)
         }
     }
 
     companion object {
+        /** Model and effort changed, with the agent's reason (the long form the banners must wrap in full). */
+        private val CHANGE = HandoverChangeView(
+            listOf(HandoverChangeItem("Model", "Opus 5.5", "Fable 5.2"), HandoverChangeItem("Effort", "High", "Extra high")),
+            "Stuck on the tokenizer's edge cases after three attempts; a larger model with more reasoning should get through them.",
+        )
+
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
         fun params(): List<Array<Any>> = HandoverShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }

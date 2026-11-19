@@ -244,6 +244,8 @@ fun Composer(
     onToggleModelPin: ((String) -> Unit)? = null,
     /** T6.6: the session a handed-off source continued in (null: gone, or not handed off). */
     handoffTarget: AgentSession? = null,
+    /** #301: what the shown session's own handover changed (the "Handed off to" notice's change row); null = none. */
+    handoverChange: HandoverChangeView? = null,
     /** T6.6: open another session (the handoff lock's link). Navigation only, never a wire mutation. */
     onOpenSession: (String) -> Unit = {},
     /** #273: a handover is requested here or pending on the server (and not yet handed off): the "under way" notice shows. */
@@ -1133,7 +1135,7 @@ fun Composer(
                             handedOff = true,
                         )
                     }
-                    HandoffNotice(HandoffVariant.To, handoffTarget, onOpenSession, linkFocus = handoffLinkFocus)
+                    HandoffNotice(HandoffVariant.To, handoffTarget, onOpenSession, linkFocus = handoffLinkFocus, change = handoverChange)
                 } else if (session?.readOnly == true) {
                     ReplayOnlyFlag(session.provider)
                 } else {
