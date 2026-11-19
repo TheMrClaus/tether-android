@@ -69,6 +69,8 @@ enum class ServerSetting(val key: String, val kind: SettingKind, val maxBytes: I
     AllowedRoots("allowedRoots", SettingKind.Paths),
     SpawnExtraWritableRoots("spawnExtraWritableRoots", SettingKind.Paths),
     PreferSpawnAgent("preferSpawnAgent", SettingKind.Choice),
+    /** v163: whether an agent handing a session over may name another model or effort; the server echoes an explicit boolean (absent = on). */
+    AgentHandoverChoice("agentHandoverChoice", SettingKind.Toggle),
     MetadataGenerationEnabled("metadataGenerationEnabled", SettingKind.Toggle),
     MetadataGenerationMode("metadataGenerationMode", SettingKind.Choice),
     MetadataGenerationProvider("metadataGenerationProvider", SettingKind.Text),

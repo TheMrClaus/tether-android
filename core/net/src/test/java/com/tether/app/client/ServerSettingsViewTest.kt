@@ -167,6 +167,17 @@ class ServerSettingsViewTest {
         assertEquals(json("""{"archiveOnMerge":true}"""), ServerSettingsPatch.toggle(v, ServerSetting.ArchiveOnMerge))
     }
 
+    @Test fun theHandoverChoiceRowReadsTheServersStateAndSendsItsKey() {
+        assertEquals("agentHandoverChoice", ServerSetting.AgentHandoverChoice.key)
+        assertEquals(SettingKind.Toggle, ServerSetting.AgentHandoverChoice.kind)
+        val on = view("""{"agentHandoverChoice":true}""")
+        assertTrue(on.toggle(ServerSetting.AgentHandoverChoice))
+        assertEquals(json("""{"agentHandoverChoice":false}"""), ServerSettingsPatch.toggle(on, ServerSetting.AgentHandoverChoice))
+        val off = view("""{"agentHandoverChoice":false}""")
+        assertFalse(off.toggle(ServerSetting.AgentHandoverChoice))
+        assertEquals(json("""{"agentHandoverChoice":true}"""), ServerSettingsPatch.toggle(off, ServerSetting.AgentHandoverChoice))
+    }
+
     @Test fun aSelectSendsTheNewOptionAndTheEmptyOptionAsNull() {
         val v = view("""{"defaultSandboxPolicy":"read-only","messageInterruptMode":"interrupt"}""")
         assertNull(ServerSettingsPatch.choice(v, ServerSetting.MessageInterruptMode, "interrupt"))

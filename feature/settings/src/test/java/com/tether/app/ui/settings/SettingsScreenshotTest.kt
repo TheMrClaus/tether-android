@@ -102,6 +102,7 @@ enum class SettingsShot(
     AdvancedLocked("settings-advanced-locked", SettingsTab.Advanced, server = ServerShot.Locked, github = GitHubShot.Fresh),
     AdvancedLifecycle("settings-advanced-lifecycle", SettingsTab.Advanced, server = ServerShot.Lifecycle, github = GitHubShot.Fresh),
     AdvancedDefaults("settings-advanced-defaults", SettingsTab.Advanced, server = ServerShot.Defaults, github = GitHubShot.Fresh),
+    AdvancedHandoverChoice("settings-advanced-handover-choice", SettingsTab.Advanced, server = ServerShot.HandoverChoice, github = GitHubShot.Fresh),
     AdvancedCli("settings-advanced-cli", SettingsTab.Advanced, server = ServerShot.Cli, github = GitHubShot.Fresh),
     AdvancedGitHub("settings-advanced-github", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Fresh),
     AdvancedGitHubDevice("settings-advanced-github-device", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Device),
@@ -130,7 +131,7 @@ private fun SettingsShot.runtimeRoute(): RuntimeDeskRoute = when {
         RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail)
     accounts != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.account("claude", "claude-work"), RuntimeDeskLevel.Detail)
     profiles != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Engines, RuntimeDeskEntities.CustomProfiles, RuntimeDeskLevel.Detail)
-    this == SettingsShot.AdvancedLifecycle || this == SettingsShot.AdvancedDefaults || tab == SettingsTab.Metadata ->
+    this == SettingsShot.AdvancedLifecycle || this == SettingsShot.AdvancedDefaults || this == SettingsShot.AdvancedHandoverChoice || tab == SettingsTab.Metadata ->
         RuntimeDeskRoute(RuntimeDeskDestinations.SessionsRouting, level = RuntimeDeskLevel.Detail)
     this == SettingsShot.AdvancedCli ->
         RuntimeDeskRoute(RuntimeDeskDestinations.Engines, RuntimeDeskEntities.ClaudeCli, RuntimeDeskLevel.Detail)
@@ -282,6 +283,8 @@ enum class ServerShot(val scrollTo: String? = null) {
     Locked,
     Lifecycle(ServerSettingsTags.section("lifecycle")),
     Defaults(ServerSettingsTags.section("defaults")),
+    /** The last Session defaults row (agent model choice on handover), scrolled into frame. */
+    HandoverChoice(ServerSettingsTags.row(com.tether.app.client.ServerSetting.AgentHandoverChoice)),
     Cli(ServerSettingsTags.section("cli")),
     Metadata,
     MetadataText,

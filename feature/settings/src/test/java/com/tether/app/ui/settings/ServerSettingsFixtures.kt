@@ -43,7 +43,7 @@ object ServerFixtures {
             "messageInterruptMode" to "interrupt", "claudeModelFallback" to "cli", "autoArchiveIdleDays" to 0, "archiveOnMerge" to false,
             "defaultPermissionMode" to "default", "defaultSandboxPolicy" to null, "defaultUseWorktree" to false,
             "allowedRoots" to listOf("/srv/work", "/srv/scratch"), "spawnExtraWritableRoots" to emptyList<String>(),
-            "preferSpawnAgent" to "deny", "pinnedWorkspaces" to null,
+            "preferSpawnAgent" to "deny", "agentHandoverChoice" to true, "pinnedWorkspaces" to null,
             "metadataGenerationEnabled" to true, "metadataGenerationMode" to "manual",
             "metadataGenerationProvider" to "anthropic:claude-3-5-haiku-latest", "metadataGenerationProviders" to PROVIDERS,
             // ta-dh1: the Engines tab. Claude's home is empty (the real HOME, issue #86); OpenCode,

@@ -122,6 +122,20 @@ class ModelBrowserBehaviourTest {
     }
 
     @Test
+    fun openingTheBrowserAsksTheServerForAFreshCatalog() {
+        rule.setContent {
+            TetherTheme { CompositionLocalProvider(LocalWindowInfo provides window) { MainShell(vm, prefs) } }
+        }
+        rule.runOnUiThread { vm.openDraft() }
+        awaitTag(DraftComposerTags.Sheet)
+        until("the connect request went out") { client.catalogRequests >= 1 }
+        val before = client.catalogRequests
+        tap(ModelBrowserTags.Chip)
+        awaitTag(ModelBrowserTags.Browser)
+        until("opening the browser asked again") { client.catalogRequests > before }
+    }
+
+    @Test
     fun theSearchCoversEveryModelAndAPickClosesTheBrowser() {
         openBrowser()
         until("the chip says nothing is picked") { spoken(ModelBrowserTags.Chip).contains("Select model") }
