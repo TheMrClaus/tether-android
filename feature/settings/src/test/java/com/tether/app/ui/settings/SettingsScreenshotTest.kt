@@ -104,7 +104,7 @@ enum class SettingsShot(
     AdvancedDefaults("settings-advanced-defaults", SettingsTab.Advanced, server = ServerShot.Defaults, github = GitHubShot.Fresh),
     AdvancedHandoverChoice("settings-advanced-handover-choice", SettingsTab.Advanced, server = ServerShot.HandoverChoice, github = GitHubShot.Fresh),
     AdvancedSteerMode("settings-advanced-steer-mode", SettingsTab.Advanced, server = ServerShot.SteerMode, github = GitHubShot.Fresh, own = true),
-    AdvancedRestartMessage("settings-advanced-restart-message", SettingsTab.Advanced, server = ServerShot.RestartMessage, github = GitHubShot.Fresh, own = true),
+    AdvancedRestartMessage("settings-advanced-restart-message", SettingsTab.Advanced, server = ServerShot.RestartMessage, github = GitHubShot.Fresh),
     AdvancedCli("settings-advanced-cli", SettingsTab.Advanced, server = ServerShot.Cli, github = GitHubShot.Fresh),
     AdvancedGitHub("settings-advanced-github", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Fresh),
     AdvancedGitHubDevice("settings-advanced-github-device", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Device),
@@ -289,8 +289,8 @@ enum class ServerShot(val scrollTo: String? = null) {
     HandoverChoice(ServerSettingsTags.row(com.tether.app.client.ServerSetting.AgentHandoverChoice)),
     /** v165: the "Messages sent during a turn" row (Session lifecycle), on a server that speaks it. */
     SteerMode(ServerSettingsTags.row(com.tether.app.client.ServerSetting.QueueSteerMode)),
-    /** v167: the "Message agents after a restart" row (Session lifecycle, after Shutdown drain), on a server that speaks it. */
-    RestartMessage(ServerSettingsTags.row(com.tether.app.client.ServerSetting.RestartResumeMessage)),
+    /** v167: the "Message agents after a restart" row (Session lifecycle, after Shutdown drain), on a server that speaks it; anchored on Shutdown drain so both rows are in frame. */
+    RestartMessage(ServerSettingsTags.row(com.tether.app.client.ServerSetting.ShutdownDrainMs)),
     Cli(ServerSettingsTags.section("cli")),
     Metadata,
     MetadataText,
