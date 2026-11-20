@@ -135,7 +135,7 @@ internal sealed interface ChatItem {
     }
 
     /** A non-ok outcome; T6.6 [interrupt]: the turn's `turn_interrupted` notice (issue #184), if any. */
-    data class Outcome(val turn: TurnProjection, override val startsGroup: Boolean, val interrupt: InterruptNoticeView? = null, val at: Double? = null) : ChatItem {
+    data class Outcome(val turn: TurnProjection, override val startsGroup: Boolean, val interrupt: InterruptNoticeView? = null, val at: Double? = null, val restartMessageFollows: Boolean = false) : ChatItem {
         override val key: String get() = "${turn.turnId}/outcome"
     }
 
@@ -400,7 +400,7 @@ internal fun buildChatItems(
         answeredList.filter { blocksById?.has(it.toolId) != true }.forEach { items.add(ChatItem.Answered(turnId, it, opens())) }
         if (turn.apiRetry != null && turn.status != Vocab.TURN_DONE) items.add(ChatItem.Retry(turn, opens()))
         if (turn.outcome != null && turn.outcome != Vocab.OUTCOME_OK) {
-            items.add(ChatItem.Outcome(turn, opens(), if (turn.outcome == Vocab.OUTCOME_CANCELLED) interrupts[turnId] else null, outcomeAt(turnObj, turn)))
+            items.add(ChatItem.Outcome(turn, opens(), if (turn.outcome == Vocab.OUTCOME_CANCELLED) interrupts[turnId] else null, outcomeAt(turnObj, turn), turn.errorCause == TETHER_RESTART_TURN_CAUSE && restartMessageFollows(projection, turnId)))
         }
     }
     errors.flush(Double.POSITIVE_INFINITY, drop = false) // errors newer than every turn (chat-view.tsx:3877)

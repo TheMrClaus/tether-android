@@ -464,6 +464,9 @@ private fun foldTurnEnd(state: JsObj, event: JsObj): JsObj {
             "endedAt" to nonNegativeFiniteNumber(event["ts"]),
         ).spread(
             if (isNullish(turn["errorCause"]) && truthy(event["cause"])) JsObj.of("errorCause" to event["cause"]) else JsObj.EMPTY,
+        ).spread(
+            // events.ts (v167): the boot reconcile's mark that nothing starts on its own after this cut turn; a key only when stamped.
+            if (event["resume"].str == "notice") JsObj.of("restartResume" to js("notice")) else JsObj.EMPTY,
         )
         if (state["provider"].str == "codex" && event["outcome"].str == Limits.TURN_OUTCOMES.OK) {
             putCodexFinalReportLast(completed)

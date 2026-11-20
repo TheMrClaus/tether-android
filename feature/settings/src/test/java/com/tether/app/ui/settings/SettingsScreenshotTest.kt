@@ -104,6 +104,7 @@ enum class SettingsShot(
     AdvancedDefaults("settings-advanced-defaults", SettingsTab.Advanced, server = ServerShot.Defaults, github = GitHubShot.Fresh),
     AdvancedHandoverChoice("settings-advanced-handover-choice", SettingsTab.Advanced, server = ServerShot.HandoverChoice, github = GitHubShot.Fresh),
     AdvancedSteerMode("settings-advanced-steer-mode", SettingsTab.Advanced, server = ServerShot.SteerMode, github = GitHubShot.Fresh, own = true),
+    AdvancedRestartMessage("settings-advanced-restart-message", SettingsTab.Advanced, server = ServerShot.RestartMessage, github = GitHubShot.Fresh),
     AdvancedCli("settings-advanced-cli", SettingsTab.Advanced, server = ServerShot.Cli, github = GitHubShot.Fresh),
     AdvancedGitHub("settings-advanced-github", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Fresh),
     AdvancedGitHubDevice("settings-advanced-github-device", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Device),
@@ -132,7 +133,7 @@ private fun SettingsShot.runtimeRoute(): RuntimeDeskRoute = when {
         RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.Credentials, RuntimeDeskLevel.Detail)
     accounts != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Accounts, RuntimeDeskEntities.account("claude", "claude-work"), RuntimeDeskLevel.Detail)
     profiles != null -> RuntimeDeskRoute(RuntimeDeskDestinations.Engines, RuntimeDeskEntities.CustomProfiles, RuntimeDeskLevel.Detail)
-    this == SettingsShot.AdvancedLifecycle || this == SettingsShot.AdvancedDefaults || this == SettingsShot.AdvancedHandoverChoice || this == SettingsShot.AdvancedSteerMode || tab == SettingsTab.Metadata ->
+    this == SettingsShot.AdvancedLifecycle || this == SettingsShot.AdvancedDefaults || this == SettingsShot.AdvancedHandoverChoice || this == SettingsShot.AdvancedSteerMode || this == SettingsShot.AdvancedRestartMessage || tab == SettingsTab.Metadata ->
         RuntimeDeskRoute(RuntimeDeskDestinations.SessionsRouting, level = RuntimeDeskLevel.Detail)
     this == SettingsShot.AdvancedCli ->
         RuntimeDeskRoute(RuntimeDeskDestinations.Engines, RuntimeDeskEntities.ClaudeCli, RuntimeDeskLevel.Detail)
@@ -288,6 +289,8 @@ enum class ServerShot(val scrollTo: String? = null) {
     HandoverChoice(ServerSettingsTags.row(com.tether.app.client.ServerSetting.AgentHandoverChoice)),
     /** v165: the "Messages sent during a turn" row (Session lifecycle), on a server that speaks it. */
     SteerMode(ServerSettingsTags.row(com.tether.app.client.ServerSetting.QueueSteerMode)),
+    /** v167: the "Message agents after a restart" row (Session lifecycle, after Shutdown drain), on a server that speaks it; anchored on Shutdown drain so both rows are in frame. */
+    RestartMessage(ServerSettingsTags.row(com.tether.app.client.ServerSetting.ShutdownDrainMs)),
     Cli(ServerSettingsTags.section("cli")),
     Metadata,
     MetadataText,
@@ -330,6 +333,11 @@ enum class ServerShot(val scrollTo: String? = null) {
             writer = NeverWrites,
         )
         SteerMode -> ServerFixtures.binding(writer = NeverWrites, serverProtocol = 165)
+        RestartMessage -> ServerFixtures.binding(
+            view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("restartResumeMessage" to true))),
+            writer = NeverWrites,
+            serverProtocol = com.tether.app.client.RESTART_RESUME_MIN_PROTOCOL,
+        )
         else -> ServerFixtures.binding(writer = NeverWrites)
     }
 }

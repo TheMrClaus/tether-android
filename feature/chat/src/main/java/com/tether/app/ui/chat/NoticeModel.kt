@@ -2,6 +2,7 @@ package com.tether.app.ui.chat
 
 import androidx.compose.runtime.Immutable
 import com.tether.app.client.LabelText
+import com.tether.app.protocol.model.SessionProjection
 import com.tether.app.protocol.tree.JsArr
 import com.tether.app.protocol.tree.JsNum
 import com.tether.app.protocol.tree.JsObj
@@ -319,6 +320,15 @@ internal const val RESTART_TURN_BY = "by an engine restart"
 internal const val RESTART_TURN_STOPPED_COPY = "Interrupted by an engine restart"
 internal const val RESTART_TURN_UNKNOWN_COPY = "Outcome unknown — an engine restart ended the turn before it finished (it may have partially applied)"
 
+/** v167 (lib/restart-resume.ts): a turn the boot reconcile ended as cut off by a Tether restart. */
+internal const val TETHER_RESTART_TURN_CAUSE = "tether_restart"
+internal const val RESTART_RESUME_NOTICE_ONLY = "notice"
+internal const val RESTART_RESUME_KEY_PREFIX = "restart-resume:"
+/** The outcome row when the one automated message follows. */
+internal const val RESTART_OUTCOME_MESSAGE_COPY = "Outcome unknown — a Tether restart ended the turn before it finished (it may have partially applied)"
+/** The outcome row when nothing follows (the notice only). */
+internal const val RESTART_OUTCOME_NOTICE_COPY = "$RESTART_OUTCOME_MESSAGE_COPY. Send a message to continue."
+
 /** chat-view.tsx OUTCOME_COPY. */
 internal val OUTCOME_COPY = mapOf(
     "cancelled" to "Turn interrupted",
@@ -327,16 +337,29 @@ internal val OUTCOME_COPY = mapOf(
 )
 
 /**
+ * v167 (lib/interrupt-notice.ts restartMessageFollows): whether the one automated message of a restart-cut turn went out, a waiting
+ * row or a later turn carrying its key `restart-resume:<turnId>`.
+ */
+internal fun restartMessageFollows(projection: SessionProjection, turnId: String): Boolean {
+    val key = "$RESTART_RESUME_KEY_PREFIX$turnId"
+    return projection.queuedMessages.any { it.queueId == key } || projection.turnsById.values.any { it.idempotencyKey == key }
+}
+
+/**
  * chat-view.tsx:3468-3471: the outcome row's words — the interrupt notice's account (a cancelled
  * turn only), else the turn's error, else the outcome's copy, else the raw outcome.
  */
-internal fun outcomeText(outcome: String, error: String?, interrupt: InterruptNoticeView?, zone: ZoneId = ZoneId.systemDefault(), cause: String? = null): String {
+internal fun outcomeText(outcome: String, error: String?, interrupt: InterruptNoticeView?, zone: ZoneId = ZoneId.systemDefault(), cause: String? = null, restartResume: String? = null, restartMessageFollows: Boolean = false): String {
     val restart = cause == RESTART_TURN_CAUSE
     val interrupted = if (outcome == "cancelled") interruptedNoticeCopy(interrupt, zone, restart) else ""
     return interrupted.ifEmpty { null }
         ?: (if (restart && outcome == "cancelled") RESTART_TURN_STOPPED_COPY else null)
         ?: LabelText.clean(error, NOTICE_BODY_MAX).ifEmpty { null }
         ?: (if (restart && outcome == "outcome_unknown") RESTART_TURN_UNKNOWN_COPY else null)
+        // v167 (lib/interrupt-notice.ts turnOutcomeCopy): a message follows -> R-ON; the notice mark or nothing followed -> N1.
+        ?: (if (cause == TETHER_RESTART_TURN_CAUSE && outcome == "outcome_unknown") {
+            if (restartResume != RESTART_RESUME_NOTICE_ONLY && restartMessageFollows) RESTART_OUTCOME_MESSAGE_COPY else RESTART_OUTCOME_NOTICE_COPY
+        } else null)
         ?: OUTCOME_COPY[outcome]
         ?: LabelText.label(outcome)
 }

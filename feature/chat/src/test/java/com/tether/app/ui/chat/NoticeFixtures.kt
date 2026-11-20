@@ -155,6 +155,30 @@ object NoticeFixtures {
         )
     }
 
+    /** v167: a turn the boot reconcile cut off by a Tether restart; [resume] is the notice-only mark, [follow] how the one message shows. */
+    private fun restartCut(resume: String?, follow: String): ChatFixtures.Folded = ChatFixtures.fold(
+        *open("t1", "Start the long migration.").toTypedArray(),
+        *reply("t1", "Starting a long task.").toTypedArray(),
+        ev("turn_end", "t1", ts = TS) {
+            put("outcome", "outcome_unknown"); put("cause", "tether_restart")
+            if (resume != null) put("resume", resume)
+        },
+        *when (follow) {
+            "turn" -> listOf(ev("turn_started", "t2", ts = TS) { put("idempotencyKey", "restart-resume:t1") })
+            "queue" -> listOf(ev("queued_message_added", null, ts = TS) { put("queueId", "restart-resume:t1"); put("text", "carry on") })
+            else -> emptyList()
+        }.toTypedArray(),
+    )
+
+    /** A restart-cut turn whose automated message went out (R-ON). */
+    val restartCutFollowed: ChatFixtures.Folded by lazy { restartCut(null, "turn") }
+
+    /** A restart-cut turn nothing follows (N1). */
+    val restartCutNotice: ChatFixtures.Folded by lazy { restartCut(null, "none") }
+
+    val restartCutQueued: ChatFixtures.Folded by lazy { restartCut(null, "queue") }
+    val restartCutMarked: ChatFixtures.Folded by lazy { restartCut("notice", "turn") }
+
     /** v17: an open turn between HTTP attempts. */
     val apiRetry: ChatFixtures.Folded by lazy {
         ChatFixtures.fold(

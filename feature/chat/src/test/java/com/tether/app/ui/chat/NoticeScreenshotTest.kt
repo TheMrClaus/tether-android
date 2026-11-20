@@ -36,6 +36,8 @@ enum class NoticeShot(val id: String, val composer: Boolean = false) {
     Scheduled("scheduled"),
     Retry("retry"),
     OutcomeUnknown("outcome-unknown"),
+    RestartCutFollowed("restart-cut-followed"),
+    RestartCutNotice("restart-cut-notice"),
     ReadOnly("read-only", composer = true),
     Handoff("handoff", composer = true),
 }
@@ -56,6 +58,8 @@ private fun fixtureFor(shot: NoticeShot): ChatFixtures.Folded = when (shot) {
     NoticeShot.Scheduled -> NoticeFixtures.scheduled
     NoticeShot.Retry -> NoticeFixtures.apiRetry
     NoticeShot.OutcomeUnknown -> NoticeFixtures.outcomeUnknown
+    NoticeShot.RestartCutFollowed -> NoticeFixtures.restartCutFollowed
+    NoticeShot.RestartCutNotice -> NoticeFixtures.restartCutNotice
     else -> ChatFixtures.idle
 }
 

@@ -134,6 +134,8 @@ data class TurnProjection(
     val error: String? = null,
     /** v159 (tth-5i8m): why the turn ended when the server says so: "auth_expired" | "usage_limit" | "interrupted" | "engine_restart". Raw; absent = none. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val errorCause: String? = null,
+    /** v167: "notice" on a turn the boot reconcile ended as cut off by a Tether restart when nothing starts on its own after it; absent otherwise. */
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val restartResume: String? = null,
     /** v145 (#256): the first `error` event's journal ts; absent on a pre-#256 projection. */
     @EncodeDefault(EncodeDefault.Mode.NEVER) val errorAt: Long? = null,
     /** v145 (#256): the turn_end journal ts; absent until the turn ended (and on a pre-#256 projection). */

@@ -73,6 +73,8 @@ enum class ServerSetting(val key: String, val kind: SettingKind, val maxBytes: I
     PreferSpawnAgent("preferSpawnAgent", SettingKind.Choice),
     /** v163: whether an agent handing a session over may name another model or effort; the server echoes an explicit boolean (absent = on). */
     AgentHandoverChoice("agentHandoverChoice", SettingKind.Toggle),
+    /** v167: whether a restart-cut turn gets one automated message once Tether is back (default on); the server sends it only from 167. */
+    RestartResumeMessage("restartResumeMessage", SettingKind.Toggle),
     MetadataGenerationEnabled("metadataGenerationEnabled", SettingKind.Toggle),
     MetadataGenerationMode("metadataGenerationMode", SettingKind.Choice),
     MetadataGenerationProvider("metadataGenerationProvider", SettingKind.Text),
@@ -165,6 +167,9 @@ class ServerSettingsView private constructor(
         is JsonPrimitive -> if (v.isString) v.content.isNotEmpty() else v.booleanOrNull ?: (v.doubleOrNull?.let { it != 0.0 && !it.isNaN() } ?: false)
         else -> true
     }
+
+    /** Whether the server sent [setting] at all (web: `"key" in settings`); a key absent from an older server draws no row. */
+    fun has(setting: ServerSetting): Boolean = raw.containsKey(setting.key)
 
     /** ServerSelectRow: null / absent is the empty option (`""`), anything else its string (a secret reads ""). */
     fun choice(setting: ServerSetting): String = if (setting.kind == SettingKind.Secret) "" else stringOf(raw[setting.key])
@@ -363,6 +368,13 @@ object ServerSettingsPatch {
 
 /** v165: whether the connected server speaks Steer and the `queueSteerMode` setting (one gate with the Steer frame, [com.tether.app.protocol.helpers.QueueWait.steerSupported]). */
 fun queueSteerSupported(serverProtocol: Int?): Boolean = com.tether.app.protocol.helpers.QueueWait.steerSupported(serverProtocol)
+
+/** v167: the first protocol whose server knows `restartResumeMessage` (the one place the number lives). */
+const val RESTART_RESUME_MIN_PROTOCOL = 167
+
+/** v167: the "Message agents after a restart" row is drawn only when the server speaks it AND sent the key (an older server would show a switch stuck OFF). */
+fun restartResumeSupported(serverProtocol: Int?, view: ServerSettingsView): Boolean =
+    serverProtocol != null && serverProtocol >= RESTART_RESUME_MIN_PROTOCOL && view.has(ServerSetting.RestartResumeMessage)
 
 /** v165: what an absent `queueSteerMode` means: a message queued during a turn goes in on its own. */
 const val QUEUE_STEER_MODE_DEFAULT = "auto"

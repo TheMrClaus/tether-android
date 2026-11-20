@@ -40,4 +40,21 @@ class ProtocolV159FoldTest {
         assertEquals(JsStr("engine_restart"), turn(state)["errorCause"])
         assertEquals("engine_restart", checkNotNull(LegacyProjectionAdapter.adaptOnce(state)).turnsById.getValue("t1").errorCause)
     }
+
+    /** v167: a restart-cut turn_end keeps its cause and the notice-only mark; a key only when stamped. */
+    @Test fun aTetherRestartTurnEndFoldsItsCauseAndTheNoticeMark() {
+        val marked = foldTree(
+            freshTree(), ev("turn_started", "t1", seq = 1, ts = 1),
+            ev("turn_end", "t1") { put("outcome", "outcome_unknown"); put("cause", "tether_restart"); put("resume", "notice") },
+        )
+        assertEquals(JsStr("tether_restart"), turn(marked)["errorCause"])
+        assertEquals(JsStr("notice"), turn(marked)["restartResume"])
+        assertEquals("notice", checkNotNull(LegacyProjectionAdapter.adaptOnce(marked)).turnsById.getValue("t1").restartResume)
+        val plain = foldTree(
+            freshTree(), ev("turn_started", "t1", seq = 1, ts = 1),
+            ev("turn_end", "t1") { put("outcome", "outcome_unknown"); put("cause", "tether_restart") },
+        )
+        assertNull(turn(plain)["restartResume"])
+        assertNull(checkNotNull(LegacyProjectionAdapter.adaptOnce(plain)).turnsById.getValue("t1").restartResume)
+    }
 }
