@@ -178,6 +178,24 @@ class ServerSettingsViewTest {
         assertEquals(json("""{"agentHandoverChoice":true}"""), ServerSettingsPatch.toggle(off, ServerSetting.AgentHandoverChoice))
     }
 
+    @Test fun theRestartResumeRowParsesDefaultsAndWritesItsKey() {
+        assertEquals("restartResumeMessage", ServerSetting.RestartResumeMessage.key)
+        assertEquals(SettingKind.Toggle, ServerSetting.RestartResumeMessage.kind)
+        val absent = view("""{"claudePersistent":true}""")
+        assertFalse(absent.has(ServerSetting.RestartResumeMessage))
+        assertFalse(restartResumeSupported(167, absent))
+        val on = view("""{"restartResumeMessage":true}""")
+        assertTrue(on.has(ServerSetting.RestartResumeMessage))
+        assertTrue(on.toggle(ServerSetting.RestartResumeMessage))
+        assertEquals(json("""{"restartResumeMessage":false}"""), ServerSettingsPatch.toggle(on, ServerSetting.RestartResumeMessage))
+        val off = view("""{"restartResumeMessage":false}""")
+        assertFalse(off.toggle(ServerSetting.RestartResumeMessage))
+        assertEquals(json("""{"restartResumeMessage":true}"""), ServerSettingsPatch.toggle(off, ServerSetting.RestartResumeMessage))
+        assertEquals(167, RESTART_RESUME_MIN_PROTOCOL)
+        assertFalse(restartResumeSupported(166, on))
+        assertTrue(restartResumeSupported(167, on))
+    }
+
     @Test fun aSelectSendsTheNewOptionAndTheEmptyOptionAsNull() {
         val v = view("""{"defaultSandboxPolicy":"read-only","messageInterruptMode":"interrupt"}""")
         assertNull(ServerSettingsPatch.choice(v, ServerSetting.MessageInterruptMode, "interrupt"))
