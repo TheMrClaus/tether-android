@@ -321,6 +321,23 @@ class NoticeModelTest {
         assertEquals("Turn ended with an error", outcomeText("error", null, InterruptNoticeView("operator-stop", null, 0, 0)))
     }
 
+    private fun cutOutcome(f: ChatFixtures.Folded) = items(f).filterIsInstance<ChatItem.Outcome>().single()
+    private fun cutText(f: ChatFixtures.Folded) = cutOutcome(f).let {
+        outcomeText("outcome_unknown", it.turn.error, null, cause = it.turn.errorCause, restartResume = it.turn.restartResume, restartMessageFollows = it.restartMessageFollows)
+    }
+
+    /** v167: a turn a Tether restart cut off reads R-ON when the one message follows, else N1; a journal without the cause keeps the generic copy. */
+    @Test
+    fun aRestartCutTurnReadsTheMessageCopyOrTheNoticeCopy() {
+        val rOn = "Outcome unknown — a Tether restart ended the turn before it finished (it may have partially applied)"
+        assertEquals(rOn, cutText(NoticeFixtures.restartCutFollowed)) // a later turn carries restart-resume:t1
+        assertEquals(rOn, cutText(NoticeFixtures.restartCutQueued)) // a waiting row carries it
+        assertEquals("$rOn. Send a message to continue.", cutText(NoticeFixtures.restartCutNotice)) // nothing followed (or the row was deleted before it ran)
+        assertEquals("$rOn. Send a message to continue.", cutText(NoticeFixtures.restartCutMarked)) // resume: "notice" wins even with a turn
+        assertEquals(OUTCOME_COPY.getValue("outcome_unknown"), cutText(NoticeFixtures.outcomeUnknown)) // no cause: generic, pinned
+        assertEquals(RESTART_TURN_UNKNOWN_COPY, outcomeText("outcome_unknown", null, null, cause = "engine_restart", restartMessageFollows = true))
+    }
+
     /** tth-5i8m (D7 1, server 159): a requested engine restart. (a1) unknown outcome, (a2) honoured/Stop-shaped, (b) crash unchanged. */
     @Test
     fun aRequestedEngineRestartHasItsOwnWordsAndACrashKeepsTheOld() {

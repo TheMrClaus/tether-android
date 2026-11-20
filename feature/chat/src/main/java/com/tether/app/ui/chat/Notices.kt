@@ -37,7 +37,7 @@ import com.tether.app.ui.theme.TetherWeights
  * cancelled turn muted; the words carry the state.
  */
 @Composable
-internal fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier, interrupt: InterruptNoticeView? = null, zone: java.time.ZoneId = java.time.ZoneId.systemDefault(), at: Double? = null) {
+internal fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier, interrupt: InterruptNoticeView? = null, zone: java.time.ZoneId = java.time.ZoneId.systemDefault(), at: Double? = null, restartMessageFollows: Boolean = false) {
     val t = LocalTetherTokens.current
     val outcome = turn.outcome ?: return
     if (outcome == Vocab.OUTCOME_OK) return
@@ -49,7 +49,7 @@ internal fun OutcomeBadge(turn: TurnProjection, modifier: Modifier = Modifier, i
     // tth-5i8m (D7 a2): a requested restart is Stop-shaped (CircleStop, role status) even with no turn_interrupted notice.
     val restart = turn.errorCause == RESTART_TURN_CAUSE
     val interrupted = outcome == Vocab.OUTCOME_CANCELLED && (interrupt != null || restart)
-    val text = outcomeText(outcome, turn.error, if (interrupted) interrupt else null, zone, cause = turn.errorCause)
+    val text = outcomeText(outcome, turn.error, if (interrupted) interrupt else null, zone, cause = turn.errorCause, restartResume = turn.restartResume, restartMessageFollows = restartMessageFollows)
     Row(
         modifier
             .background(t.tintXs, RoundedCornerShape(TetherDimens.radiusSm))

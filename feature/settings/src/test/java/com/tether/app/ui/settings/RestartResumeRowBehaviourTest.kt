@@ -95,7 +95,7 @@ class RestartResumeRowBehaviourTest {
     @Test fun theStringsAreTheSpecsBytes() {
         val r = AdvancedRows.restartResumeMessage
         assertEquals("Message agents after a restart", r.label)
-        assertEquals("Send one short message to each agent a restart cut off so it carries on; off only shows a notice", r.description)
+        assertEquals("Send one short message to each session a restart cut off so the agent carries on; off only shows a notice", r.description)
         assertEquals(
             "When on (default), each session whose turn was cut off by a Tether restart gets one short automated message once Tether is back, so the agent checks what already happened and carries on. The cut-off message is never sent again, and a cut turn gets at most one message. Delegated child sessions, and sessions that are archived, read-only, in plan mode, handed over or that already have a message waiting, only get the notice. When off, no new turn starts: the turn shows a notice and you send the next message yourself. Applies at the next restart.",
             r.tip,
