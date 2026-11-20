@@ -103,7 +103,11 @@ object ServerFixtures {
     /** v154: the agent supervisor's status (hand-authored: newer than the corpus). */
     const val SUPERVISOR_STATUS = """{"type":"supervisor_status","state":"down"}"""
 
+    /** v165: the answer to one `queue-steer` (hand-authored: newer than the corpus). */
+    const val QUEUE_STEER_RESULT = """{"type":"queue_steer_result","sessionId":"s1","queueId":"q1","status":"not_steerable","reason":"attachments"}"""
+
     val HAND_AUTHORED: Map<String, String> = mapOf(
+        "queue_steer_result" to QUEUE_STEER_RESULT,
         "supervisor_status" to SUPERVISOR_STATUS,
         "server-settings-result" to SERVER_SETTINGS_RESULT,
         "approval" to APPROVAL,

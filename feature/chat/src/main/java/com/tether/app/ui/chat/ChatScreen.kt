@@ -205,6 +205,8 @@ fun ChatScreen(
     val interruptActions = remember(session?.id, consentOrigin, vm) { interruptActionsFor(vm.client, session?.id, consentOrigin) }
     val onInterrupt = interruptActions.interrupt
     val onInterruptStopBackground = interruptActions.interruptStopBackground
+    val steerFrame by vm.client.serverSettings.collectAsStateWithLifecycle()
+    val steerStates by vm.client.queueSteerStates.collectAsStateWithLifecycle()
     val showApprovals = session == null || providers.firstOrNull { it.id == session.provider }?.capabilities?.interactiveApprovals != false
     // ONE store for every card of this screen (transcript and run tabs alike): the shell's (round 4,
     // H1: above the layout switch), or one saved here when nobody provides it.
@@ -551,6 +553,11 @@ fun ChatScreen(
                 liveness = liveness,
                 steerCapableEngine = session != null && providers.firstOrNull { it.id == session.provider }?.capabilities?.steer == true,
                 onInterruptStopBackground = onInterruptStopBackground,
+                queueSteerMode = queueSteerModeOf(steerFrame),
+                queueSteerStates = steerStates,
+                onQueueSteer = interruptActions.steerRow,
+                onInterruptRow = interruptActions.interruptRow,
+                onForgetSteer = { session?.let { vm.client.forgetQueueSteer(it.id) } },
                 serverProtocol = chatProtocol,
                 persistentSessions = session != null && providers.firstOrNull { it.id == session.provider }?.capabilities?.persistentSessions == true,
                 attachments = attachments,

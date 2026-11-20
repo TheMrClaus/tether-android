@@ -105,6 +105,10 @@ internal fun QueuedMessageSheet(
     onSave: (text: String) -> Unit,
     onRemove: () -> Unit,
     onClose: () -> Unit,
+    /** v165: what the footer's action does to this row: Steer, or Interrupt and send (the default, as before). */
+    rowAction: QueueWait.RowAction = QueueWait.RowAction.InterruptAndSend,
+    steerPending: Boolean = false,
+    onSteer: () -> Unit = {},
 ) {
     val edit = remember(message.queueId) { QueueEditState(message.text) }
     // Text changed on another device mirrors in unless this one is editing.
@@ -121,7 +125,7 @@ internal fun QueuedMessageSheet(
         QueuedMessageSheetBody(
             message, summary, waitLabel, handedOff, removable, editable, edit,
             offerInterruptAndSend, confirmationCopy, confirming, onConfirmingChange, interruptLock, interruptTurnId, interruptIdentity,
-            onInterruptNow, onSave, onRemove, onClose,
+            onInterruptNow, onSave, onRemove, onClose, rowAction, steerPending, onSteer,
         )
     }
 }
@@ -137,12 +141,13 @@ internal fun QueuedMessageSheetSurface(
     removable: Boolean = true,
     offerInterruptAndSend: Boolean = false,
     docked: Boolean = currentLayoutClass() == TetherLayoutClass.Phone,
+    rowAction: QueueWait.RowAction = QueueWait.RowAction.InterruptAndSend,
 ) {
     val editable = !message.isPeer && !message.isHandoverRequest && !handedOff
     TetherSheetSurface(title = summary.sheetTitle, modifier = modifier, docked = docked, onClose = {}, cardWidth = queueSheetCardWidth()) {
         QueuedMessageSheetBody(
             message, summary, waitLabel, handedOff, removable, editable, remember { QueueEditState(message.text) },
-            offerInterruptAndSend, QUEUE_INTERRUPT_THEN_SENT, false, {}, null, "t1", Unit, {}, {}, {}, {},
+            offerInterruptAndSend, QUEUE_INTERRUPT_THEN_SENT, false, {}, null, "t1", Unit, {}, {}, {}, {}, rowAction, false, {},
         )
     }
 }
@@ -173,6 +178,9 @@ private fun ColumnScope.QueuedMessageSheetBody(
     onSave: (text: String) -> Unit,
     onRemove: () -> Unit,
     onClose: () -> Unit,
+    rowAction: QueueWait.RowAction,
+    steerPending: Boolean,
+    onSteer: () -> Unit,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -257,7 +265,7 @@ private fun ColumnScope.QueuedMessageSheetBody(
         val hasActions = removable || canSendAgain || offerInterruptAndSend
         if (hasActions) {
             Box(Modifier.fillMaxWidth().padding(top = t.css.spaceXs).height(1.dp).background(t.line))
-            if (confirming && offerInterruptAndSend) {
+            if (confirming && offerInterruptAndSend && rowAction == QueueWait.RowAction.InterruptAndSend) {
                 QueueInterruptConfirmation(
                     copy = confirmationCopy,
                     onKeepQueued = { onConfirmingChange(false) },
@@ -279,7 +287,19 @@ private fun ColumnScope.QueuedMessageSheetBody(
                 ) {
                     if (removable) SheetAction(withdrawLabel, onRemove)
                     if (canSendAgain) SheetAction(QUEUE_SHEET_SEND_AGAIN_LABEL, { onSave(edit.value.trim()); edit.dirty = false; onClose() }, enabled = edit.value.isNotBlank())
-                    if (offerInterruptAndSend) QueueInterruptButton(
+                    if (offerInterruptAndSend && rowAction == QueueWait.RowAction.Steer) {
+                        QueueRowActionPill(
+                            action = QueueWait.RowAction.Steer,
+                            preview = message.text,
+                            pending = steerPending,
+                            onSteer = onSteer,
+                            onInterrupt = {},
+                            lock = interruptLock,
+                            identity = interruptIdentity,
+                            turnId = interruptTurnId,
+                            pillHeight = 44.dp,
+                        )
+                    } else if (offerInterruptAndSend) QueueInterruptButton(
                         onClick = { onConfirmingChange(true) },
                         lock = interruptLock,
                         identity = interruptIdentity,

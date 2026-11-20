@@ -471,10 +471,20 @@ sealed interface ClientMessage {
      * `interrupt`. [stopBackground] (v156, tether lib/protocol-schema-lu.ts:296): true = also stop the background work Tether can stop.
      * Written ONLY when true: an older server never sees the key (the caller also gates it on `serverProtocolVersion >= 156`).
      */
-    data class Interrupt(val sessionId: String, val stopBackground: Boolean = false) : ClientMessage {
+    data class Interrupt(val sessionId: String, val stopBackground: Boolean = false, val queueId: String? = null) : ClientMessage {
         override fun toJsonObject() = frame("interrupt") {
             put("sessionId", sessionId)
             if (stopBackground) put("stopBackground", true)
+            // v165: the row-specific Interrupt and send names the row that is sent next; absent = a plain Stop.
+            if (queueId != null) put("queueId", queueId)
+        }
+    }
+
+    /** v165 `queue-steer`: put THAT waiting message into the running turn; answered by `queue_steer_result`. */
+    data class QueueSteer(val sessionId: String, val queueId: String) : ClientMessage {
+        override fun toJsonObject() = frame("queue-steer") {
+            put("sessionId", sessionId)
+            put("queueId", queueId)
         }
     }
 
@@ -1221,7 +1231,8 @@ private object ClientDecoders {
         },
         "handover-cancel" to { r -> ClientMessage.HandoverCancel(r.str("sessionId"), r.o.str("requestId")) },
         "queue-remove" to { r -> ClientMessage.QueueRemove(r.str("sessionId"), r.str("queueId")) },
-        "interrupt" to { r -> ClientMessage.Interrupt(r.str("sessionId"), r.o.boolTrue("stopBackground")) },
+        "interrupt" to { r -> ClientMessage.Interrupt(r.str("sessionId"), r.o.boolTrue("stopBackground"), r.o.str("queueId")) },
+        "queue-steer" to { r -> ClientMessage.QueueSteer(r.str("sessionId"), r.str("queueId")) },
         "dismiss-notice" to { r -> ClientMessage.DismissNotice(r.str("sessionId"), r.str("dismissKey")) },
         "rate-limit-resume" to { r -> ClientMessage.RateLimitResume(r.str("sessionId"), r.long("resetsAt"), r.str("action")) },
         "scheduled-actions" to { _ -> ClientMessage.ScheduledActionsRequest },

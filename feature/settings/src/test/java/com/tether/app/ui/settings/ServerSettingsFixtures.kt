@@ -120,7 +120,8 @@ object ServerFixtures {
         secrets: ServerSecretsState = ServerSecretsState(),
         scope: kotlinx.coroutines.CoroutineScope? = null,
         onPasswordChanged: () -> Unit = {},
-    ) = ServerSettingsBinding(view, advanced, origin, writer, replies, secrets, scope, onPasswordChanged)
+        serverProtocol: Int? = null,
+    ) = ServerSettingsBinding(view, advanced, origin, writer, replies, secrets, scope, onPasswordChanged, serverProtocol)
 
     fun json(text: String): JsonObject = TetherJson.parseToJsonElement(text).jsonObject
 }

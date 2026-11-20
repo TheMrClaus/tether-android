@@ -306,6 +306,30 @@ interface TetherClient {
         interrupt(sessionId, expectedOrigin, expectedTurnId)
 
     /**
+     * v165: [interrupt] for ONE waiting row ("Interrupt and send" on that row): the turn stops and THAT row is the next turn.
+     * [queueId] rides the frame only to a server at protocol >= 165 ([com.tether.app.protocol.helpers.QueueWait.steerSupported]);
+     * on an older one it is never written (a plain interrupt, as before). null is exactly the four-argument form.
+     */
+    fun interrupt(sessionId: String, expectedOrigin: String?, expectedTurnId: String, stopBackground: Boolean, queueId: String?): InterruptResult =
+        interrupt(sessionId, expectedOrigin, expectedTurnId, stopBackground)
+
+    /**
+     * v165: Steer ONE waiting message into the running turn (`queue-steer`). True when a frame went out; false (nothing sent, nothing
+     * held) when there is no live handshaken socket or the connected server's protocol is below 165. The answer arrives as
+     * `queue_steer_result` and shows in [queueSteerStates]: nothing is retried.
+     */
+    fun queueSteer(sessionId: String, queueId: String): Boolean = false
+
+    /**
+     * v165: per queued message id, what a Steer on it is doing now: [QueueRowSteer.Pending] between the press and the answer,
+     * [QueueRowSteer.Refused] after `not_steerable` (the row stays queued; it never interrupts by itself). Any other answer clears it.
+     */
+    val queueSteerStates: StateFlow<Map<String, QueueRowSteer>> get() = NoQueueSteerStates
+
+    /** v165: forget this session's refused rows (the turn they were refused in ended). */
+    fun forgetQueueSteer(sessionId: String) {}
+
+    /**
      * T6.7 r3: per session, the turn whose interrupt the server reported `failed` (the turn stays
      * "cancelling" in the projection). While a turn is cancelling every interrupt control of its
      * session is locked; a failure recorded here for THAT turn unlocks them so the operator can retry.
@@ -1593,6 +1617,24 @@ data class ServerErrorText(val text: String, val origin: String)
 
 /** T6.7 r3: [TetherClient.failedInterrupts] of a client that records none. */
 private val NoFailedInterrupts: StateFlow<Map<String, String>> = MutableStateFlow(emptyMap())
+private val NoQueueSteerStates: StateFlow<Map<String, QueueRowSteer>> = MutableStateFlow(emptyMap())
+
+/** v165: a Steer on one queued row, as the row shows it. */
+enum class QueueRowSteer { Pending, Refused }
+
+/** v165 `queue_steer_result.status`; any value this app does not know is [Unavailable] (nothing changes). */
+enum class QueueSteerStatus {
+    Steered, NotSteerable, Uncertain, Unavailable;
+
+    companion object {
+        fun of(status: String?): QueueSteerStatus = when (status) {
+            "steered" -> Steered
+            "not_steerable" -> NotSteerable
+            "uncertain" -> Uncertain
+            else -> Unavailable
+        }
+    }
+}
 
 /** ta-coik.19: [TetherClient.pendingSends] / [TetherClient.failedSends] of a client that has none. */
 private val NoPendingSends: StateFlow<List<PendingSendRow>> = MutableStateFlow(emptyList())

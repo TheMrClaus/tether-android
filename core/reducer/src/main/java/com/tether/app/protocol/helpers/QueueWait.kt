@@ -71,6 +71,35 @@ object QueueWait {
     /** The ONE gate of the "Also stop" box and of the `stopBackground` flag: the CONNECTED SERVER's protocol (`serverProtocolVersion`), never a client constant. */
     fun stopBackgroundSupported(serverProtocol: Int?): Boolean = serverProtocol != null && serverProtocol >= STOP_BACKGROUND_PROTOCOL_MIN
 
+    // ---- v165: Steer on a waiting message ----------------------------------------------------------------
+
+    /** First protocol whose server takes `queue-steer`, `interrupt.queueId` and the `queueSteerMode` setting (v165). */
+    const val STEER_PROTOCOL_MIN = 165
+
+    /** The ONE gate of the Steer frame, the row-specific interrupt and the setting row: the CONNECTED SERVER's protocol, never a client constant. */
+    fun steerSupported(serverProtocol: Int?): Boolean = serverProtocol != null && serverProtocol >= STEER_PROTOCOL_MIN
+
+    const val QUEUE_STEER_MODE_AUTO = "auto"
+    const val QUEUE_STEER_MODE_HOLD = "hold"
+
+    /** `queueSteerMode` "hold" only: absent, "auto" or any other value is automatic (the default). A server below 165 never holds. */
+    fun steerHeld(mode: String?, serverProtocol: Int?): Boolean = steerSupported(serverProtocol) && mode == QUEUE_STEER_MODE_HOLD
+
+    /** What pressing the action on one row does: the label follows the ROW's outcome, not the engine alone. */
+    enum class RowAction { Steer, InterruptAndSend }
+
+    /**
+     * The row's action: a row that would go into the running turn natively (the engine can steer, no attachments, the server has not
+     * refused it) reads Steer; a row whose Steer would interrupt (attachments, an engine that cannot steer, or a refused steer)
+     * reads Interrupt and send.
+     */
+    fun rowAction(steerCapable: Boolean, message: QueuedMessage, refused: Boolean = false): RowAction =
+        if (steerCapable && !refused && message.attachmentIds.isNullOrEmpty() && message.attachments.isNullOrEmpty()) RowAction.Steer else RowAction.InterruptAndSend
+
+    /** Whether a row gets the action at all: the operator's own, waiting (not held), and either every row (v165) or the next one (older). */
+    fun rowOffersAction(message: QueuedMessage, steerSupported: Boolean, nextRowId: String?): Boolean =
+        !message.held && !message.isPeer && !message.isHandoverRequest && (steerSupported || message.queueId == nextRowId)
+
     // ---- spec §4.1f F.1 / F.3 / B.1 / B.3 (twin of lib/queue-wait.ts + lib/claude-stop-band.ts, tether w2-int) ----------------
 
     /** lib/claude-stop-band.ts CLAUDE_SPARES_BACKGROUND_FROM: the first Claude CLI whose interrupt spares background agents. */
@@ -227,6 +256,11 @@ object QueueWait {
 
     const val QUEUED_TURN_END_COPY = "Queued on the server \u00B7 sends when this turn ends"
     const val QUEUED_STEER_COPY = "Queued on the server \u00B7 goes into this turn at the agent\u2019s next step"
+    const val QUEUED_HOLD_COPY = "Queued on the server \u00B7 waits for Steer or the end of this turn"
+    const val QUEUED_NOT_STEERED_COPY = "Queued on the server \u00B7 the agent could not take it into this turn; it sends when this turn ends"
+    const val NOT_STEERED_LABEL = "Not steered"
+    const val NOT_STEERED_META = "Not steered \u00B7 sends when this turn ends"
+    const val HOLD_META = "Waits for Steer or the turn end"
 
     /**
      * THE one V5 predicate (label and glyph both read it): the engine can steer, the row has no attachments (never steered in the
@@ -235,8 +269,16 @@ object QueueWait {
     fun isSteered(steerCapable: Boolean, message: QueuedMessage): Boolean =
         steerCapable && message.attachmentIds.isNullOrEmpty() && message.attachments.isNullOrEmpty() && !message.atToolBoundary
 
-    fun queuedLabel(steerCapable: Boolean, message: QueuedMessage): String =
-        if (isSteered(steerCapable, message)) QUEUED_STEER_COPY else QUEUED_TURN_END_COPY
+    /**
+     * The wait label of a waiting operator row. [hold]: the setting is "Hold until I press Steer" (v165), so a row that would go in
+     * on its own waits for Steer or the turn end instead. [refused]: the server could not take this row into the turn; it keeps
+     * its place and sends when the turn ends.
+     */
+    fun queuedLabel(steerCapable: Boolean, message: QueuedMessage, hold: Boolean = false, refused: Boolean = false): String = when {
+        refused -> QUEUED_NOT_STEERED_COPY
+        isSteered(steerCapable, message) -> if (hold) QUEUED_HOLD_COPY else QUEUED_STEER_COPY
+        else -> QUEUED_TURN_END_COPY
+    }
 
     // ---- spec §4.1a C: held rows ----------------------------------------------------------------------
 
@@ -317,7 +359,16 @@ object QueueWait {
      * (spec 2.2 + QD round 2 R2-N1/N2): a held operator `steer_uncertain` row reads "Unconfirmed" (danger tone, warning glyph) even on a
      * handed-off strip, whose wait label stays handedOffRowLabel; every other held or handed-off row reads "Not sent".
      */
-    fun queueRowSummary(message: QueuedMessage, steer: Boolean = false, movesToNewSession: Boolean = false, handedOff: Boolean = false): QueueRowSummary {
+    fun queueRowSummary(
+        message: QueuedMessage,
+        steer: Boolean = false,
+        movesToNewSession: Boolean = false,
+        handedOff: Boolean = false,
+        /** v165: a row the setting holds (it would steer on its own): the turn-end row, with the hold words in the sheet. */
+        holdByMode: Boolean = false,
+        /** v165: the server could not take this row into the turn: "Not steered", it sends when the turn ends. */
+        steerRefused: Boolean = false,
+    ): QueueRowSummary {
         val count = message.attachments?.size ?: message.attachmentIds?.size ?: 0
         val images = message.attachments?.count { it.mediaType.startsWith("image/") } ?: 0
         val files = attachmentWords(count, images)
@@ -356,9 +407,12 @@ object QueueWait {
         if (movesToNewSession) {
             return QueueRowSummary(QueueRowGlyph.Clock, "To new session", QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message"), "Queued message", "Goes to the new session")
         }
+        if (steerRefused) {
+            return QueueRowSummary(QueueRowGlyph.Clock, NOT_STEERED_LABEL, QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message, not steered"), "Queued message", NOT_STEERED_META)
+        }
         if (steer) {
             return QueueRowSummary(QueueRowGlyph.CornerDownRight, "Into this turn", QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message"), "Queued message", "Goes into this turn")
         }
-        return QueueRowSummary(QueueRowGlyph.Clock, "", QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message"), "Queued message", "Sends when this turn ends")
+        return QueueRowSummary(QueueRowGlyph.Clock, "", QueueLeadTone.Muted, previewOf(message.text), files, withFiles("Your queued message"), "Queued message", if (holdByMode) HOLD_META else "Sends when this turn ends")
     }
 }

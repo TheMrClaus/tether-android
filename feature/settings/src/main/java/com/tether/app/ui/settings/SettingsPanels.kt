@@ -449,6 +449,9 @@ private fun SessionSettingsPanel(narrow: Boolean, binding: ServerSettingsBinding
             ServerNumberRow(AdvancedRows.warmBgHardCapMs, view, binding, narrow)
             ServerNumberRow(AdvancedRows.warmSweepMs, view, binding, narrow)
             ServerNumberRow(AdvancedRows.shutdownDrainMs, view, binding, narrow)
+            if (com.tether.app.client.queueSteerSupported(binding.serverProtocol)) {
+                ServerSelectRow(AdvancedRows.queueSteerMode, AdvancedRows.queueSteerModes, view, binding, narrow, fallback = com.tether.app.client.QUEUE_STEER_MODE_DEFAULT)
+            }
             ServerSelectRow(AdvancedRows.claudeModelFallback, AdvancedRows.claudeModelFallbacks, view, binding, narrow)
             ServerNumberRow(AdvancedRows.autoArchiveIdleDays, view, binding, narrow)
             ServerToggleRow(AdvancedRows.archiveOnMerge, view, binding, narrow)

@@ -23,7 +23,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import com.tether.app.ui.components.SpinningIcon
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -118,6 +120,8 @@ internal const val PLACEHOLDER_IDLE = "Message the agent…"
 internal const val PLACEHOLDER_BUSY = "Agent is working — message queues"
 /** Spec §3.1 (coarse pointer), when the engine can steer ([QueueWait.QUEUED_STEER_COPY]). */
 internal const val PLACEHOLDER_BUSY_STEER = "Agent is working — message goes into this turn"
+/** v165 (coarse pointer), the setting is "Hold until I press Steer": the message waits for its row's Steer or the turn end. */
+internal const val PLACEHOLDER_BUSY_HOLD = "Agent is working — message waits for Steer"
 
 /**
  * chat-view.tsx:3244 onKeyDown: Enter without Shift submits, Shift+Enter is a newline. An IME
@@ -380,6 +384,15 @@ internal fun QueuedMessages(
     /** W34: v151: the instruction row has no X, whatever the stage (chat-view.tsx:1632 `!handoverRequest`). */
     handoverV151: Boolean = false,
     handedOff: Boolean = false,
+    /** v165: the connected server speaks Steer: every waiting row gets the action, not only the next one. */
+    steerEnabled: Boolean = false,
+    /** v165: the setting is "Hold until I press Steer": a row that would go in on its own waits for Steer or the turn end. */
+    steerHold: Boolean = false,
+    /** v165: what a Steer press on each row is doing (pending, or refused by the agent), by queue id. */
+    steerStates: Map<String, com.tether.app.client.QueueRowSteer> = emptyMap(),
+    onSteer: (queueId: String) -> Unit = {},
+    /** v165: "Interrupt and send" on one row: that row is the next turn. Defaults to a plain interrupt. */
+    onInterruptRow: ((queueId: String, turnId: String) -> Unit)? = null,
 ) {
     val t = LocalTetherTokens.current
     val instructionIndex = queued.indexOfFirst { it.isHandoverRequest }
@@ -402,6 +415,11 @@ internal fun QueuedMessages(
         runCatching { focusers[id]?.requestFocus() }
     }
     val capDp = minOf(176f, LocalConfiguration.current.screenHeightDp * 0.34f).dp
+    fun refusedOf(message: QueuedMessage) = steerEnabled && !message.held && steerStates[message.queueId] == com.tether.app.client.QueueRowSteer.Refused
+    fun holdOf(message: QueuedMessage) = steerHold && !message.held && !message.isPeer && !message.isHandoverRequest && QueueWait.isSteered(steerCapable, message)
+    fun offerOf(message: QueuedMessage) = !handedOff && QueueWait.rowOffersAction(message, steerEnabled, interruptSendId)
+    fun actionOf(message: QueuedMessage) = if (steerEnabled) QueueWait.rowAction(steerCapable, message, refusedOf(message)) else QueueWait.RowAction.InterruptAndSend
+    fun rowInterrupt(message: QueuedMessage): (String) -> Unit = { turnId -> if (onInterruptRow != null) onInterruptRow(message.queueId, turnId) else onInterruptNow(turnId) }
     fun summaryOf(message: QueuedMessage, index: Int): QueueWait.QueueRowSummary {
         val move = com.tether.app.client.Handover.queueRowLabel(
             handoverStage, instruction = message.isHandoverRequest, peer = message.isPeer, held = message.held,
@@ -410,9 +428,11 @@ internal fun QueuedMessages(
         val operatorRow = !message.isPeer && !message.isHandoverRequest
         return QueueWait.queueRowSummary(
             message,
-            steer = !message.held && operatorRow && QueueWait.isSteered(steerCapable, message),
+            steer = !message.held && operatorRow && QueueWait.isSteered(steerCapable, message) && !holdOf(message) && !refusedOf(message),
             movesToNewSession = move != null && operatorRow && !message.held,
             handedOff = handedOff,
+            holdByMode = holdOf(message),
+            steerRefused = refusedOf(message) && operatorRow,
         )
     }
     Column(
@@ -434,15 +454,21 @@ internal fun QueuedMessages(
                     ).takeIf { !handedOff },
                     handedOff = handedOff,
                     steerCapable = steerCapable,
+                    steerHold = holdOf(message),
+                    steerRefused = refusedOf(message),
+                    steerEnabled = steerEnabled,
+                    rowAction = actionOf(message),
+                    steerPending = steerStates[message.queueId] == com.tether.app.client.QueueRowSteer.Pending,
+                    onSteer = { onSteer(message.queueId) },
                     handoverV151 = handoverV151,
                     onOpen = { openId = message.queueId },
                     focusRegistry = focusers,
                     onRemove = { onRemove(message.queueId) },
-                    onInterruptNow = onInterruptNow,
+                    onInterruptNow = rowInterrupt(message),
                     interruptLock = interruptLock,
                     interruptIdentity = Triple(sessionId, message.queueId, interruptTurnId),
                     interruptTurnId = interruptTurnId,
-                    offerInterruptAndSend = !handedOff && message.queueId == interruptSendId && !message.held && !message.isHandoverRequest && !message.isPeer,
+                    offerInterruptAndSend = offerOf(message),
                     confirmationCopy = confirmation,
                     confirming = confirmingRowId == message.queueId && openId != message.queueId,
                     onConfirmingChange = { open -> onConfirmRow(if (open) message.queueId else null) },
@@ -452,7 +478,7 @@ internal fun QueuedMessages(
     }
     if (open != null) {
         val message = open.value
-        val offer = !handedOff && message.queueId == interruptSendId && !message.held && !message.isHandoverRequest && !message.isPeer
+        val offer = offerOf(message)
         val handoverWait = com.tether.app.client.Handover.queueRowLabel(
             handoverStage, instruction = message.isHandoverRequest, peer = message.isPeer, held = message.held,
             index = open.index, instructionIndex = instructionIndex,
@@ -460,17 +486,20 @@ internal fun QueuedMessages(
         QueuedMessageSheet(
             message = message,
             summary = summaryOf(message, open.index),
-            waitLabel = queueWaitLabel(message, handedOff, handoverWait, steerCapable),
+            waitLabel = queueWaitLabel(message, handedOff, handoverWait, steerCapable, holdOf(message), refusedOf(message)),
             handedOff = handedOff,
             removable = !(message.isHandoverRequest && handoverV151 && !handedOff),
             offerInterruptAndSend = offer,
+            rowAction = actionOf(message),
+            steerPending = steerStates[message.queueId] == com.tether.app.client.QueueRowSteer.Pending,
+            onSteer = { onSteer(message.queueId) },
             confirmationCopy = confirmation,
             confirming = confirmingRowId == message.queueId && offer && interruptLock == null,
             onConfirmingChange = { o -> onConfirmRow(if (o) message.queueId else null) },
             interruptLock = interruptLock,
             interruptTurnId = interruptTurnId,
             interruptIdentity = Triple(sessionId, message.queueId, interruptTurnId),
-            onInterruptNow = onInterruptNow,
+            onInterruptNow = rowInterrupt(message),
             onSave = { text -> onSave(message.queueId, text) },
             onRemove = {
                 // Focus moves to the next row's open area, else the previous one (spec §2.8); the composer otherwise.
@@ -487,13 +516,13 @@ internal fun QueuedMessages(
 }
 
 /** The row's full wait label (spec §3.2 / §4.1a C / tth-y1hv / tth-2zt / #273): the words of `stateDescription` and the sheet's wait paragraph. */
-internal fun queueWaitLabel(message: QueuedMessage, handedOff: Boolean, handoverWaitLabel: String?, steerCapable: Boolean): String = when {
+internal fun queueWaitLabel(message: QueuedMessage, handedOff: Boolean, handoverWaitLabel: String?, steerCapable: Boolean, steerHold: Boolean = false, steerRefused: Boolean = false): String = when {
     handedOff -> handedOffRowLabel(message)
     message.held -> QueueWait.heldLabel(message)
     handoverWaitLabel != null -> handoverWaitLabel
     message.isHandoverRequest -> HANDOVER_QUEUE_WAIT_COPY
     message.isPeer -> PEER_QUEUE_WAIT_COPY
-    else -> QueueWait.queuedLabel(steerCapable, message)
+    else -> QueueWait.queuedLabel(steerCapable, message, hold = steerHold, refused = steerRefused)
 }
 
 /** What committing a queued row's edit does (chat-view.tsx:1433-1441). */
@@ -539,7 +568,18 @@ internal fun QueuedMessageRow(
     /** T6.7: the turn it is drawn for; null = none runs, so it cannot send. */
     interruptTurnId: String? = null,
     steerCapable: Boolean = false,
-    /** Spec §4.2: this is the next row to be delivered, it is the operator's own, and it is not held. */
+    /** v165: the setting holds this row (it would go in on its own): the turn-end row with the hold words. */
+    steerHold: Boolean = false,
+    /** v165: the agent could not take this row into the turn: "Not steered"; it sends when the turn ends. */
+    steerRefused: Boolean = false,
+    /** v165: the server speaks Steer: the action is on the row at every width. */
+    steerEnabled: Boolean = false,
+    /** v165: what pressing the action does to THIS row (Steer, or Interrupt and send). */
+    rowAction: QueueWait.RowAction = QueueWait.RowAction.InterruptAndSend,
+    /** v165: a Steer on this row is waiting for the server's answer. */
+    steerPending: Boolean = false,
+    onSteer: () -> Unit = {},
+    /** Spec §4.2: this row may offer its action (the next row; at v165 every waiting operator row). */
     offerInterruptAndSend: Boolean = false,
     /** Spec §4.2: `{cost} {steer line} Then this message is sent.` */
     confirmationCopy: String = QUEUE_INTERRUPT_THEN_SENT,
@@ -565,11 +605,13 @@ internal fun QueuedMessageRow(
     val handoverRequest = message.isHandoverRequest
     val peer = message.isPeer
     val held = handedOff || message.held
-    val waitLabel = queueWaitLabel(message, handedOff, handoverWaitLabel, steerCapable)
-    val confirmingNow = confirming && offerInterruptAndSend && interruptLock == null
-    // Spec §2.5: below the Medium layout class the button is sheet-only (a 130 dp button would leave the preview ~70 dp).
-    val buttonOnRow = offerInterruptAndSend && !confirmingNow && currentLayoutClass() != TetherLayoutClass.Phone
-    val steered = !held && !handoverRequest && !peer && QueueWait.isSteered(steerCapable, message)
+    val waitLabel = queueWaitLabel(message, handedOff, handoverWaitLabel, steerCapable, steerHold, steerRefused)
+    val steerRow = offerInterruptAndSend && rowAction == QueueWait.RowAction.Steer
+    val confirmingNow = confirming && offerInterruptAndSend && !steerRow && interruptLock == null
+    // Spec §2.5: below the Medium layout class the button is sheet-only on a server older than v165 (a 130 dp button would leave the preview ~70 dp).
+    // At v165 the action is on the row at every width (it is the owner's phone layout): the lead and the preview give way.
+    val buttonOnRow = offerInterruptAndSend && !confirmingNow && (steerEnabled || currentLayoutClass() != TetherLayoutClass.Phone)
+    val steered = summary.glyph == QueueWait.QueueRowGlyph.CornerDownRight
     val shape = RoundedCornerShape(t.radiusMd)
     val kindDescription = "${summary.kindName}: ${summary.preview.take(120)}"
     Column(
@@ -647,12 +689,25 @@ internal fun QueuedMessageRow(
                 }
             }
             if (buttonOnRow) {
-                QueueInterruptButton(
-                    onClick = { onConfirmingChange(true) },
-                    lock = interruptLock,
-                    identity = interruptIdentity,
-                    turnId = interruptTurnId,
-                )
+                if (steerEnabled) {
+                    QueueRowActionPill(
+                        action = rowAction,
+                        preview = summary.preview,
+                        pending = steerPending,
+                        onSteer = onSteer,
+                        onInterrupt = { onConfirmingChange(true) },
+                        lock = interruptLock,
+                        identity = interruptIdentity,
+                        turnId = interruptTurnId,
+                    )
+                } else {
+                    QueueInterruptButton(
+                        onClick = { onConfirmingChange(true) },
+                        lock = interruptLock,
+                        identity = interruptIdentity,
+                        turnId = interruptTurnId,
+                    )
+                }
             }
             // v151: Stop handover (the Session links menu) is the one stop, so Tether's instruction row has no X.
             if (!(handoverRequest && handoverV151 && !handedOff)) Box(
@@ -758,6 +813,68 @@ internal fun queueRowKey(event: KeyEvent, focusManager: FocusManager, revert: ()
 private fun Modifier.queueEdge(color: Color): Modifier = drawWithContent {
     drawContent()
     drawRect(color, size = Size(2.dp.toPx(), size.height))
+}
+
+internal const val QUEUE_STEER_TAG = "queue-steer"
+internal const val QUEUE_STEER_LABEL = "Steer"
+internal const val QUEUE_ROW_ACTION_TAG = "queue-row-action"
+
+/**
+ * v165: the ONE action on a waiting row, at every width, between the row's open area and its X. Its label follows what pressing it
+ * does to THIS row: [QueueWait.RowAction.Steer] reads "Steer" with the glyph for "goes into this turn" (one tap, no confirm),
+ * [QueueWait.RowAction.InterruptAndSend] reads "Interrupt and send" and opens the row's confirmation. A neutral outline pill 32 dp
+ * tall with a 44 dp touch target; while a Steer waits for its answer the glyph spins and the label stays. Both ways act on the first
+ * tap and drop a press that began before the turn or the row changed ([StaleTapGuard]); a copy that is not live is dimmed and inert.
+ */
+@Composable
+internal fun QueueRowActionPill(
+    action: QueueWait.RowAction,
+    preview: String,
+    pending: Boolean,
+    onSteer: () -> Unit,
+    onInterrupt: () -> Unit,
+    lock: String?,
+    identity: Any,
+    turnId: String?,
+    modifier: Modifier = Modifier,
+    /** 32 dp on the row; the sheet's footer draws the same pill at 44 dp. */
+    pillHeight: Dp = 32.dp,
+) {
+    val t = LocalTetherTokens.current
+    val steer = action == QueueWait.RowAction.Steer
+    val label = if (steer) QUEUE_STEER_LABEL else QUEUE_INTERRUPT_LABEL
+    val named = "$label: ${preview.take(60)}"
+    val live = lock == null && turnId != null && !pending
+    StaleTapGuard(identity) { guard ->
+        Box(
+            modifier
+                .heightIn(min = 44.dp)
+                .then(guard)
+                .alpha(if (lock == null) 1f else 0.55f)
+                .clickable(enabled = live, role = Role.Button, onClick = { if (live) { if (steer) onSteer() else onInterrupt() } })
+                .semantics(mergeDescendants = true) {
+                    contentDescription = if (lock == null) named else "$named, unavailable: $lock"
+                    if (pending) stateDescription = "Waiting for the agent"
+                }
+                .testTag(if (steer) QUEUE_STEER_TAG else QUEUE_INTERRUPT_TAG)
+                .padding(horizontal = 2.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(
+                Modifier
+                    .height(pillHeight)
+                    .cssSurface(RoundedCornerShape(10.dp), Color.Transparent, CssBorder(1.dp, t.lineStrong))
+                    .padding(horizontal = t.css.spaceSm),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.8.dp),
+            ) {
+                val ink = t.muted
+                if (pending) SpinningIcon(TetherIcons.Loader, tint = ink, size = 13.dp)
+                else Icon(if (steer) TetherIcons.CornerDownRight else TetherIcons.CircleStop, contentDescription = null, tint = ink, modifier = Modifier.size(13.dp))
+                Text(label, color = if (steer) t.ink else t.muted, fontFamily = Manrope, fontSize = 11.84.sp, maxLines = 1)
+            }
+        }
+    }
 }
 
 /**
