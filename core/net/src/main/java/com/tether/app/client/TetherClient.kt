@@ -852,6 +852,9 @@ interface TetherClient {
      */
     val githubConnection: GitHubConnectionSource get() = GitHubConnectionSource.Unavailable
 
+    /** Settings' Browser section: the server's browser runtime status (`GET /api/browser/runtime-status`), a read on a fixed route. The default refuses without touching the network. */
+    val browserRuntime: BrowserRuntimeSource get() = BrowserRuntimeSource.Unavailable
+
     /**
      * T8.4: the working folder's open GitHub issues and pull requests (`GET /api/github/issues` and
      * `/api/github/pull-requests`, `?cwd=`), each call only to the server it names, on a fixed route,

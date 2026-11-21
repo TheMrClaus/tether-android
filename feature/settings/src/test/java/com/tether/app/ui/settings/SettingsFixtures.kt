@@ -91,6 +91,7 @@ fun SettingsUnderTest(
     nodes: NodesBinding = NodesBinding.None,
     devices: DevicesBinding = DevicesBinding.None,
     github: GitHubBinding = GitHubBinding.None,
+    browser: BrowserBinding = BrowserBinding.None,
     accountLimitEntities: List<RuntimeDeskNavItem> = emptyList(),
     accountsLimits: @Composable (RuntimeDeskUsageTarget) -> Unit = {},
     /** ta-coik.52: the server the preferences are kept for (null: the frame's default, no server). */
@@ -115,6 +116,7 @@ fun SettingsUnderTest(
                 nodes = nodes,
                 devices = devices,
                 github = github,
+                browser = browser,
                 accountLimitEntities = accountLimitEntities,
                 accountsLimits = accountsLimits,
             )

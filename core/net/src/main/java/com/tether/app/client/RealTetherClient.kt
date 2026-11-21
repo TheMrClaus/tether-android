@@ -5492,6 +5492,16 @@ class RealTetherClient(
         }
     })
 
+    /** Settings' Browser section, over the same per-call (server, credential) read as [githubConnection]. */
+    override val browserRuntime: BrowserRuntimeSource = HttpBrowserRuntime(authHttp, authority = {
+        val (base, credential) = synchronized(lock) { baseUrlValue to credentialValue }
+        when {
+            base == null || credential == null -> FilesAuthority.SignedOut
+            blockedBeforeConnect(base) -> FilesAuthority.LocalNetworkBlocked
+            else -> FilesAuthority.Paired(base) { request -> request.authorize(credential, base) }
+        }
+    })
+
     /**
      * T8.4: the GitHub issues / pull requests reads, over [authHttp] with the same per-call (server,
      * credential) read as [githubConnection]; each call is made only when that server is the one the
