@@ -115,6 +115,9 @@ enum class SettingsShot(
     AdvancedBrowserFound("settings-advanced-browser-found", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Found),
     AdvancedBrowserMissing("settings-advanced-browser-missing", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Missing),
     AdvancedBrowserTools("settings-advanced-browser-tools", SettingsTab.Advanced, server = ServerShot.BrowserTools, browser = BrowserShot.Found),
+    AdvancedBrowserInstallable("settings-advanced-browser-installable", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Installable),
+    AdvancedBrowserInstalling("settings-advanced-browser-installing", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Installing),
+    AdvancedBrowserInstallFailed("settings-advanced-browser-install-failed", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.InstallFailed),
     Metadata("settings-metadata", SettingsTab.Metadata, server = ServerShot.Metadata),
     MetadataText("settings-metadata-text", SettingsTab.Metadata, server = ServerShot.MetadataText),
     EnginesCards("settings-engines-cards", SettingsTab.Engines, server = ServerShot.Engines),
@@ -389,9 +392,24 @@ enum class GitHubShot {
 enum class BrowserShot {
     Found,
     Missing,
+
+    /** The server can install: Chromium missing, the Install Chromium key. */
+    Installable,
+
+    /** The job is running: the progress row and the disabled key. */
+    Installing,
+
+    /** The job failed: the reason, the last output lines, Try again, and the command. */
+    InstallFailed,
     ;
 
-    fun seed(): BrowserSeed = BrowserSeed(status = if (this == Found) BrowserFixtures.FOUND else BrowserFixtures.MISSING)
+    fun seed(): BrowserSeed = when (this) {
+        Found -> BrowserSeed(status = BrowserFixtures.FOUND)
+        Missing -> BrowserSeed(status = BrowserFixtures.MISSING)
+        Installable -> BrowserSeed(status = InstallFixtures.INSTALLABLE, install = InstallFixtures.IDLE)
+        Installing -> BrowserSeed(status = InstallFixtures.INSTALLABLE, install = InstallFixtures.RUNNING)
+        InstallFailed -> BrowserSeed(status = InstallFixtures.INSTALLABLE, install = InstallFixtures.FAILED)
+    }
 }
 
 /** The Browser source behind a seeded shot: any call is a timing dependency, so it fails the shot. */
