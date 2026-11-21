@@ -265,9 +265,10 @@ class BrowserRuntimeController(
             when (r) {
                 is SecurityResult.Ok -> {
                     val v = r.value
-                    v.job?.let { install = it }
+                    val started = v.job
+                    if (started != null) install = started
                     if (!v.ok) installNote = v.message ?: BrowserCopy.NOT_STARTED
-                    else if (v.job != null && !v.job.running) load()
+                    else if (started != null && !started.running) load()
                     pollWhileRunning(o)
                 }
                 is SecurityResult.OwnerSignInNeeded -> installNote = BrowserCopy.notStarted(403)
