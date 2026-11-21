@@ -163,6 +163,20 @@ class BrowserInstallControllerTest {
         assertEquals(BrowserCopy.INSTALL_DID_NOT_FINISH, BrowserCopy.installCaption(s, InstallFixtures.FAILED.copy(reason = null), ""))
     }
 
+    @Test fun aStartThatAnswersWithAnEndedJobReadsTheStatusAtOnce() = runTest {
+        val s = FakeInstaller().status(InstallFixtures.INSTALLABLE).start(true, InstallFixtures.DONE)
+        s.status(InstallFixtures.INSTALLED)
+        val c = controller(s)
+        c.shown()
+        runCurrent()
+        c.startInstall()
+        runCurrent()
+        assertEquals(InstallFixtures.DONE, c.install)
+        assertEquals(InstallFixtures.INSTALLED, c.status)
+        assertEquals(2, s.calls.count { it == "status" })
+        c.dispose()
+    }
+
     @Test fun a409ShowsTheServersMessageAndKeepsTheRunningJob() = runTest {
         val s = FakeInstaller().status(InstallFixtures.INSTALLABLE)
         s.start(false, InstallFixtures.RUNNING, "already_installing", "Chromium is already being installed.")
