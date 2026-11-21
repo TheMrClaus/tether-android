@@ -57,17 +57,12 @@ exits 13, so re-read instead of retrying.
 - Follow the Omnio editorial style (plain text, user outcomes, no unrelated feature content).
 
 <!-- app-orchestration:begin (managed by ~/bin/game-orchestration --fleet app — do not edit by hand) -->
-## Orchestration policy (binding)
+## Orchestration
 
-Read `docs/agents/orchestration.md` and follow it: orchestrate, don't implement (an interactive,
-non-run session may make one small single-file, non-design, non-core edit); dispatch the repo roster
-in `.claude/agents/` by name with no model/effort override; all design work goes to `design`; every
-raster asset goes to the Codex image lane (`astra`, High) the design lane drives; no 3D in this
-fleet; no agent grades its own work. Commit by explicit path, never `git add -A` (the fleet gate denies it).
-**Context limits (W = window)**: lead soft min(200k, 0.60 x W) = drain and checkpoint, hard
-min(250k, 0.75 x W) = safe completion only; child lane soft min(100k, 0.45 x W), hard min(150k,
-0.60 x W).
-**If you were started with Codex as the lead**: run the Codex model the owner picked (not Opus
-5.5) and deploy **Codex agents only** — every role keeps its duties, the `.claude/agents/` pins
-do not apply; everything else here does.
+A run has one lead. Claim the run with `~/bin/lead-lock` before dispatch. The lead plans and integrates. A maker delivers one bounded piece and a different actor verifies it. Outside a run the lead may make one small single-file edit under routing rule 3.
+
+Leads dispatch pinned repo roles by name. Started in Codex? Use the owner's model and dispatch Codex agents only, preserving role duties and independence. Give each lane its task ID, Goal, Done and Return when. Commit by explicit path. Twice-failed problems and night decisions go to `advisor` (routing rule 11).
+
+Check context at start and before dispatch (W = window). Lead limits: lead soft min(200k, 0.60 x W), hard min(250k, 0.75 x W). Child limits: child lane soft min(100k, 0.45 x W), hard min(150k, 0.60 x W). At soft, plan a checkpoint with closure reserve. At hard, only safe closure and handover. Use `docs/agents/run-operations.md` › Context and handover.
+Read the applicable task in `docs/agents/apps.md`.
 <!-- app-orchestration:end -->

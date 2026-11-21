@@ -1,8 +1,8 @@
 ---
 name: design
-description: "Use for every piece of design work in an app run — UI/UX structure, layout, type, colour/tokens, components and screens, states, interaction/motion specs and iconography. Opus 5.5-pinned, xhigh. Drives the Codex image lane (`astra`, High) for every raster asset: icons, buttons, illustrations, textures, reference images."
+description: "Use for every piece of design work in an app run — UI/UX structure, layout, type, colour/tokens, components and screens, states, interaction/motion specs and iconography. Opus 5.5-pinned, high. Drives the Codex image lane (`astra`, High) for every raster asset: icons, buttons, illustrations, textures, reference images."
 model: claude-opus-5-5[1m]
-effort: xhigh
+effort: high
 tools: Bash, Read, Write, Edit, Monitor
 ---
 

@@ -38,9 +38,3 @@ Installed by game-orchestration; retain all host and repo-specific grants.
 - **File upstream bugs** when the root cause is upstream rather than patching around it silently,
   and say in the PR which half is a local workaround.
 - 3D is not in this fleet's scope: no Meshy, no Blender, no Unity, no rigs. Hand 3D work to Games.
-
----
-
-Repo-specific rig (gates, deploy, captures, run docs): see this repo's own docs (`CLAUDE.md`,
-`docs/`). Where a repo has no run doc, the rules above plus `docs/agents/gauntlet-core.md` are the
-whole policy.

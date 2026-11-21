@@ -20,7 +20,17 @@ names every BLOCKING finding, ranked (the first is the biggest); the lead triage
 answers the ones its brief lists in one *changed* candidate (*Findings*, below). Nothing is
 accepted on a maker's description of its own work. **Loop until the owner stops you**: a wave
 boundary or a named owner checkpoint is the only place the run stops, and at a checkpoint the lead
-stops, publishes and asks — it never decides on the owner's behalf.
+stops, publishes and asks — it never decides on the owner's behalf, **except inside the night
+protocol** (orchestration.md › Night protocol), where `advisor` decides provisionally in the owner's
+place and the 08:00 morning report is the ask.
+
+## Night waves — weekdays 00:00–08:00
+
+`orchestration.md` › Night protocol overrides the checkpoint rule for that window: the lead takes
+each decision to `advisor` (roles rule 11), logs the ruling, and keeps the loop running. At 08:00
+the morning report carries the wave report of anything that ended overnight — the night's
+decisions with their overturn lines, and at its top the hard stops (money, destructive operations,
+legal, policy) whose work is waiting. Work running at 08:00 finishes to its boundary; new decisions then wait again.
 
 ## The bar — three kinds, never blended
 
@@ -138,6 +148,12 @@ that record, never the chat.
 
 ## Standing rules (carry these into every brief)
 
+- **Every brief opens with three lines.** **Goal** — what the piece is for. **Done** — the
+  finished artefact, its path, and the check that accepts it. **Return when** — the conditions
+  under which the lane stops and hands back instead of deciding: a missing input or plate, the
+  brief contradicting the repo, a check it cannot pass without widening scope, anything that
+  needs the engine/editor or the owner. A lane that hits a Return-when line writes its receipt
+  and hands back; it does not guess.
 - The lead fans out and never implements (routing rule 3). The shared dev instance is the lead's:
   **"do not start or stop the dev server / deployed instance"** is in every brief.
 - **Git** — commit by explicit path only; **never `git add -A`**, `git add .` or `commit -a` (the

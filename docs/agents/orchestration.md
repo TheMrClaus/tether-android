@@ -21,7 +21,39 @@ A run's lead never builds; an interactive session may make one small edit itself
   rules, but every agent it spawns is a Codex agent on a Codex model; it never applies the Claude
   pins (the roster in `orchestration-roles.md`): read each role's duty, not its model.
 
-It stays ask-first like every app lead.
+Outside the night protocol it stays ask-first like every app lead; inside it, a fresh Codex agent
+fills the advisor duty (roles rule 11).
+
+## Night protocol — weekdays 00:00–08:00 (owner rulings 2026-10-26, 2026-11-21)
+
+**From midnight to 08:00, Monday to Friday (host local time), `advisor` decides instead of the
+owner.** The owner is asleep; the run does not idle on an answer. This section overrides every
+"ask the owner" rule below for that window, except the hard stops.
+
+- **`advisor` decides, provisionally — every time (owner 2026-11-21).** The lead takes each open
+  question to `advisor` (roles rule 11) with the options, the recommendation `DECISIONS.md` or the
+  run doc carries, and the evidence; `advisor` rules and the lead carries it out. A 👤 bead is
+  released the same way; a piece at its third REJECT is parked rather than argued a fourth time.
+  The lead never answers a question itself: no `advisor` ruling, no decision — the question
+  becomes a morning-report card and other work continues. Then keep working.
+- **Log every call as it happens** — `~/gauntlet/<run>/night/<YYYY-MM-DD>.md`: what was asked, what
+  `advisor` decided and why, the recommendation it followed or set aside, and the one line that
+  would overturn it. No log, no decision.
+- **Hard stops, at any hour:** spending money or vendor credits beyond an approved budget;
+  destructive data/git operations (delete, force-push, history rewrite); licensing, legal or upstream
+  filings; retiring or starting a project; changing this policy; overruling a closed `DEC-0xx` /
+  `OWNER` entry without new evidence; **and any stop-and-ask gate a repo's own run doc defines** (a
+  model-proof mismatch, missing evidence) — those are instrument failures, not questions the night
+  may answer. Those become cards at the top of the morning report and the work behind them waits.
+  `advisor` cannot lift one.
+- **Owner present = normal mode.** If he speaks in the session during the window, his instruction
+  wins and that session stays normal for the night.
+- **08:00 — the morning report, then normal.** At 08:00 write `~/gauntlet/<run>/morning/<date>.md`
+  and send it: what shipped (shas), every night decision with its overturn line, what is blocked on
+  him (ranked, with options), what is next, spend. A wave that ended overnight reports through it.
+  **08:00 never stops work in flight:** the lane, gate or piece running then finishes to its natural
+  boundary (calls strictly needed for it go in a `## Tail` section of that report), and only then
+  does normal ask-first mode resume.
 
 ## Roster
 
@@ -66,7 +98,9 @@ separately. Do not infer plan charges or equal cache prices across models from t
    source, dependencies, environment and command; the final integrated candidate still needs
    all required gates. See `run-operations.md` > Validation and acceptance.
 7. **Account at every boundary.** Every wave report and handover includes usage by role, lead vs
-   children, attempts/retries, and scope/completeness. Include all providers, native children,
+   children, attempts/retries, and scope/completeness. Report cost per accepted piece by role —
+   every attempt and fix round counted — because a cheaper pass that needs a second round is not
+   cheaper. Include all providers, native children,
    delegates and detached spawns; attribute a response only once. The current cost helper covers
    Claude transcripts, not every Codex path: use native usage evidence or mark coverage PARTIAL,
    never treat missing usage as zero. Missing telemetry is a tooling gap, not an invented bill or
@@ -77,7 +111,8 @@ separately. Do not infer plan charges or equal cache prices across models from t
    ownership; otherwise wait for a safe checkpoint. No half-integrated changes or gated changes
    left unpushed when a push is authorized. A lane without a handover tool writes a receipt.
 9. **Refuters remain scouts.** Read-only refutation runs on `scout`; `builder` is for code that
-   lands. No blanket model downgrades or weaker judges. At each clean point check context, state
+   lands. No blanket model downgrades or weaker judges. Effort and model move only by
+   `orchestration-roles.md` rule 9 or an owner ruling. At each clean point check context, state
    size and current-wave findings. A lead ending with jobs in flight names the jobs, dependency
    and next expected event.
 
@@ -123,7 +158,8 @@ enforced by a lock in the run-artefacts dir (`~/bin/lead-lock`, host-wide):
   the verdict path), what each round tried, and 2–3 concrete options — including changing the design
   or dropping it. Other work continues; the piece waits for the owner's ruling, which is recorded in
   the run's rulings file. Unattended (overnight) runs are no exception: the card goes at the top of
-  the morning report. Measured: the Crownjump armor label ran 4 rounds against a pixel bar until the
+  the morning report, and under the night protocol the lead parks the piece — never a fourth round,
+  never a new direction, and `advisor` does not rule on it — until the owner rules. Measured: the Crownjump armor label ran 4 rounds against a pixel bar until the
   owner replaced the design in one ruling; the Ice Queen took 6 rounds.
 
 ## Tracking (beads — the machine layer)
@@ -159,3 +195,27 @@ Setup, seeding and the full command map: `~/wiki/wiki/concepts/beads-tracking.md
 
 Before resource use read `orchestration-environment.md` and `run-operations.md` > Jobs
 and environments. Existing host-wide locks, engine ownership and grants still bind.
+
+## Changing this policy
+
+- **A pin that moves to a new model is re-baselined, not carried over.** Effort names do not
+  mean the same amount of thinking across models: start at the new model's documented default,
+  trial the neighbouring levels, and audit that role's prompt for instructions written for the
+  old model before `install --all`. `xhigh` and above stay only where a gain was measured.
+- **2026-11-15 (owner, fleet-wide now):** lead and `artist`/`design` xhigh → high; blind critics
+  high → medium; step-up ladder (roles rule 9); Fable 5.2 lead criteria (roles rule 10); briefs
+  open with Goal / Done / Return when. Measured at the next wave end against the week of
+  2026-11-09. A session started before this install keeps the pins it loaded until its next
+  handover or restart: that is not a rule 6 mismatch — record `pre-2026-11-15 pin` and carry on.
+- **2026-11-21 (owner, fleet-wide now):** `advisor` added — Fable 5.2 at high, roles rule 11:
+  optional advice, mandatory before a third attempt at a twice-failed problem, and the decider
+  inside the night protocol, which the app fleet now has too. Measured at the next wave end
+  (advisor calls and Fable usage, night rulings overturned at 08:00). A session started before
+  this install keeps the rules and roster it loaded until its next handover or restart: record
+  `pre-2026-11-21 roster` and carry on.
+
+---
+
+Repo-specific rig (gates, deploy, captures, run docs): see this repo's own docs (`CLAUDE.md`,
+`docs/`). Where a repo has no run doc, the rules above plus `docs/agents/gauntlet-core.md` are the
+whole policy.

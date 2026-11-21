@@ -57,35 +57,12 @@ exits 13, so re-read instead of retrying.
 - Follow the Omnio editorial style (plain text, user outcomes, no unrelated feature content).
 
 <!-- app-orchestration:begin (managed by ~/bin/game-orchestration --fleet app — do not edit by hand) -->
-## Orchestration policy (binding — every session in this repo)
+## Orchestration
 
-This repo runs the fleet's **app** orchestration policy: **the session is a lead that orchestrates**,
-work goes to the repo roster in `.claude/agents/` (pinned models), and no piece is judged by the
-agent that made it. A run's lead never builds; an interactive session may make one small,
-single-file, non-design, non-core edit itself (policy rule 3).
+A run has one lead. Claim the run with `~/bin/lead-lock` before dispatch. The lead plans and integrates. A maker delivers one bounded piece and a different actor verifies it. Outside a run the lead may make one small single-file edit under routing rule 3.
 
-- Spawn roster roles **by name, no model/effort override**; prove the models before wave 1 and at
-  every wave end (`game-orchestration --fleet app models <session-id>`).
-- All design → `design`. Every raster asset (icons, buttons, illustrations, textures, reference
-  images) → the **Codex image lane** the design lane drives: `codex exec -m gpt-6-astra -c
-  model_reasoning_effort=high` + the built-in `imagegen` skill — one lane at a time, recipe
-  committed with the asset. **No 3D in this fleet** (no Meshy/Blender/Unity). Complex code →
-  `builder`. Light code/recon → `scout`. **Models and efforts are pinned in `.claude/agents/`
-  frontmatter — never restate them here.**
-- **Budget:** one pass + one check + a written receipt per lane, then stop — lanes never self-iterate
-  (the judges judge), and their answer back is that receipt, never raw output.
-- Plans are challenged by `wave-check` **before** briefs go out; design verdicts come from the
-  critics against one reference, with `design-director` ruling where they disagree. Never
-  self-judge. A judge's finding is BLOCKING only with a bar line, evidence and the smallest fix — the
-  rest are notes; the lead triages before dispatch (gauntlet-core › Findings). UI claims are verified with a real-browser capture at the run doc's viewports.
-- The lead keeps the build gates, the shared dev instance (single-instance: wait, never kill), the
-  pushes and the deploys — and verifies a deploy against the served artifact.
-- **Started in Codex?** Then the lead model is the owner's choice (not Opus 5.5) and every agent
-  it spawns is a Codex agent on a Codex model — the `.claude/agents/` pins do not apply; every
-  other rule here does.
-- **Context limits (W = window):** lead soft min(200k, 0.60 x W) = drain and checkpoint, hard
-  min(250k, 0.75 x W) = safe completion only; child lane soft min(100k, 0.45 x W), hard min(150k,
-  0.60 x W). Check at clean points and before dispatch. Evidence rules: `docs/agents/run-operations.md`
-  > Validation and acceptance; State and findings. Hand-backs are <=1.5k-character pointers; always read `## Open items`.
-- Full policy: `docs/agents/orchestration.md`; how a run works: `docs/agents/gauntlet-core.md`.
+Leads dispatch pinned repo roles by name. Started in Codex? Use the owner's model and dispatch Codex agents only, preserving role duties and independence. Give each lane its task ID, Goal, Done and Return when. Commit by explicit path. Twice-failed problems and night decisions go to `advisor` (routing rule 11).
+
+Check context at start and before dispatch (W = window). Lead limits: lead soft min(200k, 0.60 x W), hard min(250k, 0.75 x W). Child limits: child lane soft min(100k, 0.45 x W), hard min(150k, 0.60 x W). At soft, plan a checkpoint with closure reserve. At hard, only safe closure and handover. Use `docs/agents/run-operations.md` › Context and handover.
+Read the applicable task in `docs/agents/apps.md`.
 <!-- app-orchestration:end -->
