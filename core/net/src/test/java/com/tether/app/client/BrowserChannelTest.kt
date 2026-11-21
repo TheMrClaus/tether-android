@@ -175,6 +175,26 @@ class BrowserChannelTest {
     }
 
     @Test
+    fun theStateFramesTabsAreParsedLikeTheHook() {
+        val (channel, socket) = opened()
+        socket.serverSends(
+            """{"t":"state","url":"https://a.test/","tabs":[{"index":1,"active":false,"url":"https://a.test/","title":"A"},{"index":2,"active":true,"url":"https://b.test/","title":"B"},{"index":3,"active":false,"url":"https://c.test/","title":"C"}]}""",
+        )
+        var s = channel.ui.value.state
+        assertEquals(3, s.tabs.size)
+        assertEquals(BrowserChannel.Tab(2, true, "https://b.test/", "B"), s.activeTab)
+        socket.serverSends("""{"t":"state","url":"https://a.test/"}""")
+        assertEquals("absent tabs is empty", emptyList<BrowserChannel.Tab>(), channel.ui.value.state.tabs)
+        socket.serverSends("""{"t":"state","tabs":"two"}""")
+        assertEquals("a non-array is empty", emptyList<BrowserChannel.Tab>(), channel.ui.value.state.tabs)
+        socket.serverSends("""{"t":"state","tabs":[7,null,{"active":true},{"index":2,"url":"u"}]}""")
+        s = channel.ui.value.state
+        assertEquals("non-object entries are skipped, missing fields default", 2, s.tabs.size)
+        assertEquals(BrowserChannel.Tab(3, true, "", ""), s.tabs[0])
+        assertEquals(BrowserChannel.Tab(2, false, "u", ""), s.tabs[1])
+    }
+
+    @Test
     fun pickMessagesReachThePartTwoSeam() {
         val (channel, socket) = opened()
         val got = runBlocking {

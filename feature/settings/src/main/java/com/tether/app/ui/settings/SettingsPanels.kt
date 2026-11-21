@@ -54,6 +54,7 @@ internal fun SettingsPanel(
     nodes: NodesBinding = NodesBinding.None,
     devices: DevicesBinding = DevicesBinding.None,
     github: GitHubBinding = GitHubBinding.None,
+    browser: BrowserBinding = BrowserBinding.None,
 ) {
     when (tab) {
         SettingsTab.General -> GeneralPanel(live, state, currentWorkspace, narrow)
@@ -68,7 +69,7 @@ internal fun SettingsPanel(
         // ta-t7l: keyed on the server, so another server's tab starts from nothing (every secret
         // masked, every half-typed field dropped; a dropped edit is bound to its own server).
         SettingsTab.Metadata -> key(serverSettings.origin) { MetadataPanel(narrow, serverSettings) }
-        SettingsTab.Advanced -> key(serverSettings.origin) { AdvancedPanel(narrow, serverSettings, github) }
+        SettingsTab.Advanced -> key(serverSettings.origin) { AdvancedPanel(narrow, serverSettings, github, browser) }
     }
 }
 
@@ -189,8 +190,8 @@ internal fun RuntimeSessionsRoutingPanel(narrow: Boolean, binding: ServerSetting
 }
 
 @Composable
-internal fun RuntimeServerIntegrationsPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding) {
-    key(binding.origin) { ServerIntegrationsPanel(narrow, binding, github) }
+internal fun RuntimeServerIntegrationsPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding, browser: BrowserBinding = BrowserBinding.None) {
+    key(binding.origin) { ServerIntegrationsPanel(narrow, binding, github, browser) }
 }
 
 /**
@@ -400,16 +401,16 @@ private fun MetadataPanel(narrow: Boolean, binding: ServerSettingsBinding) {
  * session's composer (T7.2).
  */
 @Composable
-private fun AdvancedPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding) {
+private fun AdvancedPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding, browser: BrowserBinding) {
     Column {
-        ServerIntegrationsPanel(narrow, binding, github)
+        ServerIntegrationsPanel(narrow, binding, github, browser)
         SessionSettingsPanel(narrow, binding)
         ClaudeCliSection(binding, narrow)
     }
 }
 
 @Composable
-private fun ServerIntegrationsPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding) {
+private fun ServerIntegrationsPanel(narrow: Boolean, binding: ServerSettingsBinding, github: GitHubBinding, browser: BrowserBinding) {
     val view = binding.settings?.takeIf { binding.origin != null }
     Column {
         if (view == null) {
@@ -428,6 +429,7 @@ private fun ServerIntegrationsPanel(narrow: Boolean, binding: ServerSettingsBind
                 ServerTextRow(AdvancedRows.workspaceRoot, view, binding, narrow)
             }
             GitHubConnectionSection(github, narrow)
+            BrowserRuntimeSection(browser, narrow)
         }
     }
 }

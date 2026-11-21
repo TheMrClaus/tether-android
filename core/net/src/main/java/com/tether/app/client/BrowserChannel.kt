@@ -49,7 +49,14 @@ class BrowserChannel(private val opener: BrowserSocketOpener, val sessionId: Str
         val viewport: Viewport = DEFAULT_VIEWPORT,
         val pickMode: Boolean = false,
         val loading: Boolean = false,
-    )
+        val tabs: List<Tab> = emptyList(),
+    ) {
+        /** The active tab (`tabs.find((tab) => tab.active)`), or null. */
+        val activeTab: Tab? get() = tabs.firstOrNull { it.active }
+    }
+
+    /** use-browser.ts BrowserTab: one open page, as the `state` frame lists it. */
+    data class Tab(val index: Int, val active: Boolean, val url: String, val title: String)
 
     /** use-browser.ts :94-96: `connected`, `state` and `error`, read together. */
     data class Ui(val connected: Boolean = false, val state: State = State(), val error: String? = null)
@@ -188,6 +195,7 @@ class BrowserChannel(private val opener: BrowserSocketOpener, val sessionId: Str
                             viewport = (message["viewport"] as? JsonObject)?.let(::viewportOf) ?: prev.viewport,
                             pickMode = message.truthy("pickMode"),
                             loading = message.truthy("loading"),
+                            tabs = tabsOf(message["tabs"]),
                         ),
                     )
                 }
@@ -247,6 +255,19 @@ class BrowserChannel(private val opener: BrowserSocketOpener, val sessionId: Str
         /** The JPEG bytes of a frame's base64 `data`, or null when it is not base64. */
         fun decodeFrame(base64: String): ByteArray? =
             runCatching { Base64.getDecoder().decode(base64) }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+        /** `Array.isArray(message.tabs) ? tabs : []`; an entry that is not an object is skipped. */
+        private fun tabsOf(v: JsonElement?): List<Tab> = (v as? kotlinx.serialization.json.JsonArray)
+            ?.mapIndexedNotNull { i, e ->
+                val o = e as? JsonObject ?: return@mapIndexedNotNull null
+                Tab(
+                    index = (o["index"] as? JsonPrimitive)?.doubleOrNull?.toInt() ?: (i + 1),
+                    active = o.truthy("active"),
+                    url = o.jsString("url") ?: "",
+                    title = o.jsString("title") ?: "",
+                )
+            }
+            ?: emptyList()
 
         private fun viewportOf(o: JsonObject): Viewport = Viewport(
             width = (o["width"] as? JsonPrimitive)?.doubleOrNull?.toInt() ?: 0,

@@ -8,11 +8,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -27,6 +29,7 @@ import com.tether.app.client.BrowserSocketOpen
 import com.tether.app.client.BrowserSocketOpener
 import com.tether.app.ui.theme.TetherSkin
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -207,6 +210,32 @@ class BrowserPaneBehaviourTest {
         rule.onNodeWithText("Live").assertExists()
         server("""{"t":"state","url":"https://a.test/","loading":true}""")
         rule.onNodeWithText("Loading…").assertExists()
+    }
+
+    @Test
+    fun theStatusRowSaysWhichTabIsActiveOnlyWithSeveralTabs() {
+        show()
+        server("""{"t":"state","url":"https://a.test/","tabs":[{"index":1,"active":false,"url":"a","title":""},{"index":2,"active":true,"url":"b","title":""},{"index":3,"active":false,"url":"c","title":""}]}""")
+        rule.onNodeWithTag(BrowserPaneTags.TabIndicator).assertTextEquals("Tab 2 of 3")
+        server("""{"t":"state","url":"https://a.test/","tabs":[{"index":1,"active":true,"url":"a","title":"A"}]}""")
+        rule.onNodeWithTag(BrowserPaneTags.TabIndicator).assertDoesNotExist()
+        server("""{"t":"state","url":"https://a.test/"}""")
+        rule.onNodeWithTag(BrowserPaneTags.TabIndicator).assertDoesNotExist()
+    }
+
+    @Test
+    fun aLongErrorIsShownInFullAndWraps() {
+        show()
+        server("""{"t":"state","url":"https://a.test/"}""")
+        val long = "The browser could not start. " + "Run the install command shown below. ".repeat(8) + "done"
+        server("""{"t":"error","message":"$long"}""")
+        rule.onNodeWithTag(BrowserPaneTags.StatusError).assertTextEquals(long)
+        val layouts = mutableListOf<TextLayoutResult>()
+        rule.onNodeWithTag(BrowserPaneTags.StatusError).fetchSemanticsNode().config
+            .getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts)
+        val layout = layouts.single()
+        assertTrue("wraps to several lines", layout.lineCount > 1)
+        assertFalse("nothing is ellipsised", layout.isLineEllipsized(layout.lineCount - 1))
     }
 
     @Test

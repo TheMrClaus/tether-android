@@ -57,6 +57,8 @@ enum class SettingsShot(
     val nodes: NodesShot? = null,
     val devices: DevicesShot? = null,
     val github: GitHubShot? = null,
+    /** The Browser section's seeded runtime status. */
+    val browser: BrowserShot? = null,
     /** T12.2: the push registration's status behind the Devices tab's push row. */
     val push: com.tether.app.push.PushRegistrationStatus = com.tether.app.push.PushRegistrationStatus.Registered,
     /** v144: the Authentication shots (ServerSecretScreenshotTest sets their own sizes and skins; the generic classes skip them). */
@@ -110,6 +112,8 @@ enum class SettingsShot(
     AdvancedGitHubDevice("settings-advanced-github-device", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Device),
     AdvancedGitHubConnected("settings-advanced-github-connected", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Connected),
     AdvancedGitHubErrors("settings-advanced-github-errors", SettingsTab.Advanced, server = ServerShot.GitHubToken, github = GitHubShot.Errors),
+    AdvancedBrowserFound("settings-advanced-browser-found", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Found),
+    AdvancedBrowserMissing("settings-advanced-browser-missing", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Missing),
     Metadata("settings-metadata", SettingsTab.Metadata, server = ServerShot.Metadata),
     MetadataText("settings-metadata-text", SettingsTab.Metadata, server = ServerShot.MetadataText),
     EnginesCards("settings-engines-cards", SettingsTab.Engines, server = ServerShot.Engines),
@@ -301,6 +305,8 @@ enum class ServerShot(val scrollTo: String? = null) {
     GitHub(ServerSettingsTags.GitHub),
     /** ta-coik.21: Advanced scrolled to the GitHub token rows (a refusal under the field in frame). */
     GitHubToken(GitHubTags.Pat),
+    /** The Browser section, brought to the top of the frame. */
+    Browser(BrowserTags.Section),
     ;
 
     fun binding(): ServerSettingsBinding = when (this) {
@@ -369,6 +375,20 @@ enum class GitHubShot {
             tokenError = "That token could not be verified. Check the value and its scopes.",
         )
     }
+}
+
+/** The Browser section's seeds, timing-free like the others: the server's two answers (Chromium found; Chromium missing, with the one command). */
+enum class BrowserShot {
+    Found,
+    Missing,
+    ;
+
+    fun seed(): BrowserSeed = BrowserSeed(status = if (this == Found) BrowserFixtures.FOUND else BrowserFixtures.MISSING)
+}
+
+/** The Browser source behind a seeded shot: any call is a timing dependency, so it fails the shot. */
+private object NeverCalledBrowser : com.tether.app.client.BrowserRuntimeSource {
+    override suspend fun status(origin: String): com.tether.app.client.SecurityResult<com.tether.app.client.BrowserRuntimeStatus> = error("a seeded shot must not read the status")
 }
 
 /** The GitHub source behind a seeded shot: any call is a timing dependency, so it fails the shot. */
@@ -499,6 +519,7 @@ fun ComposeContentTestRule.snapSettings(
         val devicesController = shot.devices?.let { rememberDevicesController(NeverCalledSecurity, DevicesFixtures.ORIGIN, it.seed(), authenticator = NeverPromptsPasskeys) }
         val githubScope = androidx.compose.runtime.rememberCoroutineScope()
         val github = shot.github?.let { g -> androidx.compose.runtime.remember { GitHubConnectionController(NeverCalledGitHub, ServerFixtures.ORIGIN, githubScope, seed = g.seed()) } }
+        val browser = shot.browser?.let { b -> androidx.compose.runtime.remember { BrowserRuntimeController(NeverCalledBrowser, ServerFixtures.ORIGIN, githubScope, seed = b.seed()) } }
         SettingsUnderTest(
             store.prefs,
             state,
@@ -512,6 +533,7 @@ fun ComposeContentTestRule.snapSettings(
             nodes = if (shot.nodes != null && nodeActions != null) shot.nodes.binding(nodeActions) else NodesBinding.None,
             devices = devicesController?.let { DevicesBinding(it, now = { DevicesFixtures.NOW }) } ?: DevicesBinding.None,
             github = github?.let { GitHubBinding(it) } ?: GitHubBinding.None,
+            browser = browser?.let { BrowserBinding(it) } ?: BrowserBinding.None,
             push = androidx.compose.runtime.remember { FakePushRegistration(shot.push) },
             accountLimitEntities = if (shot == SettingsShot.AccountCombined) {
                 listOf(RuntimeDeskNavItem(RuntimeDeskEntities.usage("claude", "claude-work"), "Claude Code (work)", "Usage only"))

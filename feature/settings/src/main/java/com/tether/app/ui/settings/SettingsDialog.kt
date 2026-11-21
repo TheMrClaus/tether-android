@@ -267,6 +267,11 @@ fun SettingsScreen(
         GitHubConnectionViewModel(client.githubConnection, GitHubConnectionViewModel.identityOf(client), GitHubConnectionViewModel.identitiesOf(client))
     }
     val githubBinding = GitHubBinding(github.controller, opener = loginOpener)
+    // The Browser section's status read, bound the same way (server and credential).
+    val browser = androidx.lifecycle.viewmodel.compose.viewModel(key = BROWSER_VIEW_MODEL_KEY) {
+        BrowserRuntimeViewModel(client.browserRuntime, GitHubConnectionViewModel.identityOf(client), GitHubConnectionViewModel.identitiesOf(client))
+    }
+    val browserBinding = BrowserBinding(browser.controller)
     // ta-09ca E1: the narrow settings metrics (header 76, padding 20/18, h2 20, tabs 12/10) are studio.css:957's
     // `(max-width: 640px)` block, not the shell's 48rem: they apply to a window of 640 dp or less, the
     // class is not what decides here.
@@ -289,6 +294,7 @@ fun SettingsScreen(
                 nodes = nodesBinding,
                 devices = devicesBinding,
                 github = githubBinding,
+                browser = browserBinding,
                 accountLimitEntities = accountLimitEntities,
                 accountsLimits = accountsLimits,
             )
@@ -366,6 +372,7 @@ fun SettingsFrame(
     devices: DevicesBinding = DevicesBinding.None,
     /** ta-coik.21: Advanced's GitHub connection. */
     github: GitHubBinding = GitHubBinding.None,
+    browser: BrowserBinding = BrowserBinding.None,
     /** Shell-owned usage rows and body; settings never depends on feature:shell. */
     accountLimitEntities: List<RuntimeDeskNavItem> = emptyList(),
     accountsLimits: @Composable (RuntimeDeskUsageTarget) -> Unit = {},
@@ -485,6 +492,7 @@ fun SettingsFrame(
                     accountEntity = selectedAccountEntity,
                     accountsLimits = accountsLimits,
                     github = github,
+                    browser = browser,
                 )
             }
             val detailContent = remember {
@@ -563,6 +571,7 @@ private class RuntimeDeskDetailInputs(
     val accountEntity: String,
     val accountsLimits: @Composable (RuntimeDeskUsageTarget) -> Unit,
     val github: GitHubBinding,
+    val browser: BrowserBinding,
 )
 
 @Composable
@@ -636,7 +645,7 @@ private fun RuntimeDeskDetail(input: RuntimeDeskDetailInputs) {
             }
             if (RuntimeDeskDestinations.ServerIntegrations in mountedDestinations) {
                 Box(Modifier.keepRuntimeDeskMounted(route.destination == RuntimeDeskDestinations.ServerIntegrations)) {
-                    RuntimeServerIntegrationsPanel(input.narrow, input.serverSettings, input.github)
+                    RuntimeServerIntegrationsPanel(input.narrow, input.serverSettings, input.github, input.browser)
                 }
             }
         }
@@ -948,6 +957,7 @@ private fun SettingsFooter(narrow: Boolean, saveBlocked: Boolean, onDiscard: () 
 
 /** ta-coik.21: the GitHub connection's ViewModel in the activity's store. */
 private const val GITHUB_VIEW_MODEL_KEY = "settings-github-connection"
+private const val BROWSER_VIEW_MODEL_KEY = "settings-browser-runtime"
 
 /** settings-dialog.tsx:2000, the banner's words. */
 const val RESTART_REQUIRED = "Some changes need a server restart to take effect."
