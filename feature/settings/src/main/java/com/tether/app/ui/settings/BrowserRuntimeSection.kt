@@ -104,6 +104,7 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean, ser
             buildAnnotatedString {
                 append(BrowserCopy.chromiumLine(status))
                 BrowserCopy.path(status)?.let { withStyle(SpanStyle(fontFamily = type.mono)) { append(it) } }
+                if (BrowserCopy.installedByTether(status)) append(BrowserCopy.INSTALLED_BY_TETHER)
             }
         }
         SettingsRow(

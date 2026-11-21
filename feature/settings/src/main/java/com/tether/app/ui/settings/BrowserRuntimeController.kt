@@ -54,6 +54,12 @@ object BrowserCopy {
     const val NOT_STARTED = "The install could not start."
     const val OUTPUT_LINES = 12
 
+    /** The web's suffix on the Chromium row when the binary Tether installed itself is the one found (`location === "state"`). */
+    const val INSTALLED_BY_TETHER = " · installed by Tether"
+
+    /** The most leading columns of a stack line's indent that are kept (a tab counts four). */
+    const val MAX_INDENT = 16
+
     fun notStarted(code: Int?): String = if (code == null) NOT_STARTED else "The install could not start (HTTP $code)."
 
     /** `The install finished, but Chromium was still not found` + ` at <path>`. */
@@ -75,7 +81,15 @@ object BrowserCopy {
         job?.state == BrowserInstallJob.FAILED || (job?.state == BrowserInstallJob.DONE && !s.binaryPresent)
 
     /** The last [OUTPUT_LINES] lines of the installer, cleaned line by line (the label rule), empty lines dropped. */
-    fun outputTail(job: BrowserInstallJob?): List<String> = job?.output.orEmpty().takeLast(OUTPUT_LINES).map { LabelText.clean(it, LabelText.MAX_HINT) }
+    fun outputTail(job: BrowserInstallJob?): List<String> = job?.output.orEmpty().takeLast(OUTPUT_LINES).map(::outputLine)
+
+    /** One output line cleaned by the label rule, keeping its leading indent as the web does (`white-space: pre-wrap`). */
+    private fun outputLine(raw: String): String {
+        val body = LabelText.clean(raw, LabelText.MAX_HINT)
+        if (body.isEmpty()) return body
+        val indent = raw.takeWhile { it == ' ' || it == '\t' }.sumOf { c -> if (c == '\t') 4 else 1 }.coerceAtMost(MAX_INDENT)
+        return " ".repeat(indent) + body
+    }
 
     // Native: what the web has no words for (no credential, a sign-in gateway in front of Tether).
     const val SIGNED_OUT = "Signed out — sign in again to see the browser status."
@@ -96,6 +110,8 @@ object BrowserCopy {
         val v = s.playwrightVersion?.let(LabelText::label)?.takeIf { it.isNotEmpty() }
         return "Loaded" + (v?.let { ", version $it" } ?: "")
     }
+
+    fun installedByTether(s: BrowserRuntimeStatus): Boolean = s.binaryPresent && s.location == "state"
 
     /** `Revision X expected` / `Revision unknown`, then ` · found at ` / ` · not found at ` when a path is known (the path itself is drawn apart, in the mono face). */
     fun chromiumLine(s: BrowserRuntimeStatus): String {

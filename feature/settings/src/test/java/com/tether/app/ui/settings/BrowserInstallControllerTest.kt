@@ -25,6 +25,25 @@ object InstallFixtures {
         BrowserInstallJob.FAILED, 1L, 2L, 1, "The installer exited with code 1.",
         listOf("Downloading Chromium 140.0 (playwright build v1187)", "Error: getaddrinfo ENOTFOUND cdn.playwright.dev", "Failed to install browsers"),
     )
+    val LONG_OUTPUT = BrowserInstallJob(
+        BrowserInstallJob.FAILED, 1L, 2L, 1, "The installer exited with code 1.",
+        listOf(
+            "Downloading Chromium 140.0 (playwright build v1187) from the mirror",
+            "Error: getaddrinfo ENOTFOUND cdn.playwright.dev",
+            "Failed to install browsers",
+            "Error: Failed to download Chromium 140.0 (playwright build v1187), caused by Error: connect ETIMEDOUT 203.0.113.7:443 while fetching the archive",
+            "    at ClientRequest.<anonymous> (/srv/tether/node_modules/playwright-core/lib/server/registry/browserFetcher.js:112:19)",
+            "    at Object.onceWrapper (node:events:633:26)",
+            "    at ClientRequest.emit (node:events:518:28)",
+            "    at TLSSocket.socketErrorListener (node:_http_client:495:9)",
+            "    at TLSSocket.emit (node:events:518:28)",
+            "    at emitErrorNT (node:internal/streams/destroy:170:8)",
+            "    at process.processTicksAndRejections (node:internal/process/task_queues:82:21)",
+            "WARNING: /var/lib/tether/state/browsers/chromium-1187/chrome-linux/chrome-headless-shell-archive-with-a-very-long-name-and-no-break-points.zip.partial",
+            "Retrying in 5 seconds",
+            "Giving up after 3 attempts",
+        ),
+    )
     val IDLE = BrowserInstallJob(BrowserInstallJob.IDLE, null, null, null, null, emptyList())
 }
 
