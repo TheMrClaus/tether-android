@@ -131,6 +131,8 @@ object BrowserPaneTags {
     const val Fit = "browser-fit"
     const val Readout = "browser-readout"
     const val Status = "browser-status"
+    const val TabIndicator = "browser-tab-indicator"
+    const val StatusError = "browser-status-error"
     const val SelectElements = "browser-select-elements"
     const val ShotOnPick = "browser-shot-on-pick"
     const val Highlight = "browser-highlight"
@@ -453,10 +455,18 @@ internal fun BrowserPaneContent(
             Box(Modifier.size(7.dp).background(dot, CircleShape))
             val small = TextStyle(fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 11.sp)
             Text(if (state.loading) "Loading…" else if (ui.connected) "Live" else "Connecting…", color = t.muted, style = small, maxLines = 1)
+            if (state.tabs.size > 1) {
+                val active = state.activeTab
+                Text(
+                    "Tab ${active?.index ?: 1} of ${state.tabs.size}" + if (!active?.title.isNullOrEmpty()) " · ${active?.title}" else "",
+                    color = t.muted, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 160.dp).testTag(BrowserPaneTags.TabIndicator),
+                )
+            }
             Spacer(Modifier.weight(1f))
             val error = ui.error
             if (error != null && ui.connected) {
-                Text(error, color = t.danger, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Text(error, color = t.danger, style = small, modifier = Modifier.weight(1f, fill = false).testTag(BrowserPaneTags.StatusError))
             }
             Text(state.url, color = t.muted, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 256.dp))
         }
