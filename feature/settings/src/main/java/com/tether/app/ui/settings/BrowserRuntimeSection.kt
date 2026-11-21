@@ -174,7 +174,7 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean, ser
         SettingsRow(
             kind = RowKind.Server,
             narrow = narrow,
-            text = { m -> SettingsRowText(if (installable) BrowserCopy.BY_HAND else BrowserCopy.TO_INSTALL, install, m.testTag(BrowserTags.Install)) },
+            text = { m -> SettingsRowText(if (status.canInstall != null) BrowserCopy.BY_HAND else BrowserCopy.TO_INSTALL, install, m.testTag(BrowserTags.Install)) },
             control = { m ->
                 TetherKey(
                     onClick = {

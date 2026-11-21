@@ -98,9 +98,21 @@ class BrowserInstallBehaviourTest {
         if (status.canInstall == null) assertEquals(BrowserCopy.CAPTION, sectionTexts()[1])
     }
 
-    @Test fun noKeyFromAServerOlderThanTheKey() = assertNoKey(BrowserFixtures.MISSING)
+    @Test fun noKeyFromAServerOlderThanTheKey() {
+        assertNoKey(BrowserFixtures.MISSING)
+        val t = sectionTexts()
+        assertTrue("the older server keeps the one-line label", t.contains(BrowserCopy.TO_INSTALL))
+        assertFalse(t.contains(BrowserCopy.BY_HAND))
+    }
 
-    @Test fun noKeyWhenPlaywrightCannotLoad() = assertNoKey(BrowserFixtures.NO_PACKAGE.copy(canInstall = false))
+    @Test fun noKeyWhenPlaywrightCannotLoad() {
+        val status = BrowserFixtures.NO_PACKAGE.copy(canInstall = false)
+        assertTrue("the fixture carries the command", status.installCommand != null)
+        assertNoKey(status)
+        val t = sectionTexts()
+        assertTrue("a server that sends canInstall labels the command row by hand", t.contains(BrowserCopy.BY_HAND))
+        assertFalse(t.contains(BrowserCopy.TO_INSTALL))
+    }
 
     @Test fun noKeyWhenChromiumIsFound() = assertNoKey(BrowserFixtures.FOUND)
 
