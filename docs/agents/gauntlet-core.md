@@ -146,6 +146,44 @@ that record, never the chat.
 - **Look at the pixels.** A green gate says nothing about a mis-aligned label, a 12 px tap target or
   a contrast failure. Check the capture at the real viewport, and check the phone width.
 
+## Behavioural hunt — the instrument for web UI pieces
+
+A gate proves the flows someone already wrote; a refuter reads the diff; **neither drives the running
+app and tries to break it**. For a web UI piece that gap is closed by **stillhunter**, a Claude Code
+plugin (`/stillhunter:hunt`). It is an **optional per-piece instrument, dispatched as one `scout`
+lane** — never a fleet default, never a substitute for a gate number or a `design-director` verdict.
+
+- **When.** The piece changes user-facing behaviour in a **DOM app** (`tether`, `TwoZero`,
+  `omnio-web`, `omnio-lists`, `mrclaus.io`, `weight.it`, `NVRViewer`) and no lane in the wave
+  exercises that flow. Skip it for a change the scale rule already exempts (≤20 lines, no behaviour)
+  and for a canvas/WebGL screen — a probe asserts on DOM text, screenshots and request shape, so a
+  canvas game view is out of scope, as is the native `tether-android` client.
+- **Where.** A disposable instance on its own port with its own test data, and a `reset` command in
+  `.stillhunter/config.json` so every probe starts from the same state. **Never the shared dev
+  instance, never production.** The tool is loopback-only by construction; a target it cannot reach
+  on `127.0.0.1` is not a hunt, it is an unreviewed change to the containment rules.
+- **How.** One hunt per piece per round (`--depth default`, ~10 min; `quick` for a small change;
+  `--focus` names the piece), run by the scout the lead briefs; a second hunt only after a fix
+  round. The lane never starts or stops another lane's server and never writes outside its worktree.
+- **What enters the ledger.** Only findings the tool reproduced **twice from scratch**, and only in
+  our triad: the bar line quoted with its source, the evidence (probe path under
+  `.stillhunter/runs/<run>/probes/`, capture + region, the failing expectation), and the smallest
+  change that closes it. BLOCKING only if it fails a stated requirement or a gate number;
+  everything else is a NOTE, triaged by the lead like any other. A claim without all three is
+  `rejected` — reason `uncited`.
+- **Kept probes.** `/stillhunter:keep <finding>` commits the probe to `.stillhunter/tests/`; it then
+  belongs to the **Numbers** bar and replays in the gate without a model. A kept test that fails on
+  clean code is a wrong expectation, not a bug: fix the test, don't weaken the gate.
+- **What it buys, and what it does not.** The measured gain is **precision** — in the author's own
+  81-trial benchmark, 0.26 false alarms per run against 3.37 for a Playwright-MCP arm — at ~3x a
+  lane's wall time and tokens. The recall advantage is **not established** (18/18 vs 16/18 planted,
+  McNemar p = 0.5), so never dispatch it as "it will find more bugs"; dispatch it because a clean
+  behavioural finding with a repro is worth a triage-free BLOCKING line.
+- **Install (once per machine, owner-approved).** `claude plugin marketplace add
+  stillhunter/stillhunter` then `claude plugin install stillhunter@stillhunter`; needs Node ≥22.22
+  and Chrome/Chromium. Installing it changes the agent tool surface and adds hooks, so it is a policy
+  change recorded in the run log, not a dependency bump.
+
 ## Standing rules (carry these into every brief)
 
 - **Every brief opens with three lines.** **Goal** — what the piece is for. **Done** — the
