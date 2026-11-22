@@ -185,17 +185,26 @@ the same thing when Claude Code can load it; this account's organization policy 
   lane's wall time and tokens. The recall advantage is **not established** (18/18 vs 16/18 planted,
   McNemar p = 0.5), so never dispatch it as "it will find more bugs"; dispatch it because a clean
   behavioural finding with a repro is worth a triage-free BLOCKING line.
-- **Install here — there is no plugin path on this host.** `~/tools/stillhunter` is a git checkout
-  pinned to commit `b58cdde`, built with `npm ci && npm run build` (Node 22.23.4 and Chromium are on
-  this host); the lane calls `node ~/tools/stillhunter/dist/hunt.mjs start|probe|finish`. To move the
-  pin: `git -C ~/tools/stillhunter fetch && git -C ~/tools/stillhunter checkout <sha> && npm ci &&
-  npm run build` there, then update the sha here. Every Claude Code plugin route is closed by the
-  corporate managed settings (`~/.claude/remote-settings.json`, present on all but one Tether
-  account): marketplaces are limited to `claude-plugins-official`, `--plugin-dir`/`--plugin-url` are
-  disabled by `disableSideloadFlags`, `~/.claude/skills/` plugins are blocked, and
-  `allowManagedHooksOnly` means a plugin's hooks would not run even if it loaded. The runner itself is
-  plain Node and needs none of that; the cost of the missing hooks is that the lane's brief, not a
-  hook, holds the agent to the runner. Moving this pin is a policy change recorded in the run log.
+- **Install here — the plugin works only through the `jean-claude` wrapper.** `~/tools/stillhunter` is a
+  git checkout pinned to commit `b58cdde`, built with `npm ci && npm run build` (Node 22.23.4,
+  Chromium on this host). Two ways to drive it:
+  - **Full instrument (skills, `hunter` agent and the guard hooks):**
+    `jean-claude run -- claude --plugin-dir ~/tools/stillhunter -p "/stillhunter:hunt <focus>" --model
+    sonnet`, run from the repo under test. Verified 2026-11-22: a hunt found two bugs, each reproduced
+    twice, and the hook refused an agent write into `.stillhunter/`. `jean-claude` lives at
+    `~/.nvm/versions/node/v24.21.0/bin`; it freezes `api.anthropic.com/api/claude_code/settings`, so
+    the corporate managed settings never arrive in that session. **Caveat:** Claude Code also applies a
+    cached `~/.claude/remote-settings.json` without asking the server, and while that file is present
+    `--plugin-dir` is refused ("disableSideloadFlags"). The lane must run with that cache absent (a
+    jean-claude session rewrites it from the stub); the session writes its own empty copy, so the real
+    policy has to be set aside and restored if the account is shared. A dedicated config dir for the
+    lane is the clean answer and is not built yet.
+  - **CLI runner (no hooks, no plugin):** `node ~/tools/stillhunter/dist/hunt.mjs start|probe|finish`
+    with the lane's brief holding the agent to the runner. This is the only route inside a Tether
+    run today: Tether launches agents with `claudeLaunchCommand` and has no way to pass `--plugin-dir`.
+  Moving the pin: `git -C ~/tools/stillhunter fetch && git -C ~/tools/stillhunter checkout <sha> &&
+  npm ci && npm run build`, then update the sha here. Moving it is a policy change recorded in the run
+  log.
 
 ## Standing rules (carry these into every brief)
 
