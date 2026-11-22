@@ -185,13 +185,17 @@ the same thing when Claude Code can load it; this account's organization policy 
   lane's wall time and tokens. The recall advantage is **not established** (18/18 vs 16/18 planted,
   McNemar p = 0.5), so never dispatch it as "it will find more bugs"; dispatch it because a clean
   behavioural finding with a repro is worth a triage-free BLOCKING line.
-- **Install here.** `~/tools/stillhunter` is a git checkout pinned to commit `b58cdde`, built with
-  `npm ci && npm run build` (Node 22.23.4 and Chromium are on this host). To move the pin:
-  `git -C ~/tools/stillhunter fetch && git -C ~/tools/stillhunter checkout <sha> && npm ci && npm run
-  build` in that directory, then update the sha here. The Claude Code plugin route (`claude plugin
-  marketplace add stillhunter/stillhunter`) is **blocked by the account's organization policy**; if
-  the owner allowlists it, the plugin form is preferred because its hooks enforce the containment.
-  Either way this is a policy change recorded in the run log, not a dependency bump.
+- **Install here — there is no plugin path on this host.** `~/tools/stillhunter` is a git checkout
+  pinned to commit `b58cdde`, built with `npm ci && npm run build` (Node 22.23.4 and Chromium are on
+  this host); the lane calls `node ~/tools/stillhunter/dist/hunt.mjs start|probe|finish`. To move the
+  pin: `git -C ~/tools/stillhunter fetch && git -C ~/tools/stillhunter checkout <sha> && npm ci &&
+  npm run build` there, then update the sha here. Every Claude Code plugin route is closed by the
+  corporate managed settings (`~/.claude/remote-settings.json`, present on all but one Tether
+  account): marketplaces are limited to `claude-plugins-official`, `--plugin-dir`/`--plugin-url` are
+  disabled by `disableSideloadFlags`, `~/.claude/skills/` plugins are blocked, and
+  `allowManagedHooksOnly` means a plugin's hooks would not run even if it loaded. The runner itself is
+  plain Node and needs none of that; the cost of the missing hooks is that the lane's brief, not a
+  hook, holds the agent to the runner. Moving this pin is a policy change recorded in the run log.
 
 ## Standing rules (carry these into every brief)
 
