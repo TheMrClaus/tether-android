@@ -170,8 +170,9 @@ the `advisor` pin (rule 11)** — no maker lane, judge or workflow agent runs on
     reasoning effort; the Fable pin does not apply (`orchestration.md` › A Codex lead).
 12. **A behavioural hunt is one `scout` lane, optional per piece, web UI only (owner 2026-11-22).**
     For a DOM-app piece whose flow no lane in the wave exercises, the lead may brief one `scout` to
-    run stillhunter (`/stillhunter:hunt`) against a disposable instance, as
-    `gauntlet-core.md` › Behavioural hunt defines it. It is a maker-side instrument, not a judge:
-    its output enters the ledger only through the lead's triage, in the BLOCKING/NOTE triad, and only
-    findings reproduced twice are eligible. It replaces no gate, no `wave-check` pass and no
-    `design-director` verdict, and it never runs against the shared dev instance or production.
+    run stillhunter (`~/tools/stillhunter`, runner at `dist/hunt.mjs`) against a disposable
+    instance, as `gauntlet-core.md` › Behavioural hunt defines it. It is a maker-side instrument,
+    not a judge: its output enters the ledger only through the lead's triage, in the BLOCKING/NOTE
+    triad, and only findings reproduced twice are eligible. It replaces no gate, no `wave-check`
+    pass and no `design-director` verdict, and it never runs against the shared dev instance or
+    production.

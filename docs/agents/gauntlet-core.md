@@ -149,9 +149,13 @@ that record, never the chat.
 ## Behavioural hunt — the instrument for web UI pieces
 
 A gate proves the flows someone already wrote; a refuter reads the diff; **neither drives the running
-app and tries to break it**. For a web UI piece that gap is closed by **stillhunter**, a Claude Code
-plugin (`/stillhunter:hunt`). It is an **optional per-piece instrument, dispatched as one `scout`
-lane** — never a fleet default, never a substitute for a gate number or a `design-director` verdict.
+app and tries to break it**. For a web UI piece that gap is closed by **stillhunter** — the runner at
+`~/tools/stillhunter`, pinned to commit `b58cdde`, driven as `node ~/tools/stillhunter/dist/hunt.mjs
+start|probe|finish` by a lane that follows `~/tools/stillhunter/agents/hunter.md`. It is an
+**optional per-piece instrument, dispatched as one `scout` lane** — never a fleet default, never a
+substitute for a gate number or a `design-director` verdict. (The plugin form `/stillhunter:hunt` is
+the same thing when Claude Code can load it; this account's organization policy allows only
+`claude-plugins-official` marketplaces, so the pinned checkout is the path that works here.)
 
 - **When.** The piece changes user-facing behaviour in a **DOM app** (`tether`, `TwoZero`,
   `omnio-web`, `omnio-lists`, `mrclaus.io`, `weight.it`, `NVRViewer`) and no lane in the wave
@@ -165,6 +169,8 @@ lane** — never a fleet default, never a substitute for a gate number or a `des
 - **How.** One hunt per piece per round (`--depth default`, ~10 min; `quick` for a small change;
   `--focus` names the piece), run by the scout the lead briefs; a second hunt only after a fix
   round. The lane never starts or stops another lane's server and never writes outside its worktree.
+  The brief holds it to the runner and to reads under `.stillhunter/` — nothing else — because the
+  plugin's Bash guard is not in play without the plugin.
 - **What enters the ledger.** Only findings the tool reproduced **twice from scratch**, and only in
   our triad: the bar line quoted with its source, the evidence (probe path under
   `.stillhunter/runs/<run>/probes/`, capture + region, the failing expectation), and the smallest
@@ -179,10 +185,13 @@ lane** — never a fleet default, never a substitute for a gate number or a `des
   lane's wall time and tokens. The recall advantage is **not established** (18/18 vs 16/18 planted,
   McNemar p = 0.5), so never dispatch it as "it will find more bugs"; dispatch it because a clean
   behavioural finding with a repro is worth a triage-free BLOCKING line.
-- **Install (once per machine, owner-approved).** `claude plugin marketplace add
-  stillhunter/stillhunter` then `claude plugin install stillhunter@stillhunter`; needs Node ≥22.22
-  and Chrome/Chromium. Installing it changes the agent tool surface and adds hooks, so it is a policy
-  change recorded in the run log, not a dependency bump.
+- **Install here.** `~/tools/stillhunter` is a git checkout pinned to commit `b58cdde`, built with
+  `npm ci && npm run build` (Node 22.23.4 and Chromium are on this host). To move the pin:
+  `git -C ~/tools/stillhunter fetch && git -C ~/tools/stillhunter checkout <sha> && npm ci && npm run
+  build` in that directory, then update the sha here. The Claude Code plugin route (`claude plugin
+  marketplace add stillhunter/stillhunter`) is **blocked by the account's organization policy**; if
+  the owner allowlists it, the plugin form is preferred because its hooks enforce the containment.
+  Either way this is a policy change recorded in the run log, not a dependency bump.
 
 ## Standing rules (carry these into every brief)
 
