@@ -114,6 +114,7 @@ enum class SettingsShot(
     AdvancedGitHubErrors("settings-advanced-github-errors", SettingsTab.Advanced, server = ServerShot.GitHubToken, github = GitHubShot.Errors),
     AdvancedBrowserFound("settings-advanced-browser-found", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Found),
     AdvancedBrowserMissing("settings-advanced-browser-missing", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Missing),
+    AdvancedBrowserTools("settings-advanced-browser-tools", SettingsTab.Advanced, server = ServerShot.BrowserTools, browser = BrowserShot.Found),
     Metadata("settings-metadata", SettingsTab.Metadata, server = ServerShot.Metadata),
     MetadataText("settings-metadata-text", SettingsTab.Metadata, server = ServerShot.MetadataText),
     EnginesCards("settings-engines-cards", SettingsTab.Engines, server = ServerShot.Engines),
@@ -307,6 +308,8 @@ enum class ServerShot(val scrollTo: String? = null) {
     GitHubToken(GitHubTags.Pat),
     /** The Browser section, brought to the top of the frame. */
     Browser(BrowserTags.Section),
+    /** v168: the Browser section with the "Browser tools for agents" switch, on a server that speaks it. */
+    BrowserTools(BrowserTags.Section),
     ;
 
     fun binding(): ServerSettingsBinding = when (this) {
@@ -339,6 +342,11 @@ enum class ServerShot(val scrollTo: String? = null) {
             writer = NeverWrites,
         )
         SteerMode -> ServerFixtures.binding(writer = NeverWrites, serverProtocol = 165)
+        BrowserTools -> ServerFixtures.binding(
+            view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("browserAgentTools" to true))),
+            writer = NeverWrites,
+            serverProtocol = com.tether.app.client.BROWSER_TOOLS_MIN_PROTOCOL,
+        )
         RestartMessage -> ServerFixtures.binding(
             view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("restartResumeMessage" to true))),
             writer = NeverWrites,

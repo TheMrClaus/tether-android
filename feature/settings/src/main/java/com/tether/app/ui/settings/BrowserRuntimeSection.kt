@@ -51,7 +51,7 @@ data class BrowserBinding(val controller: BrowserRuntimeController?) {
  * no install key.
  */
 @Composable
-internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean) {
+internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean, server: ServerSettingsBinding, view: com.tether.app.client.ServerSettingsView) {
     val c = binding.controller ?: return
     LaunchedEffect(c) { c.shown() }
     val type = LocalTetherTypography.current
@@ -68,6 +68,9 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean) {
                 iconSize = 14.dp,
                 modifier = m.testTag(BrowserTags.Refresh),
             )
+        }
+        if (com.tether.app.client.browserToolsSupported(server.serverProtocol, view)) {
+            ServerToggleRow(AdvancedRows.browserAgentTools, view, server, narrow)
         }
         if (status == null) {
             SettingsRow(
