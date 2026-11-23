@@ -120,6 +120,7 @@ import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Shield
 import com.composables.icons.lucide.ShieldAlert
 import com.composables.icons.lucide.ShieldCheck
+import com.composables.icons.lucide.ShieldOff
 import com.composables.icons.lucide.SlidersHorizontal
 import com.composables.icons.lucide.Smartphone
 import com.composables.icons.lucide.Sparkles
@@ -275,6 +276,7 @@ object TetherIcons {
     val Shield: ImageVector get() = Lucide.Shield
     val ShieldAlert: ImageVector get() = Lucide.ShieldAlert
     val ShieldCheck: ImageVector get() = Lucide.ShieldCheck
+    val ShieldOff: ImageVector get() = Lucide.ShieldOff
     val SlidersHorizontal: ImageVector get() = Lucide.SlidersHorizontal
     val Smartphone: ImageVector get() = Lucide.Smartphone
     val Sparkles: ImageVector get() = Lucide.Sparkles
@@ -446,6 +448,7 @@ object TetherIcons {
             "Shield" to Shield,
             "ShieldAlert" to ShieldAlert,
             "ShieldCheck" to ShieldCheck,
+            "ShieldOff" to ShieldOff,
             "SlidersHorizontal" to SlidersHorizontal,
             "Smartphone" to Smartphone,
             "Sparkles" to Sparkles,

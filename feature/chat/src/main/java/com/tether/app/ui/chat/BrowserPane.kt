@@ -133,6 +133,7 @@ object BrowserPaneTags {
     const val Status = "browser-status"
     const val TabIndicator = "browser-tab-indicator"
     const val StatusError = "browser-status-error"
+    const val UrlNotice = "browser-url-notice"
     const val SelectElements = "browser-select-elements"
     const val ShotOnPick = "browser-shot-on-pick"
     const val Highlight = "browser-highlight"
@@ -440,6 +441,28 @@ internal fun BrowserPaneContent(
             }
         }
 
+        // The address notice row (browser-pane.tsx :285, module.css .notice): an icon per kind and one sentence.
+        state.urlNotice?.let { notice ->
+            val blocked = notice.kind == BrowserChannel.UrlNoticeKind.ConsoleBlocked
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).testTag(BrowserPaneTags.UrlNotice),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    if (blocked) TetherIcons.ShieldOff else TetherIcons.Info,
+                    contentDescription = null,
+                    tint = if (blocked) t.ink else t.muted,
+                    modifier = Modifier.padding(top = 2.dp).size(14.dp),
+                )
+                Text(
+                    urlNoticeCopy(notice),
+                    color = if (blocked) t.ink else t.muted,
+                    style = TextStyle(fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp, lineHeight = 16.sp),
+                )
+            }
+        }
+
         // .status (module.css :160-170)
         Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
         Row(
@@ -471,6 +494,16 @@ internal fun BrowserPaneContent(
             Text(state.url, color = t.muted, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 256.dp))
         }
     }
+}
+
+/** browser-notice.ts urlNoticeCopy, word for word; [BrowserChannel.UrlNotice.indirect] = a redirect hop or sub-request. */
+internal fun urlNoticeCopy(notice: BrowserChannel.UrlNotice): String {
+    if (notice.kind == BrowserChannel.UrlNoticeKind.ConsoleBlocked) {
+        return "Tether's own console is not opened in this browser; a request to it was stopped."
+    }
+    val where = if (notice.host.isNotEmpty()) " (${notice.host})" else ""
+    return if (notice.indirect) "This page loaded something from a private or local address$where."
+    else "This page is on a private or local address$where."
 }
 
 /** `var(--bg, #0b0e0f)`: no skin defines `--bg`, so every skin draws the fallback. */
