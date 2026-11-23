@@ -146,4 +146,17 @@ class BrowserRuntimeControllerTest {
         assertEquals("Revision 1187 expected · not found at ", BrowserCopy.chromiumLine(BrowserFixtures.MISSING))
         assertEquals("Revision unknown", BrowserCopy.chromiumLine(BrowserFixtures.NO_PACKAGE))
     }
+
+    @Test fun theSuffixShowsOnlyForTheBinaryTetherInstalled() {
+        assertTrue(BrowserCopy.installedByTether(InstallFixtures.INSTALLED))
+        assertFalse(BrowserCopy.installedByTether(BrowserFixtures.FOUND.copy(location = "default")))
+        assertFalse(BrowserCopy.installedByTether(BrowserFixtures.FOUND.copy(location = null)))
+        assertFalse(BrowserCopy.installedByTether(BrowserFixtures.MISSING.copy(location = "state")))
+        assertEquals(" · installed by Tether", BrowserCopy.INSTALLED_BY_TETHER)
+    }
+
+    @Test fun anOutputLineKeepsItsLeadingIndent() {
+        val job = InstallFixtures.FAILED.copy(output = listOf("Error: boom", "    at Object.run (/a/b.js:1:2)", "\tat next", "plain  words"))
+        assertEquals(listOf("Error: boom", "    at Object.run (/a/b.js:1:2)", "    at next", "plain words"), BrowserCopy.outputTail(job))
+    }
 }

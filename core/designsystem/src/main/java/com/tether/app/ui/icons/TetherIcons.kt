@@ -44,6 +44,7 @@ import com.composables.icons.lucide.Coins
 import com.composables.icons.lucide.Copy
 import com.composables.icons.lucide.CornerDownRight
 import com.composables.icons.lucide.Cpu
+import com.composables.icons.lucide.Download
 import com.composables.icons.lucide.Ellipsis
 import com.composables.icons.lucide.EllipsisVertical
 import com.composables.icons.lucide.ExternalLink
@@ -197,6 +198,7 @@ object TetherIcons {
     val Clock3: ImageVector get() = Lucide.Clock3
     val Coins: ImageVector get() = Lucide.Coins
     val Copy: ImageVector get() = Lucide.Copy
+    val Download: ImageVector get() = Lucide.Download
     val CornerDownRight: ImageVector get() = Lucide.CornerDownRight
     val Cpu: ImageVector get() = Lucide.Cpu
     val Ellipsis: ImageVector get() = Lucide.Ellipsis
@@ -366,6 +368,7 @@ object TetherIcons {
             "Copy" to Copy,
             "CornerDownRight" to CornerDownRight,
             "Cpu" to Cpu,
+            "Download" to Download,
             "ExternalLink" to ExternalLink,
             "Eye" to Eye,
             "EyeOff" to EyeOff,

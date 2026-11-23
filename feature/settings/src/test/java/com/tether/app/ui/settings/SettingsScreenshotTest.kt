@@ -113,7 +113,15 @@ enum class SettingsShot(
     AdvancedGitHubConnected("settings-advanced-github-connected", SettingsTab.Advanced, server = ServerShot.GitHub, github = GitHubShot.Connected),
     AdvancedGitHubErrors("settings-advanced-github-errors", SettingsTab.Advanced, server = ServerShot.GitHubToken, github = GitHubShot.Errors),
     AdvancedBrowserFound("settings-advanced-browser-found", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Found),
+    AdvancedBrowserFoundByTether("settings-advanced-browser-found-by-tether", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.FoundByTether),
     AdvancedBrowserMissing("settings-advanced-browser-missing", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Missing),
+    AdvancedBrowserTools("settings-advanced-browser-tools", SettingsTab.Advanced, server = ServerShot.BrowserTools, browser = BrowserShot.Found),
+    AdvancedBrowserInstallable("settings-advanced-browser-installable", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Installable),
+    AdvancedBrowserInstalling("settings-advanced-browser-installing", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Installing),
+    AdvancedBrowserInstallFailed("settings-advanced-browser-install-failed", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.InstallFailed),
+    AdvancedBrowserInstallFailedLong("settings-advanced-browser-install-failed-long-output", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.InstallFailedLong),
+    AdvancedBrowserInstallNotFound("settings-advanced-browser-install-not-found", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.InstallNotFound),
+    AdvancedBrowserInstall409("settings-advanced-browser-install-409", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Install409),
     Metadata("settings-metadata", SettingsTab.Metadata, server = ServerShot.Metadata),
     MetadataText("settings-metadata-text", SettingsTab.Metadata, server = ServerShot.MetadataText),
     EnginesCards("settings-engines-cards", SettingsTab.Engines, server = ServerShot.Engines),
@@ -307,6 +315,8 @@ enum class ServerShot(val scrollTo: String? = null) {
     GitHubToken(GitHubTags.Pat),
     /** The Browser section, brought to the top of the frame. */
     Browser(BrowserTags.Section),
+    /** v168: the Browser section with the "Browser tools for agents" switch, on a server that speaks it. */
+    BrowserTools(BrowserTags.Section),
     ;
 
     fun binding(): ServerSettingsBinding = when (this) {
@@ -339,6 +349,11 @@ enum class ServerShot(val scrollTo: String? = null) {
             writer = NeverWrites,
         )
         SteerMode -> ServerFixtures.binding(writer = NeverWrites, serverProtocol = 165)
+        BrowserTools -> ServerFixtures.binding(
+            view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("browserAgentTools" to true))),
+            writer = NeverWrites,
+            serverProtocol = com.tether.app.client.BROWSER_TOOLS_MIN_PROTOCOL,
+        )
         RestartMessage -> ServerFixtures.binding(
             view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("restartResumeMessage" to true))),
             writer = NeverWrites,
@@ -381,9 +396,40 @@ enum class GitHubShot {
 enum class BrowserShot {
     Found,
     Missing,
+
+    /** The server can install: Chromium missing, the Install Chromium key. */
+    Installable,
+
+    /** The job is running: the progress row and the disabled key. */
+    Installing,
+
+    /** The job failed: the reason, the last output lines, Try again, and the command. */
+    InstallFailed,
+
+    /** Found, and the binary is the one Tether installed (the " · installed by Tether" suffix). */
+    FoundByTether,
+
+    /** Failed with fifteen output lines, long ones, a long unbroken token and indented stack lines: the 12-line bound and the wrapping. */
+    InstallFailedLong,
+
+    /** The job finished but the expected Chromium is still not found. */
+    InstallNotFound,
+
+    /** The server answered the press with its 409 note while the key is idle. */
+    Install409,
     ;
 
-    fun seed(): BrowserSeed = BrowserSeed(status = if (this == Found) BrowserFixtures.FOUND else BrowserFixtures.MISSING)
+    fun seed(): BrowserSeed = when (this) {
+        Found -> BrowserSeed(status = BrowserFixtures.FOUND)
+        FoundByTether -> BrowserSeed(status = InstallFixtures.INSTALLED)
+        InstallFailedLong -> BrowserSeed(status = InstallFixtures.INSTALLABLE, install = InstallFixtures.LONG_OUTPUT)
+        InstallNotFound -> BrowserSeed(status = InstallFixtures.INSTALLABLE, install = InstallFixtures.DONE.copy(output = listOf("Chromium downloaded")))
+        Install409 -> BrowserSeed(status = InstallFixtures.INSTALLABLE, install = InstallFixtures.IDLE, installNote = "Chromium is already being installed.")
+        Missing -> BrowserSeed(status = BrowserFixtures.MISSING)
+        Installable -> BrowserSeed(status = InstallFixtures.INSTALLABLE, install = InstallFixtures.IDLE)
+        Installing -> BrowserSeed(status = InstallFixtures.INSTALLABLE, install = InstallFixtures.RUNNING)
+        InstallFailed -> BrowserSeed(status = InstallFixtures.INSTALLABLE, install = InstallFixtures.FAILED)
+    }
 }
 
 /** The Browser source behind a seeded shot: any call is a timing dependency, so it fails the shot. */

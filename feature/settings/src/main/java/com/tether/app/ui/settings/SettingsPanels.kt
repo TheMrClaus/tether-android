@@ -429,7 +429,7 @@ private fun ServerIntegrationsPanel(narrow: Boolean, binding: ServerSettingsBind
                 ServerTextRow(AdvancedRows.workspaceRoot, view, binding, narrow)
             }
             GitHubConnectionSection(github, narrow)
-            BrowserRuntimeSection(browser, narrow)
+            BrowserRuntimeSection(browser, narrow, binding, view)
         }
     }
 }
