@@ -20,8 +20,10 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.unit.dp
 import com.tether.app.ui.components.KeyClasses
+import com.tether.app.ui.components.Spinner
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.theme.LocalTetherTokens
 import com.tether.app.ui.theme.LocalTetherTypography
 import kotlinx.coroutines.launch
 
@@ -33,6 +35,8 @@ object BrowserTags {
     const val Playwright = "browser-playwright"
     const val Chromium = "browser-chromium"
     const val Install = "browser-install"
+    const val InstallRow = "browser-install-row"
+    const val InstallKey = "browser-install-key"
     const val Command = "browser-install-command"
     const val Copy = "browser-copy"
 }
@@ -47,17 +51,19 @@ data class BrowserBinding(val controller: BrowserRuntimeController?) {
 /**
  * settings-dialog.tsx BrowserRuntimeSection, in the web's order: Status (ready or not, or the read's
  * error, or "Checking the browser…") with Refresh; Playwright; Chromium (revision, found or not, path);
- * and, only while something is missing, To install with the one command and Copy command. Read-only:
- * no install key.
+ * the Install Chromium row, only when the server says it can install (`canInstall`) or a job is running; and,
+ * only while something is missing, the one command and Copy command (as "Or install by hand" beside the key).
+ * Nothing installs until the key is pressed. A server without the install route draws no key and the
+ * read-only section it had.
  */
 @Composable
-internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean) {
+internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean, server: ServerSettingsBinding, view: com.tether.app.client.ServerSettingsView) {
     val c = binding.controller ?: return
     LaunchedEffect(c) { c.shown() }
     val type = LocalTetherTypography.current
     val status = c.status
     val error = c.error
-    SettingsSection(BrowserCopy.TITLE, AnnotatedString(BrowserCopy.CAPTION), narrow, modifier = Modifier.testTag(BrowserTags.Section)) {
+    SettingsSection(BrowserCopy.TITLE, AnnotatedString(if (status?.canInstall != null) BrowserCopy.CAPTION_INSTALLABLE else BrowserCopy.CAPTION), narrow, modifier = Modifier.testTag(BrowserTags.Section)) {
         val refresh: @Composable (Modifier) -> Unit = { m ->
             TetherKey(
                 onClick = c::load,
@@ -68,6 +74,9 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean) {
                 iconSize = 14.dp,
                 modifier = m.testTag(BrowserTags.Refresh),
             )
+        }
+        if (com.tether.app.client.browserToolsSupported(server.serverProtocol, view)) {
+            ServerToggleRow(AdvancedRows.browserAgentTools, view, server, narrow)
         }
         if (status == null) {
             SettingsRow(
@@ -95,6 +104,7 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean) {
             buildAnnotatedString {
                 append(BrowserCopy.chromiumLine(status))
                 BrowserCopy.path(status)?.let { withStyle(SpanStyle(fontFamily = type.mono)) { append(it) } }
+                if (BrowserCopy.installedByTether(status)) append(BrowserCopy.INSTALLED_BY_TETHER)
             }
         }
         SettingsRow(
@@ -102,6 +112,55 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean) {
             narrow = narrow,
             text = { m -> SettingsRowText(BrowserCopy.CHROMIUM, chromium, m.testTag(BrowserTags.Chromium)) },
         )
+        val job = c.install
+        val installable = status.canInstall == true
+        if (job?.running == true) {
+            SettingsRow(
+                kind = RowKind.Server,
+                narrow = narrow,
+                text = { m ->
+                    SettingsRowText(BrowserCopy.INSTALL, AnnotatedString(BrowserCopy.INSTALLING_CAPTION), m.testTag(BrowserTags.InstallRow).semantics { liveRegion = LiveRegionMode.Polite })
+                },
+                control = { m ->
+                    TetherKey(
+                        onClick = {},
+                        enabled = false,
+                        classes = KeyClasses.ButtonSecondary,
+                        label = BrowserCopy.INSTALLING,
+                        leading = { Spinner(14.dp, LocalTetherTokens.current.muted) },
+                        modifier = m.testTag(BrowserTags.InstallKey),
+                    )
+                },
+            )
+        } else if (installable) {
+            val failed = BrowserCopy.installFailed(status, job)
+            val caption = remember(status, job, c.installNote, type) {
+                buildAnnotatedString {
+                    append(BrowserCopy.installCaption(status, job, c.installNote))
+                    if (failed) {
+                        BrowserCopy.outputTail(job).forEach { line ->
+                            append("\n")
+                            withStyle(SpanStyle(fontFamily = type.mono)) { append(line) }
+                        }
+                    }
+                }
+            }
+            SettingsRow(
+                kind = RowKind.Server,
+                narrow = narrow,
+                text = { m -> SettingsRowText(if (failed) BrowserCopy.INSTALL_FAILED else BrowserCopy.INSTALL, caption, m.testTag(BrowserTags.InstallRow)) },
+                control = { m ->
+                    TetherKey(
+                        onClick = c::startInstall,
+                        classes = KeyClasses.ButtonSecondary,
+                        label = if (failed) BrowserCopy.TRY_AGAIN else BrowserCopy.INSTALL,
+                        icon = TetherIcons.Download,
+                        iconSize = 14.dp,
+                        modifier = m.testTag(BrowserTags.InstallKey),
+                    )
+                },
+            )
+        }
         val command = BrowserCopy.command(status) ?: return@SettingsSection
         val clipboard = LocalClipboard.current
         val scope = rememberCoroutineScope()
@@ -115,7 +174,7 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean) {
         SettingsRow(
             kind = RowKind.Server,
             narrow = narrow,
-            text = { m -> SettingsRowText(BrowserCopy.TO_INSTALL, install, m.testTag(BrowserTags.Install)) },
+            text = { m -> SettingsRowText(if (status.canInstall != null) BrowserCopy.BY_HAND else BrowserCopy.TO_INSTALL, install, m.testTag(BrowserTags.Install)) },
             control = { m ->
                 TetherKey(
                     onClick = {

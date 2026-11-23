@@ -75,6 +75,8 @@ enum class ServerSetting(val key: String, val kind: SettingKind, val maxBytes: I
     AgentHandoverChoice("agentHandoverChoice", SettingKind.Toggle),
     /** v167: whether a restart-cut turn gets one automated message once Tether is back (default on); the server sends it only from 167. */
     RestartResumeMessage("restartResumeMessage", SettingKind.Toggle),
+    /** v168: whether agent sessions are offered the browser_* tools (default on); the server sends the key only from 168. */
+    BrowserAgentTools("browserAgentTools", SettingKind.Toggle),
     MetadataGenerationEnabled("metadataGenerationEnabled", SettingKind.Toggle),
     MetadataGenerationMode("metadataGenerationMode", SettingKind.Choice),
     MetadataGenerationProvider("metadataGenerationProvider", SettingKind.Text),
@@ -375,6 +377,13 @@ const val RESTART_RESUME_MIN_PROTOCOL = 167
 /** v167: the "Message agents after a restart" row is drawn only when the server speaks it AND sent the key (an older server would show a switch stuck OFF). */
 fun restartResumeSupported(serverProtocol: Int?, view: ServerSettingsView): Boolean =
     serverProtocol != null && serverProtocol >= RESTART_RESUME_MIN_PROTOCOL && view.has(ServerSetting.RestartResumeMessage)
+
+/** v168: the first protocol whose server knows `browserAgentTools` (the one place the number lives). */
+const val BROWSER_TOOLS_MIN_PROTOCOL = 168
+
+/** v168: the "Browser tools for agents" row is drawn only when the server speaks it AND sent the key (an older server would show a switch stuck OFF). */
+fun browserToolsSupported(serverProtocol: Int?, view: ServerSettingsView): Boolean =
+    serverProtocol != null && serverProtocol >= BROWSER_TOOLS_MIN_PROTOCOL && view.has(ServerSetting.BrowserAgentTools)
 
 /** v165: what an absent `queueSteerMode` means: a message queued during a turn goes in on its own. */
 const val QUEUE_STEER_MODE_DEFAULT = "auto"

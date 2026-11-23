@@ -196,6 +196,23 @@ class ServerSettingsViewTest {
         assertTrue(restartResumeSupported(167, on))
     }
 
+    @Test fun theBrowserAgentToolsRowParsesAndWritesItsKeyAndIsGated() {
+        assertEquals("browserAgentTools", ServerSetting.BrowserAgentTools.key)
+        assertEquals(SettingKind.Toggle, ServerSetting.BrowserAgentTools.kind)
+        val absent = view("""{"claudePersistent":true}""")
+        assertFalse(absent.has(ServerSetting.BrowserAgentTools))
+        assertFalse(browserToolsSupported(168, absent))
+        val on = view("""{"browserAgentTools":true}""")
+        assertTrue(on.toggle(ServerSetting.BrowserAgentTools))
+        assertEquals(json("""{"browserAgentTools":false}"""), ServerSettingsPatch.toggle(on, ServerSetting.BrowserAgentTools))
+        val off = view("""{"browserAgentTools":false}""")
+        assertFalse(off.toggle(ServerSetting.BrowserAgentTools))
+        assertEquals(json("""{"browserAgentTools":true}"""), ServerSettingsPatch.toggle(off, ServerSetting.BrowserAgentTools))
+        assertEquals(168, BROWSER_TOOLS_MIN_PROTOCOL)
+        assertFalse(browserToolsSupported(167, on))
+        assertTrue(browserToolsSupported(168, on))
+    }
+
     @Test fun aSelectSendsTheNewOptionAndTheEmptyOptionAsNull() {
         val v = view("""{"defaultSandboxPolicy":"read-only","messageInterruptMode":"interrupt"}""")
         assertNull(ServerSettingsPatch.choice(v, ServerSetting.MessageInterruptMode, "interrupt"))
