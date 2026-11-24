@@ -1,6 +1,6 @@
 # Every lucide-react glyph name the web client imports (named imports of "lucide-react" in *.ts/*.tsx,
 # excluding node_modules/.next/dist/.git/build/coverage; "X as Y" counts as X; type-only imports skipped).
-# Source: ~/git/tether @ bde3cfa (package.json: lucide-react ^1.45.0). TetherIconsTest holds TetherIcons.byWebName equal to
+# Source: ~/git/tether @ bde3cfa (+ ShieldOff, browser-url-notice.tsx @ 0bb74e49) (package.json: lucide-react ^1.45.0). TetherIconsTest holds TetherIcons.byWebName equal to
 # this list. To refresh: re-run that extraction against the web checkout, replace the names below, and
 # update TetherIcons.kt until the test passes.
 # Download was added later from components/settings-dialog.tsx (the Install Chromium key) in the web checkout; the list is not re-extracted.
@@ -123,6 +123,7 @@ Settings
 Shield
 ShieldAlert
 ShieldCheck
+ShieldOff
 SlidersHorizontal
 Smartphone
 Sparkles

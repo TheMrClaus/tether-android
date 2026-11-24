@@ -96,6 +96,7 @@ enum class ServerSetting(val key: String, val kind: SettingKind, val maxBytes: I
     ReasonixCommand("reasonixCommand", SettingKind.Runs, maxBytes = 256),
     PiCommand("piCommand", SettingKind.Runs, maxBytes = 256),
     DshCommand("dshCommand", SettingKind.Runs, maxBytes = 256),
+    AntigravityCommand("antigravityCommand", SettingKind.Runs, maxBytes = 256),
     ClaudeLaunchCommand("claudeLaunchCommand", SettingKind.Runs, maxBytes = 256),
     ShareHostConfig("shareHostConfig", SettingKind.Toggle),
 }
@@ -146,7 +147,7 @@ class ServerSettingsView private constructor(
      * ta-dh1 (issue #86, settings-dialog.tsx:2136): the engine has no home and needs one (Claude's
      * is optional: an empty home is the operator's real HOME), so its switch is blocked.
      */
-    fun needsHome(engine: EngineCard): Boolean = text(engine.home).isEmpty() && !engine.homeOptional
+    fun needsHome(engine: EngineCard): Boolean = engine.home?.let { text(it).isEmpty() } == true && !engine.homeOptional
 
     /**
      * ServerTextRow: `String(settings[field] ?? "")`. r2: a [SettingKind.Secret] reads "" here: since v144 the server never sends a credential's value.
@@ -315,7 +316,7 @@ object ServerSettingsPatch {
      */
     fun headlessMode(view: ServerSettingsView, engine: EngineCard): JsonObject? {
         if (view.forced(ServerSetting.HeadlessModes)) return null
-        if (view.needsHome(engine) && !view.forced(engine.home)) return null
+        if (view.needsHome(engine) && !engine.home.let { h -> h != null && view.forced(h) }) return null
         val modes = view.headlessModes
         val next = if (engine.id in modes) modes.filter { it != engine.id } else modes + engine.id
         val joined = next.joinToString(",")
@@ -348,14 +349,14 @@ object ServerSettingsPatch {
      */
     fun useDetected(view: ServerSettingsView, engine: EngineCard): JsonObject? {
         val dir = detectedHome(view, engine) ?: return null
-        return patch(engine.home, JsonPrimitive(dir))
+        return patch(engine.home ?: return null, JsonPrimitive(dir))
     }
 
     /**
      * T8.2: a home chosen with "Browse folders" (settings-dialog.tsx 90fbb9f :2473-2475:
      * `onUpdateServerSettings({ [homeBrowseTarget]: path })`), written at once as it came.
      */
-    fun pickedHome(engine: EngineCard, path: String): JsonObject = patch(engine.home, JsonPrimitive(path))
+    fun pickedHome(engine: EngineCard, path: String): JsonObject? = patch(engine.home ?: return null, JsonPrimitive(path))
 
     /** The home "Use detected" offers, or null when the web draws no such row (:2191: `noHome && det?.configDir`). */
     fun detectedHome(view: ServerSettingsView, engine: EngineCard): String? {

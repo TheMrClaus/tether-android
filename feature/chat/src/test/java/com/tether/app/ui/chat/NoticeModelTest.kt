@@ -182,10 +182,10 @@ class NoticeModelTest {
 
     @Test
     fun sessionTailLabelMatchesTheWeb() {
-        // lib/provider-notice-label.ts: any codex is "Codex" (rich or not), an unknown id is "Agent".
+        // lib/provider-notice-label.ts:5-15 (antigravity :11, tether 15f74ecd): any codex is "Codex" (rich or not), an unknown id is "Agent".
         val want = mapOf(
             "claude" to "Claude", "codex" to "Codex", "opencode" to "opencode", "pi" to "Pi", "reasonix" to "Reasonix",
-            "dsh" to "DeepSeek Harness", "acp" to "ACP", "gemini" to "Gemini", "zzz" to "Agent",
+            "dsh" to "DeepSeek Harness", "antigravity" to "Antigravity", "acp" to "ACP", "gemini" to "Gemini", "zzz" to "Agent",
         )
         for ((provider, label) in want) assertEquals(provider, label, sessionNoticeProviderLabel(provider))
         assertEquals("Agent", sessionNoticeProviderLabel(null))

@@ -19,7 +19,7 @@ class SettingsWorkflowProjectionTest {
             RuntimeDeskDestinations.items.map { it.group },
         )
         assertEquals(
-            listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh", "custom-profiles", "host-config", "claude-cli"),
+            listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh", "antigravity", "custom-profiles", "host-config", "claude-cli"),
             RuntimeDeskRoute.ENGINE_IDS,
         )
         RuntimeDeskRoute.ENGINE_TASK_IDS.forEach { task ->

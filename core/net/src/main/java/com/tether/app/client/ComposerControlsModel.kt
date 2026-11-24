@@ -33,6 +33,13 @@ object ModeVocabulary {
         ModeChoice(AUTO, "YOLO", "Runs everything without asking (tool_approval yolo)", danger = true),
     )
 
+    /** lib/antigravity-modes.ts ANTIGRAVITY_MODE_OPTIONS (tether 15f74ecd): agy's own words; no Auto row. */
+    val ANTIGRAVITY: List<ModeChoice> = listOf(
+        ModeChoice("default", "Manual", "Ask before edits and commands, per your permission settings."),
+        ModeChoice("acceptEdits", "Accept Edits", "Approve file edits in the workspace without asking."),
+        ModeChoice("plan", "Plan", "Plan carefully before executing a task."),
+    )
+
     val PI: List<ModeChoice> = listOf(
         ModeChoice("default", "Manual", "Prompts before every gated tool (bash, write, edit…)"),
         ModeChoice("acceptEdits", "Accept Edits", "Auto-accepts file writes/edits; still prompts for bash"),
@@ -143,6 +150,7 @@ object ComposerControlsModel {
         }
         "reasonix" -> ModeVocabulary.REASONIX
         "pi" -> ModeVocabulary.PI
+        "antigravity" -> ModeVocabulary.ANTIGRAVITY
         else -> ModeVocabulary.PERMISSION
     }
 
@@ -226,7 +234,7 @@ object ComposerControlsModel {
         val provider = session.provider
         val codexV2 = provider == "codex" && session.engineGeneration == CODEX_V2
         val readOnly = session.readOnly
-        val live = !readOnly && (provider in setOf("claude", "opencode", "reasonix", "pi", "dsh") || codexV2)
+        val live = !readOnly && (provider in setOf("claude", "opencode", "reasonix", "pi", "dsh", "antigravity") || codexV2)
         val restoredMode = if (session.approvalPolicy == "never") "never" else session.permissionMode ?: session.collaborationMode?.mode ?: "default"
         val restored = if ((readOnly || (provider == "codex" && !codexV2)) &&
             (!session.model.isNullOrEmpty() || !session.reasoningEffort.isNullOrEmpty() || restoredMode != "default")
@@ -237,7 +245,7 @@ object ComposerControlsModel {
         } else {
             null
         }
-        val modeProviders = provider in setOf("claude", "opencode", "reasonix", "pi")
+        val modeProviders = provider in setOf("claude", "opencode", "reasonix", "pi", "antigravity")
         val offeredModes = modeOptions(session, controls, opencode?.snapshot)
         // Round 3 (N-L1): Auto for opencode is the approval policy, never a bare permissionMode.
         val autoByPolicy = provider == "opencode" && session.approvalPolicy == "never"
@@ -304,7 +312,7 @@ object ComposerControlsModel {
                 legacy = grouped.second,
                 legacyNote = if (grouped.second.isNotEmpty()) LEGACY_NOTE else null,
             )
-            if (provider in setOf("opencode", "claude", "reasonix", "pi")) {
+            if (provider in setOf("opencode", "claude", "reasonix", "pi", "antigravity")) {
                 val active = activeModel(session, controls)
                 val variants = active?.variants.orEmpty()
                 val defaultEffort = resolveDefaultEffort(controls?.defaultReasoningEffort, variants)

@@ -58,6 +58,7 @@ class ProviderBrandTest {
             "reasonix" to ProviderBrandTile(paper, blue),
             "dsh" to ProviderBrandTile(paper, blue),
             "gemini" to ProviderBrandTile(paper, blue),
+            "antigravity" to ProviderBrandTile(paper, blue),
         )
         // Every verified mark has a brand rule on the web.
         assertEquals(ProviderLogos.marks.keys, expected.keys)
@@ -77,6 +78,7 @@ class ProviderBrandTest {
             assertEquals(blue, ProviderBrand.glyphTint("dsh", c))
             // No rule for gemini: its four fills are its own.
             assertNull(ProviderBrand.glyphTint("gemini", c))
+            assertNull(ProviderBrand.glyphTint("antigravity", c))
         }
         assertEquals(Color(0xFF182238), ProviderBrand.glyphTint("codex", TetherSkin.Studio.tokens))
     }

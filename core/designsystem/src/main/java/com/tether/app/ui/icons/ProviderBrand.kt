@@ -27,7 +27,7 @@ data class ProviderBrandTile(val background: Color, val content: Color)
  *
  * - [tile]: `:root :where(*):has(> svg.provider-logo-svg[data-brand=…])` — whatever container directly
  *   holds the mark gets `border-color: transparent`, the brand background and the brand ink: claude
- *   terracotta / paper; codex, opencode, pi ink / paper; reasonix, dsh, gemini paper / blue (gemini's
+ *   terracotta / paper; codex, opencode, pi ink / paper; reasonix, dsh, gemini, antigravity paper / blue (gemini's
  *   own four fills ignore the ink). Box shadows are untouched.
  * - [glyphTint]: `.chat-mode-glyph` (an inline glyph with no tile) drops its background and tints the
  *   mark instead: claude terracotta, codex / opencode / pi `--white`, reasonix / dsh blue; gemini has
@@ -42,7 +42,7 @@ object ProviderBrand {
     fun tile(provider: String?, tokens: SkinTokens): ProviderBrandTile? = when (ProviderLogos.brand(provider)) {
         "claude" -> ProviderBrandTile(tokens.brandClaude, tokens.brandPaper)
         "codex", "opencode", "pi" -> ProviderBrandTile(tokens.brandInk, tokens.brandPaper)
-        "reasonix", "dsh", "gemini" -> ProviderBrandTile(tokens.brandPaper, tokens.brandBlue)
+        "reasonix", "dsh", "gemini", "antigravity" -> ProviderBrandTile(tokens.brandPaper, tokens.brandBlue)
         else -> null
     }
 

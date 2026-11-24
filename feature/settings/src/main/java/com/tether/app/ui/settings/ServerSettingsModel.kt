@@ -339,7 +339,7 @@ object EngineRows {
 
     /** The home row's caption (:2164). */
     fun homeCaption(view: ServerSettingsView, engine: EngineCard): String = when {
-        view.forced(engine.home) -> ServerRowCopy.SET_BY_ENV
+        engine.home?.let(view::forced) == true -> ServerRowCopy.SET_BY_ENV
         view.needsHome(engine) -> "Required — set a directory before enabling"
         engine.homeOptional -> "Optional — defaults to your real HOME"
         else -> "Dedicated credential home"

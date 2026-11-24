@@ -13,6 +13,9 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.WindowInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -25,7 +28,9 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.tether.app.client.EngineCard
 import com.tether.app.client.ServerSetting
+import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -61,6 +66,51 @@ class RuntimeDeskBehaviourTest {
         compose.onNodeWithContentDescription("Back", substring = true).performClick()
         assertEquals(RuntimeDeskLevel.Destinations, state.route.level)
         compose.onNodeWithText("Accounts").assertExists()
+    }
+
+    /** lib/runtime-desk.ts:33 RUNTIME_DESK_ENGINE_IDS (tether 15f74ecd): selecting Antigravity keeps the selection and mounts its own card. */
+    @Test fun selectingAntigravityRoutesToItsOwnCard() {
+        val state = SettingsDialogState(route = RuntimeDeskRoute.Root)
+        compose.setContent { SettingsUnderTest(store.prefs, state, serverSettings = ServerFixtures.binding()) }
+        compose.waitUntil(5_000) { state.draft != null }
+
+        compose.onNodeWithText("Engines").performClick()
+        compose.onNode(hasText("Antigravity") and hasClickAction()).performClick()
+        compose.waitForIdle()
+        assertEquals(RuntimeDeskLevel.Detail, state.route.level)
+        assertEquals("antigravity", state.route.entity)
+        compose.onNodeWithTag(EngineTags.card(EngineCard.Antigravity), useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag(ServerSettingsTags.input(ServerSetting.AntigravityCommand), useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    /**
+     * A server that reports neither Claude nor Antigravity and sends no `antigravityCommand` (an older one): the Antigravity row
+     * reads like Claude's unreported row (same status text), its switch is enabled exactly as Claude's (no home gate, unlike
+     * Dsh's), selecting it opens its card, and nothing crashes.
+     */
+    @Test fun onAnOlderServerAntigravityBehavesLikeAnUnreportedClaude() {
+        val detected = JsonObject(ServerFixtures.DETECTED - "claude" - "antigravity")
+        val settings = ServerFixtures.settingsJson()
+        assertEquals(false, settings.containsKey("antigravityCommand"))
+        val state = SettingsDialogState(route = RuntimeDeskRoute.Root)
+        compose.setContent { SettingsUnderTest(store.prefs, state, serverSettings = ServerFixtures.binding(view = ServerFixtures.view(settings = settings, detected = detected))) }
+        compose.waitUntil(5_000) { state.draft != null }
+
+        compose.onNodeWithText("Engines").performClick()
+        val waiting = hasText("Waiting for runtime status")
+        compose.onNode(hasText("Claude Code") and hasClickAction()).assert(waiting)
+        compose.onNode(hasText("Antigravity") and hasClickAction()).assert(waiting)
+
+        compose.onNode(hasText("Claude Code") and hasClickAction()).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag(EngineTags.switch(EngineCard.Claude), useUnmergedTree = true).assertIsEnabled()
+        compose.onNodeWithContentDescription("Back", substring = true).performClick()
+
+        compose.onNode(hasText("Antigravity") and hasClickAction()).performClick()
+        compose.waitForIdle()
+        assertEquals("antigravity", state.route.entity)
+        compose.onNodeWithTag(EngineTags.card(EngineCard.Antigravity), useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag(EngineTags.switch(EngineCard.Antigravity), useUnmergedTree = true).assertIsEnabled()
     }
 
     @Test fun nativeBackUsesTheSameHierarchyAndDismissesOnlyAtTheRoot() {

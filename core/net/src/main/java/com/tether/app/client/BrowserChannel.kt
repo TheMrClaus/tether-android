@@ -50,10 +50,16 @@ class BrowserChannel(private val opener: BrowserSocketOpener, val sessionId: Str
         val pickMode: Boolean = false,
         val loading: Boolean = false,
         val tabs: List<Tab> = emptyList(),
+        val urlNotice: UrlNotice? = null,
     ) {
         /** The active tab (`tabs.find((tab) => tab.active)`), or null. */
         val activeTab: Tab? get() = tabs.firstOrNull { it.active }
     }
+
+    /** The `state` frame's optional `urlNotice` (use-browser.ts BrowserUrlNotice); [host] is shown as sent. */
+    data class UrlNotice(val kind: UrlNoticeKind, val host: String, val indirect: Boolean)
+
+    enum class UrlNoticeKind { ConsoleBlocked, NonPublic }
 
     /** use-browser.ts BrowserTab: one open page, as the `state` frame lists it. */
     data class Tab(val index: Int, val active: Boolean, val url: String, val title: String)
@@ -196,6 +202,7 @@ class BrowserChannel(private val opener: BrowserSocketOpener, val sessionId: Str
                             pickMode = message.truthy("pickMode"),
                             loading = message.truthy("loading"),
                             tabs = tabsOf(message["tabs"]),
+                            urlNotice = urlNoticeOf(message["urlNotice"]),
                         ),
                     )
                 }
@@ -222,7 +229,17 @@ class BrowserChannel(private val opener: BrowserSocketOpener, val sessionId: Str
                 }
                 "pick-empty" -> pickFlow.tryEmit(message)
                 "closed" -> uiState.update { it.copy(state = State()) }
-                "error" -> uiState.update { it.copy(error = message.string("message")?.ifEmpty { null } ?: "browser error") }
+                "error" -> {
+                    val text = message.string("message")
+                    if (text == CONSOLE_BLOCKED_MESSAGE) {
+                        uiState.update { ui ->
+                            if (ui.state.urlNotice?.kind == UrlNoticeKind.ConsoleBlocked) ui
+                            else ui.copy(state = ui.state.copy(urlNotice = UrlNotice(UrlNoticeKind.ConsoleBlocked, "", false)))
+                        }
+                    } else {
+                        uiState.update { it.copy(error = text?.ifEmpty { null } ?: "browser error") }
+                    }
+                }
                 else -> Unit
             }
         }
@@ -255,6 +272,21 @@ class BrowserChannel(private val opener: BrowserSocketOpener, val sessionId: Str
         /** The JPEG bytes of a frame's base64 `data`, or null when it is not base64. */
         fun decodeFrame(base64: String): ByteArray? =
             runCatching { Base64.getDecoder().decode(base64) }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+        /** The error frame text that is the console block (browser-notice.ts CONSOLE_BLOCKED_MESSAGE). */
+        const val CONSOLE_BLOCKED_MESSAGE = "This address is the console itself, which the session browser does not open."
+
+        /** use-browser.ts parseUrlNotice: an unknown kind or a non-object is no notice; host capped at 120. */
+        internal fun urlNoticeOf(v: JsonElement?): UrlNotice? {
+            val o = v as? JsonObject ?: return null
+            val kind = when (o.string("kind")) {
+                "console_blocked" -> UrlNoticeKind.ConsoleBlocked
+                "non_public" -> UrlNoticeKind.NonPublic
+                else -> return null
+            }
+            val host = (o.jsString("host") ?: "").take(120)
+            return UrlNotice(kind, host, (o["indirect"] as? JsonPrimitive)?.let { !it.isString && it.booleanOrNull == true } ?: false)
+        }
 
         /** `Array.isArray(message.tabs) ? tabs : []`; an entry that is not an object is skipped. */
         private fun tabsOf(v: JsonElement?): List<Tab> = (v as? kotlinx.serialization.json.JsonArray)

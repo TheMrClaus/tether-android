@@ -56,6 +56,18 @@ class SessionControlsGuardTest {
         assertNull(check(session("pi"), null, SessionControl.Mode("acceptEdits")))
     }
 
+    /** chat-view.tsx:2657/:3218/:4758 + lib/antigravity-modes.ts (tether 15f74ecd): agy's three modes, no Auto row; its model and effort are live. */
+    @Test
+    fun antigravityModeModelAndEffortChangesAreAllowed() {
+        val agy = session("antigravity")
+        for (mode in listOf("default", "acceptEdits", "plan")) assertNull(mode, check(agy, null, SessionControl.Mode(mode)))
+        assertEquals(ControlResult.NotOffered, check(agy, null, SessionControl.Mode("bypassPermissions")))
+        assertEquals(ControlResult.NotOffered, check(agy, null, SessionControl.Mode("dontAsk")))
+        assertNull(check(agy, claudeControls, SessionControl.Model("claude-sonnet-5")))
+        assertNull(check(agy, claudeControls, SessionControl.Effort("high")))
+        assertEquals(ControlResult.NotOffered, check(agy, claudeControls, SessionControl.Effort("max")))
+    }
+
     @Test
     fun opencodeModesAreTheDiscoveredAgentsAndAutoOnlyOnServeV2() {
         val discovered = controls(modes = listOf(ModeOption("default", "Build", ""), ModeOption("review", "Review", ""), ModeOption("yolo", "YOLO", "", danger = true)))
@@ -109,7 +121,7 @@ class SessionControlsGuardTest {
     @Test
     fun aTypedModelIdIsPinnedOnEveryEngineButCodexAsTheWebDoes() {
         // Round 3 (F2): chat-view.tsx:3015-3024 at 7d65611.
-        for (p in listOf("claude", "opencode", "reasonix", "pi", "dsh")) {
+        for (p in listOf("claude", "opencode", "reasonix", "pi", "dsh", "antigravity")) {
             assertNull(p, check(session(p), null, SessionControl.Model("model-9", typed = true)))
             assertEquals(p, ControlResult.NotOffered, check(session(p), null, SessionControl.Model("two words", typed = true)))
         }
@@ -118,6 +130,7 @@ class SessionControlsGuardTest {
         assertEquals(ControlResult.NotOffered, check(session("fake"), null, SessionControl.Model("gpt-9", typed = true)))
         assertFalse(typedModelAllowed("codex"))
         assertTrue(typedModelAllowed("opencode"))
+        assertTrue(typedModelAllowed("antigravity"))
     }
 
     @Test
