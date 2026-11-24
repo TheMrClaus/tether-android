@@ -36,7 +36,7 @@ import org.robolectric.annotation.Config
  * dot and the page URL); `browser-dead`: a channel that could not open ("The browser is not
  * available." and why). Phone: the full-screen sheet; tablet: the 520dp right-hand panel.
  */
-enum class BrowserShot(val id: String) { Live("browser-live"), Dead("browser-dead") }
+enum class BrowserShot(val id: String) { Live("browser-live"), Dead("browser-dead"), NoticeLocal("browser-notice-local"), NoticeIndirect("browser-notice-indirect"), NoticeConsole("browser-notice-console") }
 
 private const val ShotTag = "browser-shot"
 
@@ -63,15 +63,28 @@ private fun uiFor(shot: BrowserShot): BrowserChannel.Ui = when (shot) {
         ),
     )
     BrowserShot.Dead -> BrowserChannel.Ui(connected = false, error = BrowserSocketOpener.SIGNED_OUT)
+    BrowserShot.NoticeLocal -> noticeUi(BrowserChannel.UrlNotice(BrowserChannel.UrlNoticeKind.NonPublic, "localhost:3000", false))
+    BrowserShot.NoticeIndirect -> noticeUi(BrowserChannel.UrlNotice(BrowserChannel.UrlNoticeKind.NonPublic, "192.168.1.20:8080", true))
+    BrowserShot.NoticeConsole -> noticeUi(BrowserChannel.UrlNotice(BrowserChannel.UrlNoticeKind.ConsoleBlocked, "", false))
 }
+
+private fun noticeUi(notice: BrowserChannel.UrlNotice) = BrowserChannel.Ui(
+    connected = true,
+    state = BrowserChannel.State(
+        url = "https://localhost:3000/",
+        title = "Dev server",
+        viewport = BrowserChannel.Viewport(390, 844, mobile = true, deviceScaleFactor = 1.0),
+        urlNotice = notice,
+    ),
+)
 
 @Composable
 private fun Pane(shot: BrowserShot) {
     BrowserPaneContent(
         ui = uiFor(shot),
-        frame = if (shot == BrowserShot.Live) fakeFrame() else null,
+        frame = if (shot != BrowserShot.Dead) fakeFrame() else null,
         actions = BrowserPaneActions({}, { _, _, _ -> }, {}, {}, {}),
-        defaultUrl = if (shot == BrowserShot.Live) "localhost:3000" else null,
+        defaultUrl = if (shot != BrowserShot.Dead) "localhost:3000" else null,
         modifier = Modifier.fillMaxSize(),
     )
 }
@@ -113,14 +126,14 @@ class BrowserPanePhoneScreenshotTest(private val shot: BrowserShot, private val 
 
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi")
-class BrowserPaneTabletScreenshotTest(private val skin: TetherSkin) {
+class BrowserPaneTabletScreenshotTest(private val shot: BrowserShot, private val skin: TetherSkin) {
     @get:Rule val rule = createComposeRule()
 
-    @Test fun pane() = rule.snapBrowser(BrowserShot.Live, skin, "tablet", 1280.dp, 800.dp, tablet = true)
+    @Test fun pane() = rule.snapBrowser(shot, skin, "tablet", 1280.dp, 800.dp, tablet = true)
 
     companion object {
         @JvmStatic
-        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
-        fun params(): List<Array<Any>> = TetherSkin.entries.map { arrayOf<Any>(it) }
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun params(): List<Array<Any>> = BrowserShot.entries.filter { it != BrowserShot.Dead }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }

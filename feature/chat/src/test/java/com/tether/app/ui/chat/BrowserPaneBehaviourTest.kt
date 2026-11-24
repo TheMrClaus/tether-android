@@ -239,6 +239,29 @@ class BrowserPaneBehaviourTest {
     }
 
     @Test
+    fun theUrlNoticeRowShowsTheWordsAndClearsOnTheNextFrame() {
+        show()
+        server("""{"t":"state","url":"http://10.0.0.5:3000/","urlNotice":{"kind":"non_public","host":"10.0.0.5:3000","indirect":false}}""")
+        rule.onNodeWithTag(BrowserPaneTags.UrlNotice).assertTextEquals("This page is on a private or local address (10.0.0.5:3000).")
+        server("""{"t":"state","url":"http://10.0.0.5:3000/","urlNotice":{"kind":"non_public","host":"cdn.local:80","indirect":true}}""")
+        rule.onNodeWithTag(BrowserPaneTags.UrlNotice).assertTextEquals("This page loaded something from a private or local address (cdn.local:80).")
+        server("""{"t":"state","url":"https://a.test/"}""")
+        rule.onNodeWithTag(BrowserPaneTags.UrlNotice).assertDoesNotExist()
+    }
+
+    @Test
+    fun theConsoleBlockErrorFrameShowsTheNoticeAndNotTheError() {
+        show()
+        server("""{"t":"state","url":"https://a.test/"}""")
+        server("""{"t":"error","message":"${BrowserChannel.CONSOLE_BLOCKED_MESSAGE}"}""")
+        rule.onNodeWithTag(BrowserPaneTags.UrlNotice)
+            .assertTextEquals("Tether's own console is not opened in this browser; a request to it was stopped.")
+        rule.onNodeWithTag(BrowserPaneTags.StatusError).assertDoesNotExist()
+        server("""{"t":"error","message":"navigation failed"}""")
+        rule.onNodeWithTag(BrowserPaneTags.StatusError).assertTextEquals("navigation failed")
+    }
+
+    @Test
     fun aRefusedChannelShowsTheDeadState() {
         show(BrowserChannel(BrowserSocketOpener.Unavailable, "s1"))
         rule.onNodeWithText("The browser is not available.").assertExists()
