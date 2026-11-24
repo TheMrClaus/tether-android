@@ -131,6 +131,33 @@ class EngineSettingsTest {
         assertEquals(json("""{"headlessModes":"codex"}"""), ServerSettingsPatch.headlessMode(forcedHome, EngineCard.Codex))
     }
 
+    /** settings-dialog.tsx:64-70 (tether 15f74ecd): every card but Antigravity keeps its home; Antigravity is command-only. */
+    @Test fun everyCardKeepsItsHomeAndAntigravityIsCommandOnly() {
+        val homes = mapOf(
+            EngineCard.Claude to ServerSetting.ClaudeHome, EngineCard.Codex to ServerSetting.CodexHome,
+            EngineCard.Opencode to ServerSetting.OpencodeHome, EngineCard.Reasonix to ServerSetting.ReasonixHome,
+            EngineCard.Pi to ServerSetting.PiHome, EngineCard.Dsh to ServerSetting.DshHome,
+        )
+        for ((card, home) in homes) assertEquals(card.id, home, card.home)
+        assertEquals(homes.keys + EngineCard.Antigravity, EngineCard.entries.toSet())
+        val agy = EngineCard.Antigravity
+        assertNull(agy.home)
+        assertEquals(ServerSetting.AntigravityCommand, agy.command)
+        assertEquals("antigravityCommand", agy.command.key)
+        assertEquals(SettingKind.Runs, agy.command.kind)
+        assertTrue(agy.homeOptional)
+        // No home: never needs one, never offers "Use detected", never writes a picked home.
+        val v = view("""{"headlessModes":"","antigravityCommand":""}""", detected = """{"antigravity":{"found":true,"configDir":"/h/.agy"}}""")
+        assertFalse(v.needsHome(agy))
+        assertNull(ServerSettingsPatch.detectedHome(v, agy))
+        assertNull(ServerSettingsPatch.useDetected(v, agy))
+        assertNull(ServerSettingsPatch.pickedHome(agy, "/x"))
+        assertEquals(json("""{"headlessModes":"antigravity"}"""), ServerSettingsPatch.headlessMode(v, agy))
+        assertEquals(json("""{"antigravityCommand":"agy --x"}"""), engineValueAsShown(v, ServerSetting.AntigravityCommand, " agy --x "))
+        assertEquals(json("""{"antigravityCommand":""}"""), ServerSettingsPatch.engineValue(
+            view("""{"antigravityCommand":"agy"}"""), ServerSetting.AntigravityCommand, "", shown = "agy"))
+    }
+
     @Test fun forcedOrOversizeModesAreNeverWritten() {
         val forced = view("""{"headlessModes":"claude"}""", envForced = """{"headlessModes":true}""")
         for (e in EngineCard.entries) assertNull(ServerSettingsPatch.headlessMode(forced, e))
@@ -173,7 +200,7 @@ class EngineSettingsTest {
     @Test fun theEngineValuesAreWrittenByTheirOwnRule() {
         val v = view("""{"claudeCommand":"claude","codexHome":"/c","claudeLaunchCommand":""}""")
         val runs = ServerSetting.entries.filter { it.kind == SettingKind.Runs }
-        assertEquals(13, runs.size) // 6 homes, 6 commands, the launch command
+        assertEquals(14, runs.size) // 6 homes, 7 commands (Antigravity has no home), the launch command
         for (s in runs) {
             assertNull(s.key, ServerSettingsPatch.text(v, s, "/tmp/x", v.text(s)))
             assertNull(s.key, ServerSettingsPatch.choice(v, s, "/tmp/x"))

@@ -43,7 +43,7 @@ class ProviderLogoTest {
     @get:Rule val rule = createComposeRule()
 
     /** Every LOGO_MARKS key of the web, in its key order (`dsh` is the `get dsh()` alias). */
-    private val webIds = listOf("claude", "codex", "pi", "reasonix", "gemini", "dsh", "opencode")
+    private val webIds = listOf("claude", "codex", "pi", "reasonix", "gemini", "antigravity", "dsh", "opencode")
 
     /**
      * The web's LOGO_MARKS, extracted mechanically from provider-logo.tsx into a checked-in fixture
@@ -58,7 +58,7 @@ class ProviderLogoTest {
     fun marksMatchTheWebLogoMarksVerbatim() {
         val marks = web.getValue("marks").jsonObject
         val aliases = web.getValue("aliases").jsonObject.mapValues { it.value.jsonPrimitive.content }
-        assertEquals(mapOf("dsh" to "reasonix"), aliases)
+        assertEquals(mapOf("antigravity" to "gemini", "dsh" to "reasonix"), aliases)
         assertEquals(webIds.toSet(), marks.keys + aliases.keys)
         assertEquals(webIds, ProviderLogos.marks.keys.toList())
         for (id in webIds) {
@@ -72,6 +72,7 @@ class ProviderLogoTest {
             }
             assertEquals("$id colored", parts, mine.colored)
         }
+        assertSame("antigravity is the gemini G", ProviderLogos.marks["gemini"], ProviderLogos.marks["antigravity"])
         assertSame("dsh is the reasonix whale", ProviderLogos.marks["reasonix"], ProviderLogos.marks["dsh"])
     }
 
@@ -125,7 +126,9 @@ class ProviderLogoTest {
             parts,
         )
         assertTrue(ProviderLogos.keepsOwnColours("gemini"))
-        for (id in webIds - "gemini") assertFalse(id, ProviderLogos.keepsOwnColours(id))
+        // antigravity is the same mark object (provider-logo.tsx:53), so it keeps the same brand fills
+        assertTrue(ProviderLogos.keepsOwnColours("antigravity"))
+        for (id in webIds - setOf("gemini", "antigravity")) assertFalse(id, ProviderLogos.keepsOwnColours(id))
         assertFalse(ProviderLogos.keepsOwnColours(null))
         assertFalse(ProviderLogos.keepsOwnColours("acp"))
     }

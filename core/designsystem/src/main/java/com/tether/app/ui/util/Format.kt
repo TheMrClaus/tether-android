@@ -22,7 +22,7 @@ fun providerGlyph(provider: String?): String = when (provider) {
     "opencode" -> "O"
     "reasonix" -> "R"
     "pi" -> "P"
-    "gemini" -> "G"
+    "gemini", "antigravity" -> "G"
     else -> "?"
 }
 

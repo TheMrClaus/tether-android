@@ -46,10 +46,12 @@ object SetupEngines {
         "opencode" to EngineMeta("OpenCode", "opencode", "opencodeCommand", "SST"),
         "reasonix" to EngineMeta("Reasonix", "reasonix", "reasonixCommand", "Reasonix"),
         "pi" to EngineMeta("Pi", "pi", "piCommand", "pi.dev"),
+        // app/setup/page.tsx:84 (tether 15f74ecd).
+        "antigravity" to EngineMeta("Antigravity", "agy", "antigravityCommand", "Google"),
     )
 
     /** page.tsx :63 `ENGINE_GLYPH`. */
-    val glyph: Map<String, String> = mapOf("claude" to "C", "codex" to "X", "opencode" to "O", "reasonix" to "R", "pi" to "P", "fake" to "F")
+    val glyph: Map<String, String> = mapOf("claude" to "C", "codex" to "X", "opencode" to "O", "reasonix" to "R", "pi" to "P", "antigravity" to "A", "fake" to "F")
 }
 
 enum class Isolation { Open, Guided }

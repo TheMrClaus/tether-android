@@ -47,7 +47,7 @@ data class ProviderMarkPart(val fill: String, val d: String)
  * The table is the web's LOGO_MARKS at 90fbb9f, path data byte-identical: claude, codex and
  * opencode (simple-icons, CC0, 24x24), pi (4x4 pixel mark, evenodd), reasonix (the DeepSeek
  * whale, viewBox 140 143 860 860), gemini (Google's four-colour "G", fills baked in), and dsh
- * (the other DeepSeek harness: the same whale). Every other provider id (acp, unknown, future)
+ * (the other DeepSeek harness: the same whale); antigravity is Google's agent and shares the gemini "G". Every other provider id (acp, unknown, future)
  * renders the letter fallback.
  */
 object ProviderLogos {
@@ -94,6 +94,7 @@ object ProviderLogos {
         "pi" to PI,
         "reasonix" to REASONIX,
         "gemini" to GEMINI,
+        "antigravity" to GEMINI,
         "dsh" to REASONIX,
         "opencode" to OPENCODE,
     )
