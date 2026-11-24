@@ -446,7 +446,7 @@ internal fun BrowserPaneContent(
             val blocked = notice.kind == BrowserChannel.UrlNoticeKind.ConsoleBlocked
             Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp).testTag(BrowserPaneTags.UrlNotice),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(
@@ -459,6 +459,7 @@ internal fun BrowserPaneContent(
                     urlNoticeCopy(notice),
                     color = if (blocked) t.ink else t.muted,
                     style = TextStyle(fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp, lineHeight = 16.sp),
+                    modifier = Modifier.testTag(BrowserPaneTags.UrlNotice),
                 )
             }
         }
