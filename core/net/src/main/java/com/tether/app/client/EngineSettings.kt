@@ -11,13 +11,14 @@ import kotlinx.serialization.json.JsonPrimitive
  * order: one per real engine (fake is a mode, gemini replay-only). [home] / [command] / [launch]
  * are the ServerSettings keys the card edits; [launch] is Claude's only (the full wrapper command
  * at spawn). [homeOptional] (issue #86): Claude's home may be empty (the operator's real HOME), so
- * its switch is never blocked on it; the others fail closed without one.
+ * its switch is never blocked on it; the others fail closed without one. Antigravity has no home at all
+ * ([home] null: it runs on the real HOME, settings-dialog.tsx 15f74ecd :70 `homeField: undefined`), only a command.
  */
 enum class EngineCard(
     val id: String,
     val label: String,
     val glyph: String,
-    val home: ServerSetting,
+    val home: ServerSetting?,
     val command: ServerSetting,
     val launch: ServerSetting?,
     val homeOptional: Boolean,
@@ -28,6 +29,7 @@ enum class EngineCard(
     Reasonix("reasonix", "Reasonix", "R", ServerSetting.ReasonixHome, ServerSetting.ReasonixCommand, null, homeOptional = false),
     Pi("pi", "Pi", "P", ServerSetting.PiHome, ServerSetting.PiCommand, null, homeOptional = false),
     Dsh("dsh", "DeepSeek Harness", "D", ServerSetting.DshHome, ServerSetting.DshCommand, null, homeOptional = false),
+    Antigravity("antigravity", "Antigravity", "G", null, ServerSetting.AntigravityCommand, null, homeOptional = true),
     ;
 
     companion object {

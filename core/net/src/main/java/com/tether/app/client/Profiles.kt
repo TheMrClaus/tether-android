@@ -56,7 +56,7 @@ object ProfileLimits {
     const val TOOL_NAME = 200
 
     /** :49-57 `EXTENDS_PROVIDERS`, the closed engine set (the web's `EXTENDS_OPTIONS` order). */
-    val EXTENDS = listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh", "acp")
+    val EXTENDS = listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh", "acp", "antigravity")
 }
 
 /** One `{ id, label?, isDefault? }` model row (lib/protocol.ts :1578 `ProfileModelEntry`). */

@@ -12,4 +12,12 @@ class FormatTest {
         assertEquals("$0.0045", estimatedUsd(0.0045)) // sub-cent: 4 digits
         assertEquals("—", estimatedUsd(null))
     }
+
+    /** lib/format.ts:95 (tether 15f74ecd): antigravity shares gemini's "G". */
+    @Test
+    fun providerGlyphMapsAntigravityLikeGemini() {
+        assertEquals("G", providerGlyph("gemini"))
+        assertEquals("G", providerGlyph("antigravity"))
+        assertEquals("?", providerGlyph("unknown"))
+    }
 }

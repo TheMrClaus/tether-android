@@ -242,6 +242,24 @@ class ComposerControlsModelTest {
         assertFalse(derive(session("opencode"), null).mode!!.options.single { it.value == "plan" }.danger)
     }
 
+    /** lib/antigravity-modes.ts ANTIGRAVITY_MODE_OPTIONS + chat-view.tsx:3218, :4758 (tether 15f74ecd): a live row with agy's three modes (no Auto) and an effort. */
+    @Test
+    fun antigravityHasALiveRowWithItsThreeModesAndAnEffort() {
+        val row = derive(session("antigravity"), claudeControls)
+        assertTrue(row.live)
+        assertEquals(opus.value, row.model!!.value)
+        assertEquals(listOf("low", "high"), row.effort!!.options.map { it.value })
+        assertEquals("default", row.mode!!.value)
+        assertEquals(listOf("default", "acceptEdits", "plan"), row.mode!!.options.map { it.value })
+        assertEquals(listOf("Manual", "Accept Edits", "Plan"), row.mode!!.options.map { it.label })
+        assertEquals(listOf(false, false, false), row.mode!!.options.map { it.danger })
+        assertEquals("Ask before edits and commands, per your permission settings.", row.hint)
+        assertNull(row.auto)
+        val plan = derive(session("antigravity").copy(permissionMode = "plan"), claudeControls)
+        assertEquals("plan", plan.mode!!.value)
+        assertEquals("Plan carefully before executing a task.", plan.hint)
+    }
+
     @Test
     fun dshHasOnlyAModelSelect() {
         val row = derive(session("dsh"), controls(listOf(SessionModelOption("dsh-1", "DSH"))))

@@ -115,7 +115,7 @@ internal fun EngineEntityToggle(engine: EngineCard, binding: ServerSettingsBindi
     val view = binding.settings?.takeIf { binding.origin != null } ?: return
     val latest by rememberUpdatedState(binding)
     val on = engine.id in view.headlessModes
-    val switchable = !view.forced(ServerSetting.HeadlessModes) && !(view.needsHome(engine) && !view.forced(engine.home))
+    val switchable = !view.forced(ServerSetting.HeadlessModes) && !(view.needsHome(engine) && engine.home?.let(view::forced) != true)
     Box(
         Modifier
             .testTag("runtime-${EngineTags.switch(engine)}")
@@ -192,7 +192,7 @@ private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding
     val latest by rememberUpdatedState(binding)
     val det = view.detection(engine)
     val on = engine.id in view.headlessModes
-    val homeForced = view.forced(engine.home)
+    val homeForced = engine.home?.let(view::forced) == true
     val needsHome = view.needsHome(engine)
     val switchable = !view.forced(ServerSetting.HeadlessModes) && !(needsHome && !homeForced)
     Column(
@@ -252,13 +252,17 @@ private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding
         Spacer(Modifier.height(t.css.spaceSm + 12.dp))
         RowRule()
         Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(5.6.dp)) {
-            EngineValueRow(
-                engine, engine.home, view, binding, narrow,
-                title = EngineRows.HOME,
-                caption = AnnotatedString(EngineRows.homeCaption(view, engine)),
-                placeholder = det?.configDir ?: EngineRows.HOME_PLACEHOLDER,
-                first = true,
-            )
+            // An engine with no home (Antigravity: the real HOME) draws no home row; its command row leads.
+            val home = engine.home
+            if (home != null) {
+                EngineValueRow(
+                    engine, home, view, binding, narrow,
+                    title = EngineRows.HOME,
+                    caption = AnnotatedString(EngineRows.homeCaption(view, engine)),
+                    placeholder = det?.configDir ?: EngineRows.HOME_PLACEHOLDER,
+                    first = true,
+                )
+            }
             // :2191 `noHome && det?.configDir`: env-forced or not, as on the web.
             val detected = ServerSettingsPatch.detectedHome(view, engine)
             if (detected != null) {
@@ -284,6 +288,7 @@ private fun EngineCardView(engine: EngineCard, view: ServerSettingsView, binding
                 title = EngineRows.COMMAND,
                 caption = AnnotatedString(EngineRows.commandCaption(view, engine)),
                 placeholder = det?.binPath ?: engine.id,
+                first = home == null,
             )
             val launch = engine.launch
             if (launch != null) {

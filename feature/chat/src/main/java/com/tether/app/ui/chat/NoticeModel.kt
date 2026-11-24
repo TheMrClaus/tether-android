@@ -203,6 +203,7 @@ internal fun sessionNoticeProviderLabel(provider: String?): String = when (provi
     "pi" -> "Pi"
     "reasonix" -> "Reasonix"
     "dsh" -> "DeepSeek Harness"
+    "antigravity" -> "Antigravity"
     "acp" -> "ACP"
     "gemini" -> "Gemini"
     else -> "Agent"

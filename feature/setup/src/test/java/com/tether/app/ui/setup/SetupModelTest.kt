@@ -35,6 +35,14 @@ class SetupModelTest {
 
     private fun JsonObject.str(key: String) = (get(key) as? JsonPrimitive)?.content
 
+    /** app/setup/page.tsx:84 ENGINE_META and :87 ENGINE_GLYPH (tether 15f74ecd): Antigravity is "agy", Google, glyph "A" (not the provider glyph "G"). */
+    @Test fun antigravityIsOnTheHarnessListWithTheSetupPagesOwnGlyph() {
+        val meta = checkNotNull(SetupEngines.meta["antigravity"])
+        assertEquals(listOf("Antigravity", "agy", "antigravityCommand", "Google"), listOf(meta.label, meta.bin, meta.overrideKey, meta.blurb))
+        assertEquals("A", SetupEngines.glyph["antigravity"])
+        assertEquals(listOf("claude", "codex", "opencode", "reasonix", "pi", "antigravity"), SetupEngines.meta.keys.toList())
+    }
+
     @Test fun loadingPreselectsEveryDetectedHarnessAndSeedsTheWorkspace() = runTest {
         val (m, _) = loaded()
         assertEquals(listOf("claude", "codex", "reasonix"), m.engines)

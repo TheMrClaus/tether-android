@@ -78,7 +78,7 @@ data class RuntimeDeskRoute(
 
     companion object {
         val Root = RuntimeDeskRoute()
-        val BUILT_IN_ENGINE_IDS = listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh")
+        val BUILT_IN_ENGINE_IDS = listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh", "antigravity")
         val ENGINE_TASK_IDS = listOf(RuntimeDeskEntities.CustomProfiles, RuntimeDeskEntities.HostConfig, RuntimeDeskEntities.ClaudeCli)
         val ENGINE_IDS = BUILT_IN_ENGINE_IDS + ENGINE_TASK_IDS
         val Saver: Saver<RuntimeDeskRoute, Any> = listSaver(

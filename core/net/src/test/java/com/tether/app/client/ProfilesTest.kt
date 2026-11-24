@@ -50,6 +50,13 @@ class ProfilesTest {
         assertEquals(listOf("parity-claude", "claude", "Parity Claude", true), listOf(p.id, p.extends, p.label, p.enabled))
     }
 
+    /** lib/providers-registry.ts:70-79 EXTENDS_PROVIDERS (tether 15f74ecd): antigravity is the last of the closed set, and a profile extending it reads as such. */
+    @Test fun theClosedExtendsSetEndsWithAntigravityAsTheWebsDoes() {
+        assertEquals(listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh", "acp", "antigravity"), ProfileLimits.EXTENDS)
+        val agy = list("""[{"id":"agy-work","extends":"antigravity","label":"Agy","enabled":true}]""").profile("agy-work")!!
+        assertEquals("antigravity", agy.extends)
+    }
+
     @Test fun aProfileReadsAsTheWebReadsIt() {
         val p = two.profile("gemini")!!
         assertEquals(listOf("gemini", "--acp"), p.command)

@@ -357,9 +357,9 @@ object SessionControlsGuard {
 
     private val SHA = Regex("^[0-9a-f]{7,64}$", RegexOption.IGNORE_CASE)
 
-    private val MODE_PROVIDERS = setOf("claude", "opencode", "reasonix", "pi")
-    private val MODEL_PROVIDERS = setOf("claude", "opencode", "reasonix", "pi", "dsh")
-    private val EFFORT_PROVIDERS = setOf("claude", "opencode", "reasonix", "pi")
+    private val MODE_PROVIDERS = setOf("claude", "opencode", "reasonix", "pi", "antigravity")
+    private val MODEL_PROVIDERS = setOf("claude", "opencode", "reasonix", "pi", "dsh", "antigravity")
+    private val EFFORT_PROVIDERS = setOf("claude", "opencode", "reasonix", "pi", "antigravity")
 }
 
 /**
@@ -371,7 +371,7 @@ fun looksLikeModelId(arg: String): Boolean = MODEL_ID.matches(arg)
 private val MODEL_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$")
 
 /** Round 3 (F2): the providers whose composer pins a typed `/model <id>` — the same set as the UI. */
-fun typedModelAllowed(provider: String): Boolean = provider != "codex" && provider in setOf("claude", "opencode", "reasonix", "pi", "dsh")
+fun typedModelAllowed(provider: String): Boolean = provider != "codex" && provider in setOf("claude", "opencode", "reasonix", "pi", "dsh", "antigravity")
 
 /** lib/model-picker.mjs LEGACY_GROUP_VALUE: the group row's sentinel, never a model id. */
 const val LEGACY_GROUP_VALUE = "__legacy_models__"

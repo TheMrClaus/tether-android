@@ -128,7 +128,7 @@ object Format {
         "opencode" -> "O"
         "reasonix" -> "R"
         "pi" -> "P"
-        "gemini" -> "G"
+        "gemini", "antigravity" -> "G"
         else -> "?"
     }
 
