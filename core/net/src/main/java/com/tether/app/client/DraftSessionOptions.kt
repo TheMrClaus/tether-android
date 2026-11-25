@@ -109,8 +109,8 @@ object DraftSessionOptionsModel {
     fun of(state: DraftComposerState): DraftSessionOptions {
         val key = (state.form["key"] as? JsStr)?.value.orEmpty()
         val entry = state.entries.firstOrNull { it.key == key } ?: return DraftSessionOptions.None
-        // A handover's successor inherits the source's Approvals (the server keeps an omitted one), so the row is not drawn there.
-        val base = of(entry, state.form).let { if (state.handover != null) it.copy(approvals = null) else it }
+        // draft-composer.tsx:530: the Approvals row is drawn in handover mode too (seeded from the source, HandoverDraftForm.seedFromSource).
+        val base = of(entry, state.form)
         // W34 (df:869-896): Codex "Current (custom)" is the FIRST, selected Mode row while the source's triple matches no preset.
         val current = state.handover?.codexCurrentOption?.takeIf { entry.provider == "codex" } ?: return base
         val mode = base.mode ?: return base

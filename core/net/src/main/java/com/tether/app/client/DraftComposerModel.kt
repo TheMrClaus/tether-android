@@ -749,7 +749,7 @@ class DraftComposerModel(
         // df:1095 SEED_FROM_SOURCE: every seeded field AND its userModified flag, so a later RESOLVE cannot overwrite any.
         val form = DraftForm.INITIAL_DRAFT_FORM
             .put("key", JsStr(seed.key)).put("model", JsStr(seed.model)).put("reasoningEffort", JsStr(seed.reasoningEffort))
-            .put("mode", JsStr(seed.mode)).put("autoMode", JsBool.FALSE).put("cwd", JsStr(seed.cwd)).put("useWorktree", JsBool.FALSE)
+            .put("mode", JsStr(seed.mode)).put("autoMode", JsBool.FALSE).put("toolApproval", JsStr(seed.toolApproval)).put("cwd", JsStr(seed.cwd)).put("useWorktree", JsBool.FALSE)
         val modified = DraftForm.INITIAL_USER_MODIFIED
             .with(
                 "key" to JsBool.TRUE, "model" to JsBool.TRUE, "reasoningEffort" to JsBool.TRUE, "mode" to JsBool.TRUE,
