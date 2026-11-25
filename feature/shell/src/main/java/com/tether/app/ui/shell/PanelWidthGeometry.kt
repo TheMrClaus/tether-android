@@ -133,4 +133,28 @@ object ExpandedBreakpoints {
      * away (globals.css 3849, 4139); below it the sheet floats beside the conversation.
      */
     const val INSPECTOR_COLUMN = 1600
+
+    /**
+     * `(min-width: 80rem)` (globals.css, `.is-browser-open`): the open browser pane is a column of the
+     * shell; below it the pane stays the overlay.
+     */
+    const val BROWSER_DOCK = 1280
+}
+
+/** The docked browser pane's column (globals.css `--browser-dock`). */
+object BrowserDockGeometry {
+    /** 32.5rem: the pane's width everywhere the chat keeps its floor. */
+    const val WIDTH = 520
+
+    /** 30rem: the chat column's floor, and the narrowest the pane gives back to. */
+    const val CHAT_FLOOR = 480
+
+    fun docks(viewport: Int): Boolean = viewport >= ExpandedBreakpoints.BROWSER_DOCK
+
+    /**
+     * `clamp(30rem, 100% - rail - inspector - 30rem, 32.5rem)`: [rail] and [inspector] are the widths
+     * of the columns actually showing (0 when collapsed or absent).
+     */
+    fun width(viewport: Int, rail: Int, inspector: Int): Int =
+        (viewport - rail - inspector - CHAT_FLOOR).coerceAtMost(WIDTH).coerceAtLeast(CHAT_FLOOR)
 }

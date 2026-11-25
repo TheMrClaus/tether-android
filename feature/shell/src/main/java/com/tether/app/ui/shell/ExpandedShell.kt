@@ -40,6 +40,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.tether.app.protocol.model.AgentSession
+import com.tether.app.ui.chat.BrowserDock
+import com.tether.app.ui.chat.BrowserPaneHost
+import com.tether.app.ui.chat.LocalBrowserDock
+import androidx.compose.runtime.CompositionLocalProvider
 import com.tether.app.ui.components.KeyClasses
 import com.tether.app.ui.components.KeyState
 import com.tether.app.ui.components.resolveKey
@@ -108,8 +112,11 @@ fun ExpandedShell(
     // ta-coik.31: opening the tools menu takes focus and the keyboard away from the composer (the web's focus move).
     PutKeyboardAwayWhile(state.menuOpen)
 
+    val browserDock = remember { BrowserDock() }
     BoxWithConstraints(modifier.fillMaxSize().testTag(ShellTags.Shell)) {
         val viewport = maxWidth.value.roundToInt()
+        // From 80rem the open browser pane is the shell's last column (globals.css `.is-browser-open`); below it the chat draws the overlay.
+        val dockable = BrowserDockGeometry.docks(viewport)
         val columnLayout = viewport >= ExpandedBreakpoints.INSPECTOR_COLUMN
         val sheetShown = session != null && state.telemetryOpen && !columnLayout
         BackHandler(enabled = state.menuOpen || state.linksOpen || sheetShown) { state.handleBack() }
@@ -125,6 +132,12 @@ fun ExpandedShell(
         val collapsed = panels.sidebarCollapsed || !showRail
         // `.is-wide-workspace` (no active session): the inspector column is 0 and its handle hidden.
         val inspectorColumn = columnLayout && session != null
+        val dockRequest = if (dockable && session != null) browserDock.request else null
+        val dockWidth = if (dockRequest != null) {
+            BrowserDockGeometry.width(viewport, if (collapsed) 0 else railWidth, if (inspectorColumn) inspectorWidth else 0)
+        } else {
+            0
+        }
         // r2: what the bar could not fit, listed by its menu.
         val fold = remember { TopbarFold() }
         // ta-7njx: the header cluster's yield, shared with the "Session links" menu's Pin row.
@@ -141,6 +154,7 @@ fun ExpandedShell(
             fileBrowserDisabled = session == null,
         )
 
+        CompositionLocalProvider(LocalBrowserDock provides if (dockable) browserDock else null) {
         Column(Modifier.fillMaxSize().background(t.graphite)) {
             TetherTopbar(actions = topbar, state = topbarState, onToggleMenu = state::toggleMenu, fold = fold)
             // T13.2: the link banner, under the topbar (never a modal).
@@ -162,6 +176,17 @@ fun ExpandedShell(
                         modifier = Modifier.weight(1f),
                     )
                     if (inspectorColumn) InspectorColumn(inspectorWidth.dp, slots.inspector)
+                    if (dockRequest != null) {
+                        BrowserPaneHost(
+                            opener = dockRequest.opener,
+                            sessionId = dockRequest.sessionId,
+                            onClose = dockRequest.onClose,
+                            onPicked = dockRequest.onPicked,
+                            browserProfiles = dockRequest.browserProfiles,
+                            docked = true,
+                            modifier = Modifier.width(dockWidth.dp).testTag(ShellTags.BrowserDock),
+                        )
+                    }
                 }
                 if (!collapsed) {
                     PanelResizeHandle(
@@ -195,13 +220,14 @@ fun ExpandedShell(
                         // `justify-self: start; transform: translateX(-50%)` over the inspector's edge.
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .offset(x = -(inspectorWidth.dp - PanelHandleWidth / 2))
+                            .offset(x = -(inspectorWidth.dp + dockWidth.dp - PanelHandleWidth / 2))
                             .zIndex(3f),
                     )
                 }
             }
         }
 
+        }
         if (session != null && state.linksOpen) {
             SessionLinksPopover(
                 session = session,
@@ -213,7 +239,7 @@ fun ExpandedShell(
                 onDismiss = state::closeLinks,
                 statusline = slots.statusline,
                 expanded = true,
-                endInset = if (inspectorColumn) inspectorWidth.dp + t.css.spaceLg else null,
+                endInset = if (inspectorColumn || dockWidth > 0) (if (inspectorColumn) inspectorWidth else 0).dp + dockWidth.dp + t.css.spaceLg else null,
                 showStatusline = !columnLayout,
                 pinInMenu = headerFit.pinInMenu,
             )

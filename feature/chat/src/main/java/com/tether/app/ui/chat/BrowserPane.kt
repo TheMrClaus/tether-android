@@ -282,6 +282,8 @@ fun BrowserPaneHost(
      * socket. Null (a server below protocol 171) draws no profile row at all.
      */
     browserProfiles: (suspend (BrowserProfilesRequest) -> BrowserProfilesReply)? = null,
+    /** On wide windows the shell hosts the pane as one of its columns (flat, sized by [modifier]). */
+    docked: Boolean = false,
 ) {
     key(sessionId) {
         val channel = remember(opener) { BrowserChannel(opener, sessionId) }
@@ -290,7 +292,9 @@ fun BrowserPaneHost(
             onDispose { channel.dispose() }
         }
         val windowWidth = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
-        if (windowWidth < BrowserPhoneMax) {
+        if (docked) {
+            BrowserDockedPanel(modifier) { BrowserPane(channel, onClose, Modifier.fillMaxSize(), onPicked = onPicked, browserProfiles = browserProfiles) }
+        } else if (windowWidth < BrowserPhoneMax) {
             Dialog(
                 onDismissRequest = onClose,
                 properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -308,6 +312,20 @@ fun BrowserPaneHost(
 internal fun BrowserSidePanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val t = LocalTetherTokens.current
     Row(modifier.fillMaxHeight().width(BrowserPanelWidth).cssSurface(RectangleShape, t.graphite, shadows = t.css.shadowFloating)) {
+        Box(Modifier.fillMaxHeight().width(1.dp).background(t.line))
+        Box(Modifier.weight(1f).fillMaxHeight()) { content() }
+    }
+}
+
+/**
+ * `.dashboard-shell.is-browser-open > .panel` from 80rem (module.css :35-51): a column of the shell,
+ * its width the shell's (the caller's [modifier]), a 1dp line on its left, flat: no shadow, no raised
+ * layer, so the workspace's own menus still open over it.
+ */
+@Composable
+internal fun BrowserDockedPanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val t = LocalTetherTokens.current
+    Row(modifier.fillMaxHeight().background(t.graphite)) {
         Box(Modifier.fillMaxHeight().width(1.dp).background(t.line))
         Box(Modifier.weight(1f).fillMaxHeight()) { content() }
     }
