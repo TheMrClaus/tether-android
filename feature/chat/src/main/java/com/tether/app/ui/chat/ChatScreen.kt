@@ -103,6 +103,8 @@ fun ChatScreen(
      */
     reviewFocus: String? = null,
     onReviewShown: () -> Unit = {},
+    /** v175: the new-session pickers the proposal card's Options panel draws (supplied by the shell; null = no Options). */
+    proposalOptions: ProposalOptionsHost? = null,
 ) {
     val t = LocalTetherTokens.current
     // ta-coik.52: every preference is the server's own (the web's localStorage is per origin).
@@ -136,6 +138,24 @@ fun ChatScreen(
         onDispose { toolClips.chatLeft() }
     }
     LaunchedEffect(session?.id) { toolClips.onSession(session?.id) }
+
+    // v175: the proposal card's frames; each press carries its own requestId, a refusal comes back inline on the card.
+    val proposalLocal by vm.client.proposalLocal.collectAsStateWithLifecycle()
+    val proposalActions = remember(vm.client, session?.id, proposalLocal, proposalOptions) {
+        val sid = session?.id
+        fun send(kind: String, proposalId: String, settings: kotlinx.serialization.json.JsonObject? = null) {
+            if (sid != null) vm.client.sendProposal(com.tether.app.protocol.ClientMessage.ProposalFrame(kind, sid, proposalId, settings, java.util.UUID.randomUUID().toString()))
+        }
+        ProposalActions(
+            sessionId = sid,
+            local = proposalLocal,
+            onStart = { id, settings -> send("start", id, settings) },
+            onHere = { id -> send("here", id) },
+            onDismiss = { id -> send("dismiss", id) },
+            onOpenSession = { id -> vm.selectSession(id) },
+            optionsHost = proposalOptions,
+        )
+    }
 
     val selectedRunIds by vm.selectedRunIdBySession.collectAsStateWithLifecycle()
     val tree = session?.let { trees[it.id] }
@@ -531,6 +551,8 @@ fun ChatScreen(
                     handoverV151 = com.tether.app.client.Handover.v151(chatProtocol),
                     handoverChange = HandoverChangeModel.of(session, controlsMap[session.id]),
                     onOpenSession = { id -> vm.selectSession(id) },
+                    proposalCard = com.tether.app.client.proposalCardSupported(chatProtocol),
+                    proposals = proposalActions,
                 ) } }
             }
             // ta-coik.68: the full-size viewer is hosted here, not in the tool card's row: a lazy transcript may

@@ -176,6 +176,11 @@ internal sealed interface ChatItem {
         override val startsGroup: Boolean get() = true
     }
 
+    /** v175 (#293): the agent's new-session proposal, as its card; it replaces the `propose_session` tool row of its turn. */
+    data class Proposal(val turnId: String, val proposal: ProposalView, override val startsGroup: Boolean) : ChatItem {
+        override val key: String get() = "$turnId/proposal/${proposal.proposalId}"
+    }
+
     /** T6.4: a finished background `!` command, anchored where it was launched (a `.chat-scroll` child). */
     data class BgCommand(val command: BackgroundCommandView) : ChatItem {
         override val key: String get() = "bg-${command.commandId}"
@@ -260,6 +265,8 @@ internal fun buildChatItems(
     handedOffFrom: String? = null,
     /** W34: the server speaks protocol >= 151 ([com.tether.app.client.Handover.v151]): the handover notices read the web's new words. */
     handoverV151: Boolean = false,
+    /** v175: the server speaks protocol >= 175 ([com.tether.app.client.proposalCardSupported]): a proposal shows as its card and replaces its tool row. */
+    proposalCard: Boolean = false,
 ): List<ChatItem> {
     val items = ArrayList<ChatItem>(projection.turnOrder.size * 3)
     // T6.6 r2: the session the notice / limit rows belong to (their lazy keys carry it).
@@ -313,7 +320,12 @@ internal fun buildChatItems(
         val turnDenials = placement.byTurn[turnId]
         val answeredList = (cardTurn?.get("answeredQuestions") as? JsArr)?.mapNotNull { (it as? JsObj)?.let(::answeredView) }.orEmpty()
         if (turn.continuation) items.add(ChatItem.Continuation(turnId, opens()))
-        for (segment in segmentBlocks(turn.blocks, ::rawFor)) {
+        // v175: with the card shown, the turn's `propose_session` tool rows give way to it (below 175 they stay).
+        val proposals = if (proposalCard) proposalViews(cardTurn) else emptyList()
+        val shownBlocks = if (proposals.isEmpty()) turn.blocks else turn.blocks.filterNot { id ->
+            turn.blocksById[id]?.let { it.kind == Vocab.BLOCK_TOOL && isProposeSessionTool(it.name) } == true
+        }
+        for (segment in segmentBlocks(shownBlocks, ::rawFor)) {
             when (segment) {
                 is ActivitySegment.Group -> {
                     val raws = segment.blockIds.mapNotNull(::rawFor)
@@ -375,6 +387,7 @@ internal fun buildChatItems(
                 }
             }
         }
+        proposals.forEach { items.add(ChatItem.Proposal(turnId, it, opens())) }
         if (richCodex && turnObj != null) {
             // `CodexRichTurnDetails`: one `.turnDetails` stack (space-sm apart) after the blocks.
             var inDetails = false
