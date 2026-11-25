@@ -78,6 +78,7 @@ class BrowserChannelWireTest {
         assertEquals(ws.getHeader("Origin"), upgrade.getHeader("Origin"))
 
         // Client → server: `open` on connect, then what the pane asks for.
+        assertEquals("""{"t":"profile"}""", serverReceived.poll(20, TimeUnit.SECONDS))
         assertEquals("""{"t":"open"}""", serverReceived.poll(20, TimeUnit.SECONDS))
         channel.navigate("https://localhost:3000")
         assertEquals("""{"t":"navigate","url":"https://localhost:3000"}""", serverReceived.poll(20, TimeUnit.SECONDS))

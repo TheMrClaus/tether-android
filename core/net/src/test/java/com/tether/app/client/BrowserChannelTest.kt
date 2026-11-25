@@ -70,8 +70,8 @@ class BrowserChannelTest {
         opener.last.serverOpens()
         assertTrue(channel.ui.value.connected)
         assertNull(channel.ui.value.error)
-        // :130: `{t:"open"}` exactly, no url key.
-        assertEquals(listOf("""{"t":"open"}"""), opener.last.sent)
+        // :187-188: the profile query, then `{t:"open"}` exactly, no url key.
+        assertEquals(listOf("""{"t":"profile"}""", """{"t":"open"}"""), opener.last.sent)
         // A second connect() never opens a second socket.
         channel.connect()
         assertEquals(1, opener.opened.size)
