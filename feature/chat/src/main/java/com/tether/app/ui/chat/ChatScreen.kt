@@ -614,6 +614,8 @@ fun ChatScreen(
                 browserPicks = browserPicks.filter { it.sessionId == session.id } + SessionPick(session.id, pick)
                 browserPageUrl = pageUrl
             },
+            // hooks/use-tether.ts browserProfiles: profiles need server protocol 171; below it no profile row is drawn.
+            browserProfiles = if (com.tether.app.client.browserProfilesSupported(chatProtocol)) ({ request -> vm.client.browserProfiles(request) }) else null,
             modifier = Modifier.align(Alignment.TopEnd),
         )
     }
