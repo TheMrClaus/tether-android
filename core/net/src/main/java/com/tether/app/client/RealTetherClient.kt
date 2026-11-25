@@ -3831,7 +3831,7 @@ class RealTetherClient(
                 // "Couldn't hand over: ..." and drops the claim; (iii) a live composer's is inline only (no toast) and
                 // drops the claim; (iv) anything else is the v150 reading.
                 // v175: a refusal echoing a proposal frame's requestId is inline on its card, never a toast.
-                val proposalRefusal = message.requestId?.let { takeProposalRefusal(it, message.message) }
+                val proposalRefusal = message.requestId?.let { takeProposalRefusal(it, message.message) } == true
                 val route = if (proposalRefusal) null else message.requestId?.let(::takeHandoverRoute)
                 val refusalCode = Handover.parseRefusal(message.message)?.code
                 if (!proposalRefusal) when (route) {
