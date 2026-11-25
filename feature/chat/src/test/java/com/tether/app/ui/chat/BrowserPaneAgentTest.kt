@@ -10,11 +10,9 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
-import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import com.tether.app.client.BrowserChannel
 import com.tether.app.client.BrowserProfilesReply
@@ -80,8 +78,14 @@ class BrowserPaneAgentTest {
 
     private fun text(node: SemanticsNode): String = node.config.getOrNull(SemanticsProperties.Text)?.joinToString { it.text } ?: ""
 
-    private val DpRect.wd get() = (right - left).value
-    private val DpRect.ht get() = (bottom - top).value
+    /** A node's own box in dp (position in the root and size; `getBoundsInRoot` is clipped to what is visible). */
+    private class Box4(val left: Float, val top: Float, val wd: Float, val ht: Float)
+
+    private fun boxOf(tag: String): Box4 {
+        val node = rule.onNodeWithTag(tag).fetchSemanticsNode()
+        val d = rule.density.density
+        return Box4(node.positionInRoot.x / d, node.positionInRoot.y / d, node.size.width / d, node.size.height / d)
+    }
 
     // ---- the marker ----
 
@@ -90,12 +94,12 @@ class BrowserPaneAgentTest {
         show()
         page()
         server("""{"t":"agent","phase":"start","kind":"click","box":{"x":39,"y":84.4,"width":78,"height":42.2}}""")
-        val stage = rule.onNodeWithTag(BrowserPaneTags.Stage).getBoundsInRoot()
-        val marker = rule.onNodeWithTag(BrowserPaneTags.Marker).getBoundsInRoot()
+        val stage = boxOf(BrowserPaneTags.Stage)
+        val marker = boxOf(BrowserPaneTags.Marker)
         val w = stage.wd
         val h = stage.ht
-        assertEquals(stage.left.value + w * 0.10f, marker.left.value, 0.6f)
-        assertEquals(stage.top.value + h * 0.10f, marker.top.value, 0.6f)
+        assertEquals(stage.left + w * 0.10f, marker.left, 0.6f)
+        assertEquals(stage.top + h * 0.10f, marker.top, 0.6f)
         assertEquals(w * 0.20f, marker.wd, 0.6f)
         assertEquals(h * 0.05f, marker.ht, 0.6f)
     }
@@ -105,11 +109,11 @@ class BrowserPaneAgentTest {
         show()
         page()
         server("""{"t":"agent","phase":"start","kind":"click","box":{"x":195,"y":422,"width":0,"height":0}}""")
-        val stage = rule.onNodeWithTag(BrowserPaneTags.Stage).getBoundsInRoot()
-        val marker = rule.onNodeWithTag(BrowserPaneTags.Marker).getBoundsInRoot()
+        val stage = boxOf(BrowserPaneTags.Stage)
+        val marker = boxOf(BrowserPaneTags.Marker)
         assertEquals(20f, marker.wd, 0.6f)
-        assertEquals(stage.left.value + stage.wd / 2 - 10f, marker.left.value, 0.6f)
-        assertEquals(stage.top.value + stage.ht / 2 - 10f, marker.top.value, 0.6f)
+        assertEquals(stage.left + stage.wd / 2 - 10f, marker.left, 0.6f)
+        assertEquals(stage.top + stage.ht / 2 - 10f, marker.top, 0.6f)
     }
 
     @Test
@@ -118,12 +122,12 @@ class BrowserPaneAgentTest {
         page()
         server("""{"t":"agent","phase":"start","kind":"click","box":{"x":39,"y":84,"width":78,"height":42}}""")
         rule.onNodeWithTag(BrowserPaneTags.Marker).assertIsDisplayed()
-        now += 1599
-        rule.mainClock.advanceTimeBy(1599)
+        now += 1500
+        rule.mainClock.advanceTimeBy(1500)
         rule.waitForIdle()
         rule.onNodeWithTag(BrowserPaneTags.Marker).assertExists()
-        now += 1
-        rule.mainClock.advanceTimeBy(1)
+        now += 100
+        rule.mainClock.advanceTimeBy(100)
         rule.waitForIdle()
         rule.onNodeWithTag(BrowserPaneTags.Marker).assertDoesNotExist()
     }
@@ -149,7 +153,7 @@ class BrowserPaneAgentTest {
     }
 
     @Test
-    fun tookOverReplacesThePillAndTheMarkerAndResumedClearsIt() {
+    fun tookOverReplacesThePillAndTheMarkerAndResumedBringsTheAgentPillBack() {
         show()
         page()
         server("""{"t":"agent","phase":"start","kind":"click","box":{"x":39,"y":84,"width":78,"height":42}}""")
@@ -158,8 +162,15 @@ class BrowserPaneAgentTest {
         rule.onNodeWithTag(BrowserPaneTags.Marker).assertDoesNotExist()
         assertEquals("You took over the browser. The agent waits until you stop, then it can carry on.", desc(BrowserPaneTags.AgentPill))
         server("""{"t":"agent","phase":"resumed"}""")
-        rule.onNodeWithTag(BrowserPaneTags.AgentPill).assertDoesNotExist()
+        // Resumed clears the took-over state: the agent's own pill is back (it never ended), no marker.
+        assertEquals("Agent is using the browser", desc(BrowserPaneTags.AgentPill))
         rule.onNodeWithTag(BrowserPaneTags.Marker).assertDoesNotExist()
+        now += 1000
+        server("""{"t":"agent","phase":"end","kind":"click"}""")
+        now += 1000
+        rule.mainClock.advanceTimeBy(1000)
+        rule.waitForIdle()
+        rule.onNodeWithTag(BrowserPaneTags.AgentPill).assertDoesNotExist()
     }
 
     // ---- the tab picker ----
@@ -168,9 +179,9 @@ class BrowserPaneAgentTest {
     fun theTabPickerIsA48dpTargetThatSendsTheTabInputWithTheId() {
         show()
         server("""{"t":"state","url":"https://a.test/",$viewport,"tabs":${tabs(1)}}""")
-        rule.onNodeWithTag(BrowserPaneTags.TabPicker).assertHeightIsAtLeast(48.dp)
+        rule.onNodeWithTag(BrowserPaneTags.TabIndicator).assertHeightIsAtLeast(48.dp)
         rule.onNodeWithTag(BrowserPaneTags.TabIndicator).assertTextEquals("Tab 1 of 3 · Docs")
-        rule.onNodeWithTag(BrowserPaneTags.TabPicker).performClick()
+        rule.onNodeWithTag(BrowserPaneTags.TabIndicator).performClick()
         rule.onNodeWithTag(BrowserPaneTags.tabOption("t3")).performClick()
         assertEquals(listOf("""{"t":"input","event":{"type":"tab","action":"switch","id":"t3"}}"""), socket.sent)
     }
@@ -181,7 +192,7 @@ class BrowserPaneAgentTest {
         server("""{"t":"state","url":"https://a.test/",$viewport,"tabs":${tabs(1, withIds = false)}}""")
         server("""{"t":"state","url":"https://a.test/",$viewport,"tabs":${tabs(2, withIds = false)}}""")
         assertEquals("", desc(BrowserPaneTags.LiveTab))
-        rule.onNodeWithTag(BrowserPaneTags.TabPicker).performClick()
+        rule.onNodeWithTag(BrowserPaneTags.TabIndicator).performClick()
         rule.onNodeWithTag(BrowserPaneTags.tabOption("none-3")).performClick()
         assertEquals(emptyList<String>(), socket.sent)
     }

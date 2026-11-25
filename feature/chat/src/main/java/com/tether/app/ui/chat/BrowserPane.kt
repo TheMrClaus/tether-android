@@ -196,7 +196,6 @@ object BrowserPaneTags {
     const val StatusUrl = "browser-status-url"
     const val Marker = "browser-agent-marker"
     const val AgentPill = "browser-agent-caption"
-    const val TabPicker = "browser-tab-select"
     const val LiveAgent = "browser-live-region"
     const val LiveTab = "browser-tab-live-region"
     const val ProfileSelect = "browser-profile-select"
@@ -339,9 +338,12 @@ fun BrowserPane(
     // lib/browser-agent-ui.ts nextAgentDeadline: the channel runs no timer, the pane lets go of the
     // marker and the caption when their time is up (use-browser.ts runs the same timeout).
     LaunchedEffect(channel, agent) {
-        val wait = channel.agentDeadlineMs() ?: return@LaunchedEffect
-        delay(wait)
-        channel.expireAgent()
+        // Looping, so a delay that wakes a millisecond before the clock's deadline cannot strand a marker.
+        while (true) {
+            val wait = channel.agentDeadlineMs() ?: break
+            delay(wait.coerceAtLeast(1))
+            channel.expireAgent()
+        }
     }
     // browser-pane.tsx :58-71: the list is read when the pane opens and whenever the session's profile
     // changes, and again when the select opens. A failed list leaves what was there (an empty list).
@@ -1410,14 +1412,14 @@ private fun TabPicker(tabs: List<BrowserChannel.Tab>, wide: Boolean, onSwitchTab
                 .heightIn(min = 48.dp)
                 .focusRing(focused, t.violet, 4.dp)
                 .clickable(interaction, indication = null, role = Role.DropdownList, onClickLabel = "Switch tab") { open = true }
-                .testTag(BrowserPaneTags.TabPicker),
+                .testTag(BrowserPaneTags.TabIndicator),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
                 browserTabLabel(tabs),
                 color = t.muted, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false).testTag(BrowserPaneTags.TabIndicator),
+                modifier = Modifier.weight(1f, fill = false),
             )
             Icon(TetherIcons.ChevronDown, contentDescription = null, tint = t.faint, modifier = Modifier.size(11.dp))
         }
