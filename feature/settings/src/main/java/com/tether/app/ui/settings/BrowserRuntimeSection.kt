@@ -41,8 +41,8 @@ object BrowserTags {
     const val Copy = "browser-copy"
 }
 
-/** What Advanced needs for the Browser section: its [controller] (held by [BrowserRuntimeViewModel] in the app, built from a seed by the goldens). A null one draws nothing. */
-data class BrowserBinding(val controller: BrowserRuntimeController?) {
+/** What Advanced needs for the Browser section: its [controller] and, for a server that speaks named profiles, the [profiles] block's controller (null draws no block); the first (held by [BrowserRuntimeViewModel] in the app, built from a seed by the goldens). A null [controller] draws nothing. */
+data class BrowserBinding(val controller: BrowserRuntimeController?, val profiles: BrowserProfilesController? = null) {
     companion object {
         val None = BrowserBinding(null)
     }
@@ -78,6 +78,7 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean, ser
         if (com.tether.app.client.browserToolsSupported(server.serverProtocol, view)) {
             ServerToggleRow(AdvancedRows.browserAgentTools, view, server, narrow)
         }
+        run rows@{
         if (status == null) {
             SettingsRow(
                 kind = RowKind.Server,
@@ -87,7 +88,7 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean, ser
                 },
                 control = if (error != null) refresh else null,
             )
-            return@SettingsSection
+            return@rows
         }
         SettingsRow(
             kind = RowKind.Server,
@@ -161,7 +162,7 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean, ser
                 },
             )
         }
-        val command = BrowserCopy.command(status) ?: return@SettingsSection
+        val command = BrowserCopy.command(status) ?: return@rows
         val clipboard = LocalClipboard.current
         val scope = rememberCoroutineScope()
         var copied by remember(command) { mutableStateOf(false) }
@@ -191,5 +192,9 @@ internal fun BrowserRuntimeSection(binding: BrowserBinding, narrow: Boolean, ser
                 )
             },
         )
+        }
+        // v171: named browser profiles, after the runtime rows; a server below 171 is never offered them and never sent the request.
+        val profiles = binding.profiles
+        if (profiles != null && com.tether.app.client.browserProfilesSupported(server.serverProtocol)) BrowserProfilesBlock(profiles, narrow)
     }
 }

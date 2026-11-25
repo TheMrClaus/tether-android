@@ -4,16 +4,25 @@ import android.graphics.BitmapFactory
 import android.os.SystemClock
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.Image
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -22,8 +31,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -38,7 +47,23 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.buildAnnotatedString
+import com.composables.icons.lucide.Hand
+import com.composables.icons.lucide.MousePointer2
+import com.tether.app.client.BrowserProfilesReply
+import com.tether.app.client.BrowserProfilesRequest
+import com.tether.app.protocol.BrowserProfileInfo
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -53,14 +78,22 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.nativeKeyCode
@@ -89,11 +122,16 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.testTag as semanticsTestTag
+import androidx.compose.ui.semantics.getTextLayoutResult
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -101,17 +139,29 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.tether.app.client.AgentCaption
+import com.tether.app.client.AgentMarker
+import com.tether.app.client.AgentUiState
+import com.tether.app.client.BrowserAgentUi
 import com.tether.app.client.BrowserChannel
 import com.tether.app.client.BrowserInput
 import com.tether.app.client.BrowserPick
 import com.tether.app.client.HoverBox
 import com.tether.app.client.BrowserSocketOpener
+import com.composables.icons.lucide.Globe
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.MonitorX
+import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.theme.LocalTetherTokens
+import com.tether.app.ui.theme.CssShadow
+import com.tether.app.ui.theme.JetBrainsMono
+import com.tether.app.ui.theme.LocalReducedMotion
 import com.tether.app.ui.theme.Manrope
 import com.tether.app.ui.theme.TetherWeights
 import kotlin.math.roundToInt
+import kotlin.math.floor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
@@ -137,6 +187,25 @@ object BrowserPaneTags {
     const val SelectElements = "browser-select-elements"
     const val ShotOnPick = "browser-shot-on-pick"
     const val Highlight = "browser-highlight"
+    const val Segmented = "browser-viewport-size"
+    const val LoadingBar = "browser-loading-bar"
+    const val NoticeRow = "browser-notice-row"
+    const val ErrorRow = "browser-error-row"
+    const val Dead = "browser-dead"
+    const val Blank = "browser-blank"
+    const val PickHint = "browser-pick-hint"
+    const val StatusStart = "browser-status-start"
+    const val StatusUrl = "browser-status-url"
+    const val Marker = "browser-agent-marker"
+    const val AgentPill = "browser-agent-caption"
+    const val LiveAgent = "browser-live-region"
+    const val LiveTab = "browser-tab-live-region"
+    const val ProfileSelect = "browser-profile-select"
+    const val ProfileLabel = "browser-profile-label"
+    const val ProfileHint = "browser-profile-hint"
+    const val ProfileRefusal = "browser-profile-refusal"
+    fun tabOption(id: String) = "browser-tab-option-$id"
+    fun profileOption(id: String?) = "browser-profile-option-${id ?: "default"}"
     fun preset(name: String) = "browser-preset-$name"
 }
 
@@ -208,6 +277,13 @@ fun BrowserPaneHost(
      * it was on (read at the pick, as the web's `urlRef`).
      */
     onPicked: (BrowserPick, String) -> Unit = { _, _ -> },
+    /**
+     * browser-pane.tsx :36-40 `onBrowserProfiles`: the owner-grade profile list request on the main
+     * socket. Null (a server below protocol 171) draws no profile row at all.
+     */
+    browserProfiles: (suspend (BrowserProfilesRequest) -> BrowserProfilesReply)? = null,
+    /** On wide windows the shell hosts the pane as one of its columns (flat, sized by [modifier]). */
+    docked: Boolean = false,
 ) {
     key(sessionId) {
         val channel = remember(opener) { BrowserChannel(opener, sessionId) }
@@ -216,15 +292,17 @@ fun BrowserPaneHost(
             onDispose { channel.dispose() }
         }
         val windowWidth = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
-        if (windowWidth < BrowserPhoneMax) {
+        if (docked) {
+            BrowserDockedPanel(modifier) { BrowserPane(channel, onClose, Modifier.fillMaxSize(), onPicked = onPicked, browserProfiles = browserProfiles) }
+        } else if (windowWidth < BrowserPhoneMax) {
             Dialog(
                 onDismissRequest = onClose,
                 properties = DialogProperties(usePlatformDefaultWidth = false),
             ) {
-                BrowserPane(channel, onClose, Modifier.fillMaxSize(), onPicked = onPicked)
+                BrowserPane(channel, onClose, Modifier.fillMaxSize(), onPicked = onPicked, browserProfiles = browserProfiles)
             }
         } else {
-            BrowserSidePanel(modifier) { BrowserPane(channel, onClose, Modifier.fillMaxSize(), onPicked = onPicked) }
+            BrowserSidePanel(modifier) { BrowserPane(channel, onClose, Modifier.fillMaxSize(), onPicked = onPicked, browserProfiles = browserProfiles) }
         }
     }
 }
@@ -240,10 +318,26 @@ internal fun BrowserSidePanel(modifier: Modifier = Modifier, content: @Composabl
 }
 
 /**
- * The in-console browser pane (browser-pane.tsx 90fbb9f :26-296): the URL row (Go, Reload, Close),
- * the viewport row (Mobile / Tablet / Desktop presets, Fit, a custom W × H and the true emulated
- * size), the live page (the server's JPEG screencast frames, never a web view of the page) taking
- * taps, drags, wheel and hardware keys as CDP-style input, and the status line.
+ * `.dashboard-shell.is-browser-open > .panel` from 80rem (module.css :35-51): a column of the shell,
+ * its width the shell's (the caller's [modifier]), a 1dp line on its left, flat: no shadow, no raised
+ * layer, so the workspace's own menus still open over it.
+ */
+@Composable
+internal fun BrowserDockedPanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val t = LocalTetherTokens.current
+    Row(modifier.fillMaxHeight().background(t.graphite)) {
+        Box(Modifier.fillMaxHeight().width(1.dp).background(t.line))
+        Box(Modifier.weight(1f).fillMaxHeight()) { content() }
+    }
+}
+
+/**
+ * The in-console browser pane (browser-pane.tsx 0bd07fdd :203-463, design/pane-spec.md): one surface
+ * with a toolbar (Reload, the address with Go inside, Close; then the tools: the viewport presets
+ * and Fit as one segmented control, a custom W × H, Select elements, Screenshot on pick), the live
+ * page (the server's JPEG screencast frames, never a web view of the page) framed on the floor
+ * colour and taking taps, drags, wheel and hardware keys as CDP-style input, the notice rows, and
+ * the status line (the live state, the tab, the true emulated size and the address).
  *
  * T8.6 part 2: "Select elements" and "Screenshot on pick" (browser-pane.tsx :231-248) between the
  * viewport row and the page. In pick mode the page takes no input: a drag sends `hover` (~30fps,
@@ -258,8 +352,30 @@ fun BrowserPane(
     modifier: Modifier = Modifier,
     defaultUrl: String? = null,
     onPicked: (BrowserPick, String) -> Unit = { _, _ -> },
+    browserProfiles: (suspend (BrowserProfilesRequest) -> BrowserProfilesReply)? = null,
 ) {
     val ui by channel.ui.collectAsStateWithLifecycle()
+    val agent by channel.agent.collectAsStateWithLifecycle()
+    // lib/browser-agent-ui.ts nextAgentDeadline: the channel runs no timer, the pane lets go of the
+    // marker and the caption when their time is up (use-browser.ts runs the same timeout).
+    LaunchedEffect(channel, agent) {
+        // Looping, so a delay that wakes a millisecond before the clock's deadline cannot strand a marker.
+        while (true) {
+            val wait = channel.agentDeadlineMs() ?: break
+            delay(wait.coerceAtLeast(1))
+            channel.expireAgent()
+        }
+    }
+    // browser-pane.tsx :58-71: the list is read when the pane opens and whenever the session's profile
+    // changes, and again when the select opens. A failed list leaves what was there (an empty list).
+    val currentProfiles by rememberUpdatedState(browserProfiles)
+    var profileList by remember(channel) { mutableStateOf<List<BrowserProfileInfo>>(emptyList()) }
+    val profileId = ui.state.profile?.id
+    val profileName = ui.state.profile?.name
+    LaunchedEffect(channel, browserProfiles != null, profileId, profileName) {
+        currentProfiles?.invoke(BrowserProfilesRequest.List)?.let { if (it.ok) profileList = it.profiles }
+    }
+    val scope = rememberCoroutineScope()
     val hoverBox by channel.hoverBox.collectAsStateWithLifecycle()
     // A ref, as the web's `urlRef` (:44-47): the handler outlives the URL it was made with.
     val currentOnPicked by rememberUpdatedState(onPicked)
@@ -276,6 +392,8 @@ fun BrowserPane(
         frame = frame,
         defaultUrl = defaultUrl,
         hoverBox = hoverBox,
+        agent = agent,
+        profileList = if (browserProfiles != null) profileList else null,
         actions = remember(channel, onClose) {
             BrowserPaneActions(
                 navigate = { channel.navigate(it) },
@@ -284,6 +402,11 @@ fun BrowserPane(
                 setPickMode = { channel.setPickMode(it) },
                 hover = { x, y -> channel.hover(x, y) },
                 pick = { x, y, screenshot -> channel.pick(x, y, screenshot) },
+                switchTab = { channel.switchTab(it) },
+                pickProfile = { channel.pickProfile(it) },
+                refreshProfiles = {
+                    scope.launch { currentProfiles?.invoke(BrowserProfilesRequest.List)?.let { if (it.ok) profileList = it.profiles } }
+                },
                 close = {
                     channel.close()
                     onClose()
@@ -302,9 +425,126 @@ internal class BrowserPaneActions(
     val close: () -> Unit,
     val hover: (x: Int, y: Int) -> Unit = { _, _ -> },
     val pick: (x: Int, y: Int, screenshot: Boolean) -> Unit = { _, _, _ -> },
+    /** use-browser.ts :314: a `tab` input naming the tab. */
+    val switchTab: (id: String) -> Unit = {},
+    /** use-browser.ts :315-320: the id, or null for the throwaway default. */
+    val pickProfile: (id: String?) -> Unit = {},
+    /** browser-pane.tsx :62-66: read the list again (the select was opened). */
+    val refreshProfiles: () -> Unit = {},
 )
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * The pane's own sizes (browser-pane.module.css 0bd07fdd :14-64 `--pane-*`; design/pane-spec.md §2, §7).
+ * Android is a touch surface: the coarse-pointer values, with every target at Android's 48dp
+ * (spec §7) instead of the web's 44px.
+ */
+internal object BrowserPaneMetrics {
+    /** `--pane-ctl` (coarse 2.75rem), raised to 48dp: every toolbar target's height. */
+    val Ctl: Dp = 48.dp
+
+    /** `--pane-pad` (coarse 0.5rem). */
+    val Pad: Dp = 8.dp
+
+    /** `@container pane (max-width: 29.99rem)` (:501, :910): narrower panes use the two-column tools. */
+    val WideMin: Dp = 480.dp
+
+    /** `.status` on a coarse pointer (:760-763): a 44dp row below its 1dp top line (the shipped web wins, spec rev 3). */
+    val StatusMin: Dp = 44.dp
+
+    /** `.stage` radius (:548-551). */
+    val FrameRadius: Dp = 6.dp
+
+    /** `.loadingBar` height (:287-295). */
+    val LoadingBar: Dp = 2.dp
+
+    /** browser-pane.tsx :112: the frame fits the area's height from a 48rem window. */
+    val FitHeightWindowMin: Dp = 768.dp
+}
+
+/** `--pane-chip-text` / `--pane-field-text` on a coarse pointer (:53-63). */
+private val ChipText = 13.sp
+private val FieldText = 16.sp
+
+/** The chip row's text style (Select elements / Screenshot on pick); the tablet profile select uses it. */
+internal val PROFILE_CHIP_STYLE = TextStyle(fontFamily = Manrope, fontWeight = FontWeight(500), fontSize = ChipText)
+
+/** `.status` / `.profileHint` text (:702-713). */
+private val StatusText = 11.sp
+
+private val StatusWeight = FontWeight(560)
+private val BlankTitleWeight = FontWeight(650)
+
+/** browser-pane.tsx :450: the status line's hint while Select elements is on. */
+internal const val BROWSER_PICK_HINT = "Click an element to send it. Esc stops."
+
+/** browser-pane.tsx :360-366: the quiet invitation on an empty page. */
+internal const val BROWSER_BLANK_TITLE = "No page open yet"
+internal const val BROWSER_BLANK_BODY = "Enter an address above to load a page."
+
+/** browser-profiles-ui.ts :29-30: the default's name and the note under the select. */
+internal const val PROFILE_DEFAULT_LABEL = "Throwaway profile (default)"
+internal const val PROFILE_PICK_HINT = "Changing the profile restarts the open browser on it."
+
+/** browser-profiles-ui.ts :108-110 `paneProfileLabel`: the session's profile name; none is the default. */
+internal fun profileLabel(profile: BrowserChannel.PaneProfile?): String = profile?.name ?: PROFILE_DEFAULT_LABEL
+
+/** browser-pane.tsx :87: the tab indicator's words ("N tabs" when no tab is marked active). */
+internal fun browserTabLabel(tabs: List<BrowserChannel.Tab>): String {
+    val active = tabs.firstOrNull { it.active }
+    return if (active != null) "Tab ${active.index} of ${tabs.size}" + if (active.title.isNotEmpty()) " · ${active.title}" else ""
+    else "${tabs.size} tabs"
+}
+
+/**
+ * browser-pane.tsx :199-201: no page yet. Connected, no error, not loading and still on about:blank;
+ * never while the socket is connecting and never over an error (the error row says why instead).
+ */
+internal fun browserBlankPage(ui: BrowserChannel.Ui): Boolean =
+    ui.connected && ui.error == null && !ui.state.loading && (ui.state.url == "" || ui.state.url == "about:blank")
+
+/** A CSS `box-shadow: 0 0 0 <width> <color>` ring, drawn outside the box. */
+private fun ring(width: Dp, color: Color) = CssShadow(inset = false, offsetX = 0.dp, offsetY = 0.dp, blur = 0.dp, spread = width, color = color)
+
+/**
+ * `:focus-visible { outline: 2px solid var(--violet); outline-offset: <offset> }` (:178-185, :560-563):
+ * a 2dp violet ring [offset] outside the control, drawn only while it holds keyboard focus.
+ */
+private fun Modifier.focusRing(focused: Boolean, color: Color, radius: Dp, offset: Dp = 2.dp): Modifier =
+    if (!focused) this else drawWithContent {
+        drawContent()
+        val stroke = 2.dp.toPx()
+        val o = offset.toPx() + stroke / 2
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(-o, -o),
+            size = Size(size.width + 2 * o, size.height + 2 * o),
+            cornerRadius = CornerRadius(radius.toPx() + o),
+            style = Stroke(stroke),
+        )
+    }
+
+/** A colour that eases over `--duration-fast` (:103), or snaps under reduced motion (:923-934). */
+@Composable
+private fun paneColor(target: Color): Color {
+    val t = LocalTetherTokens.current
+    val reduced = LocalReducedMotion.current
+    val value by animateColorAsState(target, if (reduced) snap() else tween(t.css.durationFast, easing = t.css.easeOut.toEasing()), label = "pane-colour")
+    return value
+}
+
+/**
+ * The address row is widened by the icon buttons' own inset (`.row` :80-88, `margin-inline:
+ * calc(-1 * min(--pane-pad, (--pane-ctl - 1rem) / 2))`) so Reload and Close sit on the pane's edge
+ * and their glyphs line up with the rows below; the row's box is widened, nothing overflows it.
+ */
+private fun Modifier.bleed(by: Dp): Modifier = layout { measurable, constraints ->
+    val extra = by.roundToPx() * 2
+    val wide = if (constraints.hasBoundedWidth) constraints.copy(minWidth = constraints.minWidth + extra, maxWidth = constraints.maxWidth + extra) else constraints
+    val p = measurable.measure(wide)
+    val w = (p.width - extra).coerceAtLeast(0)
+    layout(w, p.height) { p.place(-by.roundToPx(), 0) }
+}
+
 @Composable
 internal fun BrowserPaneContent(
     ui: BrowserChannel.Ui,
@@ -313,9 +553,31 @@ internal fun BrowserPaneContent(
     modifier: Modifier = Modifier,
     defaultUrl: String? = null,
     hoverBox: HoverBox? = null,
+    /** What the agent is doing (browser-pane.tsx :83-85): the marker over the page, the pill in the status line. */
+    agent: AgentUiState = BrowserAgentUi.INITIAL,
+    /**
+     * The profiles the server lists, for the tools' profile row (tsx :295-312). Null draws no row (a
+     * server below protocol 171); an empty list (also a failed read) keeps the select with the default
+     * and the session's current profile.
+     */
+    profileList: List<BrowserProfileInfo>? = null,
 ) {
     val t = LocalTetherTokens.current
     val state = ui.state
+    val caption = BrowserAgentUi.caption(agent)
+    // tsx :86-95: a tab change is said once to a screen reader, never on the first list. A tab with no
+    // id (`""` here, `null` on the web) is not a change.
+    val activeTab = state.tabs.firstOrNull { it.active }
+    var tabAnnouncement by remember { mutableStateOf("") }
+    var lastTab by remember { mutableStateOf<String?>(null) }
+    val activeId = activeTab?.id?.takeIf { it.isNotEmpty() }
+    LaunchedEffect(activeId, activeTab?.index, activeTab?.title, state.tabs.size) {
+        val last = lastTab
+        if (last != null && activeId != null && activeId != last) {
+            tabAnnouncement = "Switched to tab ${activeTab?.index} of ${state.tabs.size}" + if (!activeTab?.title.isNullOrEmpty()) ": ${activeTab?.title}" else ""
+        }
+        if (activeId != null || state.tabs.isEmpty()) lastTab = activeId
+    }
     // browser-pane.tsx :53: "Screenshot on pick" starts on.
     var shotOnPick by remember { mutableStateOf(true) }
     val vw = state.viewport.width
@@ -323,178 +585,628 @@ internal fun BrowserPaneContent(
     var urlDraft by remember { mutableStateOf(defaultUrl ?: "") }
     var customW by remember { mutableStateOf("") }
     var customH by remember { mutableStateOf("") }
-    val sm = RoundedCornerShape(t.radiusSm)
-    // The stage's width (`clientWidth - 16`, at least 240), measured by the stage wrap; Fit reads it.
+    // The stage's width (`clientWidth - 16`, at least 240), measured by the page area; Fit reads it.
     var stageWidthDp by remember { mutableStateOf(480) }
     val stageHeightDp = if (vw > 0) (stageWidthDp * (vh.toFloat() / vw)).roundToInt() else 0
+    val windowWidth = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
 
-    Column(
+    BoxWithConstraints(
         modifier
             .background(t.graphite)
             .testTag(BrowserPaneTags.Pane)
             .semantics { paneTitle = "In-console browser" },
     ) {
-        // .header (module.css :20-27)
-        Column(
-            Modifier.fillMaxWidth().background(t.graphiteRaised).padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(Modifier.size(44.dp).border(1.dp, t.line, sm).background(t.graphite, sm), contentAlignment = Alignment.Center) {
-                    Icon(TetherIcons.AppWindow, contentDescription = null, tint = t.ink, modifier = Modifier.size(16.dp))
-                }
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    val submit = { browserTarget(urlDraft)?.let(actions.navigate) }
-                    BrowserField(
+        val wide = maxWidth >= BrowserPaneMetrics.WideMin
+        Column(Modifier.fillMaxSize()) {
+            // .header (module.css :66-78): the panel face, the rows 0.5rem apart.
+            Column(
+                Modifier.fillMaxWidth().background(t.graphite).padding(BrowserPaneMetrics.Pad),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Navigate: Reload → the address (Go inside) → Close (tsx :206-246).
+                Row(
+                    Modifier.fillMaxWidth().bleed(BrowserPaneMetrics.Pad),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PaneIconButton(TetherIcons.RotateCw, "Reload", { actions.navigate(state.url) }, Modifier.testTag(BrowserPaneTags.Reload))
+                    AddressField(
                         value = urlDraft,
                         onValueChange = { urlDraft = it },
-                        placeholder = BROWSER_URL_PLACEHOLDER,
-                        description = "URL to open",
-                        fontSize = 13.sp,
-                        keyboard = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
-                        onGo = { submit() },
-                        modifier = Modifier.weight(1f).testTag(BrowserPaneTags.Url),
+                        onSubmit = { browserTarget(urlDraft)?.let(actions.navigate) },
+                        modifier = Modifier.weight(1f),
                     )
-                    SmallButton("Go", onClick = { submit() }, modifier = Modifier.testTag(BrowserPaneTags.Go))
+                    PaneIconButton(TetherIcons.X, "Close browser", actions.close, Modifier.testTag(BrowserPaneTags.Close))
                 }
-                IconButton(TetherIcons.RotateCw, "Reload", { actions.navigate(state.url) }, Modifier.testTag(BrowserPaneTags.Reload))
-                IconButton(TetherIcons.X, "Close browser", actions.close, Modifier.testTag(BrowserPaneTags.Close))
-            }
 
-            // .viewportRow (module.css :104-109): wraps.
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                itemVerticalAlignment = Alignment.CenterVertically,
-            ) {
-                BROWSER_PRESETS.forEach { p ->
-                    SmallButton(
-                        p.name,
-                        onClick = { actions.setViewport(p.width, p.height, p.mobile) },
-                        active = vw == p.width && vh == p.height,
-                        modifier = Modifier.testTag(BrowserPaneTags.preset(p.name)),
+                // .tools (:318-328 wide, :501-533 narrow): viewport, size, Select elements, screenshot, profile.
+                val segmented: @Composable (Modifier) -> Unit = { m ->
+                    ViewportSegments(
+                        activeWidth = vw,
+                        activeHeight = vh,
+                        equal = !wide,
+                        onPreset = { p -> actions.setViewport(p.width, p.height, p.mobile) },
+                        onFit = { actions.setViewport(stageWidthDp, stageHeightDp, false) },
+                        modifier = m,
                     )
                 }
-                SmallButton("Fit", onClick = { actions.setViewport(stageWidthDp, stageHeightDp, false) }, modifier = Modifier.testTag(BrowserPaneTags.Fit))
-                BrowserField(customW, { customW = it }, "W", "Custom width", 12.sp, numeric, {}, Modifier.width(68.dp).testTag(BrowserPaneTags.CustomWidth))
-                Text("×", color = t.muted, fontFamily = Manrope, fontSize = 12.sp, modifier = Modifier.clearAndSetSemantics {})
-                BrowserField(customH, { customH = it }, "H", "Custom height", 12.sp, numeric, {}, Modifier.width(68.dp).testTag(BrowserPaneTags.CustomHeight))
-                SmallButton(
-                    "Set",
-                    onClick = {
-                        val w = jsParseInt(customW)
-                        val h = jsParseInt(customH)
-                        if (w != null && h != null) actions.setViewport(w, h, false)
-                    },
-                    modifier = Modifier.testTag(BrowserPaneTags.SetCustom),
-                )
-                Text(
-                    "${vw}×${vh}" + if (state.viewport.mobile) " · mobile" else "",
-                    color = t.muted,
-                    fontFamily = Manrope,
-                    fontWeight = TetherWeights.body,
-                    fontSize = 11.sp,
-                    style = TextStyle(fontFeatureSettings = "tnum"),
-                    maxLines = 1,
-                    modifier = Modifier.padding(start = 4.dp).testTag(BrowserPaneTags.Readout),
-                )
-            }
-
-            // browser-pane.tsx :231-248: Select elements (an `iconButton`, violet while picking) and the
-            // Screenshot on pick checkbox (a `smallButton` label).
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SelectElementsKey(active = state.pickMode, onClick = { actions.setPickMode(!state.pickMode) })
-                ShotOnPickToggle(checked = shotOnPick, onCheckedChange = { shotOnPick = it })
-            }
-        }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
-
-        // .stageWrap (module.css :124-132)
-        BoxWithConstraints(
-            Modifier.weight(1f).fillMaxWidth().background(StageWrapColor).verticalScroll(rememberScrollState()).padding(8.dp),
-            contentAlignment = Alignment.TopCenter,
-        ) {
-            val measured = maxOf(240, maxWidth.value.roundToInt())
-            SideEffect { stageWidthDp = measured }
-            val stageW = measured.dp
-            val stageH = (if (vw > 0) (measured * (vh.toFloat() / vw)).roundToInt() else 0).coerceAtLeast(0).dp
-            val error = ui.error
-            if (error != null && !ui.connected) {
-                Column(Modifier.widthIn(max = 384.dp).padding(horizontal = 16.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("The browser is not available.", color = t.muted, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 13.sp)
-                    Spacer(Modifier.size(12.dp))
-                    Text(error, color = t.muted, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp)
+                val size: @Composable (Modifier) -> Unit = { m ->
+                    SizeGroup(
+                        width = customW,
+                        height = customH,
+                        onWidth = { customW = it },
+                        onHeight = { customH = it },
+                        fill = !wide,
+                        onSet = {
+                            val w = jsParseInt(customW)
+                            val h = jsParseInt(customH)
+                            if (w != null && h != null) actions.setViewport(w, h, false)
+                        },
+                        modifier = m,
+                    )
                 }
-            } else {
-                BrowserStage(
-                    frame = frame,
-                    pickMode = state.pickMode,
-                    viewportWidth = vw,
-                    viewportHeight = vh,
-                    actions = actions,
-                    hoverBox = hoverBox,
-                    stageWidth = stageW,
-                    stageHeight = stageH,
-                    onPick = { x, y -> actions.pick(x, y, shotOnPick) },
-                    modifier = Modifier.size(stageW, stageH),
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (wide) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            segmented(Modifier)
+                            Spacer(Modifier.weight(1f).widthIn(min = 6.dp))
+                            size(Modifier)
+                        }
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (profileList != null) 4.dp else 6.dp)) {
+                            SelectElementsChip(active = state.pickMode, onClick = { actions.setPickMode(!state.pickMode) })
+                            ShotOnPickChip(checked = shotOnPick, onCheckedChange = { shotOnPick = it })
+                            if (profileList != null) ProfileSelect(state.profile, profileList, actions, Modifier.weight(1f), chipText = true)
+                        }
+                    } else {
+                        segmented(Modifier.fillMaxWidth())
+                        size(Modifier.fillMaxWidth())
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SelectElementsChip(active = state.pickMode, onClick = { actions.setPickMode(!state.pickMode) }, modifier = Modifier.weight(1f))
+                            ShotOnPickChip(checked = shotOnPick, onCheckedChange = { shotOnPick = it }, modifier = Modifier.weight(1f))
+                        }
+                        if (profileList != null) ProfileSelect(state.profile, profileList, actions, Modifier.fillMaxWidth())
+                    }
+                    if (profileList != null) {
+                        ProfileHint(state.profile)
+                        ui.profileError?.let { ProfileRefusal(it) }
+                    }
+                }
             }
-        }
+            // The toolbar's 1dp bottom line, and the 2dp loading bar on it (:287-316).
+            Box(Modifier.fillMaxWidth().height(1.dp).background(t.line)) {
+                if (state.loading) LoadingBar(Modifier.align(Alignment.Center))
+            }
 
-        // The address notice row (browser-pane.tsx :285, module.css .notice): an icon per kind and one sentence.
-        state.urlNotice?.let { notice ->
-            val blocked = notice.kind == BrowserChannel.UrlNoticeKind.ConsoleBlocked
-            Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(
-                    if (blocked) TetherIcons.ShieldOff else TetherIcons.Info,
-                    contentDescription = null,
-                    tint = if (blocked) t.ink else t.muted,
-                    modifier = Modifier.padding(top = 2.dp).size(14.dp),
-                )
-                Text(
-                    urlNoticeCopy(notice),
-                    color = if (blocked) t.ink else t.muted,
-                    style = TextStyle(fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp, lineHeight = 16.sp),
-                    modifier = Modifier.testTag(BrowserPaneTags.UrlNotice),
-                )
+            // .stageWrap (:536-546): the page on the floor colour.
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().background(t.mineral)) {
+                val error = ui.error
+                if (error != null && !ui.connected) {
+                    DeadState(error, Modifier.fillMaxSize())
+                } else {
+                    val fitWidth = maxOf(240, (maxWidth.value - 16f).roundToInt())
+                    SideEffect { stageWidthDp = fitWidth }
+                    // tsx :102-112: from a 48rem window a tall frame is scaled to the area's height; a phone scrolls.
+                    val room = if (windowWidth >= BrowserPaneMetrics.FitHeightWindowMin && maxHeight != Dp.Infinity) (maxHeight.value - 16f).toInt() else 0
+                    val stageW = if (room > 0 && vh > 0) minOf(fitWidth, maxOf(120, floor(room * (vw.toDouble() / vh)).toInt())) else fitWidth
+                    val stageH = (if (vw > 0) (stageW * (vh.toFloat() / vw)).roundToInt() else 0).coerceAtLeast(0)
+                    Box(
+                        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
+                        BrowserStage(
+                            frame = frame,
+                            pickMode = state.pickMode,
+                            blank = browserBlankPage(ui),
+                            viewportWidth = vw,
+                            viewportHeight = vh,
+                            actions = actions,
+                            hoverBox = hoverBox,
+                            stageWidth = stageW.dp,
+                            stageHeight = stageH.dp,
+                            marker = agent.marker,
+                            onPick = { x, y -> actions.pick(x, y, shotOnPick) },
+                            modifier = Modifier.size(stageW.dp, stageH.dp),
+                        )
+                    }
+                }
             }
-        }
 
-        // .status (module.css :160-170)
-        Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
-        Row(
-            Modifier.fillMaxWidth().heightIn(min = 28.dp).padding(horizontal = 10.dp, vertical = 6.dp).testTag(BrowserPaneTags.Status),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val dot = when {
-                state.loading -> t.violet
-                ui.connected -> t.accent
-                else -> t.muted
-            }
-            Box(Modifier.size(7.dp).background(dot, CircleShape))
-            val small = TextStyle(fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 11.sp)
-            Text(if (state.loading) "Loading…" else if (ui.connected) "Live" else "Connecting…", color = t.muted, style = small, maxLines = 1)
-            if (state.tabs.size > 1) {
-                val active = state.activeTab
-                Text(
-                    "Tab ${active?.index ?: 1} of ${state.tabs.size}" + if (!active?.title.isNullOrEmpty()) " · ${active?.title}" else "",
-                    color = t.muted, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 160.dp).testTag(BrowserPaneTags.TabIndicator),
+            // Notice rows above the status (tsx :387-393, module.css :666-700): full width, wrapping.
+            state.urlNotice?.let { notice ->
+                val blocked = notice.kind == BrowserChannel.UrlNoticeKind.ConsoleBlocked
+                PaneNoticeRow(
+                    icon = if (blocked) TetherIcons.ShieldOff else TetherIcons.Info,
+                    text = urlNoticeCopy(notice),
+                    edge = if (blocked) t.attentionBorder else t.line,
+                    fill = if (blocked) t.attentionBg else t.graphiteRaised,
+                    ink = if (blocked) t.attentionInk else t.muted,
+                    iconTint = if (blocked) t.attentionInk else t.muted,
+                    textTag = BrowserPaneTags.UrlNotice,
                 )
             }
-            Spacer(Modifier.weight(1f))
             val error = ui.error
             if (error != null && ui.connected) {
-                Text(error, color = t.danger, style = small, modifier = Modifier.weight(1f, fill = false).testTag(BrowserPaneTags.StatusError))
+                PaneNoticeRow(
+                    icon = TetherIcons.TriangleAlert,
+                    text = error,
+                    edge = t.dangerEdge,
+                    fill = t.dangerWash,
+                    ink = t.white,
+                    iconTint = t.danger,
+                    textTag = BrowserPaneTags.StatusError,
+                    rowTag = BrowserPaneTags.ErrorRow,
+                )
             }
-            Text(state.url, color = t.muted, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 256.dp))
+
+            StatusLine(ui = ui, wide = wide, caption = caption, onSwitchTab = actions.switchTab)
+        }
+        // tsx :395-399: the two polite regions, said to a screen reader and never drawn.
+        Box(Modifier.size(1.dp).semantics { liveRegion = LiveRegionMode.Polite; contentDescription = agent.announce }.testTag(BrowserPaneTags.LiveAgent))
+        Box(Modifier.size(1.dp).semantics { liveRegion = LiveRegionMode.Polite; contentDescription = tabAnnouncement }.testTag(BrowserPaneTags.LiveTab))
+    }
+}
+
+/** `.loadingBar` (:287-316): a 2dp running-green segment sliding along the line; static under reduced motion. */
+@Composable
+private fun LoadingBar(modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val reduced = LocalReducedMotion.current
+    // `bottom: -1px` on the header: the bar covers the 1dp line and the 1dp above it.
+    BoxWithConstraints(
+        modifier.fillMaxWidth().requiredHeight(BrowserPaneMetrics.LoadingBar).offset(y = (-0.5).dp).clipToBounds()
+            .clearAndSetSemantics { semanticsTestTag = BrowserPaneTags.LoadingBar },
+    ) {
+        val barWidth = maxWidth * 0.4f
+        val shift = if (reduced) {
+            0f
+        } else {
+            val run = rememberInfiniteTransition(label = "pane-loading")
+            val f by run.animateFloat(
+                initialValue = -1f,
+                targetValue = 2.6f,
+                animationSpec = infiniteRepeatable(tween(1100, easing = t.css.easeOut.toEasing()), RepeatMode.Restart),
+                label = "pane-loading-x",
+            )
+            f
+        }
+        Box(Modifier.offset(x = barWidth * shift).width(barWidth).fillMaxHeight().background(t.running))
+    }
+}
+
+/** `.iconButton` (:90-117, :172-185): transparent, a muted 16dp glyph, a 48dp square; `--line` while pressed. */
+@Composable
+private fun PaneIconButton(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val shape = RoundedCornerShape(t.radiusSm)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    Box(
+        modifier
+            .size(BrowserPaneMetrics.Ctl)
+            .focusRing(focused, t.violet, t.radiusSm)
+            .background(paneColor(if (pressed) t.line else Color.Transparent), shape)
+            .clickable(interaction, indication = null, role = Role.Button, onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp))
+    }
+}
+
+/**
+ * `.urlField` / `.urlInput` / `.urlGo` (:195-285): one filled field holding the page icon, the
+ * address and Go (a full 48dp target flush with the field's end). Focused, the field takes the
+ * console's field focus (panel face, a 1dp violet ring and the 4dp glow) and Go turns cobalt.
+ */
+@Composable
+private fun AddressField(value: String, onValueChange: (String) -> Unit, onSubmit: () -> Unit, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val shape = RoundedCornerShape(t.radiusSm)
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val style = TextStyle(fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = FieldText, color = t.white)
+    Row(
+        modifier
+            .height(BrowserPaneMetrics.Ctl)
+            .cssSurface(
+                shape,
+                paneColor(if (focused) t.graphite else t.graphiteRaised),
+                shadows = if (focused) listOf(ring(1.dp, t.violet), ring(4.dp, t.focusGlow)) else emptyList(),
+            )
+            .padding(start = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(Lucide.Globe, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = style,
+            cursorBrush = SolidColor(t.violet),
+            interactionSource = interaction,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
+            keyboardActions = KeyboardActions(onGo = { onSubmit() }),
+            modifier = Modifier.weight(1f).fillMaxHeight().testTag(BrowserPaneTags.Url).semantics { contentDescription = "URL to open" },
+            decorationBox = { inner ->
+                Box(Modifier.fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
+                    // --muted, not --faint (:236-239): 4.9:1 on the field fill in the light skin.
+                    if (value.isEmpty()) Text(BROWSER_URL_PLACEHOLDER, style = style, color = t.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    inner()
+                }
+            },
+        )
+        val goInteraction = remember { MutableInteractionSource() }
+        val goFocused by goInteraction.collectIsFocusedAsState()
+        val goShape = RoundedCornerShape(t.radiusSm - 2.dp)
+        Box(
+            Modifier
+                .size(BrowserPaneMetrics.Ctl)
+                .focusRing(goFocused, t.violet, t.radiusSm - 2.dp)
+                .background(paneColor(if (focused) t.accent else Color.Transparent), goShape)
+                .clickable(goInteraction, indication = null, role = Role.Button, onClickLabel = "Go", onClick = onSubmit)
+                .semantics { contentDescription = "Go" }
+                .testTag(BrowserPaneTags.Go),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(TetherIcons.ArrowRight, contentDescription = null, tint = paneColor(if (focused) t.accentInk else t.muted), modifier = Modifier.size(16.dp))
         }
     }
+}
+
+/**
+ * `.segmented` / `.segment` / `.segmentActive` (:330-365): the viewport presets and Fit as one
+ * control. On touch the track has no inset, so every segment is a full target (:351-359). The
+ * active preset is raised on the panel face with cobalt text and is `selected`; the others say
+ * not selected (`aria-pressed`); Fit is an action and never carries a selection. [equal]: the
+ * narrow pane's four equal segments (:512-516).
+ */
+@Composable
+private fun ViewportSegments(
+    activeWidth: Int,
+    activeHeight: Int,
+    equal: Boolean,
+    onPreset: (BrowserPreset) -> Unit,
+    onFit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalTetherTokens.current
+    Row(
+        // tsx :250 `role="group" aria-label="Viewport size"`: the group's name.
+        modifier.background(t.graphiteRaised, RoundedCornerShape(t.radiusSm)).semantics { contentDescription = "Viewport size" }.testTag(BrowserPaneTags.Segmented),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        val each = if (equal) Modifier.weight(1f) else Modifier
+        BROWSER_PRESETS.forEach { p ->
+            Segment(p.name, active = activeWidth == p.width && activeHeight == p.height, onClick = { onPreset(p) }, modifier = each.testTag(BrowserPaneTags.preset(p.name)))
+        }
+        Segment("Fit", active = null, onClick = onFit, modifier = each.testTag(BrowserPaneTags.Fit))
+    }
+}
+
+/** One segment; [active] null = an action (Fit): no selection state at all. */
+@Composable
+private fun Segment(label: String, active: Boolean?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    val radius = t.radiusSm - 2.dp
+    val shape = RoundedCornerShape(radius)
+    val on = active == true
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    Box(
+        modifier
+            .heightIn(min = BrowserPaneMetrics.Ctl)
+            .focusRing(focused, t.violet, radius)
+            .cssSurface(
+                shape,
+                paneColor(if (on) t.graphite else if (pressed) t.line else Color.Transparent),
+                shadows = if (on) listOf(ring(1.dp, t.line)) + t.css.shadowRaised else emptyList(),
+            )
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { if (active != null) selected = active }
+            .padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = paneColor(if (on) t.violet else t.muted), fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = ChipText, maxLines = 1)
+    }
+}
+
+/**
+ * `.sizeGroup` / `.sizeField` / `.times` + the Set chip (:367-410): two ruled mono fields (inputs,
+ * not buttons) and Set. [fill]: the narrow pane's full-width row where W and H grow (:518-526).
+ */
+@Composable
+private fun SizeGroup(
+    width: String,
+    height: String,
+    onWidth: (String) -> Unit,
+    onHeight: (String) -> Unit,
+    fill: Boolean,
+    onSet: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val t = LocalTetherTokens.current
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        val field = if (fill) Modifier.weight(1f) else Modifier.width(56.dp)
+        SizeField(width, onWidth, "W", "Custom width", field.testTag(BrowserPaneTags.CustomWidth))
+        Text("×", color = t.muted, fontFamily = Manrope, fontSize = 12.sp, modifier = Modifier.clearAndSetSemantics {})
+        SizeField(height, onHeight, "H", "Custom height", field.testTag(BrowserPaneTags.CustomHeight))
+        PaneChip(onClick = onSet, modifier = Modifier.testTag(BrowserPaneTags.SetCustom)) { tone ->
+            Text("Set", color = tone, fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = ChipText, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun SizeField(value: String, onValueChange: (String) -> Unit, placeholder: String, description: String, modifier: Modifier) {
+    val t = LocalTetherTokens.current
+    val shape = RoundedCornerShape(t.radiusSm)
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val style = TextStyle(fontFamily = JetBrainsMono, fontWeight = TetherWeights.body, fontSize = FieldText, color = t.white, fontFeatureSettings = "tnum")
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = style,
+        cursorBrush = SolidColor(t.violet),
+        interactionSource = interaction,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = modifier.height(BrowserPaneMetrics.Ctl).semantics { contentDescription = description },
+        decorationBox = { inner ->
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .cssSurface(
+                        shape,
+                        t.graphite,
+                        border = CssBorder(1.dp, if (focused) t.violet else t.lineStrong),
+                        shadows = if (focused) listOf(ring(4.dp, t.focusGlow)) else emptyList(),
+                    )
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (value.isEmpty()) {
+                    Text(placeholder, color = t.muted, fontFamily = Manrope, fontWeight = FontWeight.Normal, fontSize = FieldText, maxLines = 1)
+                }
+                inner()
+            }
+        },
+    )
+}
+
+/**
+ * `.chip` / `.chipActive` (:90-141): a borderless filled chip on `--graphite-raised`, 48dp tall,
+ * `--line` while pressed; cobalt wash and cobalt text when [active].
+ */
+@Composable
+private fun PaneChip(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    active: Boolean = false,
+    toggle: Pair<Boolean, Role>? = null,
+    content: @Composable (tone: Color) -> Unit,
+) {
+    val t = LocalTetherTokens.current
+    val shape = RoundedCornerShape(t.radiusSm)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val fill = when {
+        active -> t.violetWash
+        pressed -> t.line
+        else -> t.graphiteRaised
+    }
+    val action = if (toggle != null) {
+        Modifier.toggleable(value = toggle.first, interactionSource = interaction, indication = null, role = toggle.second, onValueChange = { onClick() })
+    } else {
+        Modifier.clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+    }
+    Row(
+        modifier
+            .heightIn(min = BrowserPaneMetrics.Ctl)
+            .widthIn(min = BrowserPaneMetrics.Ctl)
+            .focusRing(focused, t.violet, t.radiusSm)
+            .background(paneColor(fill), shape)
+            .then(action)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+    ) {
+        content(paneColor(if (active) t.violet else t.ink))
+    }
+}
+
+/** The Select elements toggle (tsx :280-289, `.pickChip`): cobalt wash and cobalt text while picking. */
+@Composable
+private fun SelectElementsChip(active: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    PaneChip(onClick = onClick, modifier = modifier.testTag(BrowserPaneTags.SelectElements), active = active, toggle = active to Role.Button) { tone ->
+        Icon(TetherIcons.SquareDashedMousePointer, contentDescription = null, tint = tone, modifier = Modifier.size(14.dp))
+        Text("Select elements", color = tone, fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = ChipText, maxLines = 1)
+    }
+}
+
+/** "Screenshot on pick" (tsx :290-293, `.shotChip` :416-420): a quiet chip holding a cobalt checkbox. */
+@Composable
+private fun ShotOnPickChip(checked: Boolean, onCheckedChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    PaneChip(onClick = { onCheckedChange(!checked) }, modifier = modifier.testTag(BrowserPaneTags.ShotOnPick), toggle = checked to Role.Checkbox) {
+        val boxShape = RoundedCornerShape(3.dp)
+        Box(
+            Modifier.size(14.dp).cssSurface(boxShape, if (checked) t.violet else t.graphite, border = if (checked) null else CssBorder(1.dp, t.lineStrong)),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (checked) Icon(TetherIcons.Check, contentDescription = null, tint = t.graphite, modifier = Modifier.size(11.dp))
+        }
+        Text("Screenshot on pick", color = t.muted, fontFamily = Manrope, fontWeight = StatusWeight, fontSize = ChipText, maxLines = 1)
+    }
+}
+
+/**
+ * `.deadState` (:641-664, tsx :328-335): the socket could not open. A danger icon in a circle, the
+ * sentence and why, centred on the page area.
+ */
+@Composable
+private fun DeadState(error: String, modifier: Modifier = Modifier) {
+    val t = LocalTetherTokens.current
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.widthIn(max = 384.dp).padding(horizontal = 16.dp, vertical = 32.dp).testTag(BrowserPaneTags.Dead),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            StateBadge(Lucide.MonitorX, fill = t.dangerWash, tint = t.danger)
+            Text("The browser is not available.", color = t.white, fontFamily = Manrope, fontWeight = BlankTitleWeight, fontSize = 14.sp, textAlign = TextAlign.Center)
+            Text(error, color = t.muted, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+/** `.blankIcon` / `.deadIcon` (:608-619): a 40dp circle holding an 18dp glyph, 6dp above the title. */
+@Composable
+private fun StateBadge(icon: ImageVector, fill: Color, tint: Color) {
+    Box(Modifier.padding(bottom = 6.dp).size(40.dp).background(fill, CircleShape), contentAlignment = Alignment.Center) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+    }
+}
+
+/**
+ * `.notice` / `.noticeBlocked` / `.alert` (:666-700): a full-width row above the status line with a
+ * 1dp top edge, an icon and the whole sentence, wrapping.
+ */
+@Composable
+private fun PaneNoticeRow(
+    icon: ImageVector,
+    text: String,
+    edge: Color,
+    fill: Color,
+    ink: Color,
+    iconTint: Color,
+    textTag: String,
+    rowTag: String = BrowserPaneTags.NoticeRow,
+) {
+    Column(Modifier.fillMaxWidth().background(fill).testTag(rowTag)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(edge))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = BrowserPaneMetrics.Pad, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.padding(top = 2.dp).size(14.dp))
+            Text(
+                text,
+                color = ink,
+                style = TextStyle(fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp, lineHeight = 16.8.sp),
+                // tsx :387 (the notice row is `role="status"`): a polite live region (the error row too).
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag(textTag),
+            )
+        }
+    }
+}
+
+/** `.sep` (:871-876): a 1dp × 12dp rule between the status line's parts. */
+@Composable
+private fun StatusSep() {
+    val t = LocalTetherTokens.current
+    Box(Modifier.width(1.dp).height(12.dp).background(t.lineStrong).clearAndSetSemantics {})
+}
+
+/**
+ * `.status` (:702-723, :850-921; tsx :401-462): the left cluster (live dot and word, then the slot
+ * for who is driving the page), the tab indicator, the pick hint; on the right the true emulated
+ * size in mono and the page address.
+ */
+@Composable
+private fun StatusLine(ui: BrowserChannel.Ui, wide: Boolean, caption: AgentCaption?, onSwitchTab: (String) -> Unit) {
+    val t = LocalTetherTokens.current
+    val state = ui.state
+    val small = TextStyle(fontFamily = Manrope, fontWeight = StatusWeight, fontSize = StatusText)
+    Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(t.graphite)
+            .heightIn(min = BrowserPaneMetrics.StatusMin)
+            .padding(horizontal = BrowserPaneMetrics.Pad)
+            .testTag(BrowserPaneTags.Status),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.testTag(BrowserPaneTags.StatusStart),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                LiveDot(connected = ui.connected, loading = state.loading)
+                Text(if (state.loading) "Loading…" else if (ui.connected) "Live" else "Connecting…", color = t.ink, style = small, maxLines = 1)
+                if (caption != null) {
+                    StatusSep()
+                    AgentPill(caption)
+                }
+            }
+            if (state.tabs.size > 1) {
+                StatusSep()
+                TabPicker(state.tabs, wide, onSwitchTab)
+            }
+            if (state.pickMode) {
+                StatusSep()
+                Text(
+                    BROWSER_PICK_HINT,
+                    color = t.violet, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false).testTag(BrowserPaneTags.PickHint),
+                )
+            }
+        }
+        Text(
+            "${state.viewport.width}×${state.viewport.height}" + if (state.viewport.mobile) " · mobile" else "",
+            color = t.muted,
+            style = small.copy(fontFamily = JetBrainsMono, fontWeight = TetherWeights.body, fontFeatureSettings = "tnum"),
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.testTag(BrowserPaneTags.Readout),
+        )
+        StatusSep()
+        Text(
+            state.url,
+            color = t.muted, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            // module.css :909-920: the address gives way first while the pill or the tab label is up.
+            modifier = Modifier.widthIn(min = if (wide) 32.dp else 0.dp, max = if (wide) 256.dp else if (caption != null && state.tabs.size > 1) 72.dp else if (caption != null || state.tabs.size > 1) 104.dp else 128.dp).testTag(BrowserPaneTags.StatusUrl),
+        )
+    }
+}
+
+/**
+ * `.dot` / `.dotLive` / `.dotWaiting` (:878-903): faint while connecting, running green when live,
+ * green with a soft ring while a page loads (the ring breathes only without reduced motion).
+ */
+@Composable
+private fun LiveDot(connected: Boolean, loading: Boolean) {
+    val t = LocalTetherTokens.current
+    val reduced = LocalReducedMotion.current
+    val color = if (loading || connected) t.running else t.faint
+    val ringWidth = if (!loading) {
+        0f
+    } else if (reduced) {
+        3f
+    } else {
+        val pulse = rememberInfiniteTransition(label = "pane-dot")
+        val w by pulse.animateFloat(
+            initialValue = 3f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "pane-dot-ring",
+        )
+        w
+    }
+    val ringAlpha = if (ringWidth >= 3f || reduced) 0.25f else 0.10f + 0.15f * ((ringWidth - 1f) / 2f)
+    Box(
+        Modifier.size(7.dp).drawBehind {
+            if (ringWidth > 0f) drawCircle(color.copy(alpha = ringAlpha), radius = size.minDimension / 2 + ringWidth.dp.toPx())
+            drawCircle(color)
+        },
+    )
 }
 
 /** browser-notice.ts urlNoticeCopy, word for word; [BrowserChannel.UrlNotice.indirect] = a redirect hop or sub-request. */
@@ -507,11 +1219,6 @@ internal fun urlNoticeCopy(notice: BrowserChannel.UrlNotice): String {
     else "This page is on a private or local address$where."
 }
 
-/** `var(--bg, #0b0e0f)`: no skin defines `--bg`, so every skin draws the fallback. */
-private val StageWrapColor = Color(0xFF0B0E0F)
-
-private val numeric = KeyboardOptions(keyboardType = KeyboardType.Number)
-
 /**
  * The live page (browser-pane.tsx :204-224): the frame drawn to the stage's size; a press, a drag
  * (throttled ~30fps) and a release go as `mousePressed` / `mouseMoved` / `mouseReleased` at the
@@ -519,34 +1226,49 @@ private val numeric = KeyboardOptions(keyboardType = KeyboardType.Number)
  * In pick mode none of them is forwarded: a drag sends `hover` at the same throttle and the box the
  * server answers with is drawn (:250-254); a tap (a touch within the slop, or any mouse click) is the
  * pick (:108-112 `onClick`).
+ *
+ * Its look (module.css 0bd07fdd :548-619): a 6dp frame on the panel face (never a white glare before
+ * the first frame) with a 1dp `--line-strong` ring and the floating shadow; a 2dp cobalt ring while
+ * Select elements is on; on an empty page ([blank]) the quiet invitation, decorative only.
  */
 @Composable
 private fun BrowserStage(
     frame: ImageBitmap?,
     pickMode: Boolean,
+    blank: Boolean,
     viewportWidth: Int,
     viewportHeight: Int,
     actions: BrowserPaneActions,
     hoverBox: HoverBox?,
     stageWidth: Dp,
     stageHeight: Dp,
+    marker: AgentMarker?,
     onPick: (x: Int, y: Int) -> Unit,
     modifier: Modifier,
 ) {
+    val t = LocalTetherTokens.current
     val focus = remember { FocusRequester() }
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
     val pick by rememberUpdatedState(pickMode)
     val currentOnPick by rememberUpdatedState(onPick)
     val touchSlop = LocalViewConfiguration.current.touchSlop
+    val shape = RoundedCornerShape(BrowserPaneMetrics.FrameRadius)
     Box(
         modifier
-            .background(Color.White)
+            .focusRing(focused, t.violet, BrowserPaneMetrics.FrameRadius, offset = 3.dp)
+            .cssSurface(
+                shape,
+                t.graphite,
+                shadows = listOf(if (pickMode) ring(2.dp, t.violet) else ring(1.dp, t.lineStrong)) + t.css.shadowFloating,
+            )
             .testTag(BrowserPaneTags.Stage)
             .semantics {
                 contentDescription = "Live page — click to interact, or use Select elements"
                 role = Role.Image
             }
             .focusRequester(focus)
-            .focusable()
+            .focusable(interactionSource = interaction)
             .onKeyEvent { event ->
                 val type = when (event.type) {
                     KeyEventType.KeyDown -> "keyDown"
@@ -620,7 +1342,11 @@ private fun BrowserStage(
             },
     ) {
         if (frame != null) {
-            Image(frame, contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
+            Image(frame, contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize().clip(shape))
+        }
+        if (blank) BlankInvitation(shape)
+        if (marker != null && viewportWidth > 0 && viewportHeight > 0) {
+            key(marker.seq) { AgentMarkerBox(marker, viewportWidth, viewportHeight, stageWidth, stageHeight) }
         }
         if (pickMode && hoverBox != null && viewportWidth > 0 && viewportHeight > 0) {
             HoverHighlight(hoverBox, viewportWidth, viewportHeight, stageWidth, stageHeight)
@@ -629,9 +1355,245 @@ private fun BrowserStage(
 }
 
 /**
- * `.highlight` / `.highlightLabel` (browser-pane.module.css :159-176, tsx :143-146, :217-221): the
- * picked-to element's box scaled from page pixels to the stage, a 2dp violet border over an 18%
- * violet wash, its short label (tag#id.class) on a violet tab sitting on the box's top edge.
+ * `.agentMarker` (module.css :818-860, tsx :371-381): where the agent's action lands, over the page
+ * frame only (never part of the page, so never in a screenshot): a cobalt ring on a faint wash, a
+ * point drawn as a 20dp circle on it. It fades in and out over its 1.6 s (static under reduced
+ * motion), takes no touch and says nothing to a screen reader (the pill and the live region do).
+ */
+@Composable
+private fun AgentMarkerBox(marker: AgentMarker, vw: Int, vh: Int, stageWidth: Dp, stageHeight: Dp) {
+    val t = LocalTetherTokens.current
+    val reduced = LocalReducedMotion.current
+    val p = BrowserAgentUi.placement(marker.box, vw, vh)
+    val left = stageWidth * (p.left / 100.0).toFloat()
+    val top = stageHeight * (p.top / 100.0).toFloat()
+    val alpha = remember(marker.seq) { Animatable(if (reduced) 1f else 0f) }
+    if (!reduced) {
+        LaunchedEffect(marker.seq) {
+            alpha.animateTo(1f, tween(192))
+            alpha.animateTo(1f, tween(1008))
+            alpha.animateTo(0f, tween(400))
+        }
+    }
+    val shape = if (p.point) CircleShape else RoundedCornerShape(4.dp)
+    val boxModifier = if (p.point) {
+        Modifier.offset(left - 10.dp, top - 10.dp).size(20.dp)
+    } else {
+        Modifier.offset(left, top).size(stageWidth * (p.width / 100.0).toFloat(), stageHeight * (p.height / 100.0).toFloat())
+    }
+    Box(
+        boxModifier
+            .graphicsLayer { this.alpha = alpha.value }
+            .cssSurface(shape, t.violet.copy(alpha = 0.14f), border = CssBorder(2.dp, t.violet), shadows = listOf(ring(1.dp, t.graphite)))
+            .testTag(BrowserPaneTags.Marker),
+    )
+}
+
+/**
+ * `.agentPill` (:786-816, tsx :431-446): "Agent" while the agent uses the browser, "You took over"
+ * in attention colours when the operator acts. The words are drawn; a screen reader gets the whole
+ * sentence instead (the caption's `sentence`).
+ */
+@Composable
+private fun AgentPill(caption: AgentCaption) {
+    val t = LocalTetherTokens.current
+    val shape = CircleShape
+    val tone = if (caption.tookOver) t.attentionInk else t.violet
+    Row(
+        Modifier
+            .cssSurface(
+                shape,
+                if (caption.tookOver) t.attentionBg else t.violetWash,
+                shadows = if (caption.tookOver) listOf(CssShadow(inset = true, offsetX = 0.dp, offsetY = 0.dp, blur = 0.dp, spread = 1.dp, color = t.attentionBorder)) else emptyList(),
+            )
+            .padding(horizontal = 7.dp, vertical = 1.dp)
+            .testTag(BrowserPaneTags.AgentPill)
+            .clearAndSetSemantics { contentDescription = caption.sentence },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(if (caption.tookOver) Lucide.Hand else Lucide.MousePointer2, contentDescription = null, tint = tone, modifier = Modifier.size(12.dp))
+        Text(caption.text, color = tone, fontFamily = Manrope, fontWeight = TetherWeights.label, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * `.tabIndicator` / `.tabPick` (:725-775, tsx :408-433): the tab label with a chevron; touching it
+ * lists the open tabs ("1. title") and choosing one sends the tab switch. The hit area is 48dp.
+ */
+@Composable
+private fun TabPicker(tabs: List<BrowserChannel.Tab>, wide: Boolean, onSwitchTab: (String) -> Unit) {
+    val t = LocalTetherTokens.current
+    val small = TextStyle(fontFamily = Manrope, fontWeight = StatusWeight, fontSize = StatusText)
+    var open by remember { mutableStateOf(false) }
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val activeTab = tabs.firstOrNull { it.active }
+    Box {
+        Row(
+            Modifier
+                .widthIn(max = if (wide) 192.dp else 144.dp)
+                // 44dp visual box (the status row's height); the 48dp touch target comes from the platform's minimum touch bounds, which extend the hit area without growing the layout.
+                .height(BrowserPaneMetrics.StatusMin)
+                .focusRing(focused, t.violet, 4.dp)
+                .clickable(interaction, indication = null, role = Role.DropdownList, onClickLabel = "Switch tab") { open = true }
+                .testTag(BrowserPaneTags.TabIndicator),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                browserTabLabel(tabs),
+                color = t.muted, style = small, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Icon(TetherIcons.ChevronDown, contentDescription = null, tint = t.faint, modifier = Modifier.size(11.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = t.graphiteRaised) {
+            if (activeTab == null) {
+                DropdownMenuItem(text = { Text("Choose a tab", color = t.faint) }, onClick = {}, enabled = false)
+            }
+            tabs.forEach { tab ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            "${tab.index}. ${tab.title.ifEmpty { tab.url.ifEmpty { "New tab" } }}",
+                            color = if (tab.active) t.violet else t.ink,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    onClick = {
+                        open = false
+                        // A tab with no id cannot be named: nothing to send (the web's option has no value to send either).
+                        if (tab.id.isNotEmpty()) onSwitchTab(tab.id)
+                    },
+                    modifier = Modifier.semantics { selected = tab.active }.testTag(BrowserPaneTags.tabOption(tab.id.ifEmpty { "none-${tab.index}" })),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * `.profile` / `.select` (module.css :422-477, tsx :296-312): the session's browser profile. The
+ * face is the toolbar's filled field with the chevron; the list is the default throwaway profile,
+ * the session's own profile when the server's list does not carry it, then every named profile
+ * ("(in use by <holder>)" when another session holds it). Opening it reads the list again.
+ */
+@Composable
+private fun ProfileSelect(profile: BrowserChannel.PaneProfile?, list: List<BrowserProfileInfo>, actions: BrowserPaneActions, modifier: Modifier = Modifier, chipText: Boolean = false) {
+    val t = LocalTetherTokens.current
+    val shape = RoundedCornerShape(t.radiusSm)
+    var open by remember { mutableStateOf(false) }
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    // The tablet's 3-column tools row sets the label at that row's chip text style (so the default label fits whole); the phone's full-width row keeps the field size.
+    val style = if (chipText) PROFILE_CHIP_STYLE.copy(color = t.ink) else TextStyle(fontFamily = Manrope, fontWeight = FontWeight(500), fontSize = FieldText, color = t.ink)
+    val label = profileLabel(profile)
+    Box(modifier) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(BrowserPaneMetrics.Ctl)
+                .cssSurface(
+                    shape,
+                    paneColor(if (focused) t.graphite else if (pressed) t.line else t.graphiteRaised),
+                    shadows = if (focused) listOf(ring(1.dp, t.violet), ring(4.dp, t.focusGlow)) else emptyList(),
+                )
+                .clickable(interaction, indication = null, role = Role.DropdownList, onClickLabel = "Profile") {
+                    open = true
+                    actions.refreshProfiles()
+                }
+                .padding(start = if (chipText) 6.dp else 10.dp, end = if (chipText) 4.dp else 8.dp)
+                .testTag(BrowserPaneTags.ProfileSelect)
+                .semantics { contentDescription = "Profile"; stateDescription = label },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(if (chipText) 2.dp else 6.dp),
+        ) {
+            var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+            // Cleared from the merged node (the row speaks "Profile" + its state); the tag and the layout result exist for the tests.
+            Text(
+                label, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                onTextLayout = { layout = it },
+                modifier = Modifier.weight(1f).clearAndSetSemantics {
+                    semanticsTestTag = BrowserPaneTags.ProfileLabel
+                    getTextLayoutResult { out -> layout?.let { out += it; true } ?: false }
+                },
+            )
+            Icon(TetherIcons.ChevronDown, contentDescription = null, tint = t.muted, modifier = Modifier.size(if (chipText) 11.dp else 14.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = t.graphiteRaised) {
+            @Composable fun item(id: String?, text: String) {
+                DropdownMenuItem(
+                    text = { Text(text, color = if (id == profile?.id) t.violet else t.ink, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    onClick = {
+                        open = false
+                        actions.pickProfile(id)
+                    },
+                    modifier = Modifier.semantics { selected = id == profile?.id }.testTag(BrowserPaneTags.profileOption(id)),
+                )
+            }
+            item(null, PROFILE_DEFAULT_LABEL)
+            if (profile != null && list.none { it.id == profile.id }) item(profile.id, profile.name)
+            list.forEach { p ->
+                item(p.id, p.name + if (p.heldBy != null && p.id != profile?.id) " (in use by ${p.heldBy})" else "")
+            }
+        }
+    }
+}
+
+/** tsx :313-316: "Using: <profile>. Changing the profile restarts the open browser on it." */
+@Composable
+private fun ProfileHint(profile: BrowserChannel.PaneProfile?) {
+    val t = LocalTetherTokens.current
+    Text(
+        "Using: ${profileLabel(profile)}. $PROFILE_PICK_HINT",
+        color = t.muted,
+        style = TextStyle(fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 11.sp, lineHeight = 15.4.sp),
+        modifier = Modifier.fillMaxWidth().testTag(BrowserPaneTags.ProfileHint),
+    )
+}
+
+/** tsx :317 `.profileRefusal` (module.css :487-497): the server's sentence for a refused pick, an alert. */
+@Composable
+private fun ProfileRefusal(text: String) {
+    val t = LocalTetherTokens.current
+    Text(
+        text,
+        color = t.attentionInk,
+        style = TextStyle(fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp, lineHeight = 16.8.sp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(t.attentionBg, RoundedCornerShape(t.radiusSm))
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .semantics { liveRegion = LiveRegionMode.Assertive }
+            .testTag(BrowserPaneTags.ProfileRefusal),
+    )
+}
+
+/**
+ * `.blank` (:583-606, tsx :359-367): no page yet. On the panel face, a globe in a circle, "No page
+ * open yet" and the hint; decorative (no semantics), and taps still reach the page underneath.
+ */
+@Composable
+private fun BlankInvitation(shape: androidx.compose.ui.graphics.Shape) {
+    val t = LocalTetherTokens.current
+    Column(
+        Modifier.fillMaxSize().background(t.graphite, shape).padding(16.dp).clearAndSetSemantics { semanticsTestTag = BrowserPaneTags.Blank },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+    ) {
+        StateBadge(Lucide.Globe, fill = t.graphiteRaised, tint = t.muted)
+        Text(BROWSER_BLANK_TITLE, color = t.white, fontFamily = Manrope, fontWeight = BlankTitleWeight, fontSize = 14.sp, textAlign = TextAlign.Center)
+        Text(BROWSER_BLANK_BODY, color = t.muted, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp, textAlign = TextAlign.Center)
+    }
+}
+
+/**
+ * `.highlight` / `.highlightLabel` (browser-pane.module.css 0bd07fdd :621-639): the picked-to
+ * element's box scaled from page pixels to the stage, a 2dp cobalt border over an 18% cobalt wash,
+ * its short label (tag#id.class) in mono, `--accent-ink` on `--accent` (AA in both skins, spec §6),
+ * on a tab sitting on the box's top edge.
  */
 @Composable
 private fun HoverHighlight(hover: HoverBox, vw: Int, vh: Int, stageWidth: Dp, stageHeight: Dp) {
@@ -650,8 +1612,8 @@ private fun HoverHighlight(hover: HoverBox, vw: Int, vh: Int, stageWidth: Dp, st
     ) {
         Text(
             hover.label,
-            color = Color.White,
-            fontFamily = Manrope,
+            color = t.accentInk,
+            fontFamily = JetBrainsMono,
             fontWeight = TetherWeights.body,
             fontSize = 10.sp,
             maxLines = 1,
@@ -660,58 +1622,9 @@ private fun HoverHighlight(hover: HoverBox, vw: Int, vh: Int, stageWidth: Dp, st
                     val p = measurable.measure(constraints.copy(maxWidth = Int.MAX_VALUE))
                     layout(p.width, p.height) { p.place(0, -p.height) }
                 }
-                .background(t.violet, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
-                .padding(horizontal = 4.dp, vertical = 1.dp),
+                .background(t.accent, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                .padding(horizontal = 5.dp, vertical = 1.dp),
         )
-    }
-}
-
-/** The `iconButton` / `iconButtonActive` Select elements key (tsx :232-243): violet and pressed while picking. */
-@Composable
-private fun SelectElementsKey(active: Boolean, onClick: () -> Unit) {
-    val t = LocalTetherTokens.current
-    val shape = RoundedCornerShape(t.radiusSm)
-    val tone = if (active) t.violet else t.ink
-    Row(
-        Modifier
-            .heightIn(min = 44.dp)
-            .border(1.dp, if (active) t.violet else t.line, shape)
-            .background(if (active) t.violetWash else t.graphite, shape)
-            .toggleable(value = active, role = Role.Button, onValueChange = { onClick() })
-            .padding(horizontal = 10.dp)
-            .testTag(BrowserPaneTags.SelectElements),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Icon(TetherIcons.SquareDashedMousePointer, contentDescription = null, tint = tone, modifier = Modifier.size(16.dp))
-        Text("Select elements", color = tone, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 13.sp, maxLines = 1)
-    }
-}
-
-/** The "Screenshot on pick" label (tsx :244-247): a `smallButton` holding a checkbox. */
-@Composable
-private fun ShotOnPickToggle(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    val t = LocalTetherTokens.current
-    val shape = RoundedCornerShape(t.radiusSm)
-    Row(
-        Modifier
-            .heightIn(min = 36.dp)
-            .border(1.dp, t.line, shape)
-            .background(t.graphite, shape)
-            .toggleable(value = checked, role = Role.Checkbox, onValueChange = onCheckedChange)
-            .padding(horizontal = 10.dp)
-            .testTag(BrowserPaneTags.ShotOnPick),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        val boxShape = RoundedCornerShape(3.dp)
-        Box(
-            Modifier.size(16.dp).border(1.dp, if (checked) t.violet else t.lineStrong, boxShape).background(if (checked) t.violet else t.graphite, boxShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (checked) Icon(TetherIcons.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
-        }
-        Text("Screenshot on pick", color = t.ink, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp, maxLines = 1)
     }
 }
 
@@ -803,79 +1716,6 @@ internal object BrowserKeys {
         in AndroidKeyEvent.KEYCODE_0..AndroidKeyEvent.KEYCODE_9 -> "Digit" + (keyCode - AndroidKeyEvent.KEYCODE_0)
         else -> codes[keyCode] ?: ""
     }
-}
-
-/** `.smallButton` / `.smallButtonActive` (module.css :88-102): 36dp, `radius-sm`, 0.75rem. */
-@Composable
-private fun SmallButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier, active: Boolean = false) {
-    val t = LocalTetherTokens.current
-    val shape = RoundedCornerShape(t.radiusSm)
-    Box(
-        modifier
-            .heightIn(min = 36.dp)
-            .border(1.dp, if (active) t.violet else t.line, shape)
-            .background(if (active) t.violetWash else t.graphite, shape)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics { if (active) selected = true }
-            .padding(horizontal = 10.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = if (active) t.violet else t.ink, fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = 12.sp, maxLines = 1)
-    }
-}
-
-/** `.iconButton` (module.css :55-80): 44dp, `radius-sm`, a 16dp glyph; the label is its name. */
-@Composable
-private fun IconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val t = LocalTetherTokens.current
-    val shape = RoundedCornerShape(t.radiusSm)
-    Box(
-        modifier
-            .size(44.dp)
-            .border(1.dp, t.line, shape)
-            .background(t.graphite, shape)
-            .clickable(role = Role.Button, onClickLabel = label, onClick = onClick)
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = null, tint = t.ink, modifier = Modifier.size(16.dp))
-    }
-}
-
-/** `.urlInput` / `.dim` (module.css :35-53, :111-120): 36dp, `radius-sm`, a 1px rule, ink on graphite. */
-@Composable
-private fun BrowserField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String,
-    description: String,
-    fontSize: androidx.compose.ui.unit.TextUnit,
-    keyboard: KeyboardOptions,
-    onGo: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val t = LocalTetherTokens.current
-    val shape = RoundedCornerShape(t.radiusSm)
-    val style = TextStyle(fontFamily = Manrope, fontWeight = TetherWeights.body, fontSize = fontSize, color = t.ink)
-    BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        singleLine = true,
-        textStyle = style,
-        cursorBrush = SolidColor(t.violet),
-        keyboardOptions = keyboard,
-        keyboardActions = KeyboardActions(onGo = { onGo() }),
-        modifier = modifier.semantics { contentDescription = description },
-        decorationBox = { inner ->
-            Box(
-                Modifier.heightIn(min = 36.dp).border(1.dp, t.line, shape).background(t.graphite, shape).padding(horizontal = 8.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                if (value.isEmpty()) Text(placeholder, style = style, color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                inner()
-            }
-        },
-    )
 }
 
 /** T8.6: the composer's browser toggle (chat-view.tsx 90fbb9f :4510-4524): [open] latches it. */

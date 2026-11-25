@@ -856,6 +856,13 @@ interface TetherClient {
     val browserRuntime: BrowserRuntimeSource get() = BrowserRuntimeSource.Unavailable
 
     /**
+     * v171: one owner-grade named-browser-profile request on the main socket, answered by the reply carrying the same request id
+     * (a refusal keeps the server's own sentence). Resolves with a refusal-shaped reply when the frame could not be sent or no
+     * answer came in 10 s. Never called for a server below 171 ([browserProfilesSupported]).
+     */
+    suspend fun browserProfiles(request: BrowserProfilesRequest): BrowserProfilesReply = BrowserProfilesReply.Unavailable
+
+    /**
      * T8.4: the working folder's open GitHub issues and pull requests (`GET /api/github/issues` and
      * `/api/github/pull-requests`, `?cwd=`), each call only to the server it names, on a fixed route,
      * never following a redirect (see [HttpGitHubWork]). The default refuses every call without

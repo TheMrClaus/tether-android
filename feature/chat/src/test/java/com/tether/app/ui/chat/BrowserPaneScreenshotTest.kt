@@ -31,12 +31,28 @@ import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * T8.6: the in-console browser pane (browser-pane.tsx / browser-pane.module.css 90fbb9f).
- * `browser-live`: connected on a Mobile-preset page (the active preset, "390×844 · mobile", the Live
- * dot and the page URL); `browser-dead`: a channel that could not open ("The browser is not
- * available." and why). Phone: the full-screen sheet; tablet: the 520dp right-hand panel.
+ * The in-console browser pane (browser-pane.tsx / browser-pane.module.css 0bd07fdd, design/pane-spec.md).
+ * `browser-live`: connected on a Mobile-preset page (the active segment, "390×844 · mobile" in the
+ * status line, the Live dot and the page URL); `browser-dead`: a channel that could not open ("The
+ * browser is not available." and why); `browser-loading`: a page loading (the loading bar, the
+ * ringed dot); `browser-empty`: connected on about:blank (the "No page open yet" invitation);
+ * `browser-error-row`: a server error while connected (the danger row above the status line);
+ * `browser-notice-*`: the address notices. Phone: the full-screen sheet; tablet: the 520dp
+ * right-hand panel.
  */
-enum class BrowserShot(val id: String) { Live("browser-live"), Dead("browser-dead"), NoticeLocal("browser-notice-local"), NoticeIndirect("browser-notice-indirect"), NoticeConsole("browser-notice-console") }
+enum class BrowserShot(val id: String) {
+    Live("browser-live"),
+    Dead("browser-dead"),
+    NoticeLocal("browser-notice-local"),
+    NoticeIndirect("browser-notice-indirect"),
+    NoticeConsole("browser-notice-console"),
+    Loading("browser-loading"),
+    Empty("browser-empty"),
+    ErrorRow("browser-error-row"),
+}
+
+/** A server error while the socket is open: the sentence the error row carries. */
+internal const val BROWSER_SHOT_ERROR = "Chromium could not be started on the server: the browser is not installed."
 
 private const val ShotTag = "browser-shot"
 
@@ -66,7 +82,14 @@ private fun uiFor(shot: BrowserShot): BrowserChannel.Ui = when (shot) {
     BrowserShot.NoticeLocal -> noticeUi(BrowserChannel.UrlNotice(BrowserChannel.UrlNoticeKind.NonPublic, "localhost:3000", false))
     BrowserShot.NoticeIndirect -> noticeUi(BrowserChannel.UrlNotice(BrowserChannel.UrlNoticeKind.NonPublic, "192.168.1.20:8080", true))
     BrowserShot.NoticeConsole -> noticeUi(BrowserChannel.UrlNotice(BrowserChannel.UrlNoticeKind.ConsoleBlocked, "", false))
+    BrowserShot.Loading -> BrowserChannel.Ui(connected = true, state = BrowserChannel.State(url = "https://localhost:3000/", loading = true))
+    BrowserShot.Empty -> BrowserChannel.Ui(connected = true)
+    BrowserShot.ErrorRow -> BrowserChannel.Ui(connected = true, error = BROWSER_SHOT_ERROR)
 }
+
+/** The shots that show a page: the rest have no frame yet. */
+private val BrowserShot.hasPage: Boolean
+    get() = this == BrowserShot.Live || this == BrowserShot.NoticeLocal || this == BrowserShot.NoticeIndirect || this == BrowserShot.NoticeConsole
 
 private fun noticeUi(notice: BrowserChannel.UrlNotice) = BrowserChannel.Ui(
     connected = true,
@@ -82,9 +105,9 @@ private fun noticeUi(notice: BrowserChannel.UrlNotice) = BrowserChannel.Ui(
 private fun Pane(shot: BrowserShot) {
     BrowserPaneContent(
         ui = uiFor(shot),
-        frame = if (shot != BrowserShot.Dead) fakeFrame() else null,
+        frame = if (shot.hasPage) fakeFrame() else null,
         actions = BrowserPaneActions({}, { _, _, _ -> }, {}, {}, {}),
-        defaultUrl = if (shot != BrowserShot.Dead) "localhost:3000" else null,
+        defaultUrl = if (shot != BrowserShot.Dead && shot != BrowserShot.Empty) "localhost:3000" else null,
         modifier = Modifier.fillMaxSize(),
     )
 }
@@ -134,6 +157,6 @@ class BrowserPaneTabletScreenshotTest(private val shot: BrowserShot, private val
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = BrowserShot.entries.filter { it != BrowserShot.Dead }.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = BrowserShot.entries.flatMap { s -> TetherSkin.entries.map { arrayOf<Any>(s, it) } }
     }
 }

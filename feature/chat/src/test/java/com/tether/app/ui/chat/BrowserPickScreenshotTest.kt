@@ -36,8 +36,10 @@ import org.robolectric.annotation.Config
 
 /**
  * T8.6 part 2 states (both Studio skins, phone and tablet):
- * `browser-pick` — Select elements on (violet), Screenshot on pick ticked, the hover box and its
- * `tag#id.class` tab over the page (browser-pane.tsx :231-254, module.css :155-176);
+ * `browser-pick` — Select elements on (cobalt), Screenshot on pick ticked, the page framed in cobalt,
+ * the hover box and its `tag#id.class` tab over the page, the pick hint in the status line
+ * (browser-pane.tsx 0bd07fdd :280-293, :378-383, :447-452; module.css :566-568, :621-639);
+ * `browser-pick-on` — the same with no element under the finger yet;
  * `composer-pick` — the composer with two picked elements as chips, one with its screenshot
  * (chat-view.tsx :4097-4120).
  */
@@ -68,29 +70,29 @@ private val pickingUi = BrowserChannel.Ui(
 private val hovered = HoverBox(ElementDescriptor.Box(24.0, 96.0, 342.0, 180.0), "section#hero.banner")
 
 @Composable
-private fun PickingPane() {
+private fun PickingPane(hover: HoverBox?) {
     BrowserPaneContent(
         ui = pickingUi,
         frame = pageFrame(),
         actions = BrowserPaneActions({}, { _, _, _ -> }, {}, {}, {}),
         defaultUrl = "localhost:3000",
-        hoverBox = hovered,
+        hoverBox = hover,
         modifier = Modifier.fillMaxSize(),
     )
 }
 
-private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.snapPicking(skin: TetherSkin, size: String, width: Dp, height: Dp, tablet: Boolean) {
+private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.snapPicking(skin: TetherSkin, size: String, width: Dp, height: Dp, tablet: Boolean, hover: HoverBox? = hovered, id: String = "browser-pick") {
     setContent {
         TetherTheme(choiceFor(skin)) {
             androidx.compose.runtime.CompositionLocalProvider(com.tether.app.ui.theme.LocalReducedMotion provides true) {
                 Box(Modifier.size(width, height).background(chatWellColor(com.tether.app.ui.theme.LocalTetherTokens.current)).testTag(PickShotTag)) {
-                    if (tablet) BrowserSidePanel(Modifier.align(Alignment.TopEnd)) { PickingPane() } else PickingPane()
+                    if (tablet) BrowserSidePanel(Modifier.align(Alignment.TopEnd)) { PickingPane(hover) } else PickingPane(hover)
                 }
             }
         }
     }
     waitForIdle()
-    onNodeWithTag(PickShotTag).captureRoboImage("src/test/screenshots/browser-pick/${skin.id}-$size.png", roborazziOptions = exactPick)
+    onNodeWithTag(PickShotTag).captureRoboImage("src/test/screenshots/$id/${skin.id}-$size.png", roborazziOptions = exactPick)
 }
 
 private val pickedShot = BrowserPick(
@@ -130,6 +132,8 @@ class BrowserPickPhoneScreenshotTest(private val skin: TetherSkin) {
 
     @Test fun pane() = rule.snapPicking(skin, "phone", 412.dp, 780.dp, tablet = false)
 
+    @Test fun paneOn() = rule.snapPicking(skin, "phone", 412.dp, 780.dp, tablet = false, hover = null, id = "browser-pick-on")
+
     @Test fun composer() {
         rule.mainClock.autoAdvance = false
         rule.setContent { PickComposer(skin, null) }
@@ -151,6 +155,8 @@ class BrowserPickTabletScreenshotTest(private val skin: TetherSkin) {
     @get:Rule val rule = createComposeRule()
 
     @Test fun pane() = rule.snapPicking(skin, "tablet", 1280.dp, 800.dp, tablet = true)
+
+    @Test fun paneOn() = rule.snapPicking(skin, "tablet", 1280.dp, 800.dp, tablet = true, hover = null, id = "browser-pick-on")
 
     @Test fun composer() {
         rule.mainClock.autoAdvance = false

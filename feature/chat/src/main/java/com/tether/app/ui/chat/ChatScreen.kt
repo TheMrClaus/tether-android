@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -606,16 +607,30 @@ fun ChatScreen(
     )
     // dashboard.tsx 90fbb9f :1762-1772: over the chat, keyed by session.
     if (browserOpen && session != null) {
-        BrowserPaneHost(
-            opener = vm.client.browserSockets,
-            sessionId = session.id,
-            onClose = { browserOpen = false },
-            onPicked = { pick, pageUrl ->
-                browserPicks = browserPicks.filter { it.sessionId == session.id } + SessionPick(session.id, pick)
-                browserPageUrl = pageUrl
-            },
-            modifier = Modifier.align(Alignment.TopEnd),
-        )
+        val onPicked: (com.tether.app.client.BrowserPick, String) -> Unit = { pick, pageUrl ->
+            browserPicks = browserPicks.filter { it.sessionId == session.id } + SessionPick(session.id, pick)
+            browserPageUrl = pageUrl
+        }
+        // hooks/use-tether.ts browserProfiles: profiles need server protocol 171; below it no profile row is drawn.
+        val profiles: (suspend (com.tether.app.client.BrowserProfilesRequest) -> com.tether.app.client.BrowserProfilesReply)? =
+            if (com.tether.app.client.browserProfilesSupported(chatProtocol)) ({ request -> vm.client.browserProfiles(request) }) else null
+        val dock = LocalBrowserDock.current
+        if (dock != null) {
+            // Wide window: the shell draws the pane as its own column, the chat only asks for it.
+            SideEffect {
+                dock.request = BrowserDockRequest(vm.client.browserSockets, session.id, { browserOpen = false }, onPicked, profiles)
+            }
+            DisposableEffect(dock) { onDispose { dock.request = null } }
+        } else {
+            BrowserPaneHost(
+                opener = vm.client.browserSockets,
+                sessionId = session.id,
+                onClose = { browserOpen = false },
+                onPicked = onPicked,
+                browserProfiles = profiles,
+                modifier = Modifier.align(Alignment.TopEnd),
+            )
+        }
     }
     if (find.open && session != null) {
         ChatFindBar(

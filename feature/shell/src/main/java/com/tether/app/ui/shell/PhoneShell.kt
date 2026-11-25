@@ -57,6 +57,7 @@ object ShellTags {
     const val Sidebar = "shell-sidebar"
     const val Workspace = "shell-workspace"
     const val InspectorColumn = "shell-inspector-column"
+    const val BrowserDock = "shell-browser-dock"
     const val RailHandle = "shell-rail-handle"
     const val InspectorHandle = "shell-inspector-handle"
     const val ExpandDock = "shell-expand-dock"

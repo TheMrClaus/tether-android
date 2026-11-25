@@ -59,6 +59,8 @@ enum class SettingsShot(
     val github: GitHubShot? = null,
     /** The Browser section's seeded runtime status. */
     val browser: BrowserShot? = null,
+    /** v171: the Browser section's profiles block (the list it was seeded with); the server speaks protocol 171. */
+    val browserProfiles: List<com.tether.app.protocol.BrowserProfileInfo>? = null,
     /** T12.2: the push registration's status behind the Devices tab's push row. */
     val push: com.tether.app.push.PushRegistrationStatus = com.tether.app.push.PushRegistrationStatus.Registered,
     /** v144: the Authentication shots (ServerSecretScreenshotTest sets their own sizes and skins; the generic classes skip them). */
@@ -116,6 +118,11 @@ enum class SettingsShot(
     AdvancedBrowserFoundByTether("settings-advanced-browser-found-by-tether", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.FoundByTether),
     AdvancedBrowserMissing("settings-advanced-browser-missing", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Missing),
     AdvancedBrowserTools("settings-advanced-browser-tools", SettingsTab.Advanced, server = ServerShot.BrowserTools, browser = BrowserShot.Found),
+    AdvancedBrowserProfilesEmpty("settings-advanced-browser-profiles-empty", SettingsTab.Advanced, server = ServerShot.BrowserProfiles, browser = BrowserShot.Found, browserProfiles = emptyList()),
+    AdvancedBrowserProfiles("settings-advanced-browser-profiles", SettingsTab.Advanced, server = ServerShot.BrowserProfiles, browser = BrowserShot.Found, browserProfiles = listOf(
+        com.tether.app.protocol.BrowserProfileInfo("p1", "Work", heldBy = "Fix login"),
+        com.tether.app.protocol.BrowserProfileInfo("p2", "Personal"),
+    )),
     AdvancedBrowserInstallable("settings-advanced-browser-installable", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Installable),
     AdvancedBrowserInstalling("settings-advanced-browser-installing", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.Installing),
     AdvancedBrowserInstallFailed("settings-advanced-browser-install-failed", SettingsTab.Advanced, server = ServerShot.Browser, browser = BrowserShot.InstallFailed),
@@ -317,6 +324,8 @@ enum class ServerShot(val scrollTo: String? = null) {
     Browser(BrowserTags.Section),
     /** v168: the Browser section with the "Browser tools for agents" switch, on a server that speaks it. */
     BrowserTools(BrowserTags.Section),
+    /** v171: the Browser section scrolled to the profiles block, on a server that speaks it. */
+    BrowserProfiles(BrowserProfilesTags.Block),
     ;
 
     fun binding(): ServerSettingsBinding = when (this) {
@@ -354,6 +363,7 @@ enum class ServerShot(val scrollTo: String? = null) {
             writer = NeverWrites,
             serverProtocol = com.tether.app.client.BROWSER_TOOLS_MIN_PROTOCOL,
         )
+        BrowserProfiles -> ServerFixtures.binding(writer = NeverWrites, serverProtocol = com.tether.app.client.BROWSER_PROFILES_MIN_PROTOCOL)
         RestartMessage -> ServerFixtures.binding(
             view = ServerFixtures.view(ServerFixtures.settingsJson(overrides = mapOf("restartResumeMessage" to true))),
             writer = NeverWrites,
@@ -566,6 +576,7 @@ fun ComposeContentTestRule.snapSettings(
         val githubScope = androidx.compose.runtime.rememberCoroutineScope()
         val github = shot.github?.let { g -> androidx.compose.runtime.remember { GitHubConnectionController(NeverCalledGitHub, ServerFixtures.ORIGIN, githubScope, seed = g.seed()) } }
         val browser = shot.browser?.let { b -> androidx.compose.runtime.remember { BrowserRuntimeController(NeverCalledBrowser, ServerFixtures.ORIGIN, githubScope, seed = b.seed()) } }
+        val profiles = shot.browserProfiles?.let { l -> androidx.compose.runtime.remember { BrowserProfilesController({ error("the picture asks for nothing") }, githubScope, seed = l) } }
         SettingsUnderTest(
             store.prefs,
             state,
@@ -579,7 +590,7 @@ fun ComposeContentTestRule.snapSettings(
             nodes = if (shot.nodes != null && nodeActions != null) shot.nodes.binding(nodeActions) else NodesBinding.None,
             devices = devicesController?.let { DevicesBinding(it, now = { DevicesFixtures.NOW }) } ?: DevicesBinding.None,
             github = github?.let { GitHubBinding(it) } ?: GitHubBinding.None,
-            browser = browser?.let { BrowserBinding(it) } ?: BrowserBinding.None,
+            browser = browser?.let { BrowserBinding(it, profiles) } ?: BrowserBinding.None,
             push = androidx.compose.runtime.remember { FakePushRegistration(shot.push) },
             accountLimitEntities = if (shot == SettingsShot.AccountCombined) {
                 listOf(RuntimeDeskNavItem(RuntimeDeskEntities.usage("claude", "claude-work"), "Claude Code (work)", "Usage only"))
