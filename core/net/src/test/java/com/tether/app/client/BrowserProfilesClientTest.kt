@@ -32,6 +32,10 @@ class BrowserProfilesClientTest {
     private fun reply(id: String, vararg names: String) =
         """{"type":"browser_profiles","requestId":"$id","ok":true,"profiles":[${names.joinToString(",") { """{"id":"id-$it","name":"$it","created":1,"lastUsed":2,"heldBy":null}""" }}]}"""
 
+    @Test fun theWaitIsTenSeconds() {
+        assertEquals(10_000L, BROWSER_PROFILES_TIMEOUT_MS)
+    }
+
     @Test fun aCreateSendsItsExactKeysAndResolvesWithTheMatchingReply() = runBlocking {
         val (client, ws) = connected()
         val call = async(Dispatchers.Default) { client.browserProfiles(BrowserProfilesRequest.Create("Work")) }

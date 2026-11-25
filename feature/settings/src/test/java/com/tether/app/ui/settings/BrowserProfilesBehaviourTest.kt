@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.layout.positionInRoot
 import com.tether.app.client.BROWSER_PROFILES_MIN_PROTOCOL
 import com.tether.app.client.BrowserProfilesReply
 import com.tether.app.client.BrowserProfilesRequest
@@ -64,13 +65,13 @@ class BrowserProfilesBehaviourTest {
     private val work = BrowserProfileInfo("p1", "Work", heldBy = "Fix login")
     private val home = BrowserProfileInfo("p2", "Personal")
 
-    private fun show(source: FakeBrowserProfiles, protocol: Int? = BROWSER_PROFILES_MIN_PROTOCOL) {
+    private fun show(source: FakeBrowserProfiles, protocol: Int? = BROWSER_PROFILES_MIN_PROTOCOL, layout: com.tether.app.ui.components.TetherLayoutClass = com.tether.app.ui.components.TetherLayoutClass.Phone) {
         compose.setContent {
             val scope = rememberCoroutineScope()
             val runtime = remember { BrowserRuntimeController(FakeBrowser(), ServerFixtures.ORIGIN, scope, seed = BrowserSeed(status = BrowserFixtures.FOUND)) }
             val profiles = remember { BrowserProfilesController(source, scope) }
             CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
-                SettingsUnderTest(store.prefs, state, serverSettings = ServerFixtures.binding(serverProtocol = protocol), browser = BrowserBinding(runtime, profiles))
+                SettingsUnderTest(store.prefs, state, layout = layout, serverSettings = ServerFixtures.binding(serverProtocol = protocol), browser = BrowserBinding(runtime, profiles))
             }
         }
         compose.waitUntil(5_000) { state.draft != null }
@@ -91,6 +92,52 @@ class BrowserProfilesBehaviourTest {
         return out
     }
     private fun press(t: String) = tag(t).performScrollTo().performClick()
+
+    /** The node's laid-out box, not clipped to the scroll viewport (a clipped box off screen reads as empty). */
+    private fun bounds(t: String): androidx.compose.ui.geometry.Rect {
+        val n = tag(t).fetchSemanticsNode()
+        return androidx.compose.ui.geometry.Rect(n.positionInRoot, androidx.compose.ui.geometry.Size(n.size.width.toFloat(), n.size.height.toFloat()))
+    }
+
+    @Config(qualifiers = "w1280dp-h800dp-mdpi")
+    @Test fun onTheExpandedLayoutRenameAndDeleteSitSideBySideAndCompact() {
+        show(FakeBrowserProfiles(listOf(work)), layout = com.tether.app.ui.components.TetherLayoutClass.Expanded)
+        settled { exists(BrowserProfilesTags.row("p1")) }
+        val rename = bounds(BrowserProfilesTags.rename("p1"))
+        val delete = bounds(BrowserProfilesTags.delete("p1"))
+        val row = bounds(BrowserProfilesTags.row("p1"))
+        assertEquals(rename.top, delete.top, 0.5f)
+        assertTrue("Rename then Delete, left to right", rename.right <= delete.left)
+        assertTrue("neither key fills the row: ${rename.width} ${delete.width} of ${row.width}", rename.width + delete.width < row.width)
+        press(BrowserProfilesTags.rename("p1"))
+        val save = bounds(BrowserProfilesTags.save("p1"))
+        val cancel = bounds(BrowserProfilesTags.cancel("p1"))
+        assertEquals(save.top, cancel.top, 0.5f)
+        assertTrue(save.right <= cancel.left)
+    }
+
+    @Test fun onThePhoneRenameAndDeleteStackAndFillTheSameWidth() {
+        show(FakeBrowserProfiles(listOf(work)))
+        settled { exists(BrowserProfilesTags.row("p1")) }
+        val rename = bounds(BrowserProfilesTags.rename("p1"))
+        val delete = bounds(BrowserProfilesTags.delete("p1"))
+        assertTrue("Delete sits under Rename", delete.top >= rename.bottom)
+        assertEquals(rename.left, delete.left, 0.5f)
+        assertEquals(rename.width, delete.width, 0.5f)
+    }
+
+    @Test fun everyKeyOfTheBlockHasATouchAreaOfAtLeast44dp() {
+        val dp = 44f * compose.density.density
+        show(FakeBrowserProfiles(listOf(work)))
+        settled { exists(BrowserProfilesTags.row("p1")) }
+        for (t in listOf(BrowserProfilesTags.rename("p1"), BrowserProfilesTags.delete("p1"), BrowserProfilesTags.CreateKey)) {
+            assertTrue("$t height", bounds(t).height >= dp - 0.5f)
+        }
+        press(BrowserProfilesTags.rename("p1"))
+        for (t in listOf(BrowserProfilesTags.save("p1"), BrowserProfilesTags.cancel("p1"))) {
+            assertTrue("$t height", bounds(t).height >= dp - 0.5f)
+        }
+    }
 
     @Test fun aServerBelow171IsNeverOfferedProfilesAndNothingIsSent() {
         val source = FakeBrowserProfiles(listOf(work))

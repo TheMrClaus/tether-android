@@ -134,7 +134,7 @@ private fun ProfileRow(profile: com.tether.app.protocol.BrowserProfileInfo, c: B
                 }
             },
             control = { m ->
-                KeyGroup(narrow, m) { k ->
+                KeyGroup(m) { k ->
                     if (editing != null) {
                         TetherKey(onClick = c::rename, enabled = !c.busy, classes = KeyClasses.ButtonSecondary, label = BrowserProfilesCopy.SAVE, modifier = k.testTag(BrowserProfilesTags.save(id)))
                         TetherKey(onClick = c::cancelRename, classes = KeyClasses.ButtonSecondary, label = BrowserProfilesCopy.CANCEL, modifier = k.testTag(BrowserProfilesTags.cancel(id)))
@@ -207,13 +207,14 @@ private fun CreateRow(c: BrowserProfilesController, narrow: Boolean) {
     }
 }
 
-/** The row's keys: stacked and full width on a phone (the web's narrow rows), side by side otherwise. */
+/** The row's keys: stacked and full width where the settings rows stack (the web's 35rem rule, as [SettingsRow]), compact and side by side otherwise. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun KeyGroup(narrow: Boolean, modifier: Modifier, keys: @Composable (Modifier) -> Unit) {
-    if (narrow) {
+private fun KeyGroup(modifier: Modifier, keys: @Composable (Modifier) -> Unit) {
+    if (LocalSettingsRowsStack.current) {
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) { keys(Modifier.fillMaxWidth()) }
     } else {
-        androidx.compose.foundation.layout.Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) { keys(Modifier) }
+        FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { keys(Modifier) }
     }
 }
 
