@@ -3791,6 +3791,12 @@ class RealTetherClient(
                     if (requestId != null) clearBrowseLocked()
                 }
             }
+            // v171: the answer to this socket's `browser-profiles`; only the call carrying its requestId resolves.
+            is ServerMessage.BrowserProfiles -> ifCurrent(webSocket) {
+                browserProfileWaiters.remove(message.requestId)?.complete(
+                    BrowserProfilesReply(message.ok, message.code, message.error, message.profiles),
+                )
+            }
             // T5.3: the two search replies (SearchSync.kt drops a superseded global one).
             is ServerMessage.SearchResults, is ServerMessage.GlobalSearchResults ->
                 ifCurrent(webSocket) { searchSync.onFrame(message) }
@@ -5702,6 +5708,30 @@ class RealTetherClient(
 
     /** queueId -> sessionId of the Steer presses in flight or refused, so [forgetQueueSteer] and an answer find their rows. Guarded by [lock]. */
     private val steerSessions = HashMap<String, String>()
+
+    /** requestId -> the call waiting for its `browser_profiles` reply. Guarded by [lock]. */
+    private val browserProfileWaiters = HashMap<String, CompletableDeferred<BrowserProfilesReply>>()
+    internal var browserProfileRequestIds: () -> String = { UUID.randomUUID().toString() }
+    internal var browserProfilesTimeoutMs: Long = BROWSER_PROFILES_TIMEOUT_MS
+
+    override suspend fun browserProfiles(request: BrowserProfilesRequest): BrowserProfilesReply {
+        val requestId = browserProfileRequestIds()
+        val waiter = CompletableDeferred<BrowserProfilesReply>()
+        val sent = synchronized(lock) {
+            val ws = (if (socketOpen && handshakeDone && !haltedLocked()) socket else null) ?: return@synchronized false
+            browserProfileWaiters[requestId] = waiter
+            ws.send(request.frame(requestId).encode())
+        }
+        if (!sent) {
+            synchronized(lock) { browserProfileWaiters.remove(requestId) }
+            return BrowserProfilesReply.NotSent
+        }
+        try {
+            return withTimeoutOrNull(browserProfilesTimeoutMs) { waiter.await() } ?: BrowserProfilesReply.Unavailable
+        } finally {
+            synchronized(lock) { browserProfileWaiters.remove(requestId) }
+        }
+    }
 
     override fun queueSteer(sessionId: String, queueId: String): Boolean {
         if (sessionId.isEmpty() || queueId.isEmpty()) return false

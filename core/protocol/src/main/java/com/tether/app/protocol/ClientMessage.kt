@@ -488,6 +488,24 @@ sealed interface ClientMessage {
         }
     }
 
+    /**
+     * v171 `browser-profiles` (owner-grade): [action] is "list" | "create" | "rename" | "delete"; [requestId] pairs the
+     * `browser_profiles` reply. Only the keys an action uses are written (lib/browser-profiles-ui.ts `profilesFrame`).
+     */
+    data class BrowserProfiles(
+        val action: String,
+        val requestId: String,
+        val name: String? = null,
+        val profileId: String? = null,
+    ) : ClientMessage {
+        override fun toJsonObject() = frame("browser-profiles") {
+            put("action", action)
+            put("requestId", requestId)
+            if (name != null) put("name", name)
+            if (profileId != null) put("profileId", profileId)
+        }
+    }
+
     data class DismissNotice(val sessionId: String, val dismissKey: String) : ClientMessage {
         override fun toJsonObject() = frame("dismiss-notice") {
             put("sessionId", sessionId)
@@ -1233,6 +1251,7 @@ private object ClientDecoders {
         "queue-remove" to { r -> ClientMessage.QueueRemove(r.str("sessionId"), r.str("queueId")) },
         "interrupt" to { r -> ClientMessage.Interrupt(r.str("sessionId"), r.o.boolTrue("stopBackground"), r.o.str("queueId")) },
         "queue-steer" to { r -> ClientMessage.QueueSteer(r.str("sessionId"), r.str("queueId")) },
+        "browser-profiles" to { r -> ClientMessage.BrowserProfiles(r.str("action"), r.str("requestId"), r.o.str("name"), r.o.str("profileId")) },
         "dismiss-notice" to { r -> ClientMessage.DismissNotice(r.str("sessionId"), r.str("dismissKey")) },
         "rate-limit-resume" to { r -> ClientMessage.RateLimitResume(r.str("sessionId"), r.long("resetsAt"), r.str("action")) },
         "scheduled-actions" to { _ -> ClientMessage.ScheduledActionsRequest },

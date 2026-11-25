@@ -30,6 +30,8 @@ object WireTypeLists {
         "supervisor_status",
         // v165 (steer a queued message)
         "queue_steer_result",
+        // v171 (named browser profiles)
+        "browser_profiles",
     )
 
     val CLIENT_TYPES: Set<String> = setOf(
@@ -50,21 +52,23 @@ object WireTypeLists {
         "overview-subscribe", "overview-unsubscribe",
         // v165 (steer a queued message)
         "queue-steer",
+        // v171 (named browser profiles)
+        "browser-profiles",
     )
 
     /**
      * Types added after the reducer/helpers base (887c222): none now. The wire corpus is re-vendored at 19c56e25 (v152), which
      * carries them all (W48), so both SINCE_PARITY_BASE_* sets are empty and stay as the hook for the next re-vendor.
      */
-    val SINCE_PARITY_BASE_SERVER: Set<String> = setOf("supervisor_status", "queue_steer_result")
+    val SINCE_PARITY_BASE_SERVER: Set<String> = setOf("supervisor_status", "queue_steer_result", "browser_profiles")
     /**
      * Server types newer than docs/parity/matrix.json, which is generated at tether 29537e0 (PROTOCOL 143) and so lacks the v144
      * `server-settings-result`; it joins the matrix when the matrix is rebuilt at a newer base (the S0 corpus slice).
      */
-    val SINCE_MATRIX_SERVER: Set<String> = setOf("server-settings-result", "supervisor_status", "queue_steer_result")
+    val SINCE_MATRIX_SERVER: Set<String> = setOf("server-settings-result", "supervisor_status", "queue_steer_result", "browser_profiles")
 
-    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("queue-steer")
+    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("queue-steer", "browser-profiles")
 
     /** Client types newer than docs/parity/matrix.json (PROTOCOL 143): the v165 `queue-steer`. */
-    val SINCE_MATRIX_CLIENT: Set<String> = setOf("queue-steer")
+    val SINCE_MATRIX_CLIENT: Set<String> = setOf("queue-steer", "browser-profiles")
 }

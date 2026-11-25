@@ -106,7 +106,11 @@ object ServerFixtures {
     /** v165: the answer to one `queue-steer` (hand-authored: newer than the corpus). */
     const val QUEUE_STEER_RESULT = """{"type":"queue_steer_result","sessionId":"s1","queueId":"q1","status":"not_steerable","reason":"attachments"}"""
 
+    /** v171: the answer to one `browser-profiles` (hand-authored: newer than the corpus). */
+    const val BROWSER_PROFILES = """{"type":"browser_profiles","requestId":"r1","ok":true,"profiles":[{"id":"p1","name":"Work","created":1,"lastUsed":2,"heldBy":"Fix login"},{"id":"p2","name":"Personal","created":3,"lastUsed":4,"heldBy":null}]}"""
+
     val HAND_AUTHORED: Map<String, String> = mapOf(
+        "browser_profiles" to BROWSER_PROFILES,
         "queue_steer_result" to QUEUE_STEER_RESULT,
         "supervisor_status" to SUPERVISOR_STATUS,
         "server-settings-result" to SERVER_SETTINGS_RESULT,
