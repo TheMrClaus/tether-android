@@ -1041,7 +1041,7 @@ private fun MessageWell(draft: DraftComposerState, readiness: String, narrow: Bo
  * folder…" as its last row (the interim folder picker, T8.2). A pick sets the draft's folder.
  */
 @Composable
-private fun WorkspaceSelector(cwd: String, quickPicks: List<WorkspaceQuickPick>, root: String, onSelect: (String) -> Unit, onBrowse: () -> Unit) {
+internal fun WorkspaceSelector(cwd: String, quickPicks: List<WorkspaceQuickPick>, root: String, onSelect: (String) -> Unit, onBrowse: () -> Unit) {
     var open by rememberSaveable { mutableStateOf(false) }
     val shown = compactPath(cwd, root).ifEmpty { "Folder" }
     Box {

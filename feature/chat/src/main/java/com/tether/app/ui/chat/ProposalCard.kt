@@ -20,16 +20,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -95,10 +98,48 @@ class ProposalActions(
     val onDismiss: (proposalId: String) -> Unit = {},
     val onOpenSession: (sessionId: String) -> Unit = {},
     val optionsHost: ProposalOptionsHost? = null,
+    /** The settings the operator's Options choices ended on, per proposal id (kept while the screen lives, so a scrolled-away card still starts with them). */
+    val chosen: MutableMap<String, JsonObject> = HashMap(),
+    /** The server speaks protocol >= 175 ([com.tether.app.client.proposalCardSupported]): a proposal shows as its card; below it the tool row stays. */
+    val cardShown: Boolean = false,
 ) {
     companion object {
         val Unavailable = ProposalActions()
     }
+}
+
+fun buildProposalActions(
+    vm: com.tether.app.ui.TetherViewModel,
+    sessionId: String?,
+    local: Map<String, ProposalLocalState>,
+    host: ProposalOptionsHost?,
+    chosen: MutableMap<String, JsonObject>,
+    cardShown: Boolean,
+): ProposalActions {
+    fun send(kind: String, proposalId: String, settings: JsonObject?) {
+        if (sessionId != null) vm.client.sendProposal(com.tether.app.protocol.ClientMessage.ProposalFrame(kind, sessionId, proposalId, settings, java.util.UUID.randomUUID().toString()))
+    }
+    return ProposalActions(
+        sessionId = sessionId,
+        local = local,
+        onStart = { id, settings -> send("start", id, settings) },
+        onHere = { id -> send("here", id, null) },
+        onDismiss = { id -> send("dismiss", id, null) },
+        onOpenSession = { id -> vm.selectSession(id) },
+        optionsHost = host,
+        chosen = chosen,
+        cardShown = cardShown,
+    )
+}
+
+/** The card's actions for the shown session: the shell provides them around the chat screen ([LocalProposalActions]). */
+@Composable
+fun rememberProposalActions(vm: com.tether.app.ui.TetherViewModel, sessionId: String?, host: ProposalOptionsHost?): ProposalActions {
+    val local by vm.client.proposalLocal.collectAsStateWithLifecycle()
+    val protocol by vm.client.serverProtocolVersion.collectAsStateWithLifecycle()
+    val chosen = remember { HashMap<String, JsonObject>() }
+    val shown = com.tether.app.client.proposalCardSupported(protocol)
+    return remember(vm.client, sessionId, local, host, shown) { buildProposalActions(vm, sessionId, local, host, chosen, shown) }
 }
 
 val LocalProposalActions = compositionLocalOf { ProposalActions.Unavailable }
@@ -116,8 +157,37 @@ val LocalTranscriptViewport = compositionLocalOf { TranscriptViewport() }
  * fits, else above, else on the side with more room, never outside. [capHeight] is the height it may take.
  */
 internal object ProposalPlacement {
+    /** The box the panel may use: the list's visible box (the window only when the list has not reported yet) minus the keyboard. */
+    fun panelBounds(list: IntRect?, windowWidth: Int, windowHeight: Int, ime: Int): IntRect {
+        val box = list ?: IntRect(0, 0, windowWidth, windowHeight)
+        return IntRect(box.left, box.top, box.right, minOf(box.bottom, windowHeight - ime))
+    }
+
     fun capHeight(card: IntRect, bounds: IntRect, gap: Int, floor: Int): Int =
         maxOf(floor, maxOf(bounds.bottom - card.bottom - gap, card.top - bounds.top - gap))
+
+    /**
+     * Scroll to fit, once on open (spec 3.3): how far to scroll the list (positive = further down the transcript) so the card is in
+     * view and the panel of [content] height fits below it (else above). Null when the card is in view and the panel already fits
+     * on a side, or when no scroll can make room (the panel then caps and scrolls itself). [actionRow] is the card's action row,
+     * which must stay inside [bounds] when the scroll is to make room below.
+     */
+    fun scrollToFit(card: IntRect, content: Int, bounds: IntRect, gap: Int, actionRow: Int): Float? {
+        val nearest = when {
+            card.bottom > bounds.bottom -> card.bottom - bounds.bottom
+            card.top < bounds.top -> card.top - bounds.top
+            else -> 0
+        }
+        val moved = IntRect(card.left, card.top - nearest, card.right, card.bottom - nearest)
+        val below = bounds.bottom - moved.bottom - gap
+        val above = moved.top - bounds.top - gap
+        if (content <= below || content <= above) return nearest.takeIf { it != 0 }?.toFloat()
+        val down = content - below
+        if (down <= moved.bottom - bounds.top - actionRow) return (nearest + down).toFloat()
+        val up = content - above
+        if (up <= bounds.bottom - moved.bottom) return (nearest - up).toFloat()
+        return nearest.takeIf { it != 0 }?.toFloat()
+    }
 
     fun place(card: IntRect, contentHeight: Int, bounds: IntRect, gap: Int): Int {
         val below = bounds.bottom - card.bottom - gap
@@ -145,20 +215,14 @@ private fun Rect.toIntRect() = IntRect(left.toInt(), top.toInt(), right.toInt(),
 internal fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val actions = LocalProposalActions.current
-    val local = actions.local[proposal.proposalId]
-    val state = when {
-        proposal.state.resolved -> proposal.state
-        local?.starting == true -> ProposalState.Starting
-        else -> proposal.state
-    }
-    val refusalText = local?.refusal?.text
-    val refusalCode = local?.refusal?.code
-    val view = proposal.copy(state = if (state == ProposalState.Pending && refusalText != null) ProposalState.Refused else state, refusalCode = refusalCode ?: proposal.refusalCode)
-    val busy = state == ProposalState.Starting || local != null && local.refusal == null
+    val face = proposalFace(proposal, actions.local[proposal.proposalId])
+    val state = face.state
+    val refusalText = face.refusalText
+    val view = face.view
+    val busy = face.busy
     var optionsOpen by remember(proposal.proposalId) { mutableStateOf(false) }
     var previewOpen by remember(proposal.proposalId) { mutableStateOf(false) }
     var cardBounds by remember { mutableStateOf<Rect?>(null) }
-    var settings by remember(proposal.proposalId) { mutableStateOf<JsonObject?>(null) }
     val shape = RoundedCornerShape(14.dp)
     Column(
         modifier.fillMaxWidth().border(1.dp, t.line, shape).background(t.slate, shape)
@@ -219,14 +283,14 @@ internal fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier)
                     }
                     Box(Modifier.weight(1f))
                     ProposalButton("Do it here", primary = false, enabled = !busy, tag = "proposal-here") { actions.onHere(proposal.proposalId) }
-                    ProposalButton(if (state == ProposalState.Starting) "Starting…" else "Start", primary = true, enabled = !busy, tag = "proposal-start") { actions.onStart(proposal.proposalId, settings) }
+                    ProposalButton(if (state == ProposalState.Starting) "Starting…" else "Start", primary = true, enabled = !busy, tag = "proposal-start") { actions.onStart(proposal.proposalId, actions.chosen[proposal.proposalId]) }
                 }
             }
         }
     }
     val box = cardBounds
     val host = actions.optionsHost
-    if (optionsOpen && !state.resolved && host != null && box != null) ProposalOptionsPanel(proposal, view, box, host, busy) { settings = it }
+    if (optionsOpen && !state.resolved && host != null && box != null) ProposalOptionsPanel(proposal, view, box, host, busy) { actions.chosen[proposal.proposalId] = it }
     if (previewOpen) ProposalPreviewDialog(proposal) { previewOpen = false }
 }
 
@@ -265,11 +329,18 @@ private fun ProposalOptionsPanel(proposal: ProposalView, view: ProposalView, car
     val density = LocalDensity.current
     val windowHeight = LocalWindowInfo.current.containerSize.height
     val ime = WindowInsets.ime.getBottom(density)
-    val list = viewport.bounds ?: Rect(0f, 0f, LocalWindowInfo.current.containerSize.width.toFloat(), windowHeight.toFloat())
-    val bounds = IntRect(list.left.toInt(), list.top.toInt(), list.right.toInt(), minOf(list.bottom.toInt(), windowHeight - ime))
+    val bounds = ProposalPlacement.panelBounds(viewport.bounds?.toIntRect(), LocalWindowInfo.current.containerSize.width, windowHeight, ime)
     val gap = with(density) { 4.dp.roundToPx() }
     val cap = ProposalPlacement.capHeight(card.toIntRect(), bounds, gap, with(density) { 96.dp.roundToPx() })
     val actions = LocalProposalActions.current
+    var natural by remember { mutableStateOf(0) }
+    var scrolled by remember { mutableStateOf(false) }
+    LaunchedEffect(natural) {
+        if (scrolled || natural == 0) return@LaunchedEffect
+        scrolled = true
+        val delta = ProposalPlacement.scrollToFit(card.toIntRect(), natural, bounds, gap, with(density) { 56.dp.roundToPx() })
+        if (delta != null) viewport.scrollBy(delta)
+    }
     Popup(
         popupPositionProvider = remember(card, bounds) { ProposalPositionProvider(card.toIntRect(), bounds, gap, with(density) { 8.dp.roundToPx() }) },
         properties = PopupProperties(focusable = false),
@@ -278,7 +349,9 @@ private fun ProposalOptionsPanel(proposal: ProposalView, view: ProposalView, car
             Modifier.padding(horizontal = 4.dp).heightIn(max = with(density) { cap.toDp() }).border(1.dp, t.line, RoundedCornerShape(16.dp)).background(t.graphite, RoundedCornerShape(16.dp))
                 .verticalScroll(rememberScrollState()).padding(6.dp).testTag("proposal-options-panel"),
         ) {
-            host.Rows(ProposalOptionsRequest(proposal.proposalId, actions.sessionId.orEmpty(), proposal.suggestions, proposal.replaced, view.faultRow, !busy, onSettings))
+            Column(Modifier.onSizeChanged { natural = it.height }) {
+                host.Rows(ProposalOptionsRequest(proposal.proposalId, actions.sessionId.orEmpty(), proposal.suggestions, proposal.replaced, view.faultRow, !busy, onSettings))
+            }
         }
     }
 }

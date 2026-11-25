@@ -52,8 +52,15 @@ object Proposals {
      * The `settings` of a `proposal-start`: the create frame's own settings for the card's final form, key for key, minus the
      * keys a proposal start does not take (the frame's type, requestId, name; never the prompt, which the server holds).
      */
-    fun startSettings(form: JsObj, entry: ProviderCatalogEntry, modified: JsObj): JsonObject {
+    fun startSettings(form: JsObj, entry: ProviderCatalogEntry, modified: JsObj, codexCurrent: HandoverDraftForm.CodexCurrent? = null): JsonObject {
         val create = CreateFrame.build(form, entry, modified, requestId = "x").toJsonObject()
-        return JsonObject(create.filterKeys { it != "type" && it != "requestId" && it != "name" && it != "prompt" && it != "text" })
+        val kept = create.filterKeys { it != "type" && it != "requestId" && it != "name" && it != "prompt" && it != "text" }.toMutableMap()
+        // Codex "Current (custom)": the agent's own triple goes out as it is (no preset reproduces it).
+        if (entry.provider == "codex" && codexCurrent != null && (form["mode"] as? com.tether.app.protocol.tree.JsStr)?.value == HandoverDraftForm.CODEX_CURRENT_MODE) {
+            codexCurrent.sandboxPolicy?.takeIf { it.isNotEmpty() }?.let { kept["sandboxPolicy"] = kotlinx.serialization.json.JsonPrimitive(it) }
+            kept["approvalPolicy"] = codexCurrent.approvalPolicy?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull
+            kept["approvalsReviewer"] = if (codexCurrent.approvalsReviewer == "auto_review") kotlinx.serialization.json.JsonPrimitive("auto_review") else kotlinx.serialization.json.JsonNull
+        }
+        return JsonObject(kept)
     }
 }

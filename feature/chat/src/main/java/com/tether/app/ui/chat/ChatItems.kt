@@ -320,12 +320,11 @@ internal fun buildChatItems(
         val turnDenials = placement.byTurn[turnId]
         val answeredList = (cardTurn?.get("answeredQuestions") as? JsArr)?.mapNotNull { (it as? JsObj)?.let(::answeredView) }.orEmpty()
         if (turn.continuation) items.add(ChatItem.Continuation(turnId, opens()))
-        // v175: with the card shown, the turn's `propose_session` tool rows give way to it (below 175 they stay).
+        // v175: with the card shown, each `propose_session` tool row gives way to its card, in place (below 175 the tool rows stay).
         val proposals = if (proposalCard) proposalViews(cardTurn) else emptyList()
-        val shownBlocks = if (proposals.isEmpty()) turn.blocks else turn.blocks.filterNot { id ->
-            turn.blocksById[id]?.let { it.kind == Vocab.BLOCK_TOOL && isProposeSessionTool(it.name) } == true
-        }
-        for (segment in segmentBlocks(shownBlocks, ::rawFor)) {
+        val chunks = proposalChunks(turn.blocks, proposals) { id -> turn.blocksById[id]?.let { it.kind == Vocab.BLOCK_TOOL && isProposeSessionTool(it.name) } == true }
+        for (chunk in chunks) {
+        for (segment in segmentBlocks(chunk.blockIds, ::rawFor)) {
             when (segment) {
                 is ActivitySegment.Group -> {
                     val raws = segment.blockIds.mapNotNull(::rawFor)
@@ -387,7 +386,8 @@ internal fun buildChatItems(
                 }
             }
         }
-        proposals.forEach { items.add(ChatItem.Proposal(turnId, it, opens())) }
+        chunk.card?.let { items.add(ChatItem.Proposal(turnId, it, opens())) }
+        }
         if (richCodex && turnObj != null) {
             // `CodexRichTurnDetails`: one `.turnDetails` stack (space-sm apart) after the blocks.
             var inDetails = false
@@ -446,3 +446,26 @@ internal fun sessionErrorText(lastError: String?): String? =
 internal fun outcomeAt(turnObj: JsObj?, turn: TurnProjection): Double? =
     (turnObj?.get("errorAt") as? JsNum)?.value ?: (turnObj?.get("endedAt") as? JsNum)?.value
         ?: turn.errorAt?.toDouble() ?: turn.endedAt?.toDouble()
+
+/** A run of a turn's blocks and the proposal card that follows it (null for the last run when no card is owed there). */
+internal class ProposalChunk(val blockIds: List<String>, val card: ProposalView?)
+
+/**
+ * The turn's blocks split at each `propose_session` tool block (dropped), the card of the n-th proposal taking the n-th such
+ * block's place; a proposal with no tool block of its own (a replay that lost it) follows the last run. No proposals: one run.
+ */
+internal fun proposalChunks(blocks: List<String>, proposals: List<ProposalView>, isProposeTool: (String) -> Boolean): List<ProposalChunk> {
+    if (proposals.isEmpty()) return listOf(ProposalChunk(blocks, null))
+    val out = ArrayList<ProposalChunk>()
+    var run = ArrayList<String>()
+    var next = 0
+    for (id in blocks) {
+        if (isProposeTool(id) && next < proposals.size) {
+            out.add(ProposalChunk(run, proposals[next++]))
+            run = ArrayList()
+        } else if (!isProposeTool(id)) run.add(id)
+    }
+    out.add(ProposalChunk(run, proposals.getOrNull(next)))
+    for (i in next + 1 until proposals.size) out.add(ProposalChunk(emptyList(), proposals[i]))
+    return out
+}

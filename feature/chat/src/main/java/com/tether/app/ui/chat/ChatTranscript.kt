@@ -163,15 +163,11 @@ internal fun ChatTranscript(
     handoverV151: Boolean = false,
     /** #301: what the shown session's own handover changed (the "Continued from" strip's change row); null = none. */
     handoverChange: HandoverChangeView? = null,
-    /** v175: the server speaks protocol >= 175 ([com.tether.app.client.proposalCardSupported]): a proposal shows as its card. */
-    proposalCard: Boolean = false,
-    /** v175: what the proposal card may do (its frames, opening the started session, the host's Options rows). */
-    proposals: ProposalActions = ProposalActions.Unavailable,
 ) {
     // Round 3: the card store in scope (the chat screen's), or one saved here.
     val cardStates = rememberCardStates()
-    CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices, LocalProposalActions provides proposals) {
-        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground, reviewFocus, onReviewShown, handedOffFrom, handoffPeer, onOpenSession, handoverV151, handoverChange, proposalCard)
+    CompositionLocalProvider(LocalConsent provides consent, LocalCardStates provides cardStates, LocalNoticeActions provides notices) {
+        ChatTranscriptBody(projection, tree, showThinking, onFetchTurns, modifier, roster, zone, listState, follow, restore, groupToggles, showTimeline, find, richCodex, richOpencode, showApprovals, consent.sessionId, onOpenCommand, liveCopy, sends, wellBackground, reviewFocus, onReviewShown, handedOffFrom, handoffPeer, onOpenSession, handoverV151, handoverChange)
     }
 }
 
@@ -205,7 +201,6 @@ private fun ChatTranscriptBody(
     onOpenSession: (String) -> Unit,
     handoverV151: Boolean,
     handoverChange: HandoverChangeView?,
-    proposalCard: Boolean,
 ) {
     val t = LocalTetherTokens.current
     val phone = currentLayoutClass() == TetherLayoutClass.Phone
@@ -227,6 +222,8 @@ private fun ChatTranscriptBody(
         if (wasActive[0] && !turnActive) mentionExistence?.endTurn()
         wasActive[0] = turnActive
     }
+    // v175: the card shows only when the host says the server speaks protocol >= 175 (ProposalActions.cardShown).
+    val proposalCard = LocalProposalActions.current.cardShown
     val proposalViewport = remember { TranscriptViewport() }
     proposalViewport.scrollBy = { delta -> listState.scrollBy(delta) }
     val observer = LocalChatDerivationObserver.current

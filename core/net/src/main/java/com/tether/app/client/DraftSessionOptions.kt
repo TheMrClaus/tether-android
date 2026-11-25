@@ -112,7 +112,7 @@ object DraftSessionOptionsModel {
         // draft-composer.tsx:530: the Approvals row is drawn in handover mode too (seeded from the source, HandoverDraftForm.seedFromSource).
         val base = of(entry, state.form)
         // W34 (df:869-896): Codex "Current (custom)" is the FIRST, selected Mode row while the source's triple matches no preset.
-        val current = state.handover?.codexCurrentOption?.takeIf { entry.provider == "codex" } ?: return base
+        val current = (state.handover?.codexCurrentOption ?: state.proposalCodexCurrent?.let(HandoverDraftForm::codexCurrentOption))?.takeIf { entry.provider == "codex" } ?: return base
         val mode = base.mode ?: return base
         val row = ControlOption(current.value, current.label, current.hint, danger = current.danger)
         val withCurrent = mode.copy(options = listOf(row) + mode.options.filter { it.value != current.value })
