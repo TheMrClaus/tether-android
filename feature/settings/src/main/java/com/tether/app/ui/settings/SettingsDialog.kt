@@ -271,7 +271,10 @@ fun SettingsScreen(
     val browser = androidx.lifecycle.viewmodel.compose.viewModel(key = BROWSER_VIEW_MODEL_KEY) {
         BrowserRuntimeViewModel(client.browserRuntime, GitHubConnectionViewModel.identityOf(client), GitHubConnectionViewModel.identitiesOf(client))
     }
-    val browserBinding = BrowserBinding(browser.controller)
+    // v171: the named browser profiles block, asked over the main socket; a fresh one per open Settings and per server.
+    val profilesScope = androidx.compose.runtime.rememberCoroutineScope()
+    val profilesController = remember(client, origin) { BrowserProfilesController({ client.browserProfiles(it) }, profilesScope) }
+    val browserBinding = BrowserBinding(browser.controller, profilesController)
     // ta-09ca E1: the narrow settings metrics (header 76, padding 20/18, h2 20, tabs 12/10) are studio.css:957's
     // `(max-width: 640px)` block, not the shell's 48rem: they apply to a window of 640 dp or less, the
     // class is not what decides here.
