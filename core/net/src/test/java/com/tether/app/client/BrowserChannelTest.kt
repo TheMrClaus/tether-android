@@ -240,7 +240,7 @@ class BrowserChannelTest {
         val (again, second) = opened()
         assertEquals(2, opener.opened.size)
         assertTrue(again.ui.value.connected)
-        assertEquals(listOf("""{"t":"open"}"""), second.sent)
+        assertEquals(listOf("""{"t":"profile"}""", """{"t":"open"}"""), second.sent)
     }
 
     @Test

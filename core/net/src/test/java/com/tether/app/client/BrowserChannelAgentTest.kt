@@ -128,6 +128,7 @@ class BrowserChannelAgentTest {
         now += 20_000
         start(socket)
         assertEquals(first, channel.agentNow().announcedAt)
+        now += 1000
         socket.serverSends("""{"t":"agent","phase":"end"}""")
         assertFalse(channel.agentNow().running)
         // Idle but 8 s or less since the last: not announced; just over 8 s: announced.
@@ -135,6 +136,7 @@ class BrowserChannelAgentTest {
         now = last + 8000
         start(socket)
         assertEquals(last, channel.agentNow().announcedAt)
+        now += 1000
         socket.serverSends("""{"t":"agent","phase":"end"}""")
         now = last + 8001
         start(socket)
