@@ -7,7 +7,6 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
@@ -15,6 +14,7 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import com.tether.app.client.BrowserChannel
 import com.tether.app.client.BrowserProfilesReply
@@ -80,6 +80,9 @@ class BrowserPaneAgentTest {
 
     private fun text(node: SemanticsNode): String = node.config.getOrNull(SemanticsProperties.Text)?.joinToString { it.text } ?: ""
 
+    private val DpRect.wd get() = (right - left).value
+    private val DpRect.ht get() = (bottom - top).value
+
     // ---- the marker ----
 
     @Test
@@ -89,12 +92,12 @@ class BrowserPaneAgentTest {
         server("""{"t":"agent","phase":"start","kind":"click","box":{"x":39,"y":84.4,"width":78,"height":42.2}}""")
         val stage = rule.onNodeWithTag(BrowserPaneTags.Stage).getBoundsInRoot()
         val marker = rule.onNodeWithTag(BrowserPaneTags.Marker).getBoundsInRoot()
-        val w = stage.width.value
-        val h = stage.height.value
+        val w = stage.wd
+        val h = stage.ht
         assertEquals(stage.left.value + w * 0.10f, marker.left.value, 0.6f)
         assertEquals(stage.top.value + h * 0.10f, marker.top.value, 0.6f)
-        assertEquals(w * 0.20f, marker.width.value, 0.6f)
-        assertEquals(h * 0.05f, marker.height.value, 0.6f)
+        assertEquals(w * 0.20f, marker.wd, 0.6f)
+        assertEquals(h * 0.05f, marker.ht, 0.6f)
     }
 
     @Test
@@ -104,9 +107,9 @@ class BrowserPaneAgentTest {
         server("""{"t":"agent","phase":"start","kind":"click","box":{"x":195,"y":422,"width":0,"height":0}}""")
         val stage = rule.onNodeWithTag(BrowserPaneTags.Stage).getBoundsInRoot()
         val marker = rule.onNodeWithTag(BrowserPaneTags.Marker).getBoundsInRoot()
-        assertEquals(20f, marker.width.value, 0.6f)
-        assertEquals(stage.left.value + stage.width.value / 2 - 10f, marker.left.value, 0.6f)
-        assertEquals(stage.top.value + stage.height.value / 2 - 10f, marker.top.value, 0.6f)
+        assertEquals(20f, marker.wd, 0.6f)
+        assertEquals(stage.left.value + stage.wd / 2 - 10f, marker.left.value, 0.6f)
+        assertEquals(stage.top.value + stage.ht / 2 - 10f, marker.top.value, 0.6f)
     }
 
     @Test
