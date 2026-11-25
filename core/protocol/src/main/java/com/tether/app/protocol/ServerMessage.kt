@@ -396,6 +396,19 @@ sealed interface ServerMessage {
      */
     data class QueueSteerResult(val sessionId: String, val queueId: String, val status: String, val reason: String? = null) : ServerMessage
 
+    /**
+     * v171 `browser_profiles`: the answer to one `browser-profiles`, to the asking socket only. [ok] is true only for a literal `true`;
+     * a refusal carries [code] and [error] (the server's own sentence) and the list is empty on `grade_refused` / `failed`.
+     * A row without a string id and name is dropped (lib/browser-profiles-ui.ts `readProfilesReply`).
+     */
+    data class BrowserProfiles(
+        val requestId: String,
+        val ok: Boolean,
+        val code: String? = null,
+        val error: String? = null,
+        val profiles: List<BrowserProfileInfo> = emptyList(),
+    ) : ServerMessage
+
     /** v154 `supervisor_status`: the agent supervisor is [state] "down" or "up" (any other value is carried, acted on by none). */
     data class SupervisorStatus(val state: String) : ServerMessage
 
@@ -1005,6 +1018,19 @@ private object ServerDecoders {
             )
         },
         "queue_steer_result" to { r -> ServerMessage.QueueSteerResult(r.str("sessionId"), r.str("queueId"), r.str("status"), r.o.str("reason")) },
+        "browser_profiles" to { r ->
+            ServerMessage.BrowserProfiles(
+                requestId = r.o.str("requestId") ?: "",
+                ok = r.o.boolTrue("ok"),
+                code = r.o.str("code"),
+                error = r.o.str("error"),
+                profiles = r.o.objList("profiles").orEmpty().mapNotNull { p ->
+                    val id = p.str("id") ?: return@mapNotNull null
+                    val name = p.str("name") ?: return@mapNotNull null
+                    BrowserProfileInfo(id, name, p.long("created") ?: 0L, p.long("lastUsed") ?: 0L, p.str("heldBy"))
+                },
+            )
+        },
         "supervisor_status" to { r -> ServerMessage.SupervisorStatus(r.str("state")) },
         "overview-snapshot" to { r ->
             ServerMessage.OverviewSnapshot(
@@ -1053,3 +1079,6 @@ data class ArchiveStaleSkipped(
 
 /** v141 `archive-stale-result.retention`. */
 data class ArchiveStaleRetention(val cap: Int = 0, val retiredNow: Int = 0, val willBePruned: Int = 0)
+
+/** One named browser profile as the server lists it (`heldBy` = the display name of the session whose browser holds it now, or null). */
+data class BrowserProfileInfo(val id: String, val name: String, val created: Long = 0L, val lastUsed: Long = 0L, val heldBy: String? = null)
