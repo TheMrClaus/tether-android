@@ -74,7 +74,7 @@ class BrowserProfilesController(
 
     /** The list follows the world: a quiet re-read when the screen comes back; none while this list's own action is in flight. */
     fun refreshQuietly() {
-        if (busy) return
+        if (busy || seed != null) return
         scope.launch {
             val reply = source.request(BrowserProfilesRequest.List)
             if (!busy && reply.ok) {

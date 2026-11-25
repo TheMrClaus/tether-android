@@ -71,7 +71,12 @@ internal fun BrowserProfilesBlock(c: BrowserProfilesController, narrow: Boolean)
     LaunchedEffect(c) { c.shown() }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(c, owner) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) c.refreshQuietly() }
+        // Adding an observer to a resumed screen replays ON_RESUME; the first read is shown()'s, so only a resume after a pause re-reads.
+        var paused = false
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) paused = true
+            else if (event == Lifecycle.Event.ON_RESUME && paused) { paused = false; c.refreshQuietly() }
+        }
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
