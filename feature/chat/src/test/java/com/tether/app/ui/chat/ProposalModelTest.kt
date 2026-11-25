@@ -106,10 +106,11 @@ class ProposalModelTest {
     @Test
     fun theLastCardStaysInsideTheListWhenTheWindowIsTallerThanTheList() {
         // The list ends at 700 inside a 1000px window; the keyboard takes 0. The bound is the list, so the panel flips above the last card.
-        val b = ProposalPlacement.panelBounds(IntRect(0, 100, 400, 700), 400, 1000, 0)
+        val list = IntRect(0, 100, 400, 700)
+        val b = ProposalPlacement.panelBounds(list, 400, 1000, 0)
         val last = IntRect(10, 560, 390, 690)
         val y = ProposalPlacement.place(last, 300, b, 4)
-        assertTrue("the last item's panel is inside the list: y=$y", y >= b.top && y + 300 <= b.bottom)
+        assertTrue("the last item's panel is inside the list: y=$y", y >= list.top && y + 300 <= list.bottom)
     }
 
     @Test
