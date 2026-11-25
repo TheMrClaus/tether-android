@@ -336,6 +336,8 @@ class DraftSheetActions(
     val onSelectMode: (mode: String, drawnFor: String) -> Unit = { _, _ -> },
     /** ta-xki: opencode's Auto chip, with the provider it was drawn for. */
     val onToggleAuto: (drawnFor: String) -> Unit = {},
+    /** Reasonix's Approvals pick, with the provider the control was drawn for. */
+    val onSelectToolApproval: (value: String, drawnFor: String) -> Unit = { _, _ -> },
     /** ta-xki: the phone's sliders chip (the settings sheet's hub). */
     val onOpenSettings: () -> Unit = {},
     /** ta-23f: the worktree select ("local" or a mode). */
@@ -466,6 +468,7 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHu
         onSelectEffort = { composer.selectEffort(it) },
         onSelectMode = { mode, drawnFor -> composer.selectMode(mode, drawnFor) },
         onToggleAuto = { drawnFor -> composer.toggleAuto(drawnFor) },
+        onSelectToolApproval = { value, drawnFor -> composer.selectToolApproval(value, drawnFor) },
         onSelectIsolation = { composer.selectIsolation(it) },
         onWorktreeField = { field, value -> composer.setWorktreeField(field, value) },
         onGitHub = { tab -> github.openDialog(tab, draft.cwd(), disabled = draft.creating) },
@@ -527,6 +530,7 @@ private fun DraftComposerDialog(vm: TetherViewModel, prefs: UiPrefs, onOpenGitHu
             onSelectEffort = { composer.selectEffort(it) },
             onSelectMode = { mode, drawnFor -> composer.selectMode(mode, drawnFor) },
             onToggleAuto = { drawnFor -> composer.toggleAuto(drawnFor) },
+            onSelectToolApproval = { value, drawnFor -> composer.selectToolApproval(value, drawnFor) },
             onClose = settings::close,
         )
         Dialog(onDismissRequest = settings::close, properties = DraftDialogProperties) {

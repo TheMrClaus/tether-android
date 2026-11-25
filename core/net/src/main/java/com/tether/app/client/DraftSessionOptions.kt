@@ -38,9 +38,11 @@ data class DraftSessionOptions(
     val auto: AutoToggle?,
     /** #292 (owner ruling D2): the hint of the present-but-disabled Effort row of a Claude model KNOWN to have no effort; null otherwise. */
     val effortNoneHint: String? = null,
+    /** Reasonix's Approvals (Ask / Auto / YOLO), or null for every other provider (and a handover, whose successor inherits the source's). */
+    val approvals: ApprovalsControl? = null,
 ) {
     /** draft-composer.tsx `hasOtherSettings` minus Model: the phone's settings chip is drawn. */
-    val hasSettings: Boolean get() = effort != null || effortNoneHint != null || mode != null
+    val hasSettings: Boolean get() = effort != null || effortNoneHint != null || mode != null || approvals != null
 
     /**
      * The elevated posture in force, in words, for the phone's settings chip (app addition: the web
@@ -51,6 +53,7 @@ data class DraftSessionOptions(
         get() = when {
             auto?.on == true -> AUTO_LABEL
             modeDanger -> mode?.current?.label
+            approvals?.danger == true -> approvals.word
             else -> null
         }
 
@@ -106,7 +109,8 @@ object DraftSessionOptionsModel {
     fun of(state: DraftComposerState): DraftSessionOptions {
         val key = (state.form["key"] as? JsStr)?.value.orEmpty()
         val entry = state.entries.firstOrNull { it.key == key } ?: return DraftSessionOptions.None
-        val base = of(entry, state.form)
+        // A handover's successor inherits the source's Approvals (the server keeps an omitted one), so the row is not drawn there.
+        val base = of(entry, state.form).let { if (state.handover != null) it.copy(approvals = null) else it }
         // W34 (df:869-896): Codex "Current (custom)" is the FIRST, selected Mode row while the source's triple matches no preset.
         val current = state.handover?.codexCurrentOption?.takeIf { entry.provider == "codex" } ?: return base
         val mode = base.mode ?: return base
@@ -161,6 +165,7 @@ object DraftSessionOptionsModel {
             modeAriaLabel = if (provider == "codex") CODEX_ARIA else PERMISSION_ARIA,
             modeDanger = current?.danger == true,
             auto = auto,
+            approvals = DraftApprovals.of(provider, (form["toolApproval"] as? JsStr)?.value),
         )
     }
 

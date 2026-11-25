@@ -70,6 +70,9 @@ import com.tether.app.client.AUTO_LABEL
 import com.tether.app.client.ControlOption
 import com.tether.app.client.DraftSessionOptions
 import com.tether.app.client.ProviderCatalogEntry
+import com.tether.app.ui.chat.ApprovalsHubRow
+import com.tether.app.ui.chat.ApprovalsOptionRows
+import com.tether.app.ui.chat.ApprovalsPill
 import com.tether.app.ui.chat.ControlOptionRow
 import com.tether.app.ui.chat.ControlPill
 import com.tether.app.ui.chat.ControlSelect
@@ -192,6 +195,11 @@ internal fun DraftLiveRow(inputs: DraftSheetInputs, actions: DraftSheetActions) 
                 )
             }
         }
+        options.approvals?.let { approvals ->
+            Named("Approvals", Modifier.align(Alignment.CenterVertically)) {
+                ApprovalsPill(approvals, enabled = !inputs.draft.creating, onSelect = { actions.onSelectToolApproval(it, options.provider) })
+            }
+        }
         options.auto?.let { auto -> DraftAutoChip(auto.on, { actions.onToggleAuto(options.provider) }, Modifier.align(Alignment.CenterVertically)) }
     }
 }
@@ -307,7 +315,7 @@ internal fun DraftSettingsChip(elevated: String?, onClick: () -> Unit) {
 // -------------------------------------------------------------------------------------------------
 
 /** session-settings-sheet.tsx SheetView, the draft's subset (no Fast / Approval / Auto-continue). */
-enum class DraftSettingsView { Root, Model, Effort, Mode }
+enum class DraftSettingsView { Root, Model, Effort, Mode, Approvals }
 
 /**
  * The sheet's own state (session-settings-sheet.tsx useStates): open, the view, the view it was opened
@@ -375,6 +383,8 @@ class DraftSettingsActions(
     val onSelectMode: (mode: String, drawnFor: String) -> Unit = { _, _ -> },
     /** opencode's Auto row, with the provider it was drawn for. */
     val onToggleAuto: (drawnFor: String) -> Unit = {},
+    /** Reasonix's Approvals pick, with the provider the row was drawn for. */
+    val onSelectToolApproval: (value: String, drawnFor: String) -> Unit = { _, _ -> },
     val onClose: () -> Unit = {},
 )
 
@@ -430,6 +440,7 @@ fun DraftSettingsFrame(
             DraftSettingsView.Model -> "Model"
             DraftSettingsView.Effort -> "Effort"
             DraftSettingsView.Mode -> "Mode"
+            DraftSettingsView.Approvals -> "Approvals"
         }
         Column(
             case
@@ -469,6 +480,7 @@ fun DraftSettingsFrame(
                             val value = if (autoOn) AUTO_LABEL else mode.current?.label.orEmpty()
                             HubRow(TetherIcons.Shield, "Mode", value, danger = autoOn || options.modeDanger) { state.view = DraftSettingsView.Mode }
                         }
+                        options.approvals?.let { approvals -> ApprovalsHubRow(approvals) { state.view = DraftSettingsView.Approvals } }
                     }
                 }
                 DraftSettingsView.Model -> ModelBrowserPanel(
@@ -486,6 +498,11 @@ fun DraftSettingsFrame(
                                 state.backToRoot()
                             }
                         }
+                    }
+                }
+                DraftSettingsView.Approvals -> SheetBody {
+                    options.approvals?.let { approvals ->
+                        ApprovalsOptionRows(approvals, enabled = !inputs.draft.creating, onSelect = { actions.onSelectToolApproval(it, options.provider) }, onDone = state::backToRoot)
                     }
                 }
                 DraftSettingsView.Mode -> SheetBody {

@@ -534,6 +534,17 @@ class DraftComposerModel(
     }
 
     /**
+     * use-draft-composer.ts onSelectToolApproval: Reasonix's Approvals pick (Ask / Auto / YOLO), kept in the draft form until
+     * Send. [drawnFor] is the provider the control was drawn for: a stale tap changes nothing. True when it was taken.
+     */
+    fun selectToolApproval(value: String, drawnFor: String): Boolean {
+        val provider = entryForKey(formKey())?.provider ?: return false
+        if (provider != drawnFor || provider != "reasonix" || !DraftApprovals.isChoice(value)) return false
+        dispatch(JsObj.of("type" to JsStr("SET_TOOL_APPROVAL_FROM_USER"), "toolApproval" to JsStr(value)))
+        return true
+    }
+
+    /**
      * draft-composer.tsx toggleAuto (opencode's Auto chip): Auto on is `bypassPermissions` (Build +
      * `approvalPolicy: never` on the create), off is Build ("default"). Nothing for a provider without
      * the chip. True when it was taken.
