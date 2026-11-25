@@ -7,7 +7,9 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertTouchHeightIsEqualTo
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -41,11 +43,11 @@ class BrowserPaneAgentTest {
     private var listCalls = 0
     private val requests = mutableListOf<BrowserProfilesRequest>()
 
-    private fun show(profiles: (suspend (BrowserProfilesRequest) -> BrowserProfilesReply)? = null): BrowserChannel {
+    private fun show(wellWidth: androidx.compose.ui.unit.Dp? = null, profiles: (suspend (BrowserProfilesRequest) -> BrowserProfilesReply)? = null): BrowserChannel {
         val channel = BrowserChannel(opener, "s1") { now }
         channel.connect()
         rule.setContent {
-            ChatHost(TetherSkin.StudioDark, wellHeight = WellHeightPhone) {
+            ChatHost(TetherSkin.StudioDark, wellHeight = WellHeightPhone, wellWidth = wellWidth) {
                 BrowserPane(channel, onClose = {}, modifier = Modifier.fillMaxSize(), browserProfiles = profiles)
             }
         }
@@ -179,11 +181,23 @@ class BrowserPaneAgentTest {
     fun theTabPickerIsA48dpTargetThatSendsTheTabInputWithTheId() {
         show()
         server("""{"t":"state","url":"https://a.test/",$viewport,"tabs":${tabs(1)}}""")
-        rule.onNodeWithTag(BrowserPaneTags.TabIndicator).assertHeightIsAtLeast(48.dp)
+        rule.onNodeWithTag(BrowserPaneTags.TabIndicator).assertTouchHeightIsEqualTo(48.dp)
         rule.onNodeWithTag(BrowserPaneTags.TabIndicator).assertTextEquals("Tab 1 of 3 · Docs")
         rule.onNodeWithTag(BrowserPaneTags.TabIndicator).performClick()
         rule.onNodeWithTag(BrowserPaneTags.tabOption("t3")).performClick()
         assertEquals(listOf("""{"t":"input","event":{"type":"tab","action":"switch","id":"t3"}}"""), socket.sent)
+    }
+
+    @Test
+    fun theStatusLineKeepsItsHeightWithOneTabAndWithSeveral() {
+        show()
+        server("""{"t":"state","url":"https://a.test/",$viewport,"tabs":[{"index":1,"active":true,"url":"https://Docs.test/","title":"Docs","id":"t1"}]}""")
+        val one = rule.onNodeWithTag(BrowserPaneTags.Status).getUnclippedBoundsInRoot()
+        server("""{"t":"state","url":"https://a.test/",$viewport,"tabs":${tabs(1)}}""")
+        rule.onNodeWithTag(BrowserPaneTags.TabIndicator).assertHeightIsEqualTo(44.dp)
+        val many = rule.onNodeWithTag(BrowserPaneTags.Status).getUnclippedBoundsInRoot()
+        assertEquals(one.bottom - one.top, many.bottom - many.top)
+        assertEquals(one.top, many.top)
     }
 
     @Test
@@ -217,7 +231,7 @@ class BrowserPaneAgentTest {
 
     @Test
     fun theSelectListsTheDefaultTheNamesAndWhoHoldsOne() {
-        show { request -> requests += request; listed }
+        show(profiles = { request -> requests += request; listed })
         page()
         rule.onNodeWithTag(BrowserPaneTags.ProfileSelect).assertExists()
         rule.onNodeWithTag(BrowserPaneTags.ProfileHint).assertTextEquals("Using: Throwaway profile (default). Changing the profile restarts the open browser on it.")
@@ -228,9 +242,35 @@ class BrowserPaneAgentTest {
         assertEquals("Mail (in use by Build)", text(rule.onNodeWithTag(BrowserPaneTags.profileOption("p2")).fetchSemanticsNode()))
     }
 
+    private fun profileTextStyleAndOverflow(): Pair<androidx.compose.ui.text.TextStyle, Boolean> {
+        val text = rule.onNodeWithTag(BrowserPaneTags.ProfileLabel, useUnmergedTree = true).fetchSemanticsNode()
+        val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        rule.runOnUiThread { text.config.getOrNull(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult)!!.action!!(results) }
+        val r = results.single()
+        return r.layoutInput.style to r.hasVisualOverflow
+    }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-mdpi")
+    fun theTabletProfileSelectSetsItsLabelAtTheChipStyleAndShowsTheDefaultWhole() {
+        show(wellWidth = 519.dp, profiles = { listed })
+        page()
+        val (style, overflow) = profileTextStyleAndOverflow()
+        assertEquals(PROFILE_CHIP_STYLE.fontSize, style.fontSize)
+        assertEquals(PROFILE_CHIP_STYLE.fontWeight, style.fontWeight)
+        assertEquals(false, overflow)
+    }
+
+    @Test
+    fun thePhoneProfileSelectKeepsTheFieldSize() {
+        show(wellWidth = 390.dp, profiles = { listed })
+        page()
+        assertEquals(androidx.compose.ui.unit.TextUnit(16f, androidx.compose.ui.unit.TextUnitType.Sp), profileTextStyleAndOverflow().first.fontSize)
+    }
+
     @Test
     fun aPickSendsTheProfileFrameAndTheDefaultSendsNull() {
-        show { listed }
+        show(profiles = { listed })
         page()
         rule.onNodeWithTag(BrowserPaneTags.ProfileSelect).performClick()
         rule.onNodeWithTag(BrowserPaneTags.profileOption("p1")).performClick()
@@ -241,7 +281,7 @@ class BrowserPaneAgentTest {
 
     @Test
     fun theSessionsOwnProfileShowsInTheHintAndTheListEvenWhenTheListLacksIt() {
-        show { BrowserProfilesReply(ok = true) }
+        show(profiles = { BrowserProfilesReply(ok = true) })
         server("""{"t":"state","url":"https://a.test/",$viewport,"profile":{"id":"p9","name":"Old"}}""")
         rule.onNodeWithTag(BrowserPaneTags.ProfileHint).assertTextEquals("Using: Old. Changing the profile restarts the open browser on it.")
         rule.onNodeWithTag(BrowserPaneTags.ProfileSelect).performClick()
@@ -250,7 +290,7 @@ class BrowserPaneAgentTest {
 
     @Test
     fun aFailedListKeepsTheSelectWithTheDefault() {
-        show { BrowserProfilesReply.Unavailable }
+        show(profiles = { BrowserProfilesReply.Unavailable })
         page()
         rule.onNodeWithTag(BrowserPaneTags.ProfileSelect).assertExists()
         rule.onNodeWithTag(BrowserPaneTags.ProfileSelect).performClick()
@@ -268,7 +308,7 @@ class BrowserPaneAgentTest {
 
     @Test
     fun aRefusedPickShowsTheServersWordsAndTheLabelStaysOnTheDefault() {
-        show { listed }
+        show(profiles = { listed })
         page()
         rule.onNodeWithTag(BrowserPaneTags.ProfileSelect).performClick()
         rule.onNodeWithTag(BrowserPaneTags.profileOption("p2")).performClick()
@@ -282,7 +322,7 @@ class BrowserPaneAgentTest {
 
     @Test
     fun theLiveRegionsAreTheWebsRowByRow() {
-        show { listed }
+        show(profiles = { listed })
         server("""{"t":"state","url":"https://localhost:3000/",$viewport,"urlNotice":{"kind":"non_public","host":"localhost:3000","indirect":false}}""")
         assertEquals(LiveRegionMode.Polite, liveRegion(BrowserPaneTags.UrlNotice))
         assertEquals(LiveRegionMode.Polite, liveRegion(BrowserPaneTags.LiveAgent))

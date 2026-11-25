@@ -123,6 +123,8 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.testTag as semanticsTestTag
+import androidx.compose.ui.semantics.getTextLayoutResult
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -199,6 +201,7 @@ object BrowserPaneTags {
     const val LiveAgent = "browser-live-region"
     const val LiveTab = "browser-tab-live-region"
     const val ProfileSelect = "browser-profile-select"
+    const val ProfileLabel = "browser-profile-label"
     const val ProfileHint = "browser-profile-hint"
     const val ProfileRefusal = "browser-profile-refusal"
     fun tabOption(id: String) = "browser-tab-option-$id"
@@ -444,6 +447,9 @@ internal object BrowserPaneMetrics {
 private val ChipText = 13.sp
 private val FieldText = 16.sp
 
+/** The chip row's text style (Select elements / Screenshot on pick); the tablet profile select uses it. */
+internal val PROFILE_CHIP_STYLE = TextStyle(fontFamily = Manrope, fontWeight = FontWeight(500), fontSize = ChipText)
+
 /** `.status` / `.profileHint` text (:702-713). */
 private val StatusText = 11.sp
 
@@ -628,10 +634,10 @@ internal fun BrowserPaneContent(
                             Spacer(Modifier.weight(1f).widthIn(min = 6.dp))
                             size(Modifier)
                         }
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (profileList != null) 4.dp else 6.dp)) {
                             SelectElementsChip(active = state.pickMode, onClick = { actions.setPickMode(!state.pickMode) })
                             ShotOnPickChip(checked = shotOnPick, onCheckedChange = { shotOnPick = it })
-                            if (profileList != null) ProfileSelect(state.profile, profileList, actions, Modifier.weight(1f))
+                            if (profileList != null) ProfileSelect(state.profile, profileList, actions, Modifier.weight(1f), chipText = true)
                         }
                     } else {
                         segmented(Modifier.fillMaxWidth())
@@ -1409,7 +1415,8 @@ private fun TabPicker(tabs: List<BrowserChannel.Tab>, wide: Boolean, onSwitchTab
         Row(
             Modifier
                 .widthIn(max = if (wide) 192.dp else 144.dp)
-                .heightIn(min = 48.dp)
+                // 44dp visual box (the status row's height); the 48dp touch target comes from the platform's minimum touch bounds, which extend the hit area without growing the layout.
+                .height(BrowserPaneMetrics.StatusMin)
                 .focusRing(focused, t.violet, 4.dp)
                 .clickable(interaction, indication = null, role = Role.DropdownList, onClickLabel = "Switch tab") { open = true }
                 .testTag(BrowserPaneTags.TabIndicator),
@@ -1455,14 +1462,15 @@ private fun TabPicker(tabs: List<BrowserChannel.Tab>, wide: Boolean, onSwitchTab
  * ("(in use by <holder>)" when another session holds it). Opening it reads the list again.
  */
 @Composable
-private fun ProfileSelect(profile: BrowserChannel.PaneProfile?, list: List<BrowserProfileInfo>, actions: BrowserPaneActions, modifier: Modifier = Modifier) {
+private fun ProfileSelect(profile: BrowserChannel.PaneProfile?, list: List<BrowserProfileInfo>, actions: BrowserPaneActions, modifier: Modifier = Modifier, chipText: Boolean = false) {
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(t.radiusSm)
     var open by remember { mutableStateOf(false) }
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val pressed by interaction.collectIsPressedAsState()
-    val style = TextStyle(fontFamily = Manrope, fontWeight = FontWeight(500), fontSize = FieldText, color = t.ink)
+    // The tablet's 3-column tools row sets the label at that row's chip text style (so the default label fits whole); the phone's full-width row keeps the field size.
+    val style = if (chipText) PROFILE_CHIP_STYLE.copy(color = t.ink) else TextStyle(fontFamily = Manrope, fontWeight = FontWeight(500), fontSize = FieldText, color = t.ink)
     val label = profileLabel(profile)
     Box(modifier) {
         Row(
@@ -1478,14 +1486,23 @@ private fun ProfileSelect(profile: BrowserChannel.PaneProfile?, list: List<Brows
                     open = true
                     actions.refreshProfiles()
                 }
-                .padding(start = 10.dp, end = 8.dp)
+                .padding(start = if (chipText) 6.dp else 10.dp, end = if (chipText) 4.dp else 8.dp)
                 .testTag(BrowserPaneTags.ProfileSelect)
                 .semantics { contentDescription = "Profile"; stateDescription = label },
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (chipText) 2.dp else 6.dp),
         ) {
-            Text(label, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clearAndSetSemantics {})
-            Icon(TetherIcons.ChevronDown, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
+            var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+            // Cleared from the merged node (the row speaks "Profile" + its state); the tag and the layout result exist for the tests.
+            Text(
+                label, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                onTextLayout = { layout = it },
+                modifier = Modifier.weight(1f).clearAndSetSemantics {
+                    semanticsTestTag = BrowserPaneTags.ProfileLabel
+                    getTextLayoutResult { out -> layout?.let { out += it; true } ?: false }
+                },
+            )
+            Icon(TetherIcons.ChevronDown, contentDescription = null, tint = t.muted, modifier = Modifier.size(if (chipText) 11.dp else 14.dp))
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = t.graphiteRaised) {
             @Composable fun item(id: String?, text: String) {
