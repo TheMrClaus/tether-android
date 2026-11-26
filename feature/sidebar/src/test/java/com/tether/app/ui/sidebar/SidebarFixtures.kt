@@ -247,13 +247,11 @@ object SidebarFixtures {
 
 fun choiceFor(skin: TetherSkin): ThemeMode = skin.mode
 
-private val StudioRail = Color(0xFF141D2E)
-
 /**
  * The host containers the sidebar lives in, reproduced for the goldens (feature/shell owns the
  * real ones). The phone drawer follows SessionDrawerHost in lockstep (ta-1jj7, owner-directed
  * design: the compact full-screen drawer; ta-8znp: the foot inset): an opaque full-width panel on the
- * fixed `#141d2e`, no backdrop, padded by [PhoneDrawer]'s design minimum per side (the system-bar and
+ * skin's `--bg-rail`, no backdrop, padded by [PhoneDrawer]'s design minimum per side (the system-bar and
  * cutout insets are zero here; the host's own test measures them). The expanded layout's rail
  * column ([railWidth], 272 by default) keeps `1.35rem 0.875rem 0.75rem`.
  */
@@ -270,6 +268,7 @@ fun SidebarUnderTest(
     TetherTheme(choiceFor(skin)) {
         CompositionLocalProvider(LocalReducedMotion provides true) {
             val t = LocalTetherTokens.current
+            val railFill = t.css.bgRail // Vector: the rail is the skin's own --bg-rail (the shell's StudioDrawer.background is the real host)
             BoxWithConstraints(Modifier.fillMaxSize().background(t.mineral)) {
                 val phone = layout == TetherLayoutClass.Phone
                 val width = if (phone) maxWidth else railWidth
@@ -278,7 +277,7 @@ fun SidebarUnderTest(
                         .width(width)
                         .fillMaxHeight()
                         .drawBehind {
-                            drawRect(StudioRail)
+                            drawRect(railFill)
                         }
                         .then(
                             if (phone) {
