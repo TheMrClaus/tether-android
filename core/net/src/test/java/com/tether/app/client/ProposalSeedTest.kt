@@ -124,4 +124,21 @@ class ProposalSeedTest {
         val suggested = ProposalSeed.of(s("useWorktree" to JsBool.TRUE), entries, session, prefs)!!
         assertEquals(JsBool.TRUE, suggested.form["useWorktree"])
     }
+
+    @Test
+    fun aDefaultModelAndDefaultEffortGoAsEmptyStringsNotLeftOut() {
+        val r = ProposalSeed.of(s("model" to JsStr("sonnet"), "reasoningEffort" to JsStr("high")), entries, session, JsObj.EMPTY)!!
+        val picked = r.form.put("model", JsStr("")).put("reasoningEffort", JsStr(""))
+        val json = Proposals.startSettings(picked, entries[0], r.modified).toString()
+        assertTrue(json, json.contains("\"model\":\"\""))
+        assertTrue(json, json.contains("\"reasoningEffort\":\"\""))
+    }
+
+    @Test
+    fun anUntouchedSeededCardStartsOnTheSuggestedModelAndEffort() {
+        val r = ProposalSeed.of(s("model" to JsStr("sonnet"), "reasoningEffort" to JsStr("high")), entries, session, JsObj.EMPTY)!!
+        val json = Proposals.startSettings(r.form, entries[0], r.modified).toString()
+        assertTrue(json, json.contains("\"model\":\"sonnet\""))
+        assertTrue(json, json.contains("\"reasoningEffort\":\"high\""))
+    }
 }

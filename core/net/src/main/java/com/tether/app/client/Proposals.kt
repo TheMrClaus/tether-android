@@ -58,6 +58,14 @@ object Proposals {
         // The account is always named: null is the harness's default account (the server re-froze `profileId: string | null`), so a
         // card on the default account never starts on the proposer's.
         kept["profileId"] = entry.profileId?.takeIf { it.isNotEmpty() }?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull
+        // The final value of the Model and Effort rows, always: "" is the harness default (the create path turns it into null), so a
+        // row that reads "Default" is not left to fall to the proposer's suggestion.
+        val model = (form["model"] as? com.tether.app.protocol.tree.JsStr)?.value ?: ""
+        kept["model"] = kotlinx.serialization.json.JsonPrimitive(model)
+        val effort = com.tether.app.protocol.helpers.DraftForm.effortToSend(
+            entry.provider, entry.toDraftEntry()["models"], model, (form["reasoningEffort"] as? com.tether.app.protocol.tree.JsStr)?.value ?: "",
+        )
+        kept["reasoningEffort"] = kotlinx.serialization.json.JsonPrimitive(effort)
         // Codex "Current (custom)": the agent's own triple goes out as it is (no preset reproduces it).
         if (entry.provider == "codex" && codexCurrent != null && (form["mode"] as? com.tether.app.protocol.tree.JsStr)?.value == HandoverDraftForm.CODEX_CURRENT_MODE) {
             codexCurrent.sandboxPolicy?.takeIf { it.isNotEmpty() }?.let { kept["sandboxPolicy"] = kotlinx.serialization.json.JsonPrimitive(it) }
