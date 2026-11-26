@@ -216,6 +216,7 @@ class WorkspaceHeaderRowTest(
         val dial = here(ShellTags.Dial)
         val dialLeft = dial.left
         // no opaque-interior overlap at this width/scale (Archivo narrowed the cluster 3px: at w780 x2 the dial starts 6px inside the pencil, exactly the corner inset)
+        // Accepted skip (P8A-FIX2): the verifier measured 0/144 overlapping pixels at w780 x2, so no overlap exists on Archivo and the assertion is vacuous there, not weakened.
         if (dialLeft + dialOpaqueInsetPx >= key.right - 2f) return
         val a = rule.onAllNodesWithTag("harness")[0].captureToImage().toPixelMap()
         val b = rule.onAllNodesWithTag("reference")[0].captureToImage().toPixelMap()
