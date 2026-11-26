@@ -10,7 +10,7 @@ import org.junit.Test
  * Reads the bundled TTFs' own tables (not the Kotlin constants): the `wght` axis each file
  * really has must cover every weight the families request, and the UI face must carry the
  * `tnum` feature so `font-variant-numeric: tabular-nums` roles are not a silent no-op.
- * (JetBrains Mono is monospaced, so its figures are tabular without the feature.)
+ * (Fira Code is monospaced, so its figures are tabular without the feature.)
  */
 class VariableFontFileTest {
 
@@ -47,25 +47,29 @@ class VariableFontFileTest {
     private fun font(name: String) = Sfnt(File("src/main/res/font/$name"))
 
     @Test
-    fun manropeWghtAxisCoversEveryRequestedWeight() {
-        val axes = font("manrope_variable.ttf").axes()
-        assertEquals(setOf("wght"), axes.keys)
+    fun archivoAxesCoverEveryRequestedWeightAndKeepTheDefaultWidth() {
+        val axes = font("archivo_variable.ttf").axes()
+        assertEquals(setOf("wght", "wdth"), axes.keys)
         val (min, _, max) = axes.getValue("wght")
-        assertEquals(ManropeWghtRange, min.toInt()..max.toInt())
-        for (w in WebFontWeights) assertTrue("Manrope wght $w in $min..$max", w in ManropeWghtRange)
+        assertEquals(ArchivoWghtRange, min.toInt()..max.toInt())
+        for (w in WebFontWeights) assertTrue("Archivo wght $w in $min..$max", w in ArchivoWghtRange)
+        val (wMin, wDefault, wMax) = axes.getValue("wdth")
+        assertEquals(ArchivoWdthRange, wMin.toInt()..wMax.toInt())
+        assertEquals(ArchivoDefaultWdth, wDefault.toInt())
     }
 
     @Test
-    fun jetBrainsMonoWghtAxisCoversEveryRequestedWeight() {
-        val axes = font("jetbrains_mono_variable.ttf").axes()
+    fun firaCodeWghtAxisMatchesTheFamilyRange() {
+        val axes = font("fira_code_variable.ttf").axes()
         assertEquals(setOf("wght"), axes.keys)
         val (min, _, max) = axes.getValue("wght")
-        assertEquals(JetBrainsMonoWghtRange, min.toInt()..max.toInt())
-        for (w in WebFontWeights) assertTrue("JetBrains Mono wght $w in $min..$max", w in JetBrainsMonoWghtRange)
+        assertEquals(FiraCodeWghtRange, min.toInt()..max.toInt())
+        // Web mono weights are 400-700; heavier web weights are UI-face only.
+        for (w in WebFontWeights.filter { it <= 700 && it >= 400 }) assertTrue("Fira Code wght $w", w in FiraCodeWghtRange)
     }
 
     @Test
-    fun manropeHasTabularFigures() {
-        assertTrue("tnum" in font("manrope_variable.ttf").gsubFeatures())
+    fun archivoHasTabularFigures() {
+        assertTrue("tnum" in font("archivo_variable.ttf").gsubFeatures())
     }
 }

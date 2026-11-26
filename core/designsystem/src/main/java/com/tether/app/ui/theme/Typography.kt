@@ -26,7 +26,7 @@ import java.util.Locale
  * container height.
  *
  * Studio is the only visual system (T15.5): each role is the globals.css value as app/studio.css
- * cascades over it. Micro-labels use `var(--font-ui)` (Manrope — the bundled face; its
+ * cascades over it. Micro-labels use `var(--font-ui)` (Archivo — the bundled face; its
  * -apple-system/Segoe UI fallbacks don't exist on Android), without uppercase or tracking. Both
  * Studio skins share one scale.
  */
@@ -161,14 +161,14 @@ fun TextStyle.tabularNums(): TextStyle = copy(fontFeatureSettings = TetherTypogr
 
 /**
  * Resolves a CSS font stack to a bundled family: the first family we can honour wins —
- * `Manrope Variable` / `JetBrains Mono Variable` (the bundled faces), else the generic
+ * `Archivo Variable` / `Fira Code Variable` (the bundled faces; the superseded Manrope and JetBrains Mono names resolve to them), else the generic
  * `monospace`/`ui-monospace`/`sans-serif`; platform names (-apple-system, Segoe UI…) are skipped.
  */
 fun fontFamilyForStack(stack: String): FontFamily {
     for (raw in stack.split(',')) {
         when (raw.trim().trim('"', '\'').lowercase(Locale.ROOT)) {
-            "manrope variable", "manrope" -> return Manrope
-            "jetbrains mono variable", "jetbrains mono" -> return JetBrainsMono
+            "archivo variable", "archivo", "manrope variable", "manrope" -> return Archivo
+            "fira code variable", "fira code", "jetbrains mono variable", "jetbrains mono" -> return FiraCode
             "monospace", "ui-monospace" -> return FontFamily.Monospace
             "sans-serif", "system-ui", "ui-sans-serif" -> return FontFamily.SansSerif
         }
