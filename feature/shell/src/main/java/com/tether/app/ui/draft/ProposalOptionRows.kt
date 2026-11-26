@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -36,6 +37,7 @@ import com.tether.app.client.DraftSessionOptions
 import com.tether.app.client.DraftSessionOptionsModel
 import com.tether.app.client.LabelText
 import com.tether.app.client.ProposalSeed
+import com.tether.app.client.WorktreeModes
 import com.tether.app.client.Proposals
 import com.tether.app.protocol.tree.JsBool
 import com.tether.app.protocol.tree.JsStr
@@ -67,11 +69,17 @@ import com.tether.app.ui.util.compactPath
 class ShellProposalOptionsHost(private val vm: TetherViewModel, private val prefs: UiPrefs) : ProposalOptionsHost {
     private val models = HashMap<String, DraftComposerModel>()
 
+    /** The seed each proposal's form started from (also what "Suggested" is measured against). */
+    internal val seeds = mutableStateMapOf<String, ProposalSeed.Result>()
+
     internal fun modelFor(proposalId: String): DraftComposerModel =
         models.getOrPut(proposalId) { DraftComposerModel(vm.client, InMemoryDraftStore(), vm.viewModelScope, { null }, persistPicks = false) }
 
     @Composable
-    override fun Rows(request: ProposalOptionsRequest) = ProposalOptionRows(vm, prefs, modelFor(request.proposalId), request)
+    override fun Rows(request: ProposalOptionsRequest) = ProposalOptionRows(vm, prefs, modelFor(request.proposalId), request, seeds[request.proposalId])
+
+    @Composable
+    override fun Settle(request: ProposalOptionsRequest) = ProposalFormSync(vm, modelFor(request.proposalId), request, seeds)
 }
 
 /** Test tags of the Options rows. */
@@ -130,12 +138,13 @@ private fun unchanged(row: ProposalRow, now: com.tether.app.protocol.tree.JsObj,
 }
 
 @Composable
-private fun OptionRow(row: ProposalRow, label: String, inputs: ProposalRowsInputs, control: @Composable () -> Unit) {
+private fun OptionRow(row: ProposalRow, label: String, inputs: ProposalRowsInputs, display: String, control: @Composable () -> Unit) {
     val t = LocalTetherTokens.current
     val fault = inputs.faultRow == row
     val tagged = row in inputs.suggested && unchanged(row, inputs.draft.form, inputs.seedForm)
     val replaced = inputs.replaced.firstOrNull { ProposalCopy.rowOfReplaced(it.field) == row }
-    Column(Modifier.fillMaxWidth().testTag(ProposalOptionTags.row(row))) {
+    val faultShape = RoundedCornerShape(8.dp)
+    Column(Modifier.fillMaxWidth().then(if (fault) Modifier.background(t.dangerWash, faultShape).border(1.dp, t.dangerEdge, faultShape) else Modifier).testTag(ProposalOptionTags.row(row))) {
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(label, color = t.muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -155,16 +164,7 @@ private fun OptionRow(row: ProposalRow, label: String, inputs: ProposalRowsInput
             )
         }
         if (replaced != null) {
-            val using = when (row) {
-                ProposalRow.Folder -> JsStrOf(inputs.draft.form, "cwd")
-                ProposalRow.Harness -> inputs.providerLabel
-                ProposalRow.Account -> inputs.accountLabel
-                ProposalRow.Model -> JsStrOf(inputs.draft.form, "model")
-                ProposalRow.Effort -> JsStrOf(inputs.draft.form, "reasoningEffort")
-                ProposalRow.Mode -> JsStrOf(inputs.draft.form, "mode")
-                ProposalRow.Approvals -> JsStrOf(inputs.draft.form, "toolApproval")
-                ProposalRow.Worktree -> if (inputs.draft.form["useWorktree"] == JsBool.TRUE) "Worktree" else "Local"
-            }.ifEmpty { "default" }
+            val using = display.ifEmpty { "default" }
             Text(
                 ProposalCopy.replacedLine(row, SafeText.line(replaced.suggested), SafeText.line(using)), color = t.warning, fontSize = 12.sp,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp).padding(bottom = 6.dp).testTag(ProposalOptionTags.Replaced),
@@ -181,34 +181,34 @@ internal fun ProposalOptionRowsFrame(inputs: ProposalRowsInputs, actions: Propos
     val options: DraftSessionOptions = DraftSessionOptionsModel.of(draft)
     val cwd = JsStrOf(draft.form, "cwd")
     Column(Modifier.fillMaxWidth().semantics { contentDescription = "New session options" }, verticalArrangement = Arrangement.spacedBy(0.dp)) {
-        OptionRow(ProposalRow.Folder, "Folder", inputs) { WorkspaceSelector(cwd, inputs.quickPicks, inputs.workspaceRoot, actions.onFolder, actions.onBrowseFolder) }
-        OptionRow(ProposalRow.Worktree, "Worktree", inputs) { WorktreeSelect(draft.form, actions.onIsolation) }
+        OptionRow(ProposalRow.Folder, "Folder", inputs, compactPath(cwd, inputs.workspaceRoot)) { WorkspaceSelector(cwd, inputs.quickPicks, inputs.workspaceRoot, actions.onFolder, actions.onBrowseFolder) }
+        OptionRow(ProposalRow.Worktree, "Worktree", inputs, WorktreeModes.control(draft.form).label) { WorktreeSelect(draft.form, actions.onIsolation) }
         HorizontalDivider(color = t.line, modifier = Modifier.padding(vertical = 2.dp))
-        OptionRow(ProposalRow.Harness, "Harness", inputs) {
+        OptionRow(ProposalRow.Harness, "Harness", inputs, SafeText.line(inputs.providerLabel)) {
             ControlPill(
                 label = SafeText.line(inputs.providerLabel).ifEmpty { "Select" }, enabled = inputs.enabled, contentDescription = "Harness, ${inputs.providerLabel}",
                 onClick = actions.onHarness, glyphProvider = inputs.browser.entries.firstOrNull { it.key == inputs.browser.selectedKey }?.provider,
                 glyphTile = true, active = inputs.browserOpen, testTag = "proposal-harness",
             )
         }
-        OptionRow(ProposalRow.Account, "Account", inputs) {
+        OptionRow(ProposalRow.Account, "Account", inputs, SafeText.line(inputs.accountLabel)) {
             ControlPill(
                 label = SafeText.line(inputs.accountLabel), enabled = inputs.enabled && inputs.accountChoosable, contentDescription = "Account, ${inputs.accountLabel}",
                 onClick = actions.onAccount, chevron = inputs.accountChoosable, testTag = "proposal-account",
             )
         }
-        OptionRow(ProposalRow.Model, "Model", inputs) { ModelSelectorChip(inputs.browser, inputs.browserOpen, actions.onModelChip) }
+        OptionRow(ProposalRow.Model, "Model", inputs, modelSelectorLabel(inputs.browser.entries, inputs.browser.selectedKey, inputs.browser.selectedModel)) { ModelSelectorChip(inputs.browser, inputs.browserOpen, actions.onModelChip) }
         options.effort?.let { effort ->
-            OptionRow(ProposalRow.Effort, "Effort", inputs) {
+            OptionRow(ProposalRow.Effort, "Effort", inputs, effort.label) {
                 ControlSelect(control = effort, name = "Reasoning effort", enabled = inputs.enabled, lockCopy = null, onSelect = actions.onEffort, emptyLabel = EFFORT_DEFAULT, testTag = DraftOptionsTags.Effort)
             }
         } ?: options.effortNoneHint?.let { hint ->
-            OptionRow(ProposalRow.Effort, "Effort", inputs) {
+            OptionRow(ProposalRow.Effort, "Effort", inputs, hint) {
                 ControlPill(label = hint, enabled = true, contentDescription = "Reasoning effort: $hint", onClick = {}, chevron = false, unavailable = true, testTag = DraftOptionsTags.Effort)
             }
         }
         options.mode?.let { mode ->
-            OptionRow(ProposalRow.Mode, "Mode", inputs) {
+            OptionRow(ProposalRow.Mode, "Mode", inputs, mode.label) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     ControlSelect(
                         control = mode, name = options.modeAriaLabel, enabled = inputs.enabled, lockCopy = null,
@@ -219,15 +219,20 @@ internal fun ProposalOptionRowsFrame(inputs: ProposalRowsInputs, actions: Propos
             }
         }
         options.approvals?.let { approvals ->
-            OptionRow(ProposalRow.Approvals, "Approvals", inputs) {
+            OptionRow(ProposalRow.Approvals, "Approvals", inputs, approvals.select.label) {
                 ApprovalsPill(approvals, enabled = inputs.enabled, onSelect = { actions.onApprovals(it, options.provider) })
             }
         }
     }
 }
 
+/**
+ * The card's form kept current whether or not its panel is open: refreshes the catalog, seeds once (a row the agent left out
+ * starts on the proposing session's value), and reports the create-shaped settings on every change, so the Start frame always
+ * carries the final value of every row the card shows. Draws nothing.
+ */
 @Composable
-internal fun ProposalOptionRows(vm: TetherViewModel, prefs: UiPrefs, model: DraftComposerModel, request: ProposalOptionsRequest) {
+internal fun ProposalFormSync(vm: TetherViewModel, model: DraftComposerModel, request: ProposalOptionsRequest, seeds: MutableMap<String, ProposalSeed.Result>) {
     val client = vm.client
     val draft by model.state.collectAsStateWithLifecycle()
     val connection by client.connection.collectAsStateWithLifecycle()
@@ -235,37 +240,48 @@ internal fun ProposalOptionRows(vm: TetherViewModel, prefs: UiPrefs, model: Draf
     val live by client.providerCatalogLive.collectAsStateWithLifecycle()
     val providers by client.providers.collectAsStateWithLifecycle()
     val sessions by client.sessions.collectAsStateWithLifecycle()
-    val root by client.workspaceRoot.collectAsStateWithLifecycle()
-    val directories by client.directories.collectAsStateWithLifecycle()
-    val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
-    val preferences by remember(prefs, client) { prefs.preferencesFor(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
-    val linkEpoch by client.linkEpoch.collectAsStateWithLifecycle()
     val connected = connection == ConnectionState.Connected
     val source = sessions.firstOrNull { it.id == request.sessionId }
-    val browser = remember(request.proposalId) { ModelBrowserState() }
-    var browsing by remember { mutableStateOf(false) }
-    var seed by remember(request.proposalId) { mutableStateOf<ProposalSeed.Result?>(null) }
-    val collator = remember { com.tether.app.ui.chat.IcuJsCollator.forLocale() }
+    val seed = seeds[request.proposalId]
 
     LaunchedEffect(connected) { if (connected) client.requestProviderCatalog() }
     LaunchedEffect(catalog, live, providers) { model.refresh() }
     // Seed once: the entries are in (the live catalog, else the base rows). A picked harness or account that is not here seeds nothing.
     LaunchedEffect(request.proposalId, draft.entries.isNotEmpty(), source?.id) {
-        if (seed != null || draft.entries.isEmpty() || source == null) return@LaunchedEffect
+        if (seeds[request.proposalId] != null || draft.entries.isEmpty() || source == null) return@LaunchedEffect
         val fresh = ProposalSeed.of(request.suggestions, draft.entries, source, vm.draftComposer.preferences().also(model::usePreferences))
         if (fresh != null) {
             model.seedProposal(fresh)
-            seed = fresh
+            seeds[request.proposalId] = fresh
         } else {
             model.setCwd(request.suggestions.let { (it["cwd"] as? JsStr)?.value } ?: source.cwd)
         }
     }
+    val key = JsStrOf(draft.form, "key")
+    val entry = draft.entries.firstOrNull { it.key == key }
+    LaunchedEffect(draft.form, draft.modified, draft.proposalCodexCurrent, entry, seed) {
+        if (entry != null && seed != null) request.onSettings(Proposals.startSettings(draft.form, entry, draft.modified, draft.proposalCodexCurrent))
+    }
+}
+
+@Composable
+internal fun ProposalOptionRows(vm: TetherViewModel, prefs: UiPrefs, model: DraftComposerModel, request: ProposalOptionsRequest, seed: ProposalSeed.Result?) {
+    val client = vm.client
+    val draft by model.state.collectAsStateWithLifecycle()
+    val catalog by client.providerCatalog.collectAsStateWithLifecycle()
+    val live by client.providerCatalogLive.collectAsStateWithLifecycle()
+    val providers by client.providers.collectAsStateWithLifecycle()
+    val root by client.workspaceRoot.collectAsStateWithLifecycle()
+    val directories by client.directories.collectAsStateWithLifecycle()
+    val picked by vm.currentWorkspace.collectAsStateWithLifecycle()
+    val preferences by remember(prefs, client) { prefs.preferencesFor(client.serverUrl) }.collectAsStateWithLifecycle(initialValue = TetherPreferences.Default)
+    val linkEpoch by client.linkEpoch.collectAsStateWithLifecycle()
+    val browser = remember(request.proposalId) { ModelBrowserState() }
+    var browsing by remember { mutableStateOf(false) }
+    val collator = remember { com.tether.app.ui.chat.IcuJsCollator.forLocale() }
 
     val key = JsStrOf(draft.form, "key")
     val entry = draft.entries.firstOrNull { it.key == key }
-    LaunchedEffect(draft.form, draft.modified, draft.proposalCodexCurrent, entry) {
-        if (entry != null && seed != null) request.onSettings(Proposals.startSettings(draft.form, entry, draft.modified, draft.proposalCodexCurrent))
-    }
     val rows = com.tether.app.client.NewSessionGuard.rows(if (live) catalog else null, providers)
     val browserInputs = draftBrowserInputs(draft, if (live) catalog else null, providers, collator, System.currentTimeMillis())
     val providerLabel = draftProviderLabel(rows.firstOrNull { it.choice.key == key }, providers)

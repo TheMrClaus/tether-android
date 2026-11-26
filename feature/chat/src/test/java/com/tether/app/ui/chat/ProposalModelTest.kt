@@ -196,4 +196,35 @@ class ProposalModelTest {
         assertEquals(ProposalRow.Mode, ProposalCopy.rowOfReplaced("sandboxPolicy"))
         assertEquals(setOf(ProposalRow.Harness, ProposalRow.Model), ProposalCopy.suggestedRows(com.tether.app.protocol.tree.JsObj.of("provider" to com.tether.app.protocol.tree.JsStr("codex"), "model" to com.tether.app.protocol.tree.JsStr("m"))))
     }
+
+    private fun twoCalls(firstFailed: Boolean): ChatFixtures.Folded = ChatFixtures.fold(
+        ev("turn_started", "t1") { put("idempotencyKey", "k") },
+        ev("user_message_accepted", "t1") { put("text", "plan it") },
+        ev("tool_start", "t1") { put("toolId", "tool-1"); put("name", "mcp__tether__propose_session"); put("input", buildJsonObject {}) },
+        ev("tool_end", "t1") { put("toolId", "tool-1"); put("output", if (firstFailed) "refused" else "proposed"); put("isError", firstFailed) },
+        ev("tool_start", "t1") { put("toolId", "tool-2"); put("name", "mcp__tether__propose_session"); put("input", buildJsonObject {}) },
+        ev("session_proposal", "t1") { put("proposalId", "p1"); put("title", "Split the parser"); put("prompt", "Do the work.") },
+        ev("tool_end", "t1") { put("toolId", "tool-2"); put("output", "proposed"); put("isError", false) },
+    )
+
+    @Test
+    fun aFailedProposeCallKeepsItsOwnToolRowAndOnlyTheCallThatProposedGivesWayToTheCard() {
+        val list = items(twoCalls(firstFailed = true), true)
+        assertEquals(1, list.filterIsInstance<ChatItem.Proposal>().size)
+        val rows = list.filter { it is ChatItem.Block && it.block.name == "mcp__tether__propose_session" || it is ChatItem.ToolGroup }
+        assertEquals("the failed call keeps one tool row: $list", 1, rows.size)
+    }
+
+    @Test
+    fun aProposeCallWithNoProposalLeftStaysAToolRow() {
+        val f = ChatFixtures.fold(
+            ev("turn_started", "t1") { put("idempotencyKey", "k") },
+            ev("user_message_accepted", "t1") { put("text", "plan it") },
+            ev("tool_start", "t1") { put("toolId", "tool-1"); put("name", "mcp__tether__propose_session"); put("input", buildJsonObject {}) },
+            ev("tool_end", "t1") { put("toolId", "tool-1"); put("output", "x"); put("isError", false) },
+        )
+        val list = items(f, true)
+        assertEquals(0, list.filterIsInstance<ChatItem.Proposal>().size)
+        assertEquals(1, list.count { it is ChatItem.Block && it.block.name == "mcp__tether__propose_session" || it is ChatItem.ToolGroup })
+    }
 }

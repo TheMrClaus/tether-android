@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -62,20 +63,26 @@ import org.robolectric.annotation.Config
  * (it flips above), with a replaced suggestion, a refused row, and the danger tone on Mode. The panel is drawn inline, at the
  * place the card's position provider picks, because a popup window is not part of a node capture.
  */
-enum class ProposalOptionsShot(val id: String, val atBottom: Boolean, val replaced: Boolean = false, val refused: Boolean = false, val danger: Boolean = false) {
+enum class ProposalOptionsShot(val id: String, val atBottom: Boolean, val replaced: Boolean = false, val refused: Boolean = false, val danger: Boolean = false, val reasonix: Boolean = false) {
     First("proposal-options-first", atBottom = false),
     Last("proposal-options-last", atBottom = true),
     Replaced("proposal-options-replaced", atBottom = false, replaced = true, danger = true),
     Refused("proposal-options-refused", atBottom = false, refused = true),
+    Reasonix("proposal-options-reasonix", atBottom = false, reasonix = true),
 }
 
 private fun exact() = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f))
 
-private class ProposalRowsSeed(shot: ProposalOptionsShot) {
+internal class ProposalRowsSeed(shot: ProposalOptionsShot) {
     private val job = Job()
     val client = DraftTestClient(failOnSend = false).apply {
         providerCatalog.value = DraftFixtures.catalog
         providers.value = DraftFixtures.providers
+        if (shot.reasonix) {
+            providerCatalog.value = DraftFixtures.catalog + com.tether.app.client.ProviderCatalogEntry(
+                "reasonix", "reasonix", "ready", listOf(com.tether.app.protocol.SessionModelOption("m1", "Reasonix")), label = "Reasonix",
+            )
+        }
     }
     private val model = DraftComposerModel(
         client = client, draftStore = InMemoryDraftStore(), scope = CoroutineScope(Dispatchers.Unconfined + job),
@@ -85,7 +92,7 @@ private class ProposalRowsSeed(shot: ProposalOptionsShot) {
     init {
         model.onOrigin(DraftFixtures.ORIGIN)
         model.refresh()
-        model.selectProviderAndModel("claude", "m2")
+        if (shot.reasonix) model.selectProviderAndModel("reasonix", "m1") else model.selectProviderAndModel("claude", "m2")
         model.setCwd("/srv/ws/parity-app")
         if (shot.danger) model.selectMode("bypassPermissions", "claude")
     }
@@ -99,7 +106,7 @@ private class ProposalRowsSeed(shot: ProposalOptionsShot) {
         return ProposalRowsInputs(
             draft = state,
             seedForm = seedForm,
-            suggested = setOf(ProposalRow.Folder, ProposalRow.Model),
+            suggested = if (shot.replaced) setOf(ProposalRow.Folder) else setOf(ProposalRow.Folder, ProposalRow.Model),
             replaced = replaced,
             faultRow = if (shot.refused) ProposalRow.Folder else null,
             enabled = true,
@@ -107,9 +114,9 @@ private class ProposalRowsSeed(shot: ProposalOptionsShot) {
             browserOpen = false,
             quickPicks = workspaceQuickPicks(listOf("/srv/ws/parity-app"), "", DraftFixtures.ROOT, DraftFixtures.ROOT),
             workspaceRoot = DraftFixtures.ROOT,
-            providerLabel = "Claude",
+            providerLabel = if (shot.reasonix) "Reasonix" else "Claude",
             accountLabel = "Default",
-            accountChoosable = true,
+            accountChoosable = !shot.reasonix,
         )
     }
 
@@ -125,7 +132,7 @@ private fun ProposalInPlace(shot: ProposalOptionsShot, seed: ProposalRowsSeed, w
     val replaced = if (shot.replaced) listOf(ProposalReplacedView("model", "invalid_settings", "opus-9")) else emptyList()
     val view = ProposalView(
         proposalId = "p1", title = "Split the parser into a tokenizer and a grammar module", prompt = PROMPT,
-        suggestions = JsObj.of("cwd" to JsStr("/srv/ws/parity-app"), "model" to JsStr("m2")),
+        suggestions = if (shot.replaced) JsObj.of("cwd" to JsStr("/srv/ws/parity-app")) else JsObj.of("cwd" to JsStr("/srv/ws/parity-app"), "model" to JsStr("m2")),
         replaced = replaced, state = if (shot.refused) ProposalState.Refused else ProposalState.Pending,
         refusalCode = if (shot.refused) "folder_unavailable" else null, startedSessionId = null, startedSessionName = null,
     )
@@ -134,7 +141,10 @@ private fun ProposalInPlace(shot: ProposalOptionsShot, seed: ProposalRowsSeed, w
     val bounds = with(density) { IntRect(0, 0, wellWidth.roundToPx(), wellHeight.roundToPx()) }
     val gap = with(density) { 4.dp.roundToPx() }
     val inset = with(density) { 8.dp.roundToPx() }
-    val actions = ProposalActions(sessionId = "s1", optionsHost = ProposalOptionsHost { }, cardShown = true)
+    val local = if (shot.refused) {
+        mapOf("p1" to com.tether.app.client.ProposalLocalState("start", "r1", com.tether.app.client.ProposalRefusal("folder_unavailable", com.tether.app.client.Proposals.REFUSAL_TEXTS.getValue("folder_unavailable"))))
+    } else emptyMap()
+    val actions = ProposalActions(sessionId = "s1", local = local, optionsHost = ProposalOptionsHost { }, cardShown = true)
     Box(Modifier.width(wellWidth).height(wellHeight).background(t.graphite).testTag("proposal-well")) {
         CompositionLocalProvider(LocalProposalActions provides actions) {
             Box(
@@ -164,6 +174,8 @@ fun ComposeContentTestRule.snapProposalOptions(shot: ProposalOptionsShot, skin: 
     }
     mainClock.advanceTimeBy(600)
     waitForIdle()
+    // The panel is open: Options reads its expanded state (the real panel is a popup window, which a node capture does not hold).
+    onNodeWithTag("proposal-options").performClick()
     mainClock.advanceTimeBy(600)
     waitForIdle()
     onNodeWithTag("proposal-well").captureRoboImage("src/test/screenshots/${shot.id}/${skin.id}-$size.png", roborazziOptions = exact())
@@ -182,7 +194,7 @@ class ProposalOptionsPhoneScreenshotTest(private val shot: ProposalOptionsShot, 
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = ProposalOptionsShot.entries.flatMap { s -> studioSkins.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = ProposalOptionsShot.entries.flatMap { s -> studioSkins.filter { !s.reasonix || it == TetherSkin.Studio }.map { arrayOf<Any>(s, it) } }
     }
 }
 
@@ -196,6 +208,6 @@ class ProposalOptionsTabletScreenshotTest(private val shot: ProposalOptionsShot,
     companion object {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
-        fun params(): List<Array<Any>> = ProposalOptionsShot.entries.flatMap { s -> studioSkins.map { arrayOf<Any>(s, it) } }
+        fun params(): List<Array<Any>> = ProposalOptionsShot.entries.filter { !it.reasonix }.flatMap { s -> studioSkins.map { arrayOf<Any>(s, it) } }
     }
 }

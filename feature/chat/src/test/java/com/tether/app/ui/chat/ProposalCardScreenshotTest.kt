@@ -33,6 +33,8 @@ enum class ProposalShot(val id: String) {
     Dismissed("proposal-dismissed"),
     Expired("proposal-expired"),
     Replaced("proposal-replaced"),
+    Starting("proposal-starting"),
+    Preview("proposal-preview"),
 }
 
 private const val PROMPT = "Split the parser into a tokenizer and a grammar module, keep the public entry point as it is, and move the fixtures next to the module that uses them. Run the unit tests after each step and report what moved."
@@ -51,7 +53,7 @@ private fun proposalFixture(shot: ProposalShot): ChatFixtures.Folded {
         ev("tool_start", "t1") { put("toolId", "tool-1"); put("name", "mcp__tether__propose_session"); put("input", buildJsonObject {}) },
         ev("session_proposal", "t1") {
             put("proposalId", "p1"); put("title", "Split the parser into a tokenizer and a grammar module"); put("prompt", PROMPT)
-            put("suggestions", buildJsonObject { put("model", "opus"); put("cwd", "/srv/ws/parity-app") })
+            put("suggestions", buildJsonObject { if (shot != ProposalShot.Replaced) put("model", "opus"); put("cwd", "/srv/ws/parity-app") })
             if (shot == ProposalShot.Replaced) {
                 put("replaced", buildJsonArray {
                     add(buildJsonObject { put("field", "model"); put("code", "invalid_settings"); put("suggested", "opus-9") })
@@ -70,9 +72,19 @@ fun ComposeContentTestRule.snapProposal(shot: ProposalShot, skin: TetherSkin, si
     val fixture = proposalFixture(shot)
     val local = if (shot == ProposalShot.Refused) {
         mapOf("p1" to ProposalLocalState("start", "r1", ProposalRefusal("folder_unavailable", Proposals.REFUSAL_TEXTS.getValue("folder_unavailable"))))
+    } else if (shot == ProposalShot.Starting) {
+        mapOf("p1" to ProposalLocalState("start", "r1"))
     } else emptyMap()
     setContent {
         ChatHost(skin, wellHeight, wellWidth) {
+            if (shot == ProposalShot.Preview) {
+                val view = ProposalView(
+                    proposalId = "p1", title = "Split the parser into a tokenizer and a grammar module", prompt = PROMPT, suggestions = com.tether.app.protocol.tree.JsObj.EMPTY,
+                    replaced = emptyList(), state = ProposalState.Started, refusalCode = null, startedSessionId = "s9", startedSessionName = "Split the parser",
+                )
+                ProposalPreviewContent(view) {}
+                return@ChatHost
+            }
             CompositionLocalProvider(LocalProposalActions provides ProposalActions(sessionId = "s1", local = local, optionsHost = stubHost, cardShown = true)) {
                 ChatTranscript(
                     projection = fixture.projection,

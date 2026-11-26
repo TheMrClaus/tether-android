@@ -10,7 +10,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,7 +32,12 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -59,7 +67,10 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.tether.app.client.ProposalLocalState
 import com.tether.app.protocol.tree.JsObj
+import com.tether.app.ui.components.CssBorder
+import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.icons.TetherIcons
+import com.tether.app.ui.text.SafeText
 import com.tether.app.ui.theme.LocalTetherTokens
 import kotlinx.serialization.json.JsonObject
 
@@ -87,6 +98,14 @@ class ProposalOptionsRequest(
 fun interface ProposalOptionsHost {
     @Composable
     fun Rows(request: ProposalOptionsRequest)
+
+    /**
+     * Composed by the card for as long as its Start is available, panel open or not: keeps the form seeded and reports its
+     * create-shaped settings through [ProposalOptionsRequest.onSettings], so a Start pressed without ever opening Options still
+     * carries the final value of every row. Draws nothing.
+     */
+    @Composable
+    fun Settle(request: ProposalOptionsRequest) {}
 }
 
 /** What the card may do (read through [LocalProposalActions]); the default does nothing and shows no Options. */
@@ -224,72 +243,94 @@ fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier) {
     var previewOpen by remember(proposal.proposalId) { mutableStateOf(false) }
     var cardBounds by remember { mutableStateOf<Rect?>(null) }
     val shape = RoundedCornerShape(14.dp)
-    Column(
-        modifier.fillMaxWidth().border(1.dp, t.line, shape).background(t.slate, shape)
+    val title = remember(proposal.title) { SafeText.line(proposal.title) }
+    val promptText = remember(proposal.prompt) { SafeText.prose(proposal.prompt) }
+    val host = actions.optionsHost
+    val headerHeight = 44.dp
+    val titleLine = 20.sp
+    Box(
+        modifier.fillMaxWidth().border(1.dp, t.line, shape).background(t.graphite, shape)
             .onGloballyPositioned { cardBounds = it.boundsInWindow() }
-            .semantics { contentDescription = "New session: ${proposal.title}" }
+            .semantics { contentDescription = "New session: $title" }
             .testTag("proposal-card"),
     ) {
-        Row(Modifier.fillMaxWidth().background(t.graphiteRaised, RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("New session", color = t.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            ProposalStatus(view)
-        }
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.Top) {
-                Text(proposal.title, color = t.ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).testTag("proposal-title"))
-                if (!state.resolved) {
-                    Box(
-                        Modifier.size(48.dp).clickable(enabled = !busy, role = Role.Button, onClickLabel = "Dismiss") { actions.onDismiss(proposal.proposalId) }.semantics { contentDescription = "Dismiss" }.testTag("proposal-dismiss"),
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp)) }
-                }
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.fillMaxWidth().height(headerHeight).background(t.graphiteRaised, RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                    .drawBehind { drawRect(t.line, topLeft = Offset(0f, size.height - 1.dp.toPx()), size = Size(size.width, 1.dp.toPx())) }
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("New session", color = t.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                ProposalStatus(view)
             }
-            Text(
-                proposal.prompt, color = t.muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "Read the full prompt") { previewOpen = true }.testTag("proposal-preview"),
-            )
-            when (state) {
-                ProposalState.Started -> {
-                    Text("Running in a new session.", color = t.muted, fontSize = 13.sp)
-                    val id = proposal.startedSessionId
-                    if (id != null) {
-                        Text(
-                            "Open “${proposal.startedSessionName ?: proposal.title}” →", color = t.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { actions.onOpenSession(id) }.testTag("proposal-open"),
-                        )
-                    }
-                }
-                ProposalState.Here -> Text("The prompt was sent to this session.", color = t.muted, fontSize = 13.sp)
-                ProposalState.Expired -> Text("This proposal can no longer be started.", color = t.muted, fontSize = 13.sp)
-                else -> Unit
-            }
-            if (!state.resolved && refusalText != null) {
+            Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = if (state == ProposalState.Started && proposal.startedSessionId != null) 0.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    "Couldn’t start. $refusalText", color = t.danger, fontSize = 13.sp,
-                    modifier = Modifier.fillMaxWidth().background(t.dangerWash, RoundedCornerShape(8.dp)).border(BorderStroke(1.dp, t.dangerEdge), RoundedCornerShape(8.dp)).padding(8.dp)
-                        .semantics { liveRegion = LiveRegionMode.Assertive }.testTag("proposal-error"),
+                    title, color = t.ink, fontSize = 15.sp, lineHeight = titleLine, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(end = if (state.resolved) 0.dp else 24.dp).testTag("proposal-title"),
                 )
-            }
-            if (!state.resolved) {
-                val host = actions.optionsHost
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    if (host != null) {
-                        val replacedCount = proposal.replaced.size
-                        ProposalButton(
-                            if (replacedCount > 0) "Options ⚠" else "Options", primary = false, enabled = !busy,
-                            description = if (replacedCount > 0) "Options, $replacedCount suggestion${if (replacedCount == 1) "" else "s"} replaced" else "Options",
-                            tag = "proposal-options",
-                        ) { optionsOpen = !optionsOpen }
+                Text(
+                    promptText, color = t.muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "Read the full prompt") { previewOpen = true }.testTag("proposal-preview"),
+                )
+                when (state) {
+                    ProposalState.Started -> {
+                        Text("Running in a new session.", color = t.muted, fontSize = 13.sp)
+                        val id = proposal.startedSessionId
+                        if (id != null) {
+                            Text(
+                                "Open “${SafeText.line(proposal.startedSessionName ?: proposal.title)}” →", color = t.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically).clickable(role = Role.Button) { actions.onOpenSession(id) }.testTag("proposal-open"),
+                            )
+                        }
                     }
-                    Box(Modifier.weight(1f))
-                    ProposalButton("Do it here", primary = false, enabled = !busy, tag = "proposal-here") { actions.onHere(proposal.proposalId) }
-                    ProposalButton(if (state == ProposalState.Starting) "Starting…" else "Start", primary = true, enabled = !busy, tag = "proposal-start") { actions.onStart(proposal.proposalId, actions.chosen[proposal.proposalId]) }
+                    ProposalState.Here -> Text("The prompt was sent to this session.", color = t.muted, fontSize = 13.sp)
+                    ProposalState.Expired -> Text("This proposal can no longer be started.", color = t.muted, fontSize = 13.sp)
+                    else -> Unit
+                }
+                if (!state.resolved && refusalText != null) {
+                    Text(
+                        "Couldn’t start. $refusalText", color = t.danger, fontSize = 13.sp,
+                        modifier = Modifier.fillMaxWidth().background(t.dangerWash, RoundedCornerShape(8.dp)).border(BorderStroke(1.dp, t.dangerEdge), RoundedCornerShape(8.dp)).padding(8.dp)
+                            .semantics { liveRegion = LiveRegionMode.Assertive }.testTag("proposal-error"),
+                    )
+                }
+                if (!state.resolved) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        if (host != null) {
+                            val replacedCount = proposal.replaced.size
+                            ProposalButton(
+                                "Options", primary = false, enabled = !busy, expanded = optionsOpen,
+                                description = if (replacedCount > 0) "Options, $replacedCount suggestion${if (replacedCount == 1) "" else "s"} replaced" else "Options",
+                                tag = "proposal-options",
+                                trailing = if (replacedCount > 0) {
+                                    { Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.warning, modifier = Modifier.padding(start = 4.dp).size(14.dp).testTag("proposal-warning")) }
+                                } else null,
+                            ) { optionsOpen = !optionsOpen }
+                        }
+                        Box(Modifier.weight(1f))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            ProposalButton("Do it here", primary = false, bare = true, enabled = !busy, tag = "proposal-here") { actions.onHere(proposal.proposalId) }
+                            ProposalButton(if (state == ProposalState.Starting) "Starting…" else "Start", primary = true, enabled = !busy, tag = "proposal-start") { actions.onStart(proposal.proposalId, actions.chosen[proposal.proposalId]) }
+                        }
+                    }
                 }
             }
+        }
+        if (!state.resolved) {
+            // The X sits level with the title's first line: a 48dp hit box over the card, so it adds no height to the title row.
+            Box(
+                Modifier.align(Alignment.TopEnd).offset(y = headerHeight + 8.dp + 10.dp - 24.dp).size(48.dp)
+                    .clickable(enabled = !busy, role = Role.Button, onClickLabel = "Dismiss") { actions.onDismiss(proposal.proposalId) }.semantics { contentDescription = "Dismiss" }.testTag("proposal-dismiss"),
+                contentAlignment = Alignment.Center,
+            ) { Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp)) }
         }
     }
+    if (!state.resolved && host != null) {
+        val request = ProposalOptionsRequest(proposal.proposalId, actions.sessionId.orEmpty(), proposal.suggestions, proposal.replaced, view.faultRow, !busy) { actions.chosen[proposal.proposalId] = it }
+        host.Settle(request)
+    }
     val box = cardBounds
-    val host = actions.optionsHost
     if (optionsOpen && !state.resolved && host != null && box != null) ProposalOptionsPanel(proposal, view, box, host, busy) { actions.chosen[proposal.proposalId] = it }
     if (previewOpen) ProposalPreviewDialog(proposal) { previewOpen = false }
 }
@@ -299,7 +340,7 @@ private fun ProposalStatus(view: ProposalView) {
     val t = LocalTetherTokens.current
     val (icon, word) = when (view.state) {
         ProposalState.Started -> TetherIcons.Check to "Started"
-        ProposalState.Here -> TetherIcons.RotateCcw to "Continued here"
+        ProposalState.Here -> TetherIcons.Undo2 to "Continued here"
         ProposalState.Dismissed -> TetherIcons.Ban to "Dismissed"
         ProposalState.Expired -> TetherIcons.Clock to "Expired"
         else -> return
@@ -311,14 +352,26 @@ private fun ProposalStatus(view: ProposalView) {
 }
 
 @Composable
-private fun ProposalButton(label: String, primary: Boolean, enabled: Boolean, tag: String, description: String = label, onClick: () -> Unit) {
+private fun ProposalButton(
+    label: String, primary: Boolean, enabled: Boolean, tag: String, description: String = label, expanded: Boolean = false, bare: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null, onClick: () -> Unit,
+) {
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(10.dp)
-    Box(
-        Modifier.padding(start = 6.dp).heightIn(min = 48.dp).background(if (primary) t.accent else t.graphiteRaised, shape).border(1.dp, if (primary) t.accent else t.line, shape)
+    val fill = when {
+        primary -> t.accent
+        bare -> Color.Transparent
+        expanded -> t.lineStrong
+        else -> t.slate
+    }
+    Row(
+        Modifier.heightIn(min = 48.dp).background(fill, shape).clip(shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 16.dp).semantics { contentDescription = description }.testTag(tag),
-        contentAlignment = Alignment.Center,
-    ) { Text(label, color = if (primary) t.accentInk else t.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = if (primary) t.accentInk else t.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        trailing?.invoke()
+    }
 }
 
 /** The anchored Options panel: bounded by the transcript's visible box minus the keyboard, scrolled to fit once, capped and scrolling past that. */
@@ -355,7 +408,7 @@ private fun ProposalOptionsPanel(proposal: ProposalView, view: ProposalView, car
 fun ProposalOptionsPanelChrome(maxHeight: Dp, modifier: Modifier = Modifier, onNaturalHeight: (Int) -> Unit = {}, content: @Composable () -> Unit) {
     val t = LocalTetherTokens.current
     Column(
-        modifier.padding(horizontal = 4.dp).heightIn(max = maxHeight).border(1.dp, t.line, RoundedCornerShape(16.dp)).background(t.graphite, RoundedCornerShape(16.dp))
+        modifier.padding(horizontal = 4.dp).heightIn(max = maxHeight).cssSurface(RoundedCornerShape(16.dp), t.graphite, CssBorder(1.dp, t.lineStrong), t.css.shadowFloating)
             .verticalScroll(rememberScrollState()).padding(6.dp).testTag("proposal-options-panel"),
     ) {
         Column(Modifier.onSizeChanged { onNaturalHeight(it.height) }) { content() }
@@ -365,19 +418,27 @@ fun ProposalOptionsPanelChrome(maxHeight: Dp, modifier: Modifier = Modifier, onN
 /** The full prompt, read only, with Copy (D5(9)). Opens in every state. */
 @Composable
 internal fun ProposalPreviewDialog(proposal: ProposalView, onClose: () -> Unit) {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        ProposalPreviewContent(proposal, onClose)
+    }
+}
+
+/** The preview's body (the dialog's content; the goldens draw it in place). */
+@Composable
+internal fun ProposalPreviewContent(proposal: ProposalView, onClose: () -> Unit) {
     val t = LocalTetherTokens.current
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    run {
         Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).padding(12.dp).background(t.graphite, RoundedCornerShape(16.dp)).border(1.dp, t.line, RoundedCornerShape(16.dp)).testTag("proposal-prompt")) {
             Column(Modifier.padding(16.dp)) {
-                Text(proposal.title, color = t.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(SafeText.line(proposal.title), color = t.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text("Prompt for the new session · read only", color = t.muted, fontSize = 12.sp)
             }
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-                androidx.compose.foundation.text.selection.SelectionContainer { Text(proposal.prompt, color = t.ink, fontSize = 14.sp, lineHeight = 22.sp) }
+                androidx.compose.foundation.text.selection.SelectionContainer { Text(SafeText.prose(proposal.prompt), color = t.ink, fontSize = 14.sp, lineHeight = 22.sp) }
             }
-            Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.End) {
+            Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                 ProposalButton(if (copied) "Copied" else "Copy prompt", primary = false, enabled = true, tag = "proposal-copy") {
                     val cm = context.getSystemService(android.content.ClipboardManager::class.java)
                     cm?.setPrimaryClip(android.content.ClipData.newPlainText("prompt", proposal.prompt))

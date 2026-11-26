@@ -55,6 +55,9 @@ object Proposals {
     fun startSettings(form: JsObj, entry: ProviderCatalogEntry, modified: JsObj, codexCurrent: HandoverDraftForm.CodexCurrent? = null): JsonObject {
         val create = CreateFrame.build(form, entry, modified, requestId = "x").toJsonObject()
         val kept = create.filterKeys { it != "type" && it != "requestId" && it != "name" && it != "prompt" && it != "text" }.toMutableMap()
+        // The account is always named: null is the harness's default account (the server re-froze `profileId: string | null`), so a
+        // card on the default account never starts on the proposer's.
+        kept["profileId"] = entry.profileId?.takeIf { it.isNotEmpty() }?.let { kotlinx.serialization.json.JsonPrimitive(it) } ?: kotlinx.serialization.json.JsonNull
         // Codex "Current (custom)": the agent's own triple goes out as it is (no preset reproduces it).
         if (entry.provider == "codex" && codexCurrent != null && (form["mode"] as? com.tether.app.protocol.tree.JsStr)?.value == HandoverDraftForm.CODEX_CURRENT_MODE) {
             codexCurrent.sandboxPolicy?.takeIf { it.isNotEmpty() }?.let { kept["sandboxPolicy"] = kotlinx.serialization.json.JsonPrimitive(it) }

@@ -322,7 +322,7 @@ internal fun buildChatItems(
         if (turn.continuation) items.add(ChatItem.Continuation(turnId, opens()))
         // v175: with the card shown, each `propose_session` tool row gives way to its card, in place (below 175 the tool rows stay).
         val proposals = if (proposalCard) proposalViews(cardTurn) else emptyList()
-        val chunks = proposalChunks(turn.blocks, proposals) { id -> turn.blocksById[id]?.let { it.kind == Vocab.BLOCK_TOOL && isProposeSessionTool(it.name) } == true }
+        val chunks = proposalChunks(turn.blocks, proposals) { id -> turn.blocksById[id]?.let { it.kind == Vocab.BLOCK_TOOL && isProposeSessionTool(it.name) } == true && rawFor(id)?.isErrorBlock() != true }
         for (chunk in chunks) {
         for (segment in segmentBlocks(chunk.blockIds, ::rawFor)) {
             when (segment) {
@@ -451,8 +451,9 @@ internal fun outcomeAt(turnObj: JsObj?, turn: TurnProjection): Double? =
 internal class ProposalChunk(val blockIds: List<String>, val card: ProposalView?)
 
 /**
- * The turn's blocks split at each `propose_session` tool block (dropped), the card of the n-th proposal taking the n-th such
- * block's place; a proposal with no tool block of its own (a replay that lost it) follows the last run. No proposals: one run.
+ * The turn's blocks split at each proposing tool block ([isProposeTool]: a `propose_session` call that went through), the card of
+ * the n-th proposal taking the n-th such block's place; a proposal with no tool block of its own (a replay that lost it) follows
+ * the last run. A propose call that failed, or has no proposal left, stays a normal tool row. No proposals: one run.
  */
 internal fun proposalChunks(blocks: List<String>, proposals: List<ProposalView>, isProposeTool: (String) -> Boolean): List<ProposalChunk> {
     if (proposals.isEmpty()) return listOf(ProposalChunk(blocks, null))
@@ -463,7 +464,7 @@ internal fun proposalChunks(blocks: List<String>, proposals: List<ProposalView>,
         if (isProposeTool(id) && next < proposals.size) {
             out.add(ProposalChunk(run, proposals[next++]))
             run = ArrayList()
-        } else if (!isProposeTool(id)) run.add(id)
+        } else run.add(id)
     }
     out.add(ProposalChunk(run, proposals.getOrNull(next)))
     for (i in next + 1 until proposals.size) out.add(ProposalChunk(emptyList(), proposals[i]))

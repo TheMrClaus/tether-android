@@ -8,6 +8,7 @@ import com.tether.app.protocol.tree.JsStr
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** v175: where the proposal card's rows start, and the settings a Start carries. */
@@ -82,5 +83,45 @@ class ProposalSeedTest {
         val r = ProposalSeed.of(s("provider" to JsStr("codex"), "sandboxPolicy" to JsStr("off"), "approvalPolicy" to JsStr("never")), entries, session, JsObj.EMPTY)!!
         assertNull(r.codexCurrent)
         assertEquals("full-access", (r.form["mode"] as JsStr).value)
+    }
+
+    private fun str(settings: kotlinx.serialization.json.JsonObject, key: String) = (settings[key] as kotlinx.serialization.json.JsonPrimitive).content
+
+    @Test
+    fun theStartFrameCarriesEveryRowAsTheFormShowsIt() {
+        val r = ProposalSeed.of(JsObj.EMPTY, entries, session, JsObj.EMPTY)!!
+        val settings = Proposals.startSettings(r.form, entries[0], r.modified)
+        for ((key, field) in listOf("cwd" to "cwd", "model" to "model", "permissionMode" to "mode")) {
+            assertEquals("$key on the frame equals the row", (r.form[field] as JsStr).value, str(settings, key))
+        }
+        assertEquals(kotlinx.serialization.json.JsonPrimitive(false), settings["useWorktree"])
+        assertEquals("claude", str(settings, "provider"))
+    }
+
+    @Test
+    fun theDefaultAccountGoesAsAnExplicitNull() {
+        val r = ProposalSeed.of(JsObj.EMPTY, entries, session, JsObj.EMPTY)!!
+        val settings = Proposals.startSettings(r.form, entries[0], r.modified)
+        assertTrue("the key is present", settings.containsKey("profileId"))
+        assertEquals(kotlinx.serialization.json.JsonNull, settings["profileId"])
+    }
+
+    @Test
+    fun aNamedAccountGoesAsItsId() {
+        val named = ProviderCatalogEntry("claude:work", "claude", "ready", entries[0].models, profileId = "work")
+        val onWork = AgentSession(id = "s1", provider = "claude", name = "Billing", cwd = "/work/a", status = "idle", startedAt = 1, updatedAt = 1, profileId = "work")
+        val r = ProposalSeed.of(JsObj.EMPTY, listOf(entries[0], named), onWork, JsObj.EMPTY)!!
+        val settings = Proposals.startSettings(r.form, named, r.modified)
+        assertEquals("work", str(settings, "profileId"))
+    }
+
+    @Test
+    fun worktreeIsOffUnlessTheAgentSuggestedItWhateverTheOperatorsDefaultIs() {
+        val prefs = s("useWorktree" to JsBool.TRUE, "defaultWorktree" to JsBool.TRUE, "isolation" to JsStr("worktree"))
+        val r = ProposalSeed.of(JsObj.EMPTY, entries, session, prefs)!!
+        assertEquals(JsBool.FALSE, r.form["useWorktree"])
+        assertEquals(kotlinx.serialization.json.JsonPrimitive(false), Proposals.startSettings(r.form, entries[0], r.modified)["useWorktree"])
+        val suggested = ProposalSeed.of(s("useWorktree" to JsBool.TRUE), entries, session, prefs)!!
+        assertEquals(JsBool.TRUE, suggested.form["useWorktree"])
     }
 }
