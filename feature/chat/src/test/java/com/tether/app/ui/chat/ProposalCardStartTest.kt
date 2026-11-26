@@ -5,6 +5,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -118,5 +119,66 @@ class ProposalCardStartTest {
         }
         rule.waitForIdle()
         rule.onNodeWithTag("proposal-options").assertIsDisplayed()
+    }
+}
+
+/** The prompt preview and the Starting state of the proposal card. */
+@RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class ProposalCardPreviewTest {
+    @get:Rule val rule = createComposeRule()
+
+    private val full = "Line one of the prompt.\nLine two of the prompt.\nLine three that the two-line preview never shows.\nLine four, the last."
+    private val view = ProposalView(
+        proposalId = "p1", title = "Split the parser", prompt = full, suggestions = JsObj.EMPTY, replaced = emptyList(),
+        state = ProposalState.Pending, refusalCode = null, startedSessionId = null, startedSessionName = null,
+    )
+
+    private fun card(actions: ProposalActions = ProposalActions(sessionId = "s1", cardShown = true)) {
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) { CompositionLocalProvider(LocalProposalActions provides actions) { ProposalCard(view) } }
+        }
+        rule.waitForIdle()
+    }
+
+    private fun openPreview() {
+        rule.onNodeWithTag("proposal-preview").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("proposal-prompt").assertIsDisplayed()
+    }
+
+    @Test fun copyPutsTheFullPromptOnTheClipboard() {
+        card()
+        openPreview()
+        rule.onNodeWithTag("proposal-copy").performClick()
+        rule.waitForIdle()
+        val cm = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().getSystemService(android.content.ClipboardManager::class.java)
+        assertEquals(full, cm.primaryClip!!.getItemAt(0).text.toString())
+    }
+
+    @Test fun theXClosesThePreview() {
+        card()
+        openPreview()
+        rule.onNodeWithTag("proposal-preview-x").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("proposal-prompt").assertDoesNotExist()
+    }
+
+    @Test fun backClosesThePreview() {
+        card()
+        openPreview()
+        androidx.test.espresso.Espresso.pressBack()
+        rule.waitForIdle()
+        rule.onNodeWithTag("proposal-prompt").assertDoesNotExist()
+    }
+
+    @Test fun theStartButtonIsDisabledWhileStartingSoNoSecondFrameGoes() {
+        var frames = 0
+        val local = mapOf("p1" to com.tether.app.client.ProposalLocalState(kind = "start", requestId = "r1"))
+        card(ProposalActions(sessionId = "s1", cardShown = true, local = local, onStart = { _, _ -> frames++ }))
+        rule.onNodeWithTag("proposal-start").assertIsNotEnabled()
+        rule.onNodeWithTag("proposal-start").performClick()
+        rule.waitForIdle()
+        assertEquals(0, frames)
     }
 }
