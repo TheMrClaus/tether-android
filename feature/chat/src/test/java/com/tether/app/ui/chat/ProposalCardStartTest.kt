@@ -3,6 +3,7 @@ package com.tether.app.ui.chat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -69,5 +70,19 @@ class ProposalCardStartTest {
         rule.waitForIdle()
         rule.onNodeWithTag("proposal-prompt").assertIsDisplayed()
         rule.onNodeWithTag("proposal-copy").assertIsDisplayed()
+    }
+
+    @Test fun optionsReadsExpandedWhileItsPanelIsOpen() {
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) {
+                CompositionLocalProvider(LocalProposalActions provides ProposalActions(sessionId = "s1", optionsHost = host, cardShown = true)) { ProposalCard(view) }
+            }
+        }
+        rule.waitForIdle()
+        val expanded = androidx.compose.ui.test.SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "Expanded")
+        rule.onNodeWithTag("proposal-options").assert(androidx.compose.ui.test.SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "Collapsed"))
+        rule.onNodeWithTag("proposal-options").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("proposal-options").assert(expanded)
     }
 }

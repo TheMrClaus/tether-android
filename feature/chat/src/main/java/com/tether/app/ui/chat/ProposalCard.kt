@@ -51,6 +51,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -231,7 +232,7 @@ private class ProposalPositionProvider(private val card: IntRect, private val bo
 private fun Rect.toIntRect() = IntRect(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
 
 @Composable
-fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier) {
+fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier, optionsShownExpanded: Boolean = false) {
     val t = LocalTetherTokens.current
     val actions = LocalProposalActions.current
     val face = proposalFace(proposal, actions.local[proposal.proposalId])
@@ -300,7 +301,7 @@ fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier) {
                         if (host != null) {
                             val replacedCount = proposal.replaced.size
                             ProposalButton(
-                                "Options", primary = false, enabled = !busy, expanded = optionsOpen,
+                                "Options", primary = false, enabled = !busy, expanded = optionsOpen || optionsShownExpanded,
                                 description = if (replacedCount > 0) "Options, $replacedCount suggestion${if (replacedCount == 1) "" else "s"} replaced" else "Options",
                                 tag = "proposal-options",
                                 trailing = if (replacedCount > 0) {
@@ -366,7 +367,7 @@ private fun ProposalButton(
     }
     Row(
         Modifier.heightIn(min = 48.dp).background(fill, shape).clip(shape)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 16.dp).semantics { contentDescription = description }.testTag(tag),
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 16.dp).semantics { contentDescription = description; if (tag == "proposal-options") stateDescription = if (expanded) "Expanded" else "Collapsed" }.testTag(tag),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = if (primary) t.accentInk else t.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)

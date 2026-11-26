@@ -23,7 +23,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -150,7 +149,7 @@ private fun ProposalInPlace(shot: ProposalOptionsShot, seed: ProposalRowsSeed, w
             Box(
                 Modifier.align(if (shot.atBottom) Alignment.BottomCenter else Alignment.TopCenter).padding(12.dp).fillMaxWidth()
                     .onGloballyPositioned { c -> c.boundsInWindow().let { card = IntRect(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt()) } },
-            ) { ProposalCard(view) }
+            ) { ProposalCard(view, optionsShownExpanded = true) }
         }
         val c = card
         if (c != null) {
@@ -174,8 +173,6 @@ fun ComposeContentTestRule.snapProposalOptions(shot: ProposalOptionsShot, skin: 
     }
     mainClock.advanceTimeBy(600)
     waitForIdle()
-    // The panel is open: Options reads its expanded state (the real panel is a popup window, which a node capture does not hold).
-    onNodeWithTag("proposal-options").performClick()
     mainClock.advanceTimeBy(600)
     waitForIdle()
     onNodeWithTag("proposal-well").captureRoboImage("src/test/screenshots/${shot.id}/${skin.id}-$size.png", roborazziOptions = exact())
