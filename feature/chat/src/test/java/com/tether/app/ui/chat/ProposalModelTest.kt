@@ -213,6 +213,7 @@ class ProposalModelTest {
         assertEquals(1, list.filterIsInstance<ChatItem.Proposal>().size)
         val rows = list.filter { it is ChatItem.Block && it.block.name == "mcp__tether__propose_session" || it is ChatItem.ToolGroup }
         assertEquals("the failed call keeps one tool row: $list", 1, rows.size)
+        assertTrue("the kept row is the failed call's, before the card that replaced the later call: $list", list.indexOf(rows.single()) < list.indexOfFirst { it is ChatItem.Proposal })
     }
 
     @Test
