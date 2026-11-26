@@ -156,7 +156,7 @@ val LocalTranscriptViewport = compositionLocalOf { TranscriptViewport() }
  * Where the Options panel goes (spec 3.3): inside [bounds] (the list's visible box minus the keyboard), below the card when it
  * fits, else above, else on the side with more room, never outside. [capHeight] is the height it may take.
  */
-internal object ProposalPlacement {
+object ProposalPlacement {
     /** The box the panel may use: the list's visible box (the window only when the list has not reported yet) minus the keyboard. */
     fun panelBounds(list: IntRect?, windowWidth: Int, windowHeight: Int, ime: Int): IntRect {
         val box = list ?: IntRect(0, 0, windowWidth, windowHeight)
@@ -212,7 +212,7 @@ private class ProposalPositionProvider(private val card: IntRect, private val bo
 private fun Rect.toIntRect() = IntRect(left.toInt(), top.toInt(), right.toInt(), bottom.toInt())
 
 @Composable
-internal fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier) {
+fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val actions = LocalProposalActions.current
     val face = proposalFace(proposal, actions.local[proposal.proposalId])
@@ -324,7 +324,6 @@ private fun ProposalButton(label: String, primary: Boolean, enabled: Boolean, ta
 /** The anchored Options panel: bounded by the transcript's visible box minus the keyboard, scrolled to fit once, capped and scrolling past that. */
 @Composable
 private fun ProposalOptionsPanel(proposal: ProposalView, view: ProposalView, card: Rect, host: ProposalOptionsHost, busy: Boolean, onSettings: (JsonObject) -> Unit) {
-    val t = LocalTetherTokens.current
     val viewport = LocalTranscriptViewport.current
     val density = LocalDensity.current
     val windowHeight = LocalWindowInfo.current.containerSize.height
@@ -345,14 +344,21 @@ private fun ProposalOptionsPanel(proposal: ProposalView, view: ProposalView, car
         popupPositionProvider = remember(card, bounds) { ProposalPositionProvider(card.toIntRect(), bounds, gap, with(density) { 8.dp.roundToPx() }) },
         properties = PopupProperties(focusable = false),
     ) {
-        Column(
-            Modifier.padding(horizontal = 4.dp).heightIn(max = with(density) { cap.toDp() }).border(1.dp, t.line, RoundedCornerShape(16.dp)).background(t.graphite, RoundedCornerShape(16.dp))
-                .verticalScroll(rememberScrollState()).padding(6.dp).testTag("proposal-options-panel"),
-        ) {
-            Column(Modifier.onSizeChanged { natural = it.height }) {
-                host.Rows(ProposalOptionsRequest(proposal.proposalId, actions.sessionId.orEmpty(), proposal.suggestions, proposal.replaced, view.faultRow, !busy, onSettings))
-            }
+        ProposalOptionsPanelChrome(with(density) { cap.toDp() }, onNaturalHeight = { natural = it }) {
+            host.Rows(ProposalOptionsRequest(proposal.proposalId, actions.sessionId.orEmpty(), proposal.suggestions, proposal.replaced, view.faultRow, !busy, onSettings))
         }
+    }
+}
+
+/** The Options panel's frame: a bordered, scrolling box no taller than [maxHeight]; [onNaturalHeight] reports the rows' own height. */
+@Composable
+fun ProposalOptionsPanelChrome(maxHeight: Dp, modifier: Modifier = Modifier, onNaturalHeight: (Int) -> Unit = {}, content: @Composable () -> Unit) {
+    val t = LocalTetherTokens.current
+    Column(
+        modifier.padding(horizontal = 4.dp).heightIn(max = maxHeight).border(1.dp, t.line, RoundedCornerShape(16.dp)).background(t.graphite, RoundedCornerShape(16.dp))
+            .verticalScroll(rememberScrollState()).padding(6.dp).testTag("proposal-options-panel"),
+    ) {
+        Column(Modifier.onSizeChanged { onNaturalHeight(it.height) }) { content() }
     }
 }
 

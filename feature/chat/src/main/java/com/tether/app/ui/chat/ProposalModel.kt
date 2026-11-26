@@ -11,7 +11,7 @@ import com.tether.app.protocol.tree.JsStr
 data class ProposalReplacedView(val field: String, val code: String, val suggested: String)
 
 /** The card's state, from the folded proposal; [Starting] is also what the device shows while its own Start is in flight. */
-internal enum class ProposalState { Pending, Starting, Refused, Started, Here, Dismissed, Expired;
+enum class ProposalState { Pending, Starting, Refused, Started, Here, Dismissed, Expired;
     /** Started, continued here, dismissed and expired are final: the card drops its actions. */
     val resolved: Boolean get() = this == Started || this == Here || this == Dismissed || this == Expired
 
@@ -30,7 +30,7 @@ internal enum class ProposalState { Pending, Starting, Refused, Started, Here, D
 
 /** A proposal as the transcript shows it (the folded `proposals` entry of a turn). The prompt is the server's and is never edited. */
 @Immutable
-internal data class ProposalView(
+data class ProposalView(
     val proposalId: String,
     val title: String,
     val prompt: String,

@@ -691,6 +691,9 @@ class TranscriptBidiBehaviourTest {
     private val notSelectable = setOf("LoadEarlier", "ToolGroup", "BgCommand")
 
     /** ta-coik.22: the cards and notices, selectable as on the web; walked by [noSelectableCardOrNoticeDrawsRawControlsOrAForgedToken]. */
+    /** The proposal card is selectable and has its own states and goldens; it is built by the proposal fixtures, not by these walks. */
+    private val ownFixtureKinds = setOf("Proposal")
+
     private val cardKinds = setOf("Approval", "Question", "ProviderNotice", "Compaction", "SessionNotice", "RateLimit")
 
     /**
@@ -732,7 +735,7 @@ class TranscriptBidiBehaviourTest {
         val items = buildChatItems(f.projection, f.tree, showThinking = true, zone = ChatFixtures.zone, richCodex = true, groupOpen = { _, _ -> true })
         val kinds = ChatItem::class.java.declaredClasses.filter { ChatItem::class.java.isAssignableFrom(it) && it != ChatItem::class.java }.map { it.simpleName }.toSet()
         val present = items.map { it::class.java.simpleName }.toSet()
-        assertEquals("selectable kinds missing from the walks", emptySet<String>(), kinds - notSelectable - cardKinds - present)
+        assertEquals("selectable kinds missing from the walks", emptySet<String>(), kinds - notSelectable - cardKinds - ownFixtureKinds - present)
         for (item in items) assertEquals(item::class.java.simpleName, if (item is ChatItem.Block) !item.isActivityRow else item::class.java.simpleName !in notSelectable, item.selectableText)
 
         show(f, richCodex = true)
