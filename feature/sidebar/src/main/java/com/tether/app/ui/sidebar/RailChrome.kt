@@ -113,7 +113,7 @@ private fun RailPrimaryRow(onNewSession: () -> Unit, scheduledCount: Int, schedu
                 Modifier
                     .heightIn(min = PhoneDrawer.Floor)
                     .clip(keyShape)
-                    .background(Color(0xFF365CDE), keyShape)
+                    .background(t.accent, keyShape)
                     .semantics(mergeDescendants = true) { role = Role.Button }
                     .clickable(role = Role.Button, onClick = onNewSession)
                     .padding(start = 12.dp, end = 14.dp)
@@ -121,8 +121,8 @@ private fun RailPrimaryRow(onNewSession: () -> Unit, scheduledCount: Int, schedu
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                SmallIcon(TetherIcons.Plus, Color.White, 16.dp)
-                Text("New session", style = css(type.ui, 0.8125f, 680), color = Color.White, maxLines = 1, softWrap = false)
+                SmallIcon(TetherIcons.Plus, t.accentInk, 16.dp)
+                Text("New session", style = css(type.ui, 0.8125f, 680), color = t.accentInk, maxLines = 1, softWrap = false)
             }
             // `.scheduled-actions-nav` (studio.css:1267-1268): radius 8, 0 6, gap 8, CalendarClock 16, 13/600; is-active = graphite-raised + white.
             val navShape = RoundedCornerShape(8.dp)

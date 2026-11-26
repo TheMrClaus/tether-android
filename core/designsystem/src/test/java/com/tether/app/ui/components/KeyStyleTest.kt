@@ -112,7 +112,7 @@ class KeyStyleTest {
         Row("g8722", KeyClasses.EndSession, P, { it.brickDeep }, { it.brickSide }, { it.accentInk }, brickPressed, keyRadius),
 
         // ── {new-session-button} ──
-        Row("s264 + s267 + s273 + s303 #365cde", KeyClasses.NewSession, R, { Color(0xFF365CDE) }, clear, { it.accentInk }, none, radius = studioRadius),
+        Row("s264 + s267 + s273 + s303 accent", KeyClasses.NewSession, R, { it.accent }, clear, { it.accentInk }, none, radius = studioRadius),
         Row("g8687 (0,3,0) beats s303 (0,2,0)", KeyClasses.NewSession, P, { it.keyFaceDeep }, clear, { it.accentInk }, neutralPressed, studioRadius),
 
         // ── {chat-attach-btn} (in .chat-composer-toolbar), phone layout ──

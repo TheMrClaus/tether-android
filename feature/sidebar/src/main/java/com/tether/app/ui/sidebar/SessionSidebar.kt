@@ -1243,14 +1243,14 @@ private fun PhoneBlockHeader(block: BlockView, actions: SidebarActions, offline:
                 Box(
                     Modifier
                         .size(if (rail) 24.dp else 32.dp)
-                        .background(Color(0xFF283650), badgeShape)
-                        .then(if (block.isCurrent) Modifier.border(1.dp, t.violetStrong, badgeShape) else Modifier),
+                        .background(t.css.bgPanel, badgeShape)
+                        .border(1.dp, if (block.isCurrent) t.violetStrong else t.css.border, badgeShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         Web.workspaceInitial(block.workspace),
                         style = css(type.ui, 0.875f, 700, lineHeight = 1f),
-                        color = if (block.isCurrent) t.violet else Color(0xFFC2D1ED),
+                        color = if (block.isCurrent) t.violet else t.css.inkStrong,
                     )
                 }
                 // W53b: on the rail the activity dot rides the tile's corner (out of the flow: the name keeps the width).

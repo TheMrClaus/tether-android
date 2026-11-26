@@ -223,7 +223,7 @@ private fun RuntimeDeskDestinationRail(
             modifier = Modifier.fillMaxWidth().heightIn(min = RuntimeDeskStyle.TouchTarget),
         )
         Text("Settings", color = t.muted, style = runtimeDeskSupportingStyle(), modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp))
-        RuntimeDeskList(items, selected, onSelect, dark = true, showChevron = false)
+        RuntimeDeskList(items, selected, onSelect, dark = false, showChevron = false)
     }
 }
 
@@ -464,8 +464,18 @@ private fun RuntimeDeskGroupLabel(label: String, first: Boolean) {
     )
 }
 
+/** The colours a rail row paints (P8A-FIX3 B1 pins their contrast); [dark] is the legacy navy-rail style, no caller on the light/skin rail. */
+internal data class RuntimeDeskItemPalette(val activeBackground: Color, val idleText: Color, val activeText: Color, val supporting: Color)
+
+internal fun runtimeDeskItemPalette(t: com.tether.app.ui.theme.TetherTokens, dark: Boolean) = RuntimeDeskItemPalette(
+    activeBackground = if (dark) t.accent else t.violetWash,
+    idleText = if (dark) t.css.faint else t.ink,
+    activeText = if (dark) t.accentInk else t.violetStrong,
+    supporting = if (dark) t.css.faint else t.muted,
+)
+
 @Composable
-private fun RuntimeDeskItem(
+internal fun RuntimeDeskItem(
     item: RuntimeDeskNavItem,
     active: Boolean,
     dark: Boolean,
@@ -475,10 +485,11 @@ private fun RuntimeDeskItem(
 ) {
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(RuntimeDeskStyle.ItemRadius)
-    val activeBackground = if (dark) t.accent else t.violetWash
-    val idleText = if (dark) t.css.faint else t.ink
-    val activeText = if (dark) t.accentInk else t.violetStrong
-    val supporting = if (dark) t.css.faint else t.muted
+    val palette = runtimeDeskItemPalette(t, dark)
+    val activeBackground = palette.activeBackground
+    val idleText = palette.idleText
+    val activeText = palette.activeText
+    val supporting = palette.supporting
     Row(
         Modifier
             .fillMaxWidth()
