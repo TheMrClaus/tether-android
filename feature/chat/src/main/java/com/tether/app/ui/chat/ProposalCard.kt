@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +48,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -58,6 +61,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
@@ -192,6 +196,9 @@ object ProposalPlacement {
         val box = list ?: IntRect(0, 0, windowWidth, windowHeight)
         return IntRect(box.left, box.top, box.right, minOf(box.bottom, windowHeight - ime))
     }
+
+    /** The panel's width: the card's width less the inset on each side, never wider than [bounds] (so the x clamp can keep it inside). */
+    fun panelWidth(card: IntRect, bounds: IntRect, inset: Int): Int = (minOf(card.width, bounds.width) - 2 * inset).coerceAtLeast(0)
 
     fun capHeight(card: IntRect, bounds: IntRect, gap: Int, floor: Int): Int =
         maxOf(floor, maxOf(bounds.bottom - card.bottom - gap, card.top - bounds.top - gap))
@@ -416,7 +423,8 @@ private fun ProposalOptionsPanel(proposal: ProposalView, view: ProposalView, car
         popupPositionProvider = remember(card, bounds) { ProposalPositionProvider(card.toIntRect(), bounds, gap, with(density) { 8.dp.roundToPx() }) },
         properties = PopupProperties(focusable = false),
     ) {
-        ProposalOptionsPanelChrome(with(density) { cap.toDp() }, onNaturalHeight = { natural = it }) {
+        val width = with(density) { ProposalPlacement.panelWidth(card.toIntRect(), bounds, 8.dp.roundToPx()).toDp() }
+        ProposalOptionsPanelChrome(with(density) { cap.toDp() }, Modifier.width(width), onNaturalHeight = { natural = it }) {
             host.Rows(ProposalOptionsRequest(proposal.proposalId, actions.sessionId.orEmpty(), proposal.suggestions, proposal.replaced, view.faultRow, !busy, onSettings))
         }
     }
@@ -438,10 +446,22 @@ fun ProposalOptionsPanelChrome(maxHeight: Dp, modifier: Modifier = Modifier, onN
 @Composable
 internal fun ProposalPreviewDialog(proposal: ProposalView, onClose: () -> Unit) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val view = LocalView.current
+        val dark = LocalTetherTokens.current.skin.isDark
+        SideEffect { (view.parent as? DialogWindowProvider)?.window?.let { applyPreviewBarAppearance(it, view, dark) } }
         Box(Modifier.fillMaxSize().background(LocalTetherTokens.current.graphite).windowInsetsPadding(WindowInsets.systemBars)) {
             ProposalPreviewContent(proposal, onClose)
         }
     }
+}
+
+/** The preview window's own system-bar icon contrast, as the theme sets it for the main window: dark icons on a light theme, light icons on a dark one. */
+internal fun applyPreviewBarAppearance(window: android.view.Window, view: android.view.View, dark: Boolean) {
+    val controller = androidx.core.view.WindowCompat.getInsetsController(window, view)
+    controller.isAppearanceLightStatusBars = !dark
+    controller.isAppearanceLightNavigationBars = !dark
+    window.isStatusBarContrastEnforced = false
+    window.isNavigationBarContrastEnforced = false
 }
 
 /** The preview's body (the dialog's content; the goldens draw it in place). Insets are the dialog's job. */
