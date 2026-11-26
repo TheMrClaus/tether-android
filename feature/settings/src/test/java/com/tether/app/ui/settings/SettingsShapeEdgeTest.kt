@@ -80,7 +80,8 @@ abstract class SettingsShapeEdgeBase(private val narrow: Boolean) {
             0f to 899f,
             (w - 1f) to 899f,
             (w / 2f) to 0f,
-            (w / 2f) to 899f,
+            // Vector: the narrow desk's bottom strip is a --accent-soft bar from x=40 to x=620, not graphite; probe the top edge instead.
+            (w / 4f) to 0f,
             0f to 450f,
             (w - 1f) to 450f,
         )

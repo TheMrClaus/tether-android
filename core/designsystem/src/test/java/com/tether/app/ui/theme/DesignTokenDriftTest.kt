@@ -40,14 +40,14 @@ class DesignTokenDriftTest {
     @Test
     fun verifyFailsWhenATokenValueChanges() {
         val original = TokenCorpus.jsonFile.readText()
-        // studio-dark --graphite is #172032 (raw and resolved); change the resolved value only.
-        val needle = "\"resolved\": \"#172032\""
+        // studio-dark --graphite is #11141b (resolved; raw is var(--bg-panel)); change the resolved value only.
+        val needle = "\"resolved\": \"#11141b\""
         assertTrue("fixture value present", original.contains(needle))
-        val copy = tmp.newFile("design-tokens.json").apply { writeText(original.replaceFirst(needle, "\"resolved\": \"#172033\"")) }
+        val copy = tmp.newFile("design-tokens.json").apply { writeText(original.replaceFirst(needle, "\"resolved\": \"#11141c\"")) }
         val drift = verify(copy, TokenCorpus.generatedFile, tmp.root.resolve("out/GeneratedTokens.kt"))
         assertNotNull("changed JSON must fail verification", drift)
         assertTrue(drift!!, drift.contains("Design tokens drifted"))
-        assertTrue(drift, drift.contains("0xFF172033"))
+        assertTrue(drift, drift.contains("0xFF11141C"))
     }
 
     /** T15.5: an export that still carries the retired theme families is refused, not generated. */

@@ -150,18 +150,18 @@ class GrantRowA11yTest {
 
     // The composites are the web's: the served checked cell (b-412x915-card{,-dark}.json) and the standalone probe's unchecked one.
     @Test fun aDisabledTickedBoxIsGreyNotVioletInLight() = probe(TetherSkin.Studio, true).let { (border, fill) ->
-        near(0xEAE6DE, border, "light checked border"); near(0xEAE6DE, fill, "light checked fill")
+        near(0xE8E3D9, border, "light checked border"); near(0xE8E3D9, fill, "light checked fill")
     }
 
     @Test fun aDisabledTickedBoxIsGreyNotVioletInDark() = probe(TetherSkin.StudioDark, true).let { (border, fill) ->
-        near(0x514D49, border, "dark checked border"); near(0x514D49, fill, "dark checked fill")
+        near(0x4D483F, border, "dark checked border"); near(0x4D483F, fill, "dark checked fill")
     }
 
     @Test fun aDisabledUntickedBoxIsTheMeasuredPaletteInLight() = probe(TetherSkin.Studio, false).let { (border, fill) ->
-        near(0xE9E5DD, border, "light unchecked border"); near(0xFCF8EF, fill, "light unchecked fill")
+        near(0xE8E3D9, border, "light unchecked border"); near(0xFBF7EB, fill, "light unchecked fill")
     }
 
     @Test fun aDisabledUntickedBoxIsTheMeasuredPaletteInDark() = probe(TetherSkin.StudioDark, false).let { (border, fill) ->
-        near(0x484440, border, "dark unchecked border"); near(0x35322D, fill, "dark unchecked fill")
+        near(0x433E36, border, "dark unchecked border"); near(0x302C23, fill, "dark unchecked fill")
     }
 }

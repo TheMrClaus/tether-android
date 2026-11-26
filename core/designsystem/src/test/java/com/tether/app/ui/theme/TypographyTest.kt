@@ -108,7 +108,7 @@ class TypographyTest {
             for ((role, spec) in want) {
                 val (style, uppercase) = got.getValue(role)
                 val at = "${skin.id}.$role"
-                val family = if (spec.face == Face.Ui) Manrope else JetBrainsMono
+                val family = if (spec.face == Face.Ui) Archivo else FiraCode
                 assertSame("$at family", family, style.fontFamily)
                 assertEquals("$at size sp", spec.rem * 16f, style.fontSize.value, 1e-4f)
                 assertTrue("$at size unit", style.fontSize.type == TextUnitType.Sp)
@@ -137,7 +137,7 @@ class TypographyTest {
             for (label in listOf(t.sectionLabel, t.statusLabel, t.keyLabel)) {
                 assertFalse("${skin.id} uppercase", label.uppercase)
                 assertEquals("${skin.id} tracking", em(0f), label.style.letterSpacing)
-                assertSame("${skin.id} --font-ui", Manrope, label.style.fontFamily)
+                assertSame("${skin.id} --font-ui", Archivo, label.style.fontFamily)
                 assertEquals("Send", label.format("Send"))
             }
         }
@@ -157,12 +157,12 @@ class TypographyTest {
     fun fontStacksResolveToTheBundledFaces() {
         for (skin in TetherSkin.entries) {
             val t = typographyFor(skin)
-            assertSame("${skin.id} mono", JetBrainsMono, t.mono)
-            assertSame("${skin.id} ui", Manrope, t.ui)
+            assertSame("${skin.id} mono", FiraCode, t.mono)
+            assertSame("${skin.id} ui", Archivo, t.ui)
         }
-        // --font-ui (studio.css:47) resolves to the bundled Manrope in both skins.
-        for (skin in TetherSkin.entries) assertSame(skin.id, Manrope, fontFamilyForStack(skin.tokens.fontUi))
-        assertSame(JetBrainsMono, fontFamilyForStack("\"JetBrains Mono Variable\", ui-monospace"))
+        // --font-ui (studio.css:47) resolves to the bundled Archivo in both skins.
+        for (skin in TetherSkin.entries) assertSame(skin.id, Archivo, fontFamilyForStack(skin.tokens.fontUi))
+        assertSame(FiraCode, fontFamilyForStack("\"JetBrains Mono Variable\", ui-monospace"))
         assertSame(FontFamily.Monospace, fontFamilyForStack("\"Nope\", ui-monospace"))
         assertSame(FontFamily.SansSerif, fontFamilyForStack("-apple-system, \"Segoe UI\""))
     }
@@ -170,7 +170,7 @@ class TypographyTest {
     @Test
     fun inlineCodeIsRelativeMono() {
         val span = typographyFor(TetherSkin.StudioDark).codeInline
-        assertSame(JetBrainsMono, span.fontFamily)
+        assertSame(FiraCode, span.fontFamily)
         assertEquals(em(0.85f), span.fontSize) // .md-code 0.85em — globals.css:4953
     }
 
@@ -182,14 +182,17 @@ class TypographyTest {
 
     @Test
     fun everyFontEntryPinsItsWeightOnTheWghtAxis() {
-        for ((family, res) in listOf(Manrope to R.font.manrope_variable, JetBrainsMono to R.font.jetbrains_mono_variable)) {
+        for ((family, res) in listOf(Archivo to R.font.archivo_variable, FiraCode to R.font.fira_code_variable)) {
             val fonts = (family as FontListFontFamily).fonts.map { it as ResourceFont }
-            assertEquals(WebFontWeights, fonts.map { it.weight.weight })
+            val range = if (family === Archivo) ArchivoWghtRange else FiraCodeWghtRange
+            assertEquals(WebFontWeights.filter { it in range }, fonts.map { it.weight.weight })
             for (f in fonts) {
                 assertEquals(res, f.resId)
                 val settings = f.variationSettings.settings
-                assertEquals(listOf("wght"), settings.map { it.axisName })
-                assertEquals(f.weight.weight.toFloat(), settings.single().toVariationValue(null), 0f)
+                val expectedAxes = if (family === Archivo) listOf("wght", "wdth") else listOf("wght")
+                assertEquals(expectedAxes, settings.map { it.axisName })
+                assertEquals(f.weight.weight.toFloat(), settings.first().toVariationValue(null), 0f)
+                if (family === Archivo) assertEquals(ArchivoDefaultWdth.toFloat(), settings[1].toVariationValue(null), 0f)
             }
         }
     }

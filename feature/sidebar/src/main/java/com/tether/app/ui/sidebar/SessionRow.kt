@@ -301,12 +301,12 @@ internal fun SessionRow(
     // W39 (ta-v0h8): on the phone the card clips the row, so the row itself is square (the card rounds its ends).
     val rowShape = androidx.compose.ui.graphics.RectangleShape
     val rowFace = when {
-        active -> Color(0xFF243657)
+        active -> t.css.bgPanel // Vector: web .session-item-row.is-current { background: var(--bg-panel) }
         else -> Color.Transparent
     }
     val rowBorder = null
     val rowShadows = emptyList<CssShadow>()
-    val ink = if (active) t.white else t.ink
+    val ink = if (active) t.css.inkStrong else t.ink
 
     Box(
         Modifier
@@ -600,7 +600,7 @@ private fun PhoneRowBody(
         WholeWordText(
             name,
             style = css(type.ui, 0.875f, 600, lineHeight = 1.4286f).copy(textDirection = proseDirection),
-            color = if (active) Color.White else t.ink,
+            color = if (active) t.css.inkStrong else t.ink,
             maxLines = 1,
         )
         PhoneMetaLine(

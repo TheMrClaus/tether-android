@@ -30,40 +30,33 @@ import com.tether.app.ui.theme.TetherTokens
 import com.tether.app.ui.theme.TokenScope
 
 /**
- * studio.css 295-301: `.session-sidebar` redeclares the palette for everything inside the rail —
- * "Navigation keeps a stable ink-blue finish in either lighting mode." Only these properties; the
- * derived tints (`--tint-xs` … on `:root`) keep their root values, as in CSS ([TokenScope]).
+ * studio.css Unified-Rail Rule (Vector): `:root .session-sidebar` remaps the legacy rail tokens onto the skin's
+ * own Vector tokens, so the rail is `--bg-rail` in both lightings (Light #e7ebf2, Dark #0d1016) and follows the
+ * skin. Only these properties; the derived tints (`--tint-xs` ... on `:root`) keep their root values, as in CSS
+ * ([TokenScope]). `--ink`, `--danger`, `--danger-wash` and `--violet-deep` are not redeclared there.
  */
 val StudioSidebarScope: TokenScope = TokenScope(":root:where([data-theme^=\"studio\"]) .session-sidebar") { t: SkinTokens ->
     t.copy(
-        mineral = Color(0xFF141D2E),
-        mineralDeep = Color(0xFF111A2B),
-        graphite = Color(0xFF141D2E),
-        graphiteRaised = Color(0xFF1D2940),
-        slate = Color(0xFF2A3750),
-        line = Color(0xFF2B374B),
-        lineStrong = Color(0xFF3B4861),
-        white = Color(0xFFEFF3FC),
-        ink = Color(0xFFD7DFEF),
-        muted = Color(0xFFA9B7CE),
-        faint = Color(0xFF9CACC6),
-        violet = Color(0xFFA7BDFF),
-        violetStrong = Color(0xFF8EAAFF),
-        violetWash = Color(0xFF263B66),
-        // S3a: the rail pins these two so both Studio skins draw the same (web studio.css:1241 pins danger-wash: the light skin's #fff0f2 under rail danger text is 1.6:1).
-        violetDeep = Color(0xFFC5D2FF),
-        dangerWash = Color(0xFF3B2431),
-        keyFace = Color(0xFF1D2940),
-        keyFaceHover = Color(0xFF293851),
-        keyFaceDeep = Color(0xFF111A2B),
-        keySide = Color(0xFF34425A),
-        running = Color(0xFF75DABA),
-        danger = Color(0xFFFF9DAA),
-        tintRgb = Color(0xFFEBF0FF),
-        tintBoost = 1f,
+        mineral = t.bgRail,
+        mineralDeep = t.bgPanel,
+        graphite = t.bgRail,
+        graphiteRaised = t.bgRaised,
+        slate = t.bgSubtle,
+        line = t.border,
+        lineStrong = t.borderStrong,
+        white = t.inkStrong,
+        muted = t.inkMuted,
+        faint = t.inkMuted,
+        violet = t.accent,
+        violetStrong = t.accent,
+        violetWash = t.accentSoft,
+        keyFace = t.bgRaised,
+        keyFaceHover = t.bgPanel,
+        keyFaceDeep = t.bgSubtle,
+        keySide = t.borderStrong,
+        running = t.run,
     )
 }
-
 
 /** A CSS declaration block's text: `font: <weight> <rem> <family>`, tracking in em, unitless line-height. */
 internal fun css(family: FontFamily, rem: Float, weight: Int, trackingEm: Float = 0f, lineHeight: Float? = null): TextStyle = TextStyle(
