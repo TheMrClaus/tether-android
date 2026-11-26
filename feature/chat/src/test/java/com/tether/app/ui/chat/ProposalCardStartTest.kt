@@ -85,4 +85,38 @@ class ProposalCardStartTest {
         rule.waitForIdle()
         rule.onNodeWithTag("proposal-options").assert(expanded)
     }
+
+    private val unseededHost = object : ProposalOptionsHost {
+        @Composable override fun Rows(request: ProposalOptionsRequest) {}
+        override fun offersOptions(proposalId: String) = false
+    }
+
+    private fun unseededCard(onStart: (JsonObject?) -> Unit) {
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) {
+                CompositionLocalProvider(
+                    LocalProposalActions provides ProposalActions(sessionId = "s1", optionsHost = unseededHost, cardShown = true, onStart = { _, s -> onStart(s) }),
+                ) { ProposalCard(view) }
+            }
+        }
+        rule.waitForIdle()
+    }
+
+    @Test fun aCardWithNoSeededFormOffersNoOptionsAndStartsWithTheSuggestionsOnly() {
+        var sent: JsonObject? = JsonObject(mapOf("marker" to JsonNull))
+        unseededCard { sent = it }
+        rule.onNodeWithTag("proposal-options").assertDoesNotExist()
+        rule.onNodeWithTag("proposal-start").performClick()
+        assertEquals(null, sent)
+    }
+
+    @Test fun aSeededHostStillOffersOptions() {
+        rule.setContent {
+            ChatHost(TetherSkin.StudioDark) {
+                CompositionLocalProvider(LocalProposalActions provides ProposalActions(sessionId = "s1", optionsHost = host, cardShown = true)) { ProposalCard(view) }
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("proposal-options").assertIsDisplayed()
+    }
 }

@@ -78,6 +78,8 @@ class ShellProposalOptionsHost(private val vm: TetherViewModel, private val pref
     @Composable
     override fun Rows(request: ProposalOptionsRequest) = ProposalOptionRows(vm, prefs, modelFor(request.proposalId), request, seeds[request.proposalId])
 
+    override fun offersOptions(proposalId: String): Boolean = seeds[proposalId] != null
+
     @Composable
     override fun Settle(request: ProposalOptionsRequest) = ProposalFormSync(vm, modelFor(request.proposalId), request, seeds)
 }

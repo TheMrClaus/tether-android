@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -69,6 +72,7 @@ import androidx.compose.ui.window.PopupProperties
 import com.tether.app.client.ProposalLocalState
 import com.tether.app.protocol.tree.JsObj
 import com.tether.app.ui.components.CssBorder
+import com.tether.app.ui.components.SpinnerRing
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.text.SafeText
@@ -107,6 +111,12 @@ fun interface ProposalOptionsHost {
      */
     @Composable
     fun Settle(request: ProposalOptionsRequest) {}
+
+    /**
+     * Whether Options is offered for this proposal. A host with no seeded form for it (the proposing session is not in the list, or
+     * its harness is absent) says false: Start then carries the suggestions only, and the card never shows a form the server will not use.
+     */
+    fun offersOptions(proposalId: String): Boolean = true
 }
 
 /** What the card may do (read through [LocalProposalActions]); the default does nothing and shows no Options. */
@@ -247,6 +257,7 @@ fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier, optionsS
     val title = remember(proposal.title) { SafeText.line(proposal.title) }
     val promptText = remember(proposal.prompt) { SafeText.prose(proposal.prompt) }
     val host = actions.optionsHost
+    val offered = host?.offersOptions(proposal.proposalId) ?: false
     val headerHeight = 44.dp
     val titleLine = 20.sp
     Box(
@@ -298,7 +309,7 @@ fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier, optionsS
                 }
                 if (!state.resolved) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        if (host != null) {
+                        if (host != null && offered) {
                             val replacedCount = proposal.replaced.size
                             ProposalButton(
                                 "Options", primary = false, enabled = !busy, expanded = optionsOpen || optionsShownExpanded,
@@ -312,7 +323,12 @@ fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier, optionsS
                         Box(Modifier.weight(1f))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             ProposalButton("Do it here", primary = false, bare = true, enabled = !busy, tag = "proposal-here") { actions.onHere(proposal.proposalId) }
-                            ProposalButton(if (state == ProposalState.Starting) "Starting…" else "Start", primary = true, enabled = !busy, tag = "proposal-start") { actions.onStart(proposal.proposalId, actions.chosen[proposal.proposalId]) }
+                            ProposalButton(
+                                if (state == ProposalState.Starting) "Starting…" else "Start", primary = true, enabled = !busy, tag = "proposal-start",
+                                leading = if (state == ProposalState.Starting) {
+                                    { SpinnerRing(t.accentInk, size = 14.dp, stroke = 2.dp, modifier = Modifier.padding(end = 6.dp)) }
+                                } else null,
+                            ) { actions.onStart(proposal.proposalId, actions.chosen[proposal.proposalId]) }
                         }
                     }
                 }
@@ -332,7 +348,7 @@ fun ProposalCard(proposal: ProposalView, modifier: Modifier = Modifier, optionsS
         host.Settle(request)
     }
     val box = cardBounds
-    if (optionsOpen && !state.resolved && host != null && box != null) ProposalOptionsPanel(proposal, view, box, host, busy) { actions.chosen[proposal.proposalId] = it }
+    if (optionsOpen && !state.resolved && host != null && offered && box != null) ProposalOptionsPanel(proposal, view, box, host, busy) { actions.chosen[proposal.proposalId] = it }
     if (previewOpen) ProposalPreviewDialog(proposal) { previewOpen = false }
 }
 
@@ -355,7 +371,7 @@ private fun ProposalStatus(view: ProposalView) {
 @Composable
 private fun ProposalButton(
     label: String, primary: Boolean, enabled: Boolean, tag: String, description: String = label, expanded: Boolean = false, bare: Boolean = false,
-    trailing: (@Composable () -> Unit)? = null, onClick: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null, leading: (@Composable () -> Unit)? = null, modifier: Modifier = Modifier, onClick: () -> Unit,
 ) {
     val t = LocalTetherTokens.current
     val shape = RoundedCornerShape(10.dp)
@@ -366,10 +382,12 @@ private fun ProposalButton(
         else -> t.slate
     }
     Row(
-        Modifier.heightIn(min = 48.dp).background(fill, shape).clip(shape)
+        modifier.heightIn(min = 48.dp).background(fill, shape).clip(shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 16.dp).semantics { contentDescription = description; if (tag == "proposal-options") stateDescription = if (expanded) "Expanded" else "Collapsed" }.testTag(tag),
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        leading?.invoke()
         Text(label, color = if (primary) t.accentInk else t.ink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         trailing?.invoke()
     }
@@ -416,37 +434,54 @@ fun ProposalOptionsPanelChrome(maxHeight: Dp, modifier: Modifier = Modifier, onN
     }
 }
 
-/** The full prompt, read only, with Copy (D5(9)). Opens in every state. */
+/** The full prompt, read only, with Copy (D5(9)). Opens in every state; fills the screen on every form factor. */
 @Composable
 internal fun ProposalPreviewDialog(proposal: ProposalView, onClose: () -> Unit) {
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        ProposalPreviewContent(proposal, onClose)
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Box(Modifier.fillMaxSize().background(LocalTetherTokens.current.graphite).windowInsetsPadding(WindowInsets.systemBars)) {
+            ProposalPreviewContent(proposal, onClose)
+        }
     }
 }
 
-/** The preview's body (the dialog's content; the goldens draw it in place). */
+/** The preview's body (the dialog's content; the goldens draw it in place). Insets are the dialog's job. */
 @Composable
 internal fun ProposalPreviewContent(proposal: ProposalView, onClose: () -> Unit) {
     val t = LocalTetherTokens.current
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
-    run {
-        Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).padding(12.dp).background(t.graphite, RoundedCornerShape(16.dp)).border(1.dp, t.line, RoundedCornerShape(16.dp)).testTag("proposal-prompt")) {
-            Column(Modifier.padding(16.dp)) {
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(2000)
+            copied = false
+        }
+    }
+    Column(Modifier.fillMaxSize().background(t.graphite).testTag("proposal-prompt")) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(vertical = 12.dp)) {
                 Text(SafeText.line(proposal.title), color = t.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text("Prompt for the new session · read only", color = t.muted, fontSize = 12.sp)
             }
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-                androidx.compose.foundation.text.selection.SelectionContainer { Text(SafeText.prose(proposal.prompt), color = t.ink, fontSize = 14.sp, lineHeight = 22.sp) }
+            Box(
+                Modifier.size(48.dp).clickable(role = Role.Button, onClickLabel = "Close preview", onClick = onClose).semantics { contentDescription = "Close preview" }.testTag("proposal-preview-x"),
+                contentAlignment = Alignment.Center,
+            ) { Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(16.dp)) }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            androidx.compose.foundation.text.selection.SelectionContainer { Text(SafeText.prose(proposal.prompt), color = t.ink, fontSize = 14.sp, lineHeight = 22.sp) }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(t.line))
+        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ProposalButton(
+                if (copied) "Copied" else "Copy prompt", primary = false, enabled = true, tag = "proposal-copy", modifier = Modifier.weight(1f),
+                leading = { Icon(TetherIcons.Copy, contentDescription = null, tint = t.ink, modifier = Modifier.padding(end = 6.dp).size(14.dp)) },
+            ) {
+                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                cm?.setPrimaryClip(android.content.ClipData.newPlainText("prompt", proposal.prompt))
+                copied = true
             }
-            Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                ProposalButton(if (copied) "Copied" else "Copy prompt", primary = false, enabled = true, tag = "proposal-copy") {
-                    val cm = context.getSystemService(android.content.ClipboardManager::class.java)
-                    cm?.setPrimaryClip(android.content.ClipData.newPlainText("prompt", proposal.prompt))
-                    copied = true
-                }
-                ProposalButton("Close", primary = false, enabled = true, tag = "proposal-close", onClick = onClose)
-            }
+            ProposalButton("Close", primary = false, enabled = true, tag = "proposal-close", modifier = Modifier.weight(1f), onClick = onClose)
         }
     }
 }
