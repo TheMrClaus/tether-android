@@ -2,6 +2,7 @@ package com.tether.tools.designtokens
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -62,6 +63,19 @@ object Css {
 
     private fun argb(r: Float, g: Float, b: Float, a: Float): Long =
         (q(a) shl 24) or (q(r) shl 16) or (q(g) shl 8) or q(b)
+
+    /** `color-mix(in srgb, #A p%, #B)` with two hex colours -> `#rrggbb` (CSS Color 4 srgb mix, channels rounded). */
+    fun mixSrgb(s: String): String? {
+        val m = Regex("color-mix\\(\\s*in srgb\\s*,\\s*(#[0-9a-fA-F]{6})\\s+(\\d+(?:\\.\\d+)?)%\\s*,\\s*(#[0-9a-fA-F]{6})\\s*\\)").matchEntire(s.trim())
+            ?: return null
+        val a = m.groupValues[1]
+        val p = m.groupValues[2].toDouble() / 100.0
+        val b = m.groupValues[3]
+        fun ch(h: String, i: Int) = h.substring(1 + 2 * i, 3 + 2 * i).toInt(16)
+        return "#" + (0..2).joinToString("") { i ->
+            "%02x".format(Math.round(ch(a, i) * p + ch(b, i) * (1 - p)).toInt())
+        }
+    }
 
     fun color(s: String): Long? {
         val v = s.trim()
@@ -344,7 +358,14 @@ fun generate(jsonText: String): String {
         val graphite = chrome["graphite"]?.str() ?: fail("skin ${ref.id}: missing chrome.graphite")
         val boot = chrome["bootThemeColor"]?.str()
         if (boot != null && boot != graphite) fail("skin ${ref.id}: chrome.bootThemeColor $boot != chrome.graphite $graphite")
-        val tokens = s.obj("tokens").mapValues { (_, v) -> v.jsonObject["resolved"]?.str() ?: fail("unresolved token") }
+        val tokens = s.obj("tokens").mapValues { (name, v) ->
+            val o = v.jsonObject
+            val resolved = o["resolved"]?.takeIf { it !is JsonNull }?.str()
+            // The exporter leaves `resolved` null for a colour it cannot flatten (color-mix(), tokens.css/studio.css
+            // `--brick-deep`) and carries the var()-free text in `expanded`: evaluate the one shape it emits.
+            resolved ?: o["expanded"]?.takeIf { it !is JsonNull }?.str()?.let(Css::mixSrgb)
+                ?: fail("unresolved token $name")
+        }
         Skin(ref, tokens, isDark, Css.color(graphite) ?: fail("skin ${ref.id}: bad chrome.graphite $graphite"))
     }
 

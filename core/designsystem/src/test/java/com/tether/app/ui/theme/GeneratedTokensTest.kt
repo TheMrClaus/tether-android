@@ -21,7 +21,14 @@ class GeneratedTokensTest {
 
     private fun resolved(skin: String): Map<String, String> =
         TokenCorpus.skins.getValue(skin).jsonObject.getValue("tokens").jsonObject
-            .mapValues { it.value.jsonObject.getValue("resolved").jsonPrimitive.content }
+            .mapValues { (name, v) ->
+                val o = v.jsonObject
+                val r = o.getValue("resolved")
+                // A colour the exporter cannot flatten (color-mix) carries its var()-free text in `expanded`.
+                if (r is kotlinx.serialization.json.JsonNull) com.tether.tools.designtokens.Css.mixSrgb(o.getValue("expanded").jsonPrimitive.content)
+                    ?: throw AssertionError("$name: unresolved")
+                else r.jsonPrimitive.content
+            }
 
     // ── independent CSS parsing ──────────────────────────────────────────────
 

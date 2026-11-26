@@ -97,7 +97,7 @@ abstract class TranscriptFloorBase(private val windowW: Int, private val windowH
         assertEquals("the box is the floor (region ${g.region})", floor, g.box, 1.0)
         assertTrue("the region is below the floor here: ${g.region}", g.region < floor)
         if (!phone) {
-            assertEquals("visible band = min(box, region + strip) = 42", 42.0, g.band, 2.0)
+            assertEquals("visible band = min(box, region + strip) = 38.1 (was 42 on Manrope)", 38.1, g.band, 2.0)
             assertEquals("region is 0 at this window", 0.0, g.region, 1.0)
         }
         val composer = bounds(CHAT_COMPOSER_TAG)

@@ -338,7 +338,7 @@ val KeyRules: List<KeyRule> = listOf(
     s(266, Send, spec(2), declare = studioAccentKey),
     s(267, NewSession, spec(2), declare = studioAccentKey),
     s(277, Secondary, spec(2)) { border = it.t.lineStrong; face = it.t.graphite; ink = it.t.ink },
-    s(303, NewSession, spec(2)) { face = Color(0xFF365CDE) },
+    s(303, NewSession, spec(2)) { face = it.t.accent },
     s(389, Attach, spec(3)) { border = Color.Transparent; radius = 9.6.dp; face = it.t.graphiteRaised; shadows = emptyList() }, // .chat-composer-toolbar .chat-attach-btn
     s(489, Deny, spec(3), declare = studioFlatDestructive),
     s(491, Deny, spec(5), KeyPseudo.Active, declare = studioFlatDestructive),

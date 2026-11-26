@@ -80,7 +80,7 @@ class ProviderBrandTest {
             assertNull(ProviderBrand.glyphTint("gemini", c))
             assertNull(ProviderBrand.glyphTint("antigravity", c))
         }
-        assertEquals(Color(0xFF182238), ProviderBrand.glyphTint("codex", TetherSkin.Studio.tokens))
+        assertEquals(Color(0xFF0F172A), ProviderBrand.glyphTint("codex", TetherSkin.Studio.tokens))
     }
 
     @Test

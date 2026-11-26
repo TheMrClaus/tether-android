@@ -30,9 +30,12 @@ class SessionDrawerBarOverrideTest {
     private var open by mutableStateOf(false)
     private var hosted by mutableStateOf(true)
 
+    private var rail: Color? = null
+
     private fun show() {
         rule.setContent {
             TetherTheme {
+                rail = com.tether.app.ui.theme.LocalTetherTokens.current.css.bgRail
                 CompositionLocalProvider(LocalSystemBarOverride provides holder) {
                     if (hosted) SessionDrawerHost(open = open) { Box {} }
                 }
@@ -46,7 +49,7 @@ class SessionDrawerBarOverrideTest {
         assertNull("closed: the skin's own", holder.value)
         rule.runOnUiThread { open = true }
         rule.waitForIdle()
-        assertEquals(StudioDrawer.background, holder.value)
+        assertEquals(rail, holder.value)
         rule.runOnUiThread { open = false }
         rule.waitForIdle()
         assertNull("closed again", holder.value)
@@ -55,7 +58,7 @@ class SessionDrawerBarOverrideTest {
     @Test fun removingTheOpenHostClearsTheOverride() {
         open = true
         show()
-        assertEquals(StudioDrawer.background, holder.value)
+        assertEquals(rail, holder.value)
         rule.runOnUiThread { hosted = false }
         rule.waitForIdle()
         assertNull("disposed", holder.value)

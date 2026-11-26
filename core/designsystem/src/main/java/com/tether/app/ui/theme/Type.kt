@@ -7,19 +7,18 @@ import androidx.compose.ui.text.font.FontWeight
 import com.tether.app.core.designsystem.R
 
 /**
- * Bundled variable fonts — the same faces the web loads from `@fontsource-variable` packages
- * (app/layout.tsx imports only the upright `index.css` of each package):
- * - Manrope[wght].ttf        -> res/font/manrope_variable.ttf       (`Manrope Variable`, wght 200–800)
- * - JetBrainsMono[wght].ttf  -> res/font/jetbrains_mono_variable.ttf (`JetBrains Mono Variable`, wght 100–800)
+ * Bundled variable fonts: the same faces the web loads from `@fontsource-variable` packages
+ * (`--font-ui` / `--font-mono`, app/tokens.css:22-23; provenance in core/designsystem/licenses/README.md):
+ * - Archivo[wdth,wght].ttf -> res/font/archivo_variable.ttf  (`Archivo Variable`, wght 100-900, wdth 62-125)
+ * - FiraCode[wght].ttf     -> res/font/fira_code_variable.ttf (`Fira Code Variable`, wght 300-700)
  *
- * Both files carry a single `wght` axis. Each [Font] entry pins one named instance by setting
- * that axis explicitly ([FontVariation.weight]), so every weight the web CSS asks for renders
- * as the true instance instead of Compose's nearest-weight match (Manrope's *default* instance
- * is wght 200, so an unpinned entry would render ExtraLight).
+ * Each [Font] entry pins one named instance by setting the axes explicitly ([FontVariation.weight]
+ * and, for Archivo, [FontVariation.width] at its default 100 because the web never sets
+ * `font-stretch`), so every weight the web CSS asks for renders as the true instance instead of
+ * Compose's nearest-weight match (Archivo's *default* instance is wght 600, Fira Code's is 300).
  *
- * No italic instance is bundled, matching the web (it never loads `wght-italic.css`); the one
- * italic rule (`.diff-more`, globals.css:6161) is browser-synthesized oblique there and
- * Compose-synthesized (FontSynthesis) here.
+ * No italic instance is bundled, matching the web (it never loads an italic face); the one
+ * italic rule (`.diff-more`) is Compose-synthesized (FontSynthesis) here.
  */
 
 /**
@@ -29,20 +28,32 @@ import com.tether.app.core.designsystem.R
 val WebFontWeights: List<Int> = listOf(400, 500, 550, 560, 600, 610, 620, 630, 640, 650, 660, 680, 700, 720, 740, 750, 770)
 
 /** The `wght` axis range of each bundled file (read from its `fvar` table; asserted in tests). */
-val ManropeWghtRange: IntRange = 200..800
-val JetBrainsMonoWghtRange: IntRange = 100..800
+val ArchivoWghtRange: IntRange = 100..900
+val FiraCodeWghtRange: IntRange = 300..700
 
-private fun variableFamily(resId: Int, range: IntRange): FontFamily = FontFamily(
+/** Archivo's `wdth` axis: range 62..125, default (and the only width used) 100. */
+val ArchivoWdthRange: IntRange = 62..125
+const val ArchivoDefaultWdth: Int = 100
+
+private fun variableFamily(resId: Int, range: IntRange, width: Int? = null): FontFamily = FontFamily(
     WebFontWeights.filter { it in range }.map { w ->
-        Font(resId, weight = FontWeight(w), variationSettings = FontVariation.Settings(FontVariation.weight(w)))
+        val settings = if (width == null) FontVariation.Settings(FontVariation.weight(w))
+        else FontVariation.Settings(FontVariation.weight(w), FontVariation.width(width.toFloat()))
+        Font(resId, weight = FontWeight(w), variationSettings = settings)
     },
 )
 
-/** The interface face (`body`, globals.css:609; Studio's `--font-ui`, studio.css:47). */
-val Manrope: FontFamily = variableFamily(R.font.manrope_variable, ManropeWghtRange)
+/** The interface face (`--font-ui`, tokens.css:22). */
+val Archivo: FontFamily = variableFamily(R.font.archivo_variable, ArchivoWghtRange, ArchivoDefaultWdth)
 
-/** The mono face (`--font-mono`, globals.css:58). */
-val JetBrainsMono: FontFamily = variableFamily(R.font.jetbrains_mono_variable, JetBrainsMonoWghtRange)
+/** The mono face (`--font-mono`, tokens.css:23). */
+val FiraCode: FontFamily = variableFamily(R.font.fira_code_variable, FiraCodeWghtRange)
+
+/** Pre-Vector name of [Archivo]: the app's call sites predate the face change and keep the name. */
+val Manrope: FontFamily = Archivo
+
+/** Pre-Vector name of [FiraCode] (the mono face was JetBrains Mono); call sites keep the name. */
+val JetBrainsMono: FontFamily = FiraCode
 
 /**
  * Legacy weight aliases used by the pre-T3.2 screens. New code should take a role from

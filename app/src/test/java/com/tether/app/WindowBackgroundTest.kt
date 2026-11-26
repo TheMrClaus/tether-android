@@ -40,18 +40,18 @@ class WindowBackgroundTest {
 
     @Test @Config(qualifiers = "notnight")
     fun dayWindowIsStudioLightMineral() {
-        assertEquals(0xFFF4F6FA.toInt(), resolved(android.R.attr.windowBackground))
+        assertEquals(0xFFEEF1F5.toInt(), resolved(android.R.attr.windowBackground))
         assertEquals(argb(GeneratedTokens.Studio.mineral), resolved(android.R.attr.windowBackground))
-        assertEquals(0xFFF4F6FA.toInt(), resolved(android.R.attr.windowSplashScreenBackground))
+        assertEquals(0xFFEEF1F5.toInt(), resolved(android.R.attr.windowSplashScreenBackground))
     }
 
     @Test @Config(qualifiers = "night")
     fun nightWindowIsStudioDarkMineral() {
         val app = ApplicationProvider.getApplicationContext<android.content.Context>()
         assertEquals(Configuration.UI_MODE_NIGHT_YES, app.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
-        assertEquals(0xFF101725.toInt(), resolved(android.R.attr.windowBackground))
+        assertEquals(0xFF0A0C10.toInt(), resolved(android.R.attr.windowBackground))
         assertEquals(argb(GeneratedTokens.StudioDark.mineral), resolved(android.R.attr.windowBackground))
-        assertEquals(0xFF101725.toInt(), resolved(android.R.attr.windowSplashScreenBackground))
+        assertEquals(0xFF0A0C10.toInt(), resolved(android.R.attr.windowSplashScreenBackground))
     }
 
     /** The retired skins' --mineral and --graphite (machine, night, precision, tactile), from the pre-T15.5 export. */

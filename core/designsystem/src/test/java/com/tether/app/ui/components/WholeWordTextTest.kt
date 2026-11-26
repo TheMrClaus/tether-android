@@ -84,7 +84,8 @@ class WholeWordTextTest {
     @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 2.0f)
     @Test fun aShortNameWrapsAtItsSpaceAtTwiceTheText() {
         render("Video fixture 2")
-        assertEquals(listOf("Video", "fixture 2"), lines())
+        // Archivo (Vector) is narrower than Manrope, so "fixture" now fits beside "Video": still a wrap at a space.
+        assertEquals(listOf("Video fixture", "2"), lines())
     }
 
     private fun renderUnclamped(text: String, widthDp: Float) {
