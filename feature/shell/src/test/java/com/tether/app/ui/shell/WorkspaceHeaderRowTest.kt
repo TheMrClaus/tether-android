@@ -160,7 +160,7 @@ class WorkspaceHeaderRowTest(
         val dialLeft = here(ShellTags.Dial).left
         assertEquals("cluster left = the web's max(316, contentR - clusterW)", expectedClusterLeft(), dialLeft, 0.5f)
         if (fontScale == 1.0f) {
-            val compactClusterLeft = mapOf(768 to 343f, 772 to 347f, 780 to 355f, 800 to 375f).getValue(w)
+            val compactClusterLeft = mapOf(768 to 340f, 772 to 344f, 780 to 352f, 800 to 372f).getValue(w)
             assertEquals("compact cluster left at 1.0x", compactClusterLeft, dialLeft, 0.5f)
         }
         val strip = dialLeft - key.left
@@ -215,7 +215,8 @@ class WorkspaceHeaderRowTest(
         val key = here(ShellTags.RenameKey)
         val dial = here(ShellTags.Dial)
         val dialLeft = dial.left
-        if (dialLeft >= key.right - 2f) return // no overlap at this width/scale
+        // no opaque-interior overlap at this width/scale (Archivo narrowed the cluster 3px: at w780 x2 the dial starts 6px inside the pencil, exactly the corner inset)
+        if (dialLeft + dialOpaqueInsetPx >= key.right - 2f) return
         val a = rule.onAllNodesWithTag("harness")[0].captureToImage().toPixelMap()
         val b = rule.onAllNodesWithTag("reference")[0].captureToImage().toPixelMap()
         // The cluster has the same width and height in both headers, so the dial's pixels sit at the same offset

@@ -37,14 +37,6 @@ import com.tether.app.ui.theme.LocalSystemBarOverride
 import com.tether.app.ui.theme.LocalTetherTokens
 
 /**
- * Studio paints the drawer in a fixed ink-blue finish in both lightings (studio.css 295-301:
- * `background: #141d2e`, and the scope's own `--line: #2b374b`, no right border).
- */
-internal object StudioDrawer {
-    val background = Color(0xFF141D2E)
-}
-
-/**
  * The phone drawer's width: the whole window (ta-1jj7, owner-directed design: a full-screen panel).
  * It was the web's `min(21rem, 92vw)` clamp; the owner asked for the full width on a phone.
  */
@@ -96,9 +88,10 @@ fun SessionDrawerHost(
     // The panel fills the window, bars included: while it is open the system bars take its colour
     // (and their icons its luminance) instead of the skin's, or its edges would read as bands. Not tied
     // to the slide; cleared when it closes and when the host leaves the composition.
+    val rail = t.css.bgRail // Vector: the rail is the skin's own --bg-rail (Light #e7ebf2, Dark #0d1016)
     val bars = LocalSystemBarOverride.current
-    DisposableEffect(open, bars) {
-        if (open) bars.value = StudioDrawer.background
+    DisposableEffect(open, bars, rail) {
+        if (open) bars.value = rail
         onDispose { bars.value = null }
     }
     BoxWithConstraints(
@@ -118,7 +111,7 @@ fun SessionDrawerHost(
                     alpha = if (shown) 1f else 0f
                 }
                 .drawBehind {
-                    drawRect(StudioDrawer.background)
+                    drawRect(rail)
                 }
                 .testTag(ShellTags.Drawer) // the whole panel, insets included
                 .then(

@@ -250,7 +250,7 @@ fun ExpandedShell(
 }
 
 /**
- * `.session-sidebar` from 48rem: a static grid column (globals.css 4033-4040). Studio: the fixed ink-blue finish (`#141d2e`), no edge,
+ * `.session-sidebar` from 48rem: a static grid column (globals.css 4033-4040). Vector: the skin's `--bg-rail`, no edge,
  * `padding: 1.35rem 0.875rem 0.75rem` (studio.css 295-301, 429). The web's `aria-label="Agent
  * sessions"` names the pane.
  */
@@ -264,7 +264,7 @@ private fun SidebarColumn(width: Dp, content: @Composable () -> Unit) {
             .fillMaxHeight()
             .drawBehind {
                 val px = 1.dp.toPx()
-                drawRect(StudioDrawer.background)
+                drawRect(t.css.bgRail)
             }
             .padding(end = 0.dp)
             .windowInsetsPadding(
