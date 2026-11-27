@@ -449,7 +449,7 @@ internal fun ThemeCard(
                 role = Role.RadioButton,
                 onClick = onClick,
             )
-            .padding(horizontal = 14.dp - if (selected) 1.dp else 0.dp, vertical = 14.dp - if (selected) 1.dp else 0.dp),
+            .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(icon, contentDescription = null, tint = if (selected) t.accent else t.muted, modifier = Modifier.size(17.dp))
