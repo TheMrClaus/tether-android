@@ -11,6 +11,9 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -195,7 +198,9 @@ class OverviewM03ContrastTest {
 
     private fun emerald(skin: TetherSkin) {
         val t = tokens(skin, OverviewFixtures.clear)
-        report("all-clear strip", skin, measure(rule.onNodeWithTag(OverviewTags.AllClear), t.css.runBg))
+        // the strip's TEXT nodes only (not the whole strip, whose icon would satisfy the check on its own).
+        report("all-clear strip sentence", skin, measure(rule.onNodeWithText("Nothing is waiting for you.", useUnmergedTree = true), t.css.runBg))
+        report("all-clear strip label", skin, measure(rule.onNodeWithText("All clear", useUnmergedTree = true), t.css.runBg))
     }
 
     private fun amber(skin: TetherSkin) {
@@ -205,10 +210,14 @@ class OverviewM03ContrastTest {
         report("amber banner kind label", skin, measure(kind, t.attentionBg))
     }
 
+    private fun chipLabel(tab: StatusTab): SemanticsNodeInteraction =
+        rule.onNode(hasText(tab.label, substring = true) and hasAnyAncestor(hasTestTag(OverviewTags.tab(tab))), useUnmergedTree = true)
+
     private fun chips(skin: TetherSkin) {
         val t = tokens(skin, OverviewFixtures.populated)
-        report("selected status chip", skin, measure(rule.onNodeWithTag(OverviewTags.tab(StatusTab.Active)), t.violetWash))
-        report("idle status chip", skin, measure(rule.onNodeWithTag(OverviewTags.tab(StatusTab.Waiting)), t.graphite))
+        // the chip's label TEXT node (not the whole chip, whose 1dp outline would satisfy the check on its own).
+        report("selected status chip", skin, measure(chipLabel(StatusTab.Active), t.violetWash))
+        report("idle status chip", skin, measure(chipLabel(StatusTab.Waiting), t.graphite))
         // every card's status chip (running, waiting, attention tones) against its own wash.
         val all = rule.onAllNodesWithTag(OverviewTags.StatusChip)
         val n = all.fetchSemanticsNodes().size
