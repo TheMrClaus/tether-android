@@ -628,7 +628,7 @@ private fun TabbedBreakdown(data: UsageAnalytics, layout: UsageLayout, palette: 
     ) {
         FlowRow(
             Modifier.fillMaxWidth().selectableGroup().semantics { paneTitle = "Breakdown" }.testTag(UsageTags.Tabs),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             UsageTab.entries.forEach { x ->
@@ -643,10 +643,10 @@ private fun TabbedBreakdown(data: UsageAnalytics, layout: UsageLayout, palette: 
                         .selectable(selected = active, interactionSource = interaction, indication = null, role = Role.Tab) { tab = x }
                         .focusRing(focused, shape, t.violetStrong)
                         .testTag(UsageTags.tab(x))
-                        .padding(horizontal = 14.dp),
+                        .padding(horizontal = 10.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(x.label, color = if (active) t.violetStrong else t.muted, maxLines = 1, style = px(type.mono, 13f, if (active) 700 else 400))
+                    Text(x.label, color = if (active) t.violetStrong else t.muted, maxLines = 1, style = px(type.mono, 12f, if (active) 700 else 400))
                 }
             }
         }
