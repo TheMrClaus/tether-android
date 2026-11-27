@@ -288,6 +288,31 @@ class VectorDrawerM02BehaviourTest {
         assertEquals("8 dp gap above the hairline (measured)", 8f, (line.top - above) / density, 0.5f)
     }
 
+    /** P8C-FIX4: the 8 dp gap applies only under a session card; after an Older / runs row or a collapsed header the hairline sits flush (0 dp). */
+    private fun gapsAboveEveryRuleDp(): List<Float> {
+        val rules = rule.onAllNodesWithTag(PhoneChromeTags.BlockRule).fetchSemanticsNodes().map { it.boundsInRoot }
+        val blocks = rule.onAllNodes(androidx.compose.ui.test.SemanticsMatcher("a workspace block") { n ->
+            (if (androidx.compose.ui.semantics.SemanticsProperties.TestTag in n.config) n.config[androidx.compose.ui.semantics.SemanticsProperties.TestTag] else null)?.startsWith("sidebar-block:") == true
+        }).fetchSemanticsNodes().map { it.boundsInRoot }
+        return rules.map { line -> (line.top - blocks.filter { it.bottom <= line.top + 1f }.maxOf { it.bottom }) / density }
+    }
+
+    @Test fun theBlockHairlineIsFlushAfterAnOlderRowBlock() {
+        val run = F.history("h-run", "A background run", cwd = F.ROOT, ago = 30).copy(origin = "agent-cli-child")
+        show(F.state(sessions, pinned = listOf(F.ROOT, F.DOCS), current = F.ROOT, histories = mapOf(F.ROOT to listOf(run))))
+        rule.onNodeWithTag(PhoneChromeTags.HiddenRuns).assertExists()
+        val gaps = gapsAboveEveryRuleDp()
+        assertTrue("rules present", gaps.isNotEmpty())
+        gaps.forEach { assertEquals("0 dp after a block ending on an Older row", 0f, it, 0.5f) }
+    }
+
+    @Test fun theBlockHairlineIsFlushAfterACollapsedBlock() {
+        show(F.state(F.groupSessions + F.live("d3", "Draft the changelog", cwd = F.DOCS, ago = 20), pinned = listOf(F.DOCS, F.ROOT), current = F.APP, collapsed = listOf(F.DOCS, F.ROOT, F.APP)))
+        val gaps = gapsAboveEveryRuleDp()
+        assertTrue("rules present", gaps.isNotEmpty())
+        gaps.forEach { assertEquals("0 dp after a collapsed header", 0f, it, 0.5f) }
+    }
+
     /** P8C-FIX3 (3): the tablet rail keeps its 16 dp gap and draws no hairline (the line is phone-only). */
     @Test fun theTabletRailHasNoBlockHairlineAndKeepsItsSixteenDpGap() {
         rule.setContent {

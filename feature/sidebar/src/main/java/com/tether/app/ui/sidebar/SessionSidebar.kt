@@ -481,6 +481,7 @@ private fun SidebarContent(
                         phone = phone,
                         compact = compact,
                         first = position == 0,
+                        aboveEndsOnCard = position > 0 && blockEndsOnCard(view.blocks[position - 1], view.filtering),
                         armedKey = armedKey,
                         armedOrigin = armedOrigin,
                         menuKey = menuKey,
@@ -790,6 +791,11 @@ internal fun MenuItem(
 
 // ── Blocks ──────────────────────────────────────────────────────────────────────
 
+/** P8C-FIX4: a block ends on a session card when it is open, has rows, and draws nothing after the last card (no Show more/less, Older/runs or reset-order row). */
+private fun blockEndsOnCard(b: BlockView, filtering: Boolean): Boolean =
+    !b.collapsed && b.rows.isNotEmpty() && b.remaining == 0 && !b.expanded &&
+        !(b.olderCount > 0 || b.hiddenRuns > 0) && !(b.manualOrder && !filtering)
+
 @Composable
 private fun WorkspaceBlock(
     block: BlockView,
@@ -799,6 +805,7 @@ private fun WorkspaceBlock(
     phone: Boolean,
     compact: Boolean,
     first: Boolean,
+    aboveEndsOnCard: Boolean,
     armedKey: String?,
     armedOrigin: String?,
     menuKey: String?,
@@ -825,7 +832,7 @@ private fun WorkspaceBlock(
         verticalArrangement = Arrangement.spacedBy(if (compact) 0.dp else 0.15f.rem),
     ) {
         // m02 (P8C-FIX1 B1): on the PHONE only (the tablet keeps its 16 dp gap, no line) an 8 dp gap then a 1 dp `--line` hairline at the card inset width stands between blocks (none above the first), in place of the 16 dp gap.
-        if (phone && !first) Box(Modifier.fillMaxWidth().padding(top = PhoneChromeRule.GapAbove).height(1.dp).background(t.line).testTag(PhoneChromeTags.BlockRule))
+        if (phone && !first) Box(Modifier.fillMaxWidth().padding(top = if (aboveEndsOnCard) PhoneChromeRule.GapAbove else 0.dp).height(1.dp).background(t.line).testTag(PhoneChromeTags.BlockRule))
         BlockHeader(block, actions, offline = !state.connected, compact = compact, rail = !phone)
         if (!block.collapsed) {
             Column(
