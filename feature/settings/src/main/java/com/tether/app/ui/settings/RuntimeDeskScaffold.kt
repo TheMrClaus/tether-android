@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
@@ -308,7 +309,7 @@ private fun RuntimeDeskTopBar(
 ) {
     val t = LocalTetherTokens.current
     Row(
-        Modifier.fillMaxWidth().heightIn(min = RuntimeDeskStyle.HeaderHeight).padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().heightIn(min = RuntimeDeskStyle.HeaderHeight).padding(horizontal = 12.dp).testTag(RuntimeDeskTags.TopBar),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

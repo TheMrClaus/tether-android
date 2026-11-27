@@ -8,6 +8,10 @@ import com.tether.app.ui.theme.LocalTetherTypography
 import com.tether.app.ui.theme.SkinTokens
 import com.tether.app.ui.theme.TokenScope
 
+internal object RuntimeDeskTags {
+    const val TopBar = "runtime-desk-top-bar"
+}
+
 internal object RuntimeDeskStyle {
     val ExpandedBreakpoint = 768.dp
     val DestinationWidth = 192.dp
