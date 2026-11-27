@@ -11,7 +11,7 @@ import org.robolectric.annotation.Config
 
 /**
  * P8C-FIX1 (ta-8j8c, N10): the merged drawer row "Older (N) · M background CLI runs  Show", one workspace holding an older session
- * and a hidden background CLI run (hideAgentRuns on), phone, both skins.
+ * and a hidden background CLI run (hideAgentRuns on), then a second workspace so the block hairline lands after it; phone, both skins.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
@@ -22,7 +22,7 @@ class OlderAndRunsRowScreenshotTest(private val skin: TetherSkin) {
         val fx = SidebarFixtures
         val run = fx.history("h-run", "A background run", cwd = fx.ROOT, ago = 30).copy(origin = "agent-cli-child")
         val state = fx.state(
-            listOf(fx.live("fresh", "Fresh chat", ago = 5), fx.live("ten", "Ten days chat", ago = 10 * 24L * 60)),
+            listOf(fx.live("fresh", "Fresh chat", ago = 5), fx.live("ten", "Ten days chat", ago = 10 * 24L * 60), fx.live("d1", "Draft the changelog", cwd = fx.DOCS, ago = 20)),
             histories = mapOf(fx.ROOT to listOf(run)),
         )
         SidebarUnderTest(skin, state, TetherLayoutClass.Phone, SidebarUiSeed(), SidebarActions(onCollapse = {}))
