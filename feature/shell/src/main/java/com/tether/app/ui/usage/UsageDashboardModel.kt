@@ -107,8 +107,8 @@ object UsageDashboardModel {
     }
 
     /** The subtitle (usage-dashboard.tsx:140). */
-    fun subtitle(data: UsageAnalytics?): String =
-        if (data == null) "Your agents, measured." else "${UsageFormat.whole(data.totals.sessions)} sessions · ${UsageFormat.whole(data.totals.turns)} turns"
+    fun subtitle(data: UsageAnalytics?, short: Boolean = false): String =
+        if (data == null) "Your agents, measured." else "${UsageFormat.whole(data.totals.sessions)} ${if (short) "sess" else "sessions"} · ${if (short) UsageFormat.compact(data.totals.turns) else UsageFormat.whole(data.totals.turns)} turns"
 
     /** The error banner (usage-dashboard.tsx:154). */
     fun errorBanner(error: String, hasData: Boolean): String =

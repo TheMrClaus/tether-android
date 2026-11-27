@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -116,6 +118,10 @@ internal object UsageTags {
     const val Heatmap = "usage-heatmap"
     const val Table = "usage-top-sessions"
     const val Footnote = "usage-footnote"
+    const val Subtitle = "usage-subtitle"
+    const val Tabs = "usage-tabs"
+    const val TabPanel = "usage-tabpanel"
+    fun tab(t: UsageTab) = "usage-tab-${t.key}"
     fun card(title: String) = "usage-card-$title"
     fun showMore(title: String) = "usage-show-more-$title"
 }
@@ -246,20 +252,42 @@ private fun Header(state: UsageDashboardState, layout: UsageLayout) {
         horizontalArrangement = Arrangement.spacedBy(if (layout.compact) 20.dp else 24.dp),
         verticalArrangement = Arrangement.spacedBy(if (layout.compact) 20.dp else 24.dp),
     ) {
-        Column(Modifier.weight(1f, fill = layout.medium).widthIn(min = 0.dp)) {
+        if (layout.compact) {
+            // m04: the title and "N sess · M turns" on one line (they wrap apart when the type is large).
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                itemVerticalAlignment = Alignment.Bottom,
+            ) {
+                Text(
+                    "Usage analytics",
+                    color = t.white,
+                    style = px(type.ui, 26f, 700, trackingEm = -0.03f, lineHeight = 1.3f),
+                    modifier = Modifier.semantics { heading() },
+                )
+                Text(
+                    UsageDashboardModel.subtitle(state.data, short = true),
+                    color = t.muted,
+                    maxLines = 1,
+                    style = px(type.mono, 12f, 400, lineHeight = 1.7f).tabularNums(),
+                    modifier = Modifier.testTag(UsageTags.Subtitle),
+                )
+            }
+        } else Column(Modifier.weight(1f, fill = layout.medium).widthIn(min = 0.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.4.dp)) {
                 Icon(TetherIcons.ChartColumn, contentDescription = null, tint = t.violetStrong, modifier = Modifier.size(22.dp))
                 Text(
                     "Usage analytics",
                     color = t.white,
-                    style = px(type.ui, if (layout.compact) 28f else 32f, 700, trackingEm = -0.03f, lineHeight = 1.3f),
+                    style = px(type.ui, 32f, 700, trackingEm = -0.03f, lineHeight = 1.3f),
                     modifier = Modifier.semantics { heading() },
                 )
             }
             Text(
                 UsageDashboardModel.subtitle(state.data),
                 color = t.muted,
-                style = px(type.ui, if (layout.compact) 12f else 13f, 400, lineHeight = 1.7f).tabularNums(),
+                style = px(type.ui, 13f, 400, lineHeight = 1.7f).tabularNums(),
                 modifier = Modifier.padding(top = 10.dp).widthIn(max = 520.dp),
             )
         }
@@ -445,10 +473,25 @@ private fun ColumnScope.Readings(data: UsageAnalytics, layout: UsageLayout, env:
     val t = LocalTetherTokens.current
     val palette = VizPalette.of(t)
     val tt = data.totals
+
+    if (layout.compact) {
+        PhoneReadings(data, layout, palette)
+    } else DesktopReadings(data, layout, palette)
+
+    Text(
+        "Generated ${UsageFormat.dateTime(data.generatedAt, env)} · Cost estimates cover known models. ${if (tt.costPartial) "Some models are unpriced." else ""}",
+        color = t.muted,
+        style = px(LocalTetherTypography.current.ui, 12f, 400, lineHeight = 1.7f),
+        modifier = Modifier.testTag(UsageTags.Footnote),
+    )
+}
+
+@Composable
+private fun ColumnScope.DesktopReadings(data: UsageAnalytics, layout: UsageLayout, palette: VizPalette) {
+    val tt = data.totals
     val mu = data.mostUsed
     val fmt = UsageFormat::compact
     val int = UsageFormat::whole
-
     TileBank(
         layout,
         listOf(
@@ -503,14 +546,158 @@ private fun ColumnScope.Readings(data: UsageAnalytics, layout: UsageLayout, env:
     }
 
     Card("Top sessions", "by tokens", layout) { TopSessionsTable(data, layout) }
-
-    Text(
-        "Generated ${UsageFormat.dateTime(data.generatedAt, env)} · Cost estimates cover known models. ${if (tt.costPartial) "Some models are unpriced." else ""}",
-        color = t.muted,
-        style = px(LocalTetherTypography.current.ui, 12f, 400, lineHeight = 1.7f),
-        modifier = Modifier.testTag(UsageTags.Footnote),
-    )
 }
+
+/** The phone tabs (usage-dashboard.tsx PHONE_TABS): one breakdown panel shows at a time. */
+internal enum class UsageTab(val key: String, val label: String) {
+    Harness("harness", "Harness"), Agents("agents", "Agents"), Heatmap("heatmap", "Heatmap"), Sessions("sessions", "Sessions"),
+}
+
+/** m04 on a phone (usage-dashboard.tsx PhoneBody): the leaders line inside the tile bank, the trend card, then the tabbed breakdown. */
+@Composable
+private fun ColumnScope.PhoneReadings(data: UsageAnalytics, layout: UsageLayout, palette: VizPalette) {
+    val tt = data.totals
+    val fmt = UsageFormat::compact
+    TileBank(
+        layout,
+        listOf(
+            TileSpec(TetherIcons.Coins, "Total tokens", fmt(tt.tokens), sub = { SplitSub(data) }),
+            TileSpec(TetherIcons.Percent, "Cache efficiency", "${UsageFormat.js(tt.cacheEfficiencyPct)}%", subText = "cache reads ÷ input", compactLabel = "Cache eff."),
+            TileSpec(TetherIcons.Coins, "Est. cost", UsageFormat.money(tt.costUSD), subText = "known models only", badge = if (tt.costPartial) "partial" else null),
+            TileSpec(TetherIcons.Layers, "Avg / session", fmt(tt.avgTokensPerSession), subText = "${fmt(tt.subagentTokens)} via subagents"),
+        ),
+        footer = { PhoneLeaders(data) },
+    )
+    Card("Tokens per day", "${data.byDay.size} days · stacked", layout) {
+        AreaChart(data.byDay, palette)
+        Composition(data, palette)
+    }
+    TabbedBreakdown(data, layout, palette)
+}
+
+/** `Leader` (phone): "Harness: claude 75%" on one line each, the value in mono and cut with an ellipsis. */
+@Composable
+private fun PhoneLeaders(data: UsageAnalytics) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val mu = data.mostUsed
+    val items = listOf(
+        Triple("Harness", mu.harness?.key, mu.harness?.let { "${UsageFormat.js(it.sharePct)}%" }),
+        Triple("Model", mu.model?.key?.removePrefix("claude-"), mu.model?.let { "${UsageFormat.js(it.sharePct)}%" }),
+        Triple("Agent", mu.agent?.key, mu.agent?.let { "(${UsageFormat.whole(it.value)})" }),
+        Triple("Provider", mu.provider?.key, mu.provider?.let { "${UsageFormat.js(it.sharePct)}%" }),
+    )
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).testTag(UsageTags.Leaders), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { (label, value, detail) ->
+                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("$label:", color = t.muted, maxLines = 1, style = px(type.ui, 12f, 400))
+                        Text(
+                            value ?: "—",
+                            color = t.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = px(type.mono, 12f, 700),
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        detail?.let { Text(it, color = t.ink, maxLines = 1, style = px(type.mono, 12f, 700)) }
+                    }
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** `.tabs` + `.tabPanel`: Harness / Agents / Heatmap / Sessions as one tablist over one panel (roving selection, Role.Tab). */
+@Composable
+private fun TabbedBreakdown(data: UsageAnalytics, layout: UsageLayout, palette: VizPalette) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    var tab by rememberSaveable { mutableStateOf(UsageTab.Harness) }
+    val fmt = UsageFormat::compact
+    val int = UsageFormat::whole
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .cssSurface(RoundedCornerShape(12.dp), t.graphite, CssBorder(1.dp, t.line))
+            .padding(1.dp)
+            .padding(horizontal = 18.dp, vertical = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        FlowRow(
+            Modifier.fillMaxWidth().selectableGroup().semantics { paneTitle = "Breakdown" }.testTag(UsageTags.Tabs),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            UsageTab.entries.forEach { x ->
+                val active = x == tab
+                val interaction = remember { MutableInteractionSource() }
+                val focused by interaction.collectIsFocusedAsState()
+                val shape = RoundedCornerShape(8.dp)
+                Box(
+                    Modifier
+                        .heightIn(min = 44.dp)
+                        .cssSurface(shape, if (active) t.accentWash else t.graphite, CssBorder(1.dp, if (active) t.accent else t.line))
+                        .selectable(selected = active, interactionSource = interaction, indication = null, role = Role.Tab) { tab = x }
+                        .focusRing(focused, shape, t.violetStrong)
+                        .testTag(UsageTags.tab(x))
+                        .padding(horizontal = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(x.label, color = if (active) t.violetStrong else t.muted, maxLines = 1, style = px(type.mono, 12f, if (active) 700 else 400))
+                }
+            }
+        }
+        Column(Modifier.fillMaxWidth().semantics { paneTitle = tab.label }.testTag(UsageTags.TabPanel), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            when (tab) {
+                UsageTab.Harness -> {
+                    Cell("Tokens by harness", "tokens · sessions · turns") {
+                        BarList(
+                            "Tokens by harness",
+                            data.byHarness.map { it.key to it.tokens },
+                            palette,
+                            byIndex = true,
+                            fmt = fmt,
+                            texts = data.byHarness.map { "${fmt(it.tokens)} · ${int(it.sessions)} sess · ${int(it.turns)} turns" },
+                        )
+                    }
+                    Cell("Tokens by provider", null) { BarList("Tokens by provider", data.byProvider.map { it.key to it.tokens }, palette, byIndex = true, fmt = fmt) }
+                    Cell("Tokens by model", null) { BarList("Tokens by model", data.byModel.map { it.key to it.tokens }, palette, byIndex = true, fmt = fmt, mono = true) }
+                }
+                UsageTab.Agents -> {
+                    Cell("Most-used agents", "subagent runs") { BarList("Most-used agents", data.byAgent.map { it.key to it.count }, palette, color = palette.s(7), fmt = int) }
+                    Cell("Most-used tools", "tool calls") { BarList("Most-used tools", data.byTool.map { it.key to it.count }, palette, color = palette.s(3), fmt = int, mono = true) }
+                    Cell("Top projects", "by tokens") { BarList("Top projects", data.byProject.map { UsageFormat.shortPath(it.key) to it.tokens }, palette, color = palette.s(1), fmt = fmt, mono = true) }
+                    Cell("Effort mix", "assistant turns") { BarList("Effort mix", data.effort.sortedByDescending { it.second }, palette, color = palette.s(4), fmt = int) }
+                }
+                UsageTab.Heatmap -> {
+                    Cell("Activity by hour (UTC)", null, aside = { HeatLegend(palette) }) { Heatmap(data.heat, palette) }
+                }
+                UsageTab.Sessions -> {
+                    Cell("Top sessions", "by tokens") { TopSessionsTable(data, layout) }
+                }
+            }
+        }
+    }
+}
+
+/** `Cell`: a panel section's own small head (title, note, aside) over its body. */
+@Composable
+private fun Cell(title: String, note: String?, aside: (@Composable () -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Column(Modifier.fillMaxWidth().testTag(UsageTags.card(title)), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp), itemVerticalAlignment = Alignment.Bottom) {
+            Text(title, color = t.white, style = px(type.ui, 14f, 700, trackingEm = -0.01f), modifier = Modifier.semantics { heading() })
+            note?.let { Text(it, color = t.muted, style = px(type.ui, 11f, 400, lineHeight = 1.6f)) }
+            aside?.invoke()
+        }
+        content()
+    }
+}
+
 
 private data class TileSpec(
     val icon: ImageVector,
@@ -519,6 +706,7 @@ private data class TileSpec(
     val subText: String? = null,
     val badge: String? = null,
     val sub: (@Composable () -> Unit)? = null,
+    val compactLabel: String? = null,
 )
 
 /** The raw total never stands alone: the split right under it (usage-dashboard.tsx:247-253). */
@@ -551,7 +739,7 @@ private val LocalUsageCompact = androidx.compose.runtime.compositionLocalOf { fa
 
 /** `.tiles`: one bordered bank, four across (two from ≤ 700, the third starting a new row). */
 @Composable
-private fun TileBank(layout: UsageLayout, tiles: List<TileSpec>) {
+private fun TileBank(layout: UsageLayout, tiles: List<TileSpec>, footer: (@Composable () -> Unit)? = null) {
     val t = LocalTetherTokens.current
     val columns = if (layout.compact) 2 else 4
     val pad = when {
@@ -585,6 +773,9 @@ private fun TileBank(layout: UsageLayout, tiles: List<TileSpec>) {
                         }
                     }
                 }
+            }
+            footer?.let { f ->
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(bottomStart = 11.dp, bottomEnd = 11.dp)).drawBehind { drawRect(t.line, Offset.Zero, Size(size.width, 1.dp.toPx())) }.cssSurface(androidx.compose.ui.graphics.RectangleShape, t.mineral).padding(top = 1.dp)) { f() }
             }
         }
     }
@@ -630,10 +821,13 @@ private fun Tile(tile: TileSpec, modifier: Modifier, big: Boolean, layout: Usage
     Column(modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(if (big) 12.dp else 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.4.dp)) {
             Icon(tile.icon, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
-            Text(tile.label, color = t.muted, style = px(type.ui, if (layout.compact) 11f else 12f, 600))
+            Text(if (layout.compact && tile.compactLabel != null) tile.compactLabel else tile.label, color = t.muted, style = px(type.ui, if (layout.compact) 11f else 12f, 600))
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) {
-            val valueStyle = if (big) {
+            val valueStyle = if (big && layout.compact) {
+                // Numeric telemetry is mono (DESIGN.md Honest-Mono; web `.tileValue` on the phone): Fira Code bold.
+                px(type.mono, 26f, 700, lineHeight = 1.25f)
+            } else if (big) {
                 px(type.ui, if (layout.medium) 28f else 34f, 650, trackingEm = -0.035f, lineHeight = 1.25f)
             } else {
                 px(type.ui, if (layout.compact) 14f else 16f, 650, trackingEm = -0.01f, lineHeight = 1.5f)
@@ -722,6 +916,7 @@ private fun BarList(
     byIndex: Boolean = false,
     color: Color = palette.s(1),
     mono: Boolean = false,
+    texts: List<String>? = null,
 ) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
@@ -747,7 +942,7 @@ private fun BarList(
                         style = if (mono) px(type.mono, 11.84f, 400, lineHeight = 1.6f) else px(type.ui, 13f, 400, lineHeight = 1.6f),
                         modifier = Modifier.weight(1f),
                     )
-                    Text(fmt(value), color = t.muted, maxLines = 1, style = px(type.mono, 12f, 400).tabularNums())
+                    Text(texts?.getOrNull(i) ?: fmt(value), color = t.muted, maxLines = 1, style = px(type.mono, 12f, 400).tabularNums())
                 }
                 Box(Modifier.fillMaxWidth().height(6.dp).cssSurface(RoundedCornerShape(4.dp), t.mineral)) {
                     val fraction = (value / max).toFloat().coerceIn(0f, 1f)
