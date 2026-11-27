@@ -12,7 +12,7 @@ internal object RuntimeDeskStyle {
     val ExpandedBreakpoint = 768.dp
     val DestinationWidth = 192.dp
     val EntityWidth = 220.dp
-    val HeaderHeight = 72.dp
+    val HeaderHeight = 54.dp
     val TouchTarget = 48.dp
     val PanePadding = 12.dp
     val ItemRadius = 8.dp

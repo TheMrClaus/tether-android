@@ -7,6 +7,16 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -80,6 +90,7 @@ import com.tether.app.ui.components.StudioDialog
 import com.tether.app.ui.components.TetherKey
 import com.tether.app.ui.components.TetherSeam
 import com.tether.app.ui.components.cssSurface
+import com.tether.app.ui.components.focusRing
 import com.tether.app.ui.components.dialogScrim
 import com.tether.app.ui.icons.TetherIcons
 import com.tether.app.ui.shell.ChromeIconKey
@@ -115,6 +126,10 @@ internal object AccountsTags {
     const val Error = "usage-accounts-error"
     const val Loading = "usage-accounts-loading"
     const val Note = "usage-accounts-note"
+    const val Subtitle = "usage-accounts-subtitle"
+    const val Chips = "usage-accounts-chips"
+    fun chip(key: String) = "usage-accounts-chip-$key"
+    fun badge(id: String) = "usage-account-badge-$id"
     fun card(id: String) = "usage-account-$id"
     fun update(id: String) = "usage-account-update-$id"
     fun useGrant(grantId: String) = "claude-reset-grant-use-$grantId"
@@ -297,6 +312,7 @@ private fun Body(
     val active = activeEntity?.let { Regex("^usage:(claude|codex|deepseek):(.+)$").matchEntire(it) }
     val activeProvider = active?.groupValues?.get(1)
     val activeId = active?.groupValues?.get(2)
+    var engineFilter by rememberSaveable { mutableStateOf("all") }
     Column(
         modifier
             .fillMaxWidth()
@@ -317,14 +333,16 @@ private fun Body(
         }
         val embeddedRefreshTitle = when {
             !embedded -> null
-            active == null -> "Claude accounts"
+            active == null -> null
             activeProvider == "codex" -> "Codex"
             activeProvider == "deepseek" -> "DeepSeek"
-            else -> null
+            else -> "Claude accounts"
         }
         embeddedRefreshTitle?.let { title ->
             SectionTitle(title, embedded = true) { RefreshUsageKey(state, 48.dp) }
         }
+        // m05 / usage-accounts-dialog.tsx:780-801: on the multi-engine list the first row is the one-line subtitle and Refresh.
+        if (embedded && active == null) SubtitleRefreshRow(state)
         if (data != null) androidx.compose.runtime.CompositionLocalProvider(LocalCardPadding provides if (narrow) 18.dp else 20.dp) {
             // `.usage-accounts-grid`: auto-fill columns of at least 15rem (one ≤ 640).
             val inner = width - if (narrow) 40.dp else 56.dp
@@ -335,14 +353,23 @@ private fun Body(
             }
             val codexEntries = data.codex.filter { activeProvider == null || (activeProvider == "codex" && it.id == activeId) }
             val deepseekAccounts = data.deepseek?.accounts.orEmpty().filter { activeProvider == null || (activeProvider == "deepseek" && it.id == activeId) }
+            val deepseekCount = data.deepseek?.takeIf { activeProvider == null }?.let { deepSeekCards(it, data.generatedAt).size } ?: 0
+            val engineCounts = listOf("claude" to claude.size, "codex" to codexEntries.size, "deepseek" to deepseekCount).filter { it.second > 0 }
+            val showChips = active == null && engineCounts.size > 1
+            val activeFilter = if (showChips && engineFilter != "all" && engineCounts.any { it.first == engineFilter }) engineFilter else "all"
+            val shows = { key: String -> activeFilter == "all" || activeFilter == key }
+            val showTitles = !showChips || activeFilter == "all"
+            if (showChips) EngineChips(engineCounts, activeFilter) { engineFilter = it }
             val selectedFound = active == null || claude.isNotEmpty() || codexEntries.isNotEmpty() || deepseekAccounts.isNotEmpty()
             if (accountDetail && !selectedFound) {
                 SelectedUsageUnavailable(state)
             }
-            if (!embedded && claude.isNotEmpty()) {
+            if (claude.isNotEmpty() && shows("claude") && showTitles && active == null) {
+                SectionTitle("Claude accounts", embedded = embedded)
+            } else if (!embedded && claude.isNotEmpty() && shows("claude") && showTitles) {
                 SectionTitle("Claude accounts")
             }
-            if (claude.isNotEmpty()) Grid(columns) {
+            if (claude.isNotEmpty() && shows("claude")) Grid(columns) {
                 claude.map { entry ->
                     {
                         AccountCard(
@@ -371,8 +398,8 @@ private fun Body(
                     }
                 }
             }
-            if (codexEntries.isNotEmpty() && !(embedded && activeProvider == "codex")) SectionTitle("Codex", embedded = embedded)
-            if (codexEntries.isNotEmpty()) Grid(columns) {
+            if (codexEntries.isNotEmpty() && shows("codex") && showTitles && !(embedded && activeProvider == "codex")) SectionTitle("Codex", embedded = embedded)
+            if (codexEntries.isNotEmpty() && shows("codex")) Grid(columns) {
                 buildList<@Composable () -> Unit> {
                     codexEntries.forEach { codex ->
                         add { AccountCard(codex, data.generatedAt, UsageAccountsModel.codexFallback(codex)) }
@@ -387,10 +414,10 @@ private fun Body(
                     }
                 }
             }
-            data.deepseek?.takeIf { activeProvider == null || activeProvider == "deepseek" }?.let { deepseek ->
+            data.deepseek?.takeIf { (activeProvider == null || activeProvider == "deepseek") && shows("deepseek") }?.let { deepseek ->
                 val selectedDeepseek = deepseek.copy(accounts = deepseekAccounts, unavailable = if (activeProvider == null) deepseek.unavailable else emptyList())
                 if (activeProvider != null && deepseekAccounts.isEmpty()) return@let
-                if (!(embedded && activeProvider == "deepseek")) SectionTitle("DeepSeek", embedded = embedded)
+                if (showTitles && !(embedded && activeProvider == "deepseek")) SectionTitle("DeepSeek", embedded = embedded)
                 Grid(columns) { deepSeekCards(selectedDeepseek, data.generatedAt) }
                 // Issue #193: the balance is half the picture; the rate in force and its card.
                 DeepSeekRateCard()
@@ -412,6 +439,67 @@ private fun Body(
             }
         }
         if (data == null && state.error.isEmpty()) EmptyNote("Loading usage…", Modifier.testTag(AccountsTags.Loading))
+    }
+}
+
+/** The multi-engine list's first row (usage-accounts-dialog.tsx:780-801): the one-line subtitle, then a labelled Refresh key. */
+@Composable
+private fun SubtitleRefreshRow(state: UsageAccountsState) {
+    val t = LocalTetherTokens.current
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            "Accounts & reset grants across engines",
+            color = t.muted,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            style = cssText(LocalTetherTypography.current.ui, 0.75f, 400),
+            modifier = Modifier.weight(1f).testTag(AccountsTags.Subtitle),
+        )
+        TetherKey(
+            onClick = { state.refresh("all") },
+            classes = KeyClasses.ButtonSecondary,
+            label = if (state.loading) "Refreshing…" else "Refresh",
+            icon = TetherIcons.RefreshCw,
+            iconSize = 14.dp,
+            enabled = !state.loading,
+            contentDescription = "Refresh usage",
+            modifier = Modifier.testTag(AccountsTags.Refresh),
+        )
+    }
+}
+
+/** `.chips` / `.chip`: "All (N)" then each engine that has accounts, one scrolling row of 44dp keys; the chosen one is accent. */
+@Composable
+private fun EngineChips(counts: List<Pair<String, Int>>, selected: String, onSelect: (String) -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val all = listOf(Triple("all", "All", counts.sumOf { it.second })) + counts.map { (k, n) -> Triple(k, UsageAccountsModel.engineLabel(k), n) }
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup().semantics { paneTitle = "Filter by engine" }.testTag(AccountsTags.Chips),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        all.forEach { (key, label, n) ->
+            val on = key == selected
+            val interaction = remember { MutableInteractionSource() }
+            val focused by interaction.collectIsFocusedAsState()
+            val shape = RoundedCornerShape(t.radiusMd)
+            Box(
+                Modifier
+                    .heightIn(min = 44.dp)
+                    .cssSurface(shape, if (on) t.accentWash else t.graphite, CssBorder(1.dp, if (on) t.accent else t.lineStrong))
+                    .toggleable(value = on, interactionSource = interaction, indication = null, role = Role.Button) { onSelect(key) }
+                    .focusRing(focused, shape, t.violetStrong)
+                    .testTag(AccountsTags.chip(key))
+                    .padding(horizontal = 16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("$label ($n)", color = if (on) t.violetStrong else t.muted, maxLines = 1, style = cssText(type.mono, 0.75f, 600, trackingEm = 0.02f))
+            }
+        }
     }
 }
 
@@ -527,6 +615,7 @@ private fun AccountCard(
     // ta-28i: an account's label is server text (the label rule).
     val label = LabelText.label(entry.label).ifEmpty { entry.label }
     CardFrame(AccountsTags.card(entry.id)) {
+        val badge = UsageAccountsModel.windowBadge(entry)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.size(36.dp).cssSurface(RoundedCornerShape(9.dp), t.mineral), contentAlignment = Alignment.Center) {
                 Icon(TetherIcons.UserRound, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
@@ -538,8 +627,9 @@ private fun AccountCard(
                     !entry.managed -> "Unmanaged profile"
                     else -> null
                 }
-                small?.let { Text(it, color = t.faint, style = cssText(type.ui, 0.75f, 400, lineHeight = 1.5f)) }
+                small?.let { Text(it, color = t.muted, style = cssText(type.mono, 0.75f, 400, lineHeight = 1.5f)) }
             }
+            badge?.let { WindowBadgeChip(entry.id, it) }
             if (onRefresh != null) {
                 val look = rememberIconLook(t.ink, t.radiusSm, enabled = !refreshing)
                 SpinningKey(spinning = refreshing) { angle ->
@@ -568,30 +658,54 @@ private fun Note(text: String, color: Color, modifier: Modifier = Modifier) {
     Text(text, color = color, style = cssText(LocalTetherTypography.current.ui, 0.75f, 400, lineHeight = 1.6f), modifier = modifier)
 }
 
-/** `.usage-account-row`: 56px label · the meter · a 40px percent (toned), the reset caption under them. */
+/** `.badge` (usage-limits.module.css): the "89% 5h" chip, wait colours, danger once critical. */
+@Composable
+private fun WindowBadgeChip(id: String, badge: UsageAccountsModel.WindowBadge) {
+    val t = LocalTetherTokens.current
+    val ink = if (badge.critical) t.danger else t.warning
+    val shape = RoundedCornerShape(t.radiusSm)
+    Text(
+        badge.text,
+        color = ink,
+        maxLines = 1,
+        style = cssText(LocalTetherTypography.current.mono, 0.75f, 600),
+        modifier = Modifier
+            .cssSurface(shape, if (badge.critical) t.dangerWash else t.amberWash, CssBorder(1.dp, if (badge.critical) t.dangerEdge else t.warning.copy(alpha = 0.5f)))
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .testTag(AccountsTags.badge(id)),
+    )
+}
+
+/** `.row` (usage-limits.module.css): "5 hour · resets 1h 3m ........ 4%" over the meter. */
 @Composable
 private fun WindowRow(label: String, window: AccountWindow, env: UsageEnv) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val percent = percentReading(window.usedPercent)
     val caption = Format.resetTime(window.resetsAt?.let(::JsNum), env.now().toDouble()).ifEmpty { "No reset scheduled" }
-    Column(Modifier.semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(label, color = t.muted, style = cssText(type.ui, 0.75f, 400), modifier = Modifier.width(56.dp))
-            UsageTrack(percent, label, Modifier.weight(1f), placement = UsageTrackPlacement.Meter)
+    Column(Modifier.semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                buildAnnotatedString {
+                    append(label)
+                    withStyle(SpanStyle(color = t.muted, fontSize = cssText(type.ui, 0.75f, 400).fontSize)) { append(" · $caption") }
+                },
+                color = t.ink,
+                style = cssText(type.ui, 0.8125f, 400, lineHeight = 1.5f),
+                modifier = Modifier.weight(1f),
+            )
             Text(
                 if (percent == null) "—" else "$percent%",
                 color = when (usageTone(percent)) {
                     UsageTone.Critical -> t.danger
                     UsageTone.High -> t.warning
-                    UsageTone.None -> t.muted
+                    UsageTone.None -> t.white
                 },
                 textAlign = TextAlign.End,
-                style = cssText(type.ui, 0.75f, 400).tabularNums(),
-                modifier = Modifier.width(40.dp),
+                style = cssText(type.ui, 0.8125f, 650).tabularNums(),
             )
         }
-        Text(caption, color = t.faint, style = cssText(type.ui, 0.75f, 400, lineHeight = 1.6f))
+        UsageTrack(percent, label, Modifier.fillMaxWidth(), placement = UsageTrackPlacement.Meter)
     }
 }
 
@@ -627,39 +741,55 @@ private fun ClaudeResetGrants(reading: ClaudeResetGrantsReading, generatedAt: Do
         return
     }
     Column(frame, verticalArrangement = Arrangement.spacedBy(5.6.dp)) {
-        Text("Limit resets", color = t.muted, style = cssText(type.ui, 0.68f, 600))
+        val views = grants.map { grant -> grant to ClaudeResetGrantsView.resetGrantView(grant, summaryJs, generatedAt) }
+        val available = views.count { (it.second["tone"] as JsStr).value == "available" }
+        // `.grantsTitle`: "LIMIT RESETS · 2 GRANTS AVAILABLE" (mono, tracked, uppercase) over one compact row per grant.
+        Text(
+            "Limit resets" + if (available > 0) " · $available ${if (available == 1) "grant" else "grants"} available" else "",
+            color = t.muted,
+            style = cssText(type.mono, 0.6875f, 400, trackingEm = 0.06f),
+            modifier = Modifier.semantics { heading() },
+        )
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            grants.forEach { grant ->
-                val view = ClaudeResetGrantsView.resetGrantView(grant, summaryJs, generatedAt)
+            views.forEach { (grant, view) ->
                 val tone = (view["tone"] as JsStr).value
                 val status = (view["status"] as JsStr).value
                 val next = view["next"] == JsBool.TRUE
                 val lines = (view["lines"] as JsArr).map { (it as JsStr).value }
+                val (headline, advisory) = UsageAccountsModel.grantSummary(status, lines)
+                val grantId = ((grant as JsObj)["id"] as? JsStr)?.value.orEmpty()
+                val shape = RoundedCornerShape(t.radiusMd)
                 Column(
-                    Modifier.fillMaxWidth().alpha(if (tone == "spent" || tone == "expired") 0.7f else 1f),
-                    verticalArrangement = Arrangement.spacedBy(1.92.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .alpha(if (tone == "spent" || tone == "expired") 0.7f else 1f)
+                        .cssSurface(shape, t.graphiteRaised, CssBorder(1.dp, t.line))
+                        .padding(1.dp)
+                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Column(Modifier.semantics(mergeDescendants = true) {}) {
-                        Text(LabelText.label(((grant as JsObj)["label"] as? JsStr)?.value).ifEmpty { "Usage-limit reset" }, color = t.white, style = cssText(type.ui, 0.72f, 400))
-                        Text(
-                            buildAnnotatedString {
-                                append(status)
-                                if (next && tone == "available") withStyle(SpanStyle(color = t.faint, fontWeight = FontWeight(400))) { append(" · next the CLI would use") }
-                            },
-                            color = t.muted,
-                            style = cssText(type.ui, 0.72f, 600).tabularNums(),
-                        )
-                        lines.forEach { Text(it, color = t.faint, style = cssText(type.ui, 0.66f, 400, lineHeight = 1.35f)) }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Column(Modifier.weight(1f).semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(LabelText.label((grant["label"] as? JsStr)?.value).ifEmpty { "Usage-limit reset" }, color = t.white, style = cssText(type.ui, 0.875f, 650))
+                            Text(
+                                buildAnnotatedString {
+                                    append(headline)
+                                    if (next && tone == "available") append(" · next the CLI would use")
+                                },
+                                color = t.muted,
+                                style = cssText(type.ui, 0.6875f, 400, lineHeight = 1.4f).tabularNums(),
+                            )
+                        }
+                        if (onUse != null && tone == "available" && grant["usableNow"] == JsBool.TRUE && !reading.tokenExpired) {
+                            TetherKey(
+                                onClick = { onUse(grant, summaryJs) },
+                                classes = KeyClasses.ButtonSecondary,
+                                label = "Use reset…",
+                                modifier = Modifier.testTag(AccountsTags.useGrant(grantId)),
+                            )
+                        }
                     }
-                    val grantId = ((grant as JsObj)["id"] as? JsStr)?.value.orEmpty()
-                    if (onUse != null && tone == "available" && (grant as JsObj)["usableNow"] == JsBool.TRUE && !reading.tokenExpired) {
-                        TetherKey(
-                            onClick = { onUse(grant, summaryJs) },
-                            classes = KeyClasses.ButtonSecondary,
-                            label = "Use reset…",
-                            modifier = Modifier.padding(top = 4.dp).testTag(AccountsTags.useGrant(grantId)),
-                        )
-                    }
+                    advisory.forEach { Text(it, color = t.muted, style = cssText(type.ui, 0.75f, 400, lineHeight = 1.4f)) }
                 }
             }
         }

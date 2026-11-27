@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.tether.app.ui.components.CssBorder
 import com.tether.app.ui.components.DisabledOpacity
 import com.tether.app.ui.components.cssSurface
 import com.tether.app.ui.components.softShadow
@@ -419,59 +421,58 @@ internal fun SettingsSwitchTrack(checked: Boolean) {
 }
 
 /**
- * One option of a `ThemeAxis` radiogroup (settings-dialog.tsx:900-937; `.theme-choice`,
- * globals.css 8515-8548, studio.css 492, 636-637): the leading glyph, label over hint, and the
- * tick. Selection is the tick, the stronger label and the wash, never colour alone; the row is a
- * radio button so TalkBack announces "selected, n of m".
+ * One option of the Appearance radiogroup as a card (runtime-desk-scaffold.module.css `.appearance-card`): the glyph, the
+ * label over its hint, on `--bg-panel` with a 1px line; selected = accent-soft fill and a 2px accent outline (the web's
+ * border plus its inset ring), never colour alone (the glyph turns accent and the card is a radio button, so TalkBack
+ * announces "selected, n of m").
  */
 @Composable
-internal fun ThemeChoiceRow(
+internal fun ThemeCard(
     icon: ImageVector,
     label: String,
     hint: String,
     selected: Boolean,
     onClick: () -> Unit,
-    narrow: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val t = LocalTetherTokens.current
-    val shape = RoundedCornerShape(8.dp)
-    Column(Modifier.fillMaxWidth()) {
-        RowRule()
-        Row(
-            modifier
-                .fillMaxWidth()
-                .heightIn(min = 78.dp)
-                .background(if (selected) t.violetWash else Color.Transparent, shape)
-                .selectable(
-                    selected = selected,
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    role = Role.RadioButton,
-                    onClick = onClick,
-                )
-                .padding(horizontal = 12.dp, vertical = if (narrow) 16.dp else 17.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(if (narrow) 16.dp else 24.dp),
-        ) {
-            Box(Modifier.width(42.dp).height(28.dp), contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = if (selected) t.white else t.muted, modifier = Modifier.size(17.dp))
-            }
-            SettingsRowText(label, AnnotatedString(hint), Modifier.weight(1f), titleColor = if (selected) t.white else t.ink)
-            Icon(
-                TetherIcons.Check,
-                contentDescription = null,
-                tint = t.violet,
-                modifier = Modifier.size(16.dp).alpha(if (selected) 1f else 0f),
+    val type = LocalTetherTypography.current
+    val shape = RoundedCornerShape(10.dp)
+    Column(
+        modifier
+            .heightIn(min = 44.dp)
+            .cssSurface(shape, if (selected) t.css.accentSoft else t.graphite, CssBorder(if (selected) 2.dp else 1.dp, if (selected) t.accent else t.line))
+            .selectable(
+                selected = selected,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                role = Role.RadioButton,
+                onClick = onClick,
             )
+            .padding(horizontal = 14.dp - if (selected) 1.dp else 0.dp, vertical = 14.dp - if (selected) 1.dp else 0.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = if (selected) t.accent else t.muted, modifier = Modifier.size(17.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(label, color = t.white, style = settingsText(type.ui, 13.6f, 650, lineHeight = 1.4f))
+            Text(hint, color = t.muted, style = settingsText(type.ui, 11.5f, 400, lineHeight = 1.45f))
         }
     }
 }
 
-/** `ThemeAxis`'s `role="radiogroup"` wrapper. */
+/** The cards of one Appearance axis: side by side, equal width; stacked only when the type is so large a card could not hold its words. */
 @Composable
-internal fun ThemeChoices(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.fillMaxWidth().selectableGroup(), content = content)
+internal fun ThemeCards(modifier: Modifier = Modifier, count: Int, card: @Composable (Int, Modifier) -> Unit) {
+    val stack = androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.5f
+    if (stack) {
+        Column(modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            repeat(count) { card(it, Modifier.fillMaxWidth()) }
+        }
+    } else {
+        Row(modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Max).selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            repeat(count) { card(it, Modifier.weight(1f).fillMaxHeight()) }
+        }
+    }
 }
 
 /** The env lock's accessible name (settings-dialog.tsx:144 `aria-label="Set by environment"`). */

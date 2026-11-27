@@ -468,9 +468,9 @@ private fun RuntimeDeskGroupLabel(label: String, first: Boolean) {
 internal data class RuntimeDeskItemPalette(val activeBackground: Color, val idleText: Color, val activeText: Color, val supporting: Color)
 
 internal fun runtimeDeskItemPalette(t: com.tether.app.ui.theme.TetherTokens, dark: Boolean) = RuntimeDeskItemPalette(
-    activeBackground = if (dark) t.accent else t.violetWash,
+    activeBackground = if (dark) t.accent else t.css.accentSoft,
     idleText = if (dark) t.css.faint else t.ink,
-    activeText = if (dark) t.accentInk else t.violetStrong,
+    activeText = if (dark) t.accentInk else t.accent,
     supporting = if (dark) t.css.faint else t.muted,
 )
 
