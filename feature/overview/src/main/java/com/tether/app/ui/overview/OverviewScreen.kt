@@ -2,9 +2,8 @@ package com.tether.app.ui.overview
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -30,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -735,7 +735,21 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
                 t.css.shadowRaised,
             )
             // B2: the whole card is the open target (the web `.card`), so the "Open" label needs no padded hit area.
-            .then(if (request == null) Modifier.pointerInput(card.sessionId) { detectTapGestures { actions.onOpenSession(card.sessionId) } } else Modifier)
+            // P8D-FIX3: the card itself is the button (merged semantics: title + "Open"), with no ripple as before.
+            .then(
+                if (request == null) {
+                    Modifier
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClickLabel = "Open session",
+                            role = Role.Button,
+                        ) { actions.onOpenSession(card.sessionId) }
+                        .semantics { contentDescription = "Open session: $cardTitle" }
+                } else {
+                    Modifier
+                },
+            )
             .padding(20.dp)
             .testTag(OverviewTags.card(card.sessionId)),
     ) {
@@ -789,11 +803,9 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
                 }
             }
             if (request == null) {
+                // Decorative: the whole card (above) carries the click, the role and the name.
                 Row(
-                    Modifier
-                        .clickable(onClickLabel = "Open session", role = Role.Button) { actions.onOpenSession(card.sessionId) }
-                        .semantics { contentDescription = "Open session: $cardTitle" }
-                        .testTag(OverviewTags.open(card.sessionId)),
+                    Modifier.testTag(OverviewTags.open(card.sessionId)),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {

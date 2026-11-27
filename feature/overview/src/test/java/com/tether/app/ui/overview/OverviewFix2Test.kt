@@ -140,7 +140,12 @@ class OverviewFix2Test {
 
     @Test fun theThreeTracksShareABaselineAt412dp() = assertAligned()
 
-    @Test @Config(fontScale = 1.3f) fun theThreeTracksShareABaselineAt412dpFont1_3() = assertAligned()
+    // P8D-FIX3: at 1.3x the meters stack (the side-by-side cell cannot hold the memory value), so the tracks go down the column, each its own row.
+    @Test @Config(fontScale = 1.3f) fun theMetersStackAt412dpFont1_3() {
+        val tops = tracksAndValues().map { it.first }
+        assertTrue("tracks go down the column: $tops", tops[0] < tops[1] && tops[1] < tops[2])
+        rule.onNode(hasText("35.4/62.6G"), useUnmergedTree = true).assertExists()
+    }
 
     private fun assertAligned() {
         val tops = tracksAndValues().map { it.first }
@@ -148,5 +153,45 @@ class OverviewFix2Test {
         assertEquals("CPU/Memory track tops", tops[0], tops[1], 0.5f)
         assertEquals("Memory/Disk track tops", tops[1], tops[2], 0.5f)
         rule.onNode(hasText("35.4/62.6G"), useUnmergedTree = true).assertExists()
+    }
+
+    // ── P8D-FIX3 ──
+    /** The memory value's layout: one line, nothing cut off at the end (no ellipsis, no clip, wider than its cell never). */
+    private fun memoryLayout(total: Double = 62.6, used: Double = 35.4): TextLayoutResult {
+        rule.setContent {
+            TetherTheme(choiceFor(TetherSkin.Studio)) {
+                CompositionLocalProvider(LocalReducedMotion provides true) {
+                    Box(Modifier.fillMaxWidth().padding(14.dp).testTag("shot")) { HostUsagePanel(tile(used, total)) }
+                }
+            }
+        }
+        val out = mutableListOf<TextLayoutResult>()
+        rule.onNode(hasTextExactlyAny(), useUnmergedTree = true).fetchSemanticsNode()
+            .config.getOrNull(SemanticsActions.GetTextLayoutResult)!!.action!!.invoke(out)
+        return out.single()
+    }
+
+    private fun hasTextExactlyAny() = hasAnyAncestor(hasTestTag(HostUsageTags.meter("Memory"))) and
+        SemanticsMatcher("memory value") { n -> n.config.getOrNull(SemanticsProperties.Text)?.any { it.text.contains("62.6") } == true }
+
+    private fun assertNotClipped() {
+        val r = memoryLayout()
+        println("MEMLAYOUT text=${r.layoutInput.text.text} overflow=${r.hasVisualOverflow} w=${r.size.width} h=${r.size.height} lineRight=${r.getLineRight(0)} mpWidth=${r.multiParagraph.width} intrinsicMax=${r.multiParagraph.maxIntrinsicWidth} lastCharRight=${r.getBoundingBox(r.layoutInput.text.length - 1).right}")
+        assertEquals(1, r.lineCount)
+        assertTrue("memory value is cut off: ${r.layoutInput.text.text} (wants ${r.multiParagraph.maxIntrinsicWidth}, has ${r.multiParagraph.width})", r.multiParagraph.maxIntrinsicWidth <= r.multiParagraph.width)
+        assertTrue("trailing G laid out", r.layoutInput.text.text.endsWith("G"))
+    }
+
+    @Test @Config(qualifiers = "w412dp-h915dp-420dpi") fun theMemoryValueIsNotClippedAt412dpFont1_0() = assertNotClipped()
+    @Test @Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f) fun theMemoryValueIsNotClippedAt412dpFont1_3() = assertNotClipped()
+    @Test @Config(qualifiers = "w320dp-h915dp-420dpi") fun theMemoryValueIsNotClippedAt320dpFont1_0() = assertNotClipped()
+    @Test @Config(qualifiers = "w320dp-h915dp-420dpi", fontScale = 1.3f) fun theMemoryValueIsNotClippedAt320dpFont1_3() = assertNotClipped()
+
+    @Test @Config(qualifiers = "w320dp-h915dp-420dpi") fun atTheStackedWidthAllThreeMetersShow() {
+        val tops = tracksAndValues()
+        println("STACKED tracks/meters $tops")
+        // CPU, Memory, Disk each take a row of their own, in order, every one with a track and a non-zero height.
+        assertTrue("tracks go down the column: $tops", tops[0].first < tops[1].first && tops[1].first < tops[2].first)
+        tops.forEach { assertTrue("meter has a height: $tops", it.second > 20f) }
     }
 }

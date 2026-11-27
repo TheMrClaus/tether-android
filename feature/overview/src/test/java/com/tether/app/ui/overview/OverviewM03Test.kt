@@ -220,12 +220,12 @@ class OverviewM03ContrastTest {
         report("selected status chip", skin, measure(chipLabel(StatusTab.Active), t.violetWash))
         report("idle status chip", skin, measure(chipLabel(StatusTab.Waiting), t.graphite))
         // every card's status chip (running, waiting, attention tones) against its own wash.
-        val all = rule.onAllNodesWithTag(OverviewTags.StatusChip)
+        val all = rule.onAllNodesWithTag(OverviewTags.StatusChip, useUnmergedTree = true)
         val n = all.fetchSemanticsNodes().size
         assertTrue("card status chips drawn: $n", n >= 4)
         for (i in 0 until n) {
-            rule.onAllNodesWithTag(OverviewTags.StatusChip)[i].performScrollTo()
-            report("card status chip #$i", skin, measure(rule.onAllNodesWithTag(OverviewTags.StatusChip)[i], null))
+            rule.onAllNodesWithTag(OverviewTags.StatusChip, useUnmergedTree = true)[i].performScrollTo()
+            report("card status chip #$i", skin, measure(rule.onAllNodesWithTag(OverviewTags.StatusChip, useUnmergedTree = true)[i], null))
         }
     }
 

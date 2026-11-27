@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import androidx.compose.ui.semantics.getOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -64,10 +65,28 @@ class OverviewBehaviourTest {
         rule.setContent { OverviewUnderTest(TetherSkin.Studio, OverviewFixtures.populated, actions = actions) }
         // P8D-FIX2 (E8): the banner lists s-sync's one request, so its card is gone; the banner's own Review is the path.
         rule.onNodeWithTag(OverviewTags.reviewPending("s-sync", "r-1")).performScrollTo().performClick()
-        rule.onNodeWithTag(OverviewTags.open("s-proto")).performScrollTo().performClick()
+        // P8D-FIX3: the whole card is the button (the "Open" label is decoration), so the card tag is the click.
+        rule.onNodeWithTag(OverviewTags.card("s-proto")).performScrollTo().performClick()
         rule.onNodeWithTag(OverviewTags.activityRow(OverviewFixtures.activity[2].id)).performScrollTo().performClick()
         rule.onNodeWithTag(OverviewTags.NewSession).performClick()
         assertEquals(listOf("review:s-sync:r-1", "open:s-proto", "open:s-game", "new"), calls)
+    }
+
+    /** P8D-FIX3 (verifier r3): the capped fixture keeps the waiting card; its Review request reports the request id. */
+    @Test fun theWaitingCardsReviewRequestHandsOffItsRequestId() {
+        val calls = mutableListOf<String>()
+        val actions = OverviewActions(onReviewRequest = { s, r -> calls += "review:$s:$r" })
+        rule.setContent { OverviewUnderTest(TetherSkin.Studio, OverviewFixtures.populatedCapped, actions = actions) }
+        rule.onNodeWithTag(OverviewTags.review("s-sync")).performScrollTo().performClick()
+        assertEquals(listOf("review:s-sync:r-1"), calls)
+    }
+
+    @Test fun aSessionCardIsOneButtonNamedByItsTitleAndOpen() {
+        rule.setContent { OverviewUnderTest(TetherSkin.Studio, OverviewFixtures.clear) }
+        val node = rule.onNodeWithTag(OverviewTags.card("s-proto")).fetchSemanticsNode()
+        assertEquals(androidx.compose.ui.semantics.Role.Button, node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Role))
+        val name = node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription).orEmpty().joinToString(" ")
+        org.junit.Assert.assertTrue("name: $name", name.contains("Open") && name.contains("Protocol compatibility"))
     }
 
     @Test fun aStatusTabIsAFilterChoice() {

@@ -36,6 +36,7 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -243,19 +244,20 @@ private fun Meters(tile: HostUsagePresentation.Tile) {
     ) {
         // overview.module.css `@media (max-width: 22.5rem)`: a 360dp screen leaves this much inside the panel.
         val width = maxWidth
-        val stacked = width < 300.dp
+        // P8D-FIX3: at 1.3x the compact memory value ("35.4/62.6G") is wider than a third of a 412dp panel and its "G" clipped, so a large font stacks the meters too.
+        val stacked = width < 300.dp || (LocalDensity.current.fontScale > 1.15f && width < 420.dp)
         if (stacked) {
             Column {
                 tile.meters.forEachIndexed { index, meter ->
                     if (index > 0) Box(Modifier.padding(vertical = 12.dp).fillMaxWidth().height(1.dp).cssSurface(RoundedCornerShape(0.dp), t.line))
-                    MeterCell(meter, narrow = true, Modifier.fillMaxWidth())
+                    MeterCell(meter, narrow = true, Modifier.fillMaxWidth(), fillHeight = false)
                 }
             }
         } else {
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 tile.meters.forEachIndexed { index, meter ->
                     if (index > 0) Box(Modifier.width(1.dp).fillMaxHeight().cssSurface(RoundedCornerShape(0.dp), t.line))
-                    MeterCell(meter, narrow = width < 420.dp, Modifier.weight(1f))
+                    MeterCell(meter, narrow = width < 420.dp, Modifier.weight(1f), fillHeight = true)
                 }
             }
         }
@@ -264,7 +266,7 @@ private fun Meters(tile: HostUsagePresentation.Tile) {
 
 /** `Meter`: label, track (role=meter: 0..100, the printed figure as its value text), value or reason. */
 @Composable
-private fun MeterCell(meter: HostUsagePresentation.Meter, narrow: Boolean, modifier: Modifier) {
+private fun MeterCell(meter: HostUsagePresentation.Meter, narrow: Boolean, modifier: Modifier, fillHeight: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val fill: Color = when (meter.tone) {
@@ -280,7 +282,8 @@ private fun MeterCell(meter: HostUsagePresentation.Meter, narrow: Boolean, modif
     }
     Column(
         modifier
-            .fillMaxHeight()
+            // P8D-FIX3: only the side-by-side row has a bounded height to fill; in the stacked column fillMaxHeight swallowed the other meters.
+            .then(if (fillHeight) Modifier.fillMaxHeight() else Modifier)
             .testTag(HostUsageTags.meter(meter.label))
             .clearAndSetSemantics {
                 contentDescription = meter.label
