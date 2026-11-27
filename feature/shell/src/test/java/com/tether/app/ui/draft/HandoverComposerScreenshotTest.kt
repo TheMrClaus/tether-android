@@ -51,6 +51,9 @@ enum class HandoverComposerShot(val id: String, val phone: Boolean, val expanded
     NameCleared("handover-composer-name-cleared", true, true),
     CodexCustom("handover-composer-codex-custom", true, true),
     Pi("handover-composer-pi", true, false),
+
+    /** A Reasonix source that reports Auto: the successor's Approvals row is drawn and seeded Auto (the phone shoots the settings hub). */
+    Reasonix("handover-composer-reasonix", true, true),
     Pending("handover-composer-pending", true, false),
     Refusal("handover-composer-refusal", true, true),
     Blocked("handover-composer-blocked", true, false),
@@ -74,6 +77,9 @@ class HandoverComposerSeed(shot: HandoverComposerShot) {
             if (it.key == "pi") it.copy(status = "ready", models = listOf(SessionModelOption("m1", "Model 1"))) else it
         }
         providers.value = DraftFixtures.providers.map { if (it.id == "pi") it.copy(available = true) else it }
+        if (shot == HandoverComposerShot.Reasonix) {
+            providerCatalog.value = providerCatalog.value + ProviderCatalogEntry("reasonix", "reasonix", "ready", listOf(SessionModelOption("m1", "Reasonix")), label = "Reasonix")
+        }
     }
     private val model = DraftComposerModel(
         client = client,
@@ -91,6 +97,10 @@ class HandoverComposerSeed(shot: HandoverComposerShot) {
         val source = when (shot) {
             HandoverComposerShot.CodexCustom -> SOURCE.copy(provider = "codex", model = "m1", sandboxPolicy = "off", approvalPolicy = "on-request")
             HandoverComposerShot.Pi -> SOURCE.copy(provider = "pi", model = "m1")
+            HandoverComposerShot.Reasonix -> SOURCE.copy(
+                provider = "reasonix", model = "m1", permissionMode = "default",
+                toolApproval = kotlinx.serialization.json.buildJsonObject { put("value", JsonPrimitive("auto")) },
+            )
             else -> SOURCE
         }
         when (shot) {
@@ -144,7 +154,7 @@ fun ComposeContentTestRule.snapHandoverComposer(shot: HandoverComposerShot, skin
                     if (settingsMode) {
                         DraftSettingsFrame(
                             seed.inputs(),
-                            DraftSettingsState(open = true, view = DraftSettingsView.Mode),
+                            DraftSettingsState(open = true, view = if (shot == HandoverComposerShot.Reasonix) DraftSettingsView.Root else DraftSettingsView.Mode),
                             DraftSettingsActions(
                                 browser = ModelBrowserActions(onSelect = { _, _ -> }, onRetry = {}, onAddModel = { _, _ -> true }, onRemoveModel = { _, _ -> }, onClose = {}),
                                 onSelectEffort = { true }, onSelectMode = { _, _ -> true }, onToggleAuto = { true }, onClose = {},
@@ -169,8 +179,8 @@ fun ComposeContentTestRule.snapHandoverComposer(shot: HandoverComposerShot, skin
 class HandoverComposerPhoneScreenshotTest(private val shot: HandoverComposerShot, private val skin: TetherSkin) {
     @get:Rule val rule = createComposeRule()
 
-    // The phone's Mode view is the settings sheet, so the codex-custom golden shoots it open on Mode.
-    @Test fun sheet() = rule.snapHandoverComposer(shot, skin, phone = true, settingsMode = shot == HandoverComposerShot.CodexCustom)
+    // The phone's Mode view is the settings sheet, so the codex-custom golden shoots it open on Mode (the Reasonix one on the hub).
+    @Test fun sheet() = rule.snapHandoverComposer(shot, skin, phone = true, settingsMode = shot == HandoverComposerShot.CodexCustom || shot == HandoverComposerShot.Reasonix)
 
     companion object {
         @JvmStatic

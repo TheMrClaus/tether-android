@@ -54,6 +54,8 @@ object WireTypeLists {
         "queue-steer",
         // v171 (named browser profiles)
         "browser-profiles",
+        // v175 (new-session proposal card)
+        "proposal-start", "proposal-here", "proposal-dismiss",
     )
 
     /**
@@ -67,8 +69,8 @@ object WireTypeLists {
      */
     val SINCE_MATRIX_SERVER: Set<String> = setOf("server-settings-result", "supervisor_status", "queue_steer_result", "browser_profiles")
 
-    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("queue-steer", "browser-profiles")
+    val SINCE_PARITY_BASE_CLIENT: Set<String> = setOf("queue-steer", "browser-profiles", "proposal-start", "proposal-here", "proposal-dismiss")
 
     /** Client types newer than docs/parity/matrix.json (PROTOCOL 143): the v165 `queue-steer`. */
-    val SINCE_MATRIX_CLIENT: Set<String> = setOf("queue-steer", "browser-profiles")
+    val SINCE_MATRIX_CLIENT: Set<String> = setOf("queue-steer", "browser-profiles", "proposal-start", "proposal-here", "proposal-dismiss")
 }

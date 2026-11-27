@@ -176,6 +176,11 @@ internal sealed interface ChatItem {
         override val startsGroup: Boolean get() = true
     }
 
+    /** v175 (#293): the agent's new-session proposal, as its card; it replaces the `propose_session` tool row of its turn. */
+    data class Proposal(val turnId: String, val proposal: ProposalView, override val startsGroup: Boolean) : ChatItem {
+        override val key: String get() = "$turnId/proposal/${proposal.proposalId}"
+    }
+
     /** T6.4: a finished background `!` command, anchored where it was launched (a `.chat-scroll` child). */
     data class BgCommand(val command: BackgroundCommandView) : ChatItem {
         override val key: String get() = "bg-${command.commandId}"
@@ -260,6 +265,8 @@ internal fun buildChatItems(
     handedOffFrom: String? = null,
     /** W34: the server speaks protocol >= 151 ([com.tether.app.client.Handover.v151]): the handover notices read the web's new words. */
     handoverV151: Boolean = false,
+    /** v175: the server speaks protocol >= 175 ([com.tether.app.client.proposalCardSupported]): a proposal shows as its card and replaces its tool row. */
+    proposalCard: Boolean = false,
 ): List<ChatItem> {
     val items = ArrayList<ChatItem>(projection.turnOrder.size * 3)
     // T6.6 r2: the session the notice / limit rows belong to (their lazy keys carry it).
@@ -313,7 +320,11 @@ internal fun buildChatItems(
         val turnDenials = placement.byTurn[turnId]
         val answeredList = (cardTurn?.get("answeredQuestions") as? JsArr)?.mapNotNull { (it as? JsObj)?.let(::answeredView) }.orEmpty()
         if (turn.continuation) items.add(ChatItem.Continuation(turnId, opens()))
-        for (segment in segmentBlocks(turn.blocks, ::rawFor)) {
+        // v175: with the card shown, each `propose_session` tool row gives way to its card, in place (below 175 the tool rows stay).
+        val proposals = if (proposalCard) proposalViews(cardTurn) else emptyList()
+        val chunks = proposalChunks(turn.blocks, proposals) { id -> turn.blocksById[id]?.let { it.kind == Vocab.BLOCK_TOOL && isProposeSessionTool(it.name) } == true && rawFor(id)?.isErrorBlock() != true }
+        for (chunk in chunks) {
+        for (segment in segmentBlocks(chunk.blockIds, ::rawFor)) {
             when (segment) {
                 is ActivitySegment.Group -> {
                     val raws = segment.blockIds.mapNotNull(::rawFor)
@@ -375,6 +386,8 @@ internal fun buildChatItems(
                 }
             }
         }
+        chunk.card?.let { items.add(ChatItem.Proposal(turnId, it, opens())) }
+        }
         if (richCodex && turnObj != null) {
             // `CodexRichTurnDetails`: one `.turnDetails` stack (space-sm apart) after the blocks.
             var inDetails = false
@@ -433,3 +446,27 @@ internal fun sessionErrorText(lastError: String?): String? =
 internal fun outcomeAt(turnObj: JsObj?, turn: TurnProjection): Double? =
     (turnObj?.get("errorAt") as? JsNum)?.value ?: (turnObj?.get("endedAt") as? JsNum)?.value
         ?: turn.errorAt?.toDouble() ?: turn.endedAt?.toDouble()
+
+/** A run of a turn's blocks and the proposal card that follows it (null for the last run when no card is owed there). */
+internal class ProposalChunk(val blockIds: List<String>, val card: ProposalView?)
+
+/**
+ * The turn's blocks split at each proposing tool block ([isProposeTool]: a `propose_session` call that went through), the card of
+ * the n-th proposal taking the n-th such block's place; a proposal with no tool block of its own (a replay that lost it) follows
+ * the last run. A propose call that failed, or has no proposal left, stays a normal tool row. No proposals: one run.
+ */
+internal fun proposalChunks(blocks: List<String>, proposals: List<ProposalView>, isProposeTool: (String) -> Boolean): List<ProposalChunk> {
+    if (proposals.isEmpty()) return listOf(ProposalChunk(blocks, null))
+    val out = ArrayList<ProposalChunk>()
+    var run = ArrayList<String>()
+    var next = 0
+    for (id in blocks) {
+        if (isProposeTool(id) && next < proposals.size) {
+            out.add(ProposalChunk(run, proposals[next++]))
+            run = ArrayList()
+        } else run.add(id)
+    }
+    out.add(ProposalChunk(run, proposals.getOrNull(next)))
+    for (i in next + 1 until proposals.size) out.add(ProposalChunk(emptyList(), proposals[i]))
+    return out
+}

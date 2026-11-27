@@ -102,6 +102,7 @@ class TranscriptBidiBehaviourTest {
                 androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider provides (menu ?: androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider.current),
             ) {
                 ChatHost(TetherSkin.StudioDark, wellHeight = wellHeight) {
+                  androidx.compose.runtime.CompositionLocalProvider(LocalProposalActions provides ProposalActions(sessionId = "s1", cardShown = true)) {
                     Column {
                         extra?.invoke()
                         ChatTranscript(
@@ -115,6 +116,7 @@ class TranscriptBidiBehaviourTest {
                             richCodex = richCodex,
                         )
                     }
+                  }
                 }
             }
         }
@@ -691,7 +693,7 @@ class TranscriptBidiBehaviourTest {
     private val notSelectable = setOf("LoadEarlier", "ToolGroup", "BgCommand")
 
     /** ta-coik.22: the cards and notices, selectable as on the web; walked by [noSelectableCardOrNoticeDrawsRawControlsOrAForgedToken]. */
-    private val cardKinds = setOf("Approval", "Question", "ProviderNotice", "Compaction", "SessionNotice", "RateLimit")
+    private val cardKinds = setOf("Approval", "Question", "ProviderNotice", "Compaction", "SessionNotice", "RateLimit", "Proposal")
 
     /**
      * r2: every selectable row kind, fed hostile words (an override, an isolate, a forged token with
@@ -802,11 +804,15 @@ class TranscriptBidiBehaviourTest {
                     }
                 }
             },
+            ev("tool_start", "t1", ts = 1) { put("toolId", "tp"); put("name", "mcp__tether__propose_session"); putJsonObject("input") {} },
+            ev("session_proposal", "t1", ts = 1) { put("proposalId", "p-1"); put("title", "title $h"); put("prompt", "prompt $h") },
+            ev("tool_end", "t1", ts = 1) { put("toolId", "tp"); put("output", "proposed"); put("isError", false) },
+            evNullTurn("session_proposal_updated", seq = 89, ts = 2) { put("proposalId", "p-1"); put("state", "started"); put("startedSessionId", "s9"); put("startedSessionName", "name $h") },
             evNullTurn("external_advancement", seq = 90, ts = 2) { put("noticeId", "ext-1"); put("count", 2) },
             // Within the reducer's horizon (an hour after the event).
             evNullTurn("limit_hit", seq = 91, ts = 2) { put("resetAt", 2L + 3_600_000L); put("limitType", "five_hour") },
         )
-        val items = buildChatItems(f.projection, f.tree, showThinking = true, zone = ChatFixtures.zone, richCodex = true)
+        val items = buildChatItems(f.projection, f.tree, showThinking = true, zone = ChatFixtures.zone, richCodex = true, proposalCard = true)
         val present = items.map { it::class.java.simpleName }.toSet()
         assertEquals("card kinds missing from the walk", emptySet<String>(), cardKinds - present)
         for (item in items) assertEquals(item::class.java.simpleName, if (item is ChatItem.Block) !item.isActivityRow else item::class.java.simpleName !in notSelectable, item.selectableText)
@@ -819,7 +825,7 @@ class TranscriptBidiBehaviourTest {
             all += spoken()
         }
         val forbidden = (ALL_BIDI.map { it[0] } + (0x00..0x1F).filter { it != 0x09 && it != 0x0A }.map { it.toChar() } + (0x7F..0x9F).map { it.toChar() }).toSet()
-        for (word in listOf("notice", "cmd", "ask", "head", "opt", "desc")) {
+        for (word in listOf("notice", "cmd", "ask", "head", "opt", "desc", "title", "prompt", "name")) {
             assertTrue("no card drew \"$word\": $all", all.any { it.contains("$word x", ignoreCase = true) })
         }
         for (s in all) {
@@ -842,6 +848,18 @@ class TranscriptBidiBehaviourTest {
         rule.onNodeWithTag("todo-bar-head").performClick()
         rule.waitForIdle()
         assertTrue(rule.onAllNodes(hasText("Fix the ${tok(0x202E)}parser${tok(0x202C)}"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        assertNoRawOverride()
+    }
+
+    @Test fun theProposalCardsTitleAndPromptAreCleanedAndNeverDrawRawControls() {
+        val view = ProposalView(
+            proposalId = "p1", title = "Fix the ${RLO}parser$PDF", prompt = "Then ${RLO}reorder$PDF the tests", suggestions = com.tether.app.protocol.tree.JsObj.EMPTY,
+            replaced = emptyList(), state = ProposalState.Pending, refusalCode = null, startedSessionId = null, startedSessionName = null,
+        )
+        rule.setContent { ChatHost(TetherSkin.StudioDark) { ProposalCard(view) } }
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodes(hasText("Fix the ${tok(0x202E)}parser${tok(0x202C)}"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(rule.onAllNodes(hasText("Then ${tok(0x202E)}reorder${tok(0x202C)} the tests"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         assertNoRawOverride()
     }
 

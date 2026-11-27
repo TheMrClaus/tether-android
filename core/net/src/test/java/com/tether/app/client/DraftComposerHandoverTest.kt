@@ -411,4 +411,44 @@ class DraftComposerHandoverTest {
         h.model.selectProvider("codex")
         assertTrue(DraftSessionOptionsModel.of(h.model.state.value).mode!!.options.none { it.value == "current" })
     }
+
+    // AND-APPR2: a Reasonix successor's Approvals row is drawn, seeded from the source, and its pick rides the request frame.
+    private fun Harness.reasonixSource(approval: String?): AgentSession {
+        client.providerCatalog.value = claudeRows + ProviderCatalogEntry("reasonix", "reasonix", "ready", emptyList())
+        client.providerCatalogLive.value = true
+        val session = source {
+            it.copy(
+                provider = "reasonix", model = null, permissionMode = "default",
+                toolApproval = approval?.let { v -> kotlinx.serialization.json.buildJsonObject { put("value", JsonPrimitive(v)) } },
+            )
+        }
+        client.sessions.value = listOf(session); model.refresh()
+        assertTrue(model.openHandover(session))
+        return session
+    }
+
+    @Test fun aReasonixHandoverDrawsApprovalsSeededFromTheSourceAndSendsThePick() = runTest {
+        val h = harness(); h.reasonixSource("yolo")
+        assertEquals("yolo", DraftSessionOptionsModel.of(h.model.state.value).approvals!!.value)
+        assertTrue(h.model.selectToolApproval("auto", "reasonix"))
+        h.model.submitHandover()
+        assertEquals("auto", (h.client.requests.single().third["toolApproval"] as JsonPrimitive).content)
+    }
+
+    @Test fun anUntouchedReasonixHandoverSendsTheSourcesApprovalsAndAskWhenItReportsNone() = runTest {
+        val h = harness(); h.reasonixSource("yolo")
+        h.model.submitHandover()
+        assertEquals("yolo", (h.client.requests.single().third["toolApproval"] as JsonPrimitive).content)
+        val g = harness(); g.reasonixSource(null)
+        assertEquals("ask", DraftSessionOptionsModel.of(g.model.state.value).approvals!!.value)
+        g.model.submitHandover()
+        assertEquals("ask", (g.client.requests.single().third["toolApproval"] as JsonPrimitive).content)
+    }
+
+    @Test fun aNonReasonixHandoverHasNoApprovalsRowAndNoField() = runTest {
+        val h = harness(); h.live(); h.open()
+        assertNull(DraftSessionOptionsModel.of(h.model.state.value).approvals)
+        h.model.submitHandover()
+        assertFalse(h.client.requests.single().third.containsKey("toolApproval"))
+    }
 }

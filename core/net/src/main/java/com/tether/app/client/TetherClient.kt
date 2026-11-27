@@ -1023,6 +1023,16 @@ interface TetherClient {
      */
     fun handoverCancel(sessionId: String, requestId: String): Boolean = false
 
+    /**
+     * v175 (the new-session proposal card): sends one `proposal-start` / `-here` / `-dismiss` frame. A press in flight and a
+     * refusal echoing its requestId are in [proposalLocal]; a refusal is inline on the card, never a toast. True when the frame
+     * went out (a failed send is in [proposalLocal] too).
+     */
+    fun sendProposal(frame: com.tether.app.protocol.ClientMessage.ProposalFrame): Boolean = false
+
+    /** v175: per proposal id, what this device sent and has no state change for yet (the press in flight), or its refusal. */
+    val proposalLocal: StateFlow<Map<String, ProposalLocalState>> get() = NO_PROPOSAL_LOCAL
+
     /** v151: the source session id of each refused `handover-cancel` (use-tether.ts handoverStopRefusal). */
     val handoverStopRefusals: SharedFlow<String> get() = NO_STOP_REFUSALS
 
@@ -1389,6 +1399,7 @@ data class WorkspaceSelectStatus(val cwd: String, val requestId: String, val pha
 private val NO_NODES: StateFlow<List<NodeSummary>> = MutableStateFlow(emptyList())
 private val NO_NODE_RESULT: StateFlow<NodeActionResult?> = MutableStateFlow(null)
 private val NO_HANDOVER_REFUSALS: SharedFlow<Unit> = MutableSharedFlow()
+private val NO_PROPOSAL_LOCAL: StateFlow<Map<String, ProposalLocalState>> = MutableStateFlow(emptyMap())
 private val NO_STOP_REFUSALS: SharedFlow<String> = MutableSharedFlow()
 private val NO_SERVER_PROTOCOL: StateFlow<Int?> = MutableStateFlow(null)
 private val NO_GIT_FILE_DIFFS: StateFlow<Map<String, Map<String, ServerMessage.GitDiffFile>>> = MutableStateFlow(emptyMap())
