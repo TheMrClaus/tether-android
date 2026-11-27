@@ -132,7 +132,7 @@ class CreateFrameTest {
         Row("opencode plan", entry("opencode"), form("mode" to "plan"), expected = frame("opencode", """"permissionMode":"plan",""")),
         // --- every other engine: bypassPermissions for wire symmetry, no sandbox, the mode ignored --------
         Row("pi", entry("pi"), form("mode" to "plan"), expected = frame("pi", """"permissionMode":"bypassPermissions",""")),
-        Row("reasonix", entry("reasonix"), form(), expected = frame("reasonix", """"permissionMode":"default",""")),
+        Row("reasonix", entry("reasonix"), form(), expected = frame("reasonix", """"permissionMode":"default","toolApproval":"ask",""")),
         Row("dsh", entry("dsh"), form("mode" to "default"), expected = frame("dsh", """"permissionMode":"bypassPermissions",""")),
         Row(
             "acp profile",
@@ -429,6 +429,8 @@ class CreateFrameTest {
                 put("approvalPolicy", "never")
             }
             if (isCodex && preset["approvalsReviewer"] == JsStr("auto_review")) put("approvalsReviewer", "auto_review")
+            // web lib/draft-form.ts:977 createToolApprovalFor: Reasonix only, the choice or Ask.
+            if (provider == "reasonix") put("toolApproval", f("toolApproval").takeIf { it == "ask" || it == "auto" || it == "yolo" } ?: "ask")
             put("useWorktree", form["useWorktree"] == JsBool.TRUE)
             entry.profileId?.let { put("profileId", it) }
             if (m("model") && f("model").isNotEmpty()) put("model", f("model"))
@@ -475,7 +477,7 @@ class CreateFrameTest {
     /**
      * ta-h9g5.1: a mode left in the form by a previously selected provider (stale) must not leak into another
      * provider's create frame. Web createPermissionModeFor: Claude/opencode send the form mode (cold "" -> bypassPermissions),
-     * Reasonix always "default", every other provider bypassPermissions; no toolApproval key anywhere.
+     * Reasonix always "default", every other provider bypassPermissions; toolApproval only on Reasonix (the test below).
      */
     @Test
     fun staleFormModesYieldThePerProviderPermissionModeMatrix() {
@@ -490,24 +492,31 @@ class CreateFrameTest {
             for (other in listOf("codex", "pi", "dsh", "acp")) {
                 assertEquals("$other/$mode", JsonPrimitive("bypassPermissions"), wire(other)["permissionMode"])
             }
-            for (provider in listOf("claude", "codex", "opencode", "reasonix", "pi", "dsh", "acp")) {
+            for (provider in listOf("claude", "codex", "opencode", "pi", "dsh", "acp")) {
                 assertFalse("$provider/$mode", "toolApproval" in wire(provider))
             }
         }
     }
 
     /**
-     * ta-d3tj.10 (R1, ruling 6): the draft form now carries `toolApproval` ("ask" at start, web draft-form.ts:427) as a pure
-     * passthrough. The Create frame still sends NO `toolApproval` key for any provider and any choice until ta-d3tj.3.
+     * Reasonix's Approvals on the create frame (web lib/draft-form.ts:977 createToolApprovalFor): the explicit choice, Ask when the
+     * form holds none of the three, never a key for another provider. Replaces the earlier "never sent" pin on the owner's ruling
+     * that the new-session screen carries the Approvals choice.
      */
     @Test
-    fun theDraftFormsToolApprovalIsNeverSentOnTheCreateFrame() {
+    fun reasonixCarriesItsApprovalsChoiceAndNoOtherProviderDoes() {
         assertEquals(JsStr("ask"), DraftForm.INITIAL_DRAFT_FORM["toolApproval"])
-        for (provider in listOf("claude", "codex", "opencode", "reasonix", "pi")) {
-            for (choice in listOf("ask", "auto", "yolo")) {
-                val wire = CreateFrame.build(form("toolApproval" to choice), entry(provider), DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
-                assertFalse("$provider/$choice", "toolApproval" in wire)
+        for (choice in listOf("ask", "auto", "yolo")) {
+            val wire = CreateFrame.build(form("toolApproval" to choice), entry("reasonix"), DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
+            assertEquals(choice, JsonPrimitive(choice), wire["toolApproval"])
+            for (provider in listOf("claude", "codex", "opencode", "pi")) {
+                val other = CreateFrame.build(form("toolApproval" to choice), entry(provider), DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
+                assertFalse("$provider/$choice", "toolApproval" in other)
             }
         }
+        val untouched = CreateFrame.build(DraftForm.INITIAL_DRAFT_FORM.put("cwd", JsStr("/w")), entry("reasonix"), DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
+        assertEquals(JsonPrimitive("ask"), untouched["toolApproval"])
+        val junk = CreateFrame.build(form("toolApproval" to "bogus"), entry("reasonix"), DraftForm.INITIAL_USER_MODIFIED, "r").toJsonObject()
+        assertEquals(JsonPrimitive("ask"), junk["toolApproval"])
     }
 }

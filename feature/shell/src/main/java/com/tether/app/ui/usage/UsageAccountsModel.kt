@@ -13,6 +13,9 @@ import com.tether.app.client.UsageCall
 import com.tether.app.client.UsageFailure
 import com.tether.app.client.UsageSource
 import com.tether.app.protocol.tree.JsCodec
+import com.tether.app.ui.statusline.UsageTone
+import com.tether.app.ui.statusline.percentReading
+import com.tether.app.ui.statusline.usageTone
 import com.tether.app.protocol.tree.JsNull
 import com.tether.app.protocol.tree.JsValue
 import kotlinx.coroutines.CoroutineScope
@@ -57,6 +60,48 @@ object UsageAccountsModel {
         "session" -> "live session"
         "http" -> "polled"
         else -> null
+    }
+
+    /** The engine chip's word (usage-accounts-dialog.tsx ENGINE_CHIPS). */
+    fun engineLabel(key: String): String = when (key) {
+        "claude" -> "Claude"
+        "codex" -> "Codex"
+        "deepseek" -> "DeepSeek"
+        else -> key
+    }
+
+    /** `highestWindowBadge` (usage-accounts-dialog.tsx:150): "89% 5h" only once a window reached the usage tone (>= 75 high, >= 90 critical); no "Healthy". */
+    data class WindowBadge(val text: String, val critical: Boolean)
+
+    fun windowBadge(entry: AccountUsage): WindowBadge? {
+        val w = entry.windows ?: return null
+        val labels = listOf("5h" to w.fiveHour, "weekly" to w.weekly, "Fable" to w.fable)
+        var best: Pair<String, Int>? = null
+        labels.forEach { (label, win) ->
+            val pct = percentReading(win?.usedPercent) ?: return@forEach
+            if (best == null || pct > best!!.second) best = label to pct
+        }
+        val (label, pct) = best ?: return null
+        return when (usageTone(pct)) {
+            UsageTone.None -> null
+            UsageTone.High -> WindowBadge("$pct% $label", false)
+            UsageTone.Critical -> WindowBadge("$pct% $label", true)
+        }
+    }
+
+    /** `resetGrantSummary` (claude-reset-grants-view.ts:140): the one-row headline "1 left · Clears 5h+weekly · expires 15d" and the advisory lines. */
+    fun grantSummary(status: String, lines: List<String>): Pair<String, List<String>> {
+        val compact = { text: String -> text.replace(Regex("(\\d) (min|h|d)\\b"), "$1$2") }
+        val parts = mutableListOf(status.replace(Regex("^(\\d+) resets? left"), "$1 left"))
+        val advisory = mutableListOf<String>()
+        lines.forEach { line ->
+            when {
+                line.startsWith("Clears ") -> parts += compact(line)
+                line.startsWith("Expires unused in ") -> parts += "expires ${compact(line.removePrefix("Expires unused in "))}"
+                else -> advisory += line
+            }
+        }
+        return parts.joinToString(" · ") to advisory
     }
 
     /** The card's rows: 5 hour, Weekly, Fable, then every other window by its duration. */

@@ -6,9 +6,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -261,22 +263,21 @@ private fun AppearancePanel(prefs: UiPrefs, origin: String?, live: TetherPrefere
     }
     Column {
         SettingsSection("Appearance", caption, narrow) {
-            ThemeChoices {
-                ThemeMode.entries.forEach { mode ->
-                    ThemeChoiceRow(
-                        icon = when (mode) {
-                            ThemeMode.Light -> TetherIcons.Sun
-                            ThemeMode.Dark -> TetherIcons.Moon
-                            ThemeMode.System -> TetherIcons.Monitor
-                        },
-                        label = mode.label,
-                        hint = mode.hint,
-                        selected = live.themeMode == mode,
-                        onClick = { scope.launchPreferenceWrite { prefs.setThemeMode(origin, mode) } },
-                        narrow = narrow,
-                        modifier = Modifier.testTag(SettingsPanelTags.themeMode(mode)),
-                    )
-                }
+            val modes = ThemeMode.entries
+            ThemeCards(Modifier.padding(top = 12.dp), modes.size) { i, m ->
+                val mode = modes[i]
+                ThemeCard(
+                    icon = when (mode) {
+                        ThemeMode.Light -> TetherIcons.Sun
+                        ThemeMode.Dark -> TetherIcons.Moon
+                        ThemeMode.System -> TetherIcons.Monitor
+                    },
+                    label = mode.label,
+                    hint = mode.hint,
+                    selected = live.themeMode == mode,
+                    onClick = { scope.launchPreferenceWrite { prefs.setThemeMode(origin, mode) } },
+                    modifier = m.testTag(SettingsPanelTags.themeMode(mode)),
+                )
             }
         }
         SettingsSection(
@@ -285,18 +286,17 @@ private fun AppearancePanel(prefs: UiPrefs, origin: String?, live: TetherPrefere
             narrow,
             last = true,
         ) {
-            ThemeChoices {
-                AppearanceChoices.loginVariants.forEach { choice ->
-                    ThemeChoiceRow(
-                        icon = TetherIcons.Terminal,
-                        label = choice.label,
-                        hint = choice.hint,
-                        selected = live.loginVariant == choice.value,
-                        onClick = { scope.launchPreferenceWrite { prefs.setLoginVariant(origin, choice.value) } },
-                        narrow = narrow,
-                        modifier = Modifier.testTag(SettingsPanelTags.loginVariant(choice.value.id)),
-                    )
-                }
+            val variants = AppearanceChoices.loginVariants
+            ThemeCards(Modifier.padding(top = 12.dp), variants.size) { i, m ->
+                val choice = variants[i]
+                ThemeCard(
+                    icon = TetherIcons.Terminal,
+                    label = choice.label,
+                    hint = choice.hint,
+                    selected = live.loginVariant == choice.value,
+                    onClick = { scope.launchPreferenceWrite { prefs.setLoginVariant(origin, choice.value) } },
+                    modifier = m.testTag(SettingsPanelTags.loginVariant(choice.value.id)),
+                )
             }
         }
     }

@@ -53,6 +53,7 @@ class DraftSessionOptionsTest {
             ),
             ProviderCatalogEntry("opencode", "opencode", "ready", listOf(SessionModelOption("oc", "OC")), label = "OpenCode"),
             ProviderCatalogEntry("pi", "pi", "ready", listOf(SessionModelOption("pi-1", "Pi One", variants = variants)), label = "Pi"),
+            ProviderCatalogEntry("reasonix", "reasonix", "ready", listOf(SessionModelOption("rx", "Reasonix")), label = "Reasonix"),
         )
     }
 
@@ -104,6 +105,41 @@ class DraftSessionOptionsTest {
 
     private fun options(key: String, model: String = "", effort: String = "", mode: String = "") =
         DraftSessionOptionsModel.of(DraftComposerState(form = form(key, model, effort, mode), entries = catalog))
+
+    /** web draft-composer.tsx:170-176 + lib/reasonix-approvals.ts: Ask / Auto / YOLO, Ask by default, YOLO the danger row, only for Reasonix. */
+    @Test
+    fun approvalsRowIsShownForReasonixOnlyWithTheWebsRowsAndDefault() {
+        val o = options("reasonix", "rx")
+        val a = o.approvals!!
+        assertEquals("ask", a.value)
+        assertEquals(listOf("Ask", "Auto", "YOLO"), a.select.options.map { it.label })
+        assertEquals(listOf(false, false, true), a.select.options.map { it.danger })
+        assertTrue(o.hasSettings)
+        val yolo = DraftSessionOptionsModel.of(
+            DraftComposerState(form = form("reasonix", "rx").put("toolApproval", JsStr("yolo")), entries = catalog),
+        )
+        assertEquals("YOLO", yolo.approvals!!.word)
+        assertTrue(yolo.approvals!!.danger)
+        assertEquals("YOLO", yolo.elevatedLabel)
+        for (key in listOf("claude", "work", "codex", "opencode", "pi")) assertNull(key, options(key, mode = "").approvals)
+    }
+
+    @Test
+    fun aReasonixApprovalsPickRidesTheCreateAndAStaleOrUnknownPickChangesNothing() = runTest {
+        val h = harness()
+        assertFalse("no row picked", h.model.selectToolApproval("auto", "reasonix"))
+        h.model.selectProviderAndModel("reasonix", "rx")
+        h.model.setText("go")
+        assertEquals(DraftSubmitResult.Sent, h.model.submit(A))
+        assertEquals("untouched sends the web's default", "ask", h.client.frames.last().toolApproval?.value)
+        assertFalse("drawn for another provider", h.model.selectToolApproval("yolo", "claude"))
+        assertFalse("not one of the three", h.model.selectToolApproval("bogus", "reasonix"))
+        assertTrue(h.model.selectToolApproval("yolo", "reasonix"))
+        assertEquals("yolo", (h.model.state.value.form["toolApproval"] as JsStr).value)
+        h.model.selectProviderAndModel("claude", "opus")
+        assertFalse("another provider has no Approvals", h.model.selectToolApproval("auto", "claude"))
+        assertEquals("a switch of provider drops the choice", "ask", (h.model.state.value.form["toolApproval"] as JsStr).value)
+    }
 
     @Test
     fun claudeOnAutoIsTheDangerRowAndNamedInWords() {
@@ -191,7 +227,7 @@ class DraftSessionOptionsTest {
         override val consentOrigin = MutableStateFlow<String?>(A)
         override val linkEpoch = MutableStateFlow(1L)
         override val providers = MutableStateFlow(
-            listOf(ProviderInfo("claude", "Claude", "C", true), ProviderInfo("codex", "Codex", "X", true), ProviderInfo("opencode", "OpenCode", "O", true), ProviderInfo("pi", "Pi", "P", true)),
+            listOf(ProviderInfo("claude", "Claude", "C", true), ProviderInfo("codex", "Codex", "X", true), ProviderInfo("opencode", "OpenCode", "O", true), ProviderInfo("pi", "Pi", "P", true), ProviderInfo("reasonix", "Reasonix", "R", true)),
         )
         override val providerCatalog = MutableStateFlow(catalog)
         override val providerCatalogLive = MutableStateFlow(true)

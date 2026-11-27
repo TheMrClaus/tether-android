@@ -858,6 +858,30 @@ sealed interface ClientMessage {
     }
 
     /**
+     * v175 (tether #293): the operator's answer to a new-session proposal card, one frame per button. `proposal-start` carries
+     * the final create-shaped [settings] (never prompt text: the server holds the prompt), `proposal-here` and
+     * `proposal-dismiss` only the ids. [sessionId] is the PROPOSING session. A refusal is an `error` frame "<code>: text"
+     * echoing [requestId]. Owner-grade only; sent only to a server at protocol >= 175.
+     */
+    data class ProposalFrame(
+        val kind: String,
+        val sessionId: String,
+        val proposalId: String,
+        val settings: kotlinx.serialization.json.JsonObject? = null,
+        val requestId: String? = null,
+    ) : ClientMessage {
+        override fun toJsonObject() = frame("proposal-$kind") {
+            put("sessionId", sessionId)
+            put("proposalId", proposalId)
+            if (settings != null) put("settings", settings)
+            opt("requestId", requestId)
+        }
+
+        /** The settings carry the folder and account: redacted like [Create]. */
+        override fun toString(): String = "ProposalFrame(kind=$kind, sessionId=$sessionId, proposalId=$proposalId, settings=${if (settings == null) "none" else "***"}, requestId=$requestId)"
+    }
+
+    /**
      * v151 (tether #273 part 2): the operator's explicit "Stop handover" press, the ONLY sender of this frame.
      * `{ type, sessionId, requestId? }`; success has no reply (the session row loses its handover stage), a refusal is
      * an `error` frame "<code>: detail" echoing [requestId]. Owner-grade only. Unknown to a v150 server.
@@ -1248,6 +1272,9 @@ private object ClientDecoders {
             ClientMessage.HandoverRequest(r.str("sessionId"), r.o.obj("successor"), r.o.str("requestId"))
         },
         "handover-cancel" to { r -> ClientMessage.HandoverCancel(r.str("sessionId"), r.o.str("requestId")) },
+        "proposal-start" to { r -> ClientMessage.ProposalFrame("start", r.str("sessionId"), r.str("proposalId"), r.o.obj("settings"), r.o.str("requestId")) },
+        "proposal-here" to { r -> ClientMessage.ProposalFrame("here", r.str("sessionId"), r.str("proposalId"), null, r.o.str("requestId")) },
+        "proposal-dismiss" to { r -> ClientMessage.ProposalFrame("dismiss", r.str("sessionId"), r.str("proposalId"), null, r.o.str("requestId")) },
         "queue-remove" to { r -> ClientMessage.QueueRemove(r.str("sessionId"), r.str("queueId")) },
         "interrupt" to { r -> ClientMessage.Interrupt(r.str("sessionId"), r.o.boolTrue("stopBackground"), r.o.str("queueId")) },
         "queue-steer" to { r -> ClientMessage.QueueSteer(r.str("sessionId"), r.str("queueId")) },

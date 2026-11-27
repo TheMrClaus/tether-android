@@ -134,6 +134,8 @@ internal class ChatRowsInputs(
     val handedOffFrom: String? = null,
     /** W34: the server's protocol is >= 151 (the handover notices' new words). */
     val handoverV151: Boolean = false,
+    /** v175: the server's protocol is >= 175: a proposal shows as its card. */
+    val proposalCard: Boolean = false,
 )
 
 internal fun deriveChatRows(i: ChatRowsInputs, toggles: Map<String, GroupToggle>): ChatRows {
@@ -146,7 +148,7 @@ internal fun deriveChatRows(i: ChatRowsInputs, toggles: Map<String, GroupToggle>
             if (toggle != null && toggle.default != default) reads.add(ToggleRead(key, default))
             if (toggle == null || toggle.default != default) default else toggle.open
         },
-        i.showApprovals, i.consentSessionId, i.handedOffFrom, i.handoverV151,
+        i.showApprovals, i.consentSessionId, i.handedOffFrom, i.handoverV151, i.proposalCard,
     )
     return ChatRows(items, TimelineModel.points(i.tree), reads, touchedFilesOf(cardTree(i.projection, i.tree)))
 }

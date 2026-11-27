@@ -201,6 +201,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
     // and the no-session branch, so a rotation, a window resize across 768dp or a session switch
     // never drops what the operator ticked (ChatScreen falls back to its own only when unprovided).
     val cardStates = rememberSaveable(saver = CardStateStore.Saver) { CardStateStore() }
+    val proposalOptions = remember(vm, prefs) { com.tether.app.ui.draft.ShellProposalOptionsHost(vm, prefs) }
     // I-2: the records belong to the CONFIGURED server (not the socket's origin, so a drop keeps
     // them): signing in to another server empties the store. Bound during composition, before any
     // card of the new server reads it.
@@ -662,6 +663,7 @@ private fun MainShellBody(vm: TetherViewModel, prefs: UiPrefs) {
                         LocalCardStates provides cardStates,
                         LocalTranscriptScrollStore provides transcriptScroll,
                         LocalWorkspaceFileOpener provides fileLinks,
+                        com.tether.app.ui.chat.LocalProposalActions provides com.tether.app.ui.chat.rememberProposalActions(vm, session?.id, proposalOptions),
                     ) {
                         ChatScreen(
                             vm = vm,

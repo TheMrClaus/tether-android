@@ -77,6 +77,8 @@ object CreateFrame {
             sandboxPolicy = if (isCodex) (codexPreset["sandboxPolicy"] as JsStr).value else null,
             approvalPolicy = approvalPolicy?.let { OrNull(it) },
             approvalsReviewer = approvalsReviewer?.let { OrNull(it) },
+            // lib/draft-form.ts:977 createToolApprovalFor: Reasonix always carries its Approvals choice (Ask untouched).
+            toolApproval = DraftApprovals.createValueFor(provider, form.s("toolApproval"))?.let { OrNull(it) },
             useWorktree = form["useWorktree"] == JsBool.TRUE,
             worktree = worktree,
             profileId = entry.profileId?.takeIf { it.isNotEmpty() },

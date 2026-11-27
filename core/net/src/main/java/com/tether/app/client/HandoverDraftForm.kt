@@ -18,8 +18,8 @@ import kotlinx.serialization.json.JsonPrimitive
  *
  * The server resolves the `successor` with `own(frame, key)` (lib/fresh-create.mjs:145-182): an ABSENT key inherits
  * the source's value, an explicit `null` is a choice. [buildSuccessor] therefore keeps absent and null distinct.
- * `toolApproval` is not built: Android has no Reasonix Approvals control (the draft form has no such field), and an
- * omitted `toolApproval` inherits the source's while the provider is unchanged (fresh-create.mjs:182).
+ * `toolApproval` is seeded from the source's reported Approvals (Ask when it reports none, df:910-916) and sent for a
+ * Reasonix successor only, the explicit choice even untouched (df:977-978 createToolApprovalFor); never for another harness.
  */
 object HandoverDraftForm {
     /** The Codex Mode value that means "keep the source's raw sandbox / approvals / reviewer" (df:870). */
@@ -46,6 +46,7 @@ object HandoverDraftForm {
         val cwd: String,
         val codexCurrent: CodexCurrent?,
         val extraModel: String?,
+        val toolApproval: String = DraftApprovals.DEFAULT,
     )
 
     private fun normalizeId(value: String?): String = if (value == null) "" else jsTrim(value)
@@ -92,7 +93,10 @@ object HandoverDraftForm {
             "opencode" -> mode = if (source.approvalPolicy == "never") "bypassPermissions" else normalizeId(source.permissionMode)
             "reasonix" -> mode = normalizeId(source.permissionMode)
         }
-        return Seed(entry.key, model, effort, mode, source.cwd, current, extraModel)
+        // df:910-916: Reasonix Approvals = the source's reported value, Ask when it reports none (or a value the draft does not know).
+        val reported = source.toolApprovalState?.value
+        val approvals = if (entry.provider == "reasonix" && DraftApprovals.isChoice(reported)) reported!! else DraftApprovals.DEFAULT
+        return Seed(entry.key, model, effort, mode, source.cwd, current, extraModel, approvals)
     }
 
     private val SANDBOX_WORDS = mapOf("workspace-write" to "workspace-write sandbox", "off" to "no sandbox")
@@ -177,6 +181,8 @@ object HandoverDraftForm {
         } else if (provider == "opencode") {
             out["approvalPolicy"] = if (mode == "bypassPermissions") JsonPrimitive("never") else JsonNull
         }
+        // df:977-978: Reasonix always carries the explicit choice (Ask unless picked otherwise); no other harness a field.
+        DraftApprovals.createValueFor(provider, f("toolApproval"))?.let { out["toolApproval"] = JsonPrimitive(it) }
         val trimmed = jsTrim(name)
         if (nameEdited && trimmed.isNotEmpty()) out["name"] = JsonPrimitive(trimmed)
         return JsonObject(out)

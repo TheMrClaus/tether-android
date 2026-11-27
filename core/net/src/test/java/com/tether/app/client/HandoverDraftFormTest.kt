@@ -19,9 +19,8 @@ import org.junit.Test
 /**
  * ta-74gu: the handover composer's form rules against the WEB. Every expected JSON below is the output of the web's own
  * lib/draft-form.ts at tether 62ceca46 (buildHandoverSuccessor / seedFromSource run under node with these inputs), so
- * key presence, an explicit null and the absent keys are the web's, not a paraphrase. The one deliberate difference is
- * `toolApproval` for Reasonix: Android has no Approvals control, so it omits the key and the server inherits the
- * source's (lib/fresh-create.mjs:182); the web's literal output carries `"toolApproval":"ask"`.
+ * key presence, an explicit null and the absent keys are the web's, not a paraphrase. `toolApproval` rides for a
+ * Reasonix successor only (the explicit choice, Ask when untouched on an Ask source), as the web's literal output does.
  */
 class HandoverDraftFormTest {
     private val models = listOf(
@@ -121,10 +120,15 @@ class HandoverDraftFormTest {
         entry("opencode"), form("opencode", mode = "default"),
     )
 
-    @Test fun reasonixSendsDefaultModeAndOmitsToolApproval() = check(
+    @Test fun reasonixSendsDefaultModeAndTheUntouchedAskToolApproval() = check(
         // web: {"provider":"reasonix","cwd":"/w","permissionMode":"default","toolApproval":"ask","name":"n"}
-        """{"provider":"reasonix","cwd":"/w","permissionMode":"default","name":"n"}""",
+        """{"provider":"reasonix","cwd":"/w","permissionMode":"default","toolApproval":"ask","name":"n"}""",
         entry("reasonix"), form("reasonix"), name = "n", edited = true,
+    )
+
+    @Test fun reasonixSendsTheChosenToolApproval() = check(
+        """{"provider":"reasonix","cwd":"/w","permissionMode":"default","toolApproval":"yolo"}""",
+        entry("reasonix"), form("reasonix").put("toolApproval", JsStr("yolo")),
     )
 
     @Test fun piKeepsTheWireShapeBypassPermissions() = check(
@@ -192,6 +196,17 @@ class HandoverDraftFormTest {
     @Test fun seedOpencodeAutoAndBuild() {
         assertSeed(seed(entry("opencode"), src("opencode") { it.copy(approvalPolicy = "never", permissionMode = "default") }), "opencode", "", "", "bypassPermissions")
         assertSeed(seed(entry("opencode"), src("opencode") { it.copy(permissionMode = "default") }), "opencode", "", "", "default")
+    }
+
+    @Test fun seedReasonixToolApprovalIsTheSourcesReportedValueElseAsk() {
+        fun reported(v: String?) = seed(entry("reasonix"), src("reasonix") {
+            it.copy(toolApproval = v?.let { x -> kotlinx.serialization.json.buildJsonObject { put("value", JsonPrimitive(x)) } })
+        }).toolApproval
+        assertEquals("yolo", reported("yolo")); assertEquals("auto", reported("auto"))
+        assertEquals("ask", reported(null)); assertEquals("ask", reported("bogus"))
+        // another harness never carries one
+        val claude = HandoverDraftForm.buildSuccessor(form("claude", "opus", "high", "plan").put("toolApproval", JsStr("yolo")), entry("claude"), "opus", "high", null, "", false)
+        assertFalse(claude.containsKey("toolApproval"))
     }
 
     @Test fun seedReasonixAndPi() {
