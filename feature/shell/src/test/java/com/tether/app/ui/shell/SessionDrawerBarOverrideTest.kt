@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.junit4.createComposeRule
+import com.tether.app.ui.theme.LocalNavBarOverride
 import com.tether.app.ui.theme.LocalSystemBarOverride
 import com.tether.app.ui.theme.TetherTheme
 import org.junit.Assert.assertEquals
@@ -30,13 +31,16 @@ class SessionDrawerBarOverrideTest {
     private var open by mutableStateOf(false)
     private var hosted by mutableStateOf(true)
 
+    private val navHolder = mutableStateOf<Color?>(null)
+    private var panel: Color? = null
     private var rail: Color? = null
 
     private fun show() {
         rule.setContent {
             TetherTheme {
                 rail = com.tether.app.ui.theme.LocalTetherTokens.current.css.bgRail
-                CompositionLocalProvider(LocalSystemBarOverride provides holder) {
+                panel = com.tether.app.ui.theme.LocalTetherTokens.current.css.bgPanel
+                CompositionLocalProvider(LocalSystemBarOverride provides holder, LocalNavBarOverride provides navHolder) {
                     if (hosted) SessionDrawerHost(open = open) { Box {} }
                 }
             }
@@ -62,5 +66,24 @@ class SessionDrawerBarOverrideTest {
         rule.runOnUiThread { hosted = false }
         rule.waitForIdle()
         assertNull("disposed", holder.value)
+    }
+
+    /** P8C-FIX3: the area below the footer takes the footer's panel colour while open; closing / removing restores the previous value exactly. */
+    @Test fun theNavigationBarTakesTheFooterPanelWhileOpenAndRestoresThePreviousColour() {
+        val previous = Color(0xFF123456)
+        navHolder.value = previous
+        show()
+        assertEquals("closed: untouched", previous, navHolder.value)
+        rule.runOnUiThread { open = true }
+        rule.waitForIdle()
+        assertEquals(panel, navHolder.value)
+        rule.runOnUiThread { open = false }
+        rule.waitForIdle()
+        assertEquals("closed: the previous colour, exactly", previous, navHolder.value)
+        rule.runOnUiThread { open = true }
+        rule.waitForIdle()
+        rule.runOnUiThread { hosted = false }
+        rule.waitForIdle()
+        assertEquals("host removed: restored", previous, navHolder.value)
     }
 }

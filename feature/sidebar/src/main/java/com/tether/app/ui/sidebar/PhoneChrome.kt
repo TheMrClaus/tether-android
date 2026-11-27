@@ -71,6 +71,11 @@ import com.tether.app.protocol.helpers.SessionSidebar as Web
  * the merged search bar with its scope pill, the quick-filter chips (Fira Code), and the footer's link line.
  * The list body below it is [SessionSidebar]'s; the tablet rail keeps its own chrome ([RailChrome]).
  */
+/** P8C-FIX3: the phone's block rule: an 8 dp gap above the 1 dp hairline (off the card border above it). */
+internal object PhoneChromeRule {
+    val GapAbove = 8.dp
+}
+
 internal object PhoneChromeTags {
     const val SearchScope = "sidebar-search-scope"
     const val ChipRow = "sidebar-chips"

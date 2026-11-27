@@ -819,13 +819,13 @@ private fun WorkspaceBlock(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(top = if (first || compact) 0.dp else 0.75f.rem)
+            .padding(top = if (first || phone) 0.dp else if (compact) 16.dp else 0.75f.rem)
             .testTag(SidebarTags.block(block.workspace))
             .semantics { contentDescription = SafeText.line(block.name) },
         verticalArrangement = Arrangement.spacedBy(if (compact) 0.dp else 0.15f.rem),
     ) {
-        // m02 (P8C-FIX1 B1): on the phone a 1 dp `--line` hairline at the card inset width stands between blocks (none above the first), in place of the 16 dp gap.
-        if (compact && !first) Box(Modifier.fillMaxWidth().height(1.dp).background(t.line).testTag(PhoneChromeTags.BlockRule))
+        // m02 (P8C-FIX1 B1): on the PHONE only (the tablet keeps its 16 dp gap, no line) an 8 dp gap then a 1 dp `--line` hairline at the card inset width stands between blocks (none above the first), in place of the 16 dp gap.
+        if (phone && !first) Box(Modifier.fillMaxWidth().padding(top = PhoneChromeRule.GapAbove).height(1.dp).background(t.line).testTag(PhoneChromeTags.BlockRule))
         BlockHeader(block, actions, offline = !state.connected, compact = compact, rail = !phone)
         if (!block.collapsed) {
             Column(

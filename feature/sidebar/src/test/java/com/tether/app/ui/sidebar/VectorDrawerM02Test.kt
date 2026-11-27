@@ -3,6 +3,7 @@ package com.tether.app.ui.sidebar
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasSetTextAction
@@ -272,6 +273,33 @@ class VectorDrawerM02BehaviourTest {
         assertEquals("one hairline per boundary, none above the first", blocks - 1, rules.fetchSemanticsNodes().size)
         val h = rules[0].fetchSemanticsNode().boundsInRoot.height / androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().resources.displayMetrics.density
         assertEquals("1 dp tall (px rounding)", 1f, h, 0.25f)
+    }
+
+    private val density: Float get() = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().resources.displayMetrics.density
+
+    /** P8C-FIX3 (ii): the hairline stands 8 dp below where the block above ends (not flush on its last card's border). */
+    @Test fun theBlockHairlineStandsEightDpBelowTheCardAbove() {
+        show(F.state(F.groupSessions + F.live("d3", "Draft the changelog", cwd = F.DOCS, ago = 20), pinned = listOf(F.DOCS, F.ROOT), current = F.APP))
+        val line = rule.onAllNodesWithTag(PhoneChromeTags.BlockRule)[0].fetchSemanticsNode().boundsInRoot
+        val above = rule.onAllNodes(androidx.compose.ui.test.SemanticsMatcher("a workspace block above the rule") { n ->
+            val tag = if (androidx.compose.ui.semantics.SemanticsProperties.TestTag in n.config) n.config[androidx.compose.ui.semantics.SemanticsProperties.TestTag] else null
+            tag?.startsWith("sidebar-block:") == true && n.boundsInRoot.bottom <= line.top + 1f
+        }).fetchSemanticsNodes().maxOf { it.boundsInRoot.bottom }
+        assertEquals("8 dp gap above the hairline (measured)", 8f, (line.top - above) / density, 0.5f)
+    }
+
+    /** P8C-FIX3 (3): the tablet rail keeps its 16 dp gap and draws no hairline (the line is phone-only). */
+    @Test fun theTabletRailHasNoBlockHairlineAndKeepsItsSixteenDpGap() {
+        rule.setContent {
+            SidebarUnderTest(TetherSkin.Studio, F.state(F.groupSessions + F.live("d3", "Draft the changelog", cwd = F.DOCS, ago = 20), pinned = listOf(F.DOCS, F.ROOT), current = F.APP), layout = com.tether.app.ui.components.TetherLayoutClass.Expanded)
+        }
+        rule.waitForIdle()
+        rule.onAllNodesWithTag(PhoneChromeTags.BlockRule).assertCountEquals(0)
+        val blocks = rule.onAllNodes(androidx.compose.ui.test.SemanticsMatcher("a workspace block") { n ->
+            (if (androidx.compose.ui.semantics.SemanticsProperties.TestTag in n.config) n.config[androidx.compose.ui.semantics.SemanticsProperties.TestTag] else null)?.startsWith("sidebar-block:") == true
+        }).fetchSemanticsNodes().map { it.boundsInRoot }.sortedBy { it.top }
+        assertTrue("two blocks", blocks.size >= 2)
+        assertEquals("16 dp between blocks", 16f, (blocks[1].top - blocks[0].bottom) / density, 0.5f)
     }
 
     private fun boundsOfTag(tag: String) = rule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
