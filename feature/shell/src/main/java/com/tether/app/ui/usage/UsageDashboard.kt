@@ -643,7 +643,7 @@ private fun TabbedBreakdown(data: UsageAnalytics, layout: UsageLayout, palette: 
                         .selectable(selected = active, interactionSource = interaction, indication = null, role = Role.Tab) { tab = x }
                         .focusRing(focused, shape, t.violetStrong)
                         .testTag(UsageTags.tab(x))
-                        .padding(horizontal = 8.dp),
+                        .padding(horizontal = 6.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(x.label, color = if (active) t.violetStrong else t.muted, maxLines = 1, style = px(type.mono, 12f, if (active) 700 else 400))
