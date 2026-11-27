@@ -135,6 +135,47 @@ class VectorDrawerM02ContrastTest {
         assertTrue("current outline vs the drawer face $outline ($skin)", outline >= 3.0)
     }
 
+    /** B1 pixel control: between two workspace blocks the drawer really paints the `--line` hairline across the card x-span. */
+    private fun hairline(skin: TetherSkin) {
+        var tk: TetherTokens? = null
+        rule.setContent {
+            TetherTheme(choiceFor(skin)) { tk = LocalTetherTokens.current }
+            SidebarUnderTest(skin, F.state(F.groupSessions + F.live("d3", "Draft the changelog", cwd = F.DOCS, ago = 20), pinned = listOf(F.DOCS, F.ROOT), current = F.APP))
+        }
+        rule.waitForIdle()
+        val line = tk!!.line
+        val b = rule.onAllNodesWithTag(PhoneChromeTags.BlockRule)[0].fetchSemanticsNode().boundsInRoot
+        val m = rule.onRoot().captureToImage().toPixelMap()
+        val y = ((b.top + b.bottom) / 2).toInt()
+        val x0 = (b.left + 8 * dp).toInt(); val x1 = (b.right - 8 * dp).toInt()
+        var off = 0
+        for (x in x0 until x1 step 3) if (m[x, y].toArgb() != line.toArgb()) off++
+        assertEquals("the hairline pixel row is t.line across the card x-span ($skin)", 0, off)
+    }
+
+    @Test fun lightHairlinePaintsLine() = hairline(TetherSkin.Studio)
+    @Test fun darkHairlinePaintsLine() = hairline(TetherSkin.StudioDark)
+
+    /** B2: the footer band face reaches the drawer's left and right edges and the bottom (no host insets under test, so the design minimums). */
+    private fun band(skin: TetherSkin) {
+        var tk: TetherTokens? = null
+        rule.setContent {
+            TetherTheme(choiceFor(skin)) { tk = LocalTetherTokens.current }
+            SidebarUnderTest(skin, F.state(listOf(F.live("c1", "Current one", ago = 0)), activeId = "c1", activeOnly = false))
+        }
+        rule.waitForIdle()
+        val face = tk!!.css.bgPanel.toArgb()
+        val fb = boundsOf(PhoneChromeTags.FooterStatus)
+        val m = rule.onRoot().captureToImage().toPixelMap()
+        val y = fb.top.toInt() + 6
+        assertEquals("band at the left drawer edge ($skin)", face, m[1, y].toArgb())
+        assertEquals("band at the right drawer edge ($skin)", face, m[m.width - 2, y].toArgb())
+        assertEquals("band at the bottom edge ($skin)", face, m[m.width / 2, m.height - 2].toArgb())
+    }
+
+    @Test fun lightBandReachesEdges() = band(TetherSkin.Studio)
+    @Test fun darkBandReachesEdges() = band(TetherSkin.StudioDark)
+
     @Test fun lightKeepsContrast() = check(TetherSkin.Studio)
     @Test fun darkKeepsContrast() = check(TetherSkin.StudioDark)
 }

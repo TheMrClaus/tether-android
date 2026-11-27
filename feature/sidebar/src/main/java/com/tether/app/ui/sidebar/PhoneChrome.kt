@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,6 +40,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -392,11 +398,26 @@ internal fun PhoneFooter(connected: Boolean, onOpenSettings: () -> Unit) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val line = t.line
+    val panel = t.css.bgPanel
+    // B2 (m02): the band reaches the drawer's own edges and bottom inset. The host pads the panel by max(design minimum,
+    // system bars, cutout) per side (SessionDrawerHost) and the sidebar adds its inner gutter; the face and the rule are
+    // drawn outward by those same amounts, so layout and touch targets do not move (nothing clips: the panel has no clip).
+    val inset = WindowInsets.systemBars
+        .union(WindowInsets.displayCutout)
+        .union(WindowInsets(left = PhoneDrawer.Edge, top = PhoneDrawer.Edge, right = PhoneDrawer.Edge, bottom = PhoneDrawer.Bottom))
+    val gutter = PhoneLook.InnerGutter
+    val density = LocalDensity.current
+    val dir = LocalLayoutDirection.current
     Row(
         Modifier
             .fillMaxWidth()
-            .background(t.css.bgPanel)
-            .drawBehind { drawRect(line, Offset.Zero, androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx())) }
+            .drawBehind {
+                val l = inset.getLeft(density, dir) + gutter.toPx()
+                val r = inset.getRight(density, dir) + gutter.toPx()
+                val b = inset.getBottom(density).toFloat()
+                drawRect(panel, Offset(-l, 0f), androidx.compose.ui.geometry.Size(size.width + l + r, size.height + b))
+                drawRect(line, Offset(-l, 0f), androidx.compose.ui.geometry.Size(size.width + l + r, 1.dp.toPx()))
+            }
             .heightIn(min = PhoneLook.RowMinHeight)
             .padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
