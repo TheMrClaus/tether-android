@@ -121,7 +121,7 @@ class MainShellOverviewTest {
         // Back to the Overview; open a running session: opened, not marked seen.
         rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Overview)).performClick()
         rule.waitForIdle()
-        rule.onNodeWithTag(OverviewTags.open("s2")).performScrollTo().performClick()
+        rule.onNodeWithTag(OverviewTags.card("s2")).performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals("s2", vm.selectedSessionId.value)
         assertEquals(listOf("s1", "s3", "s2"), client.attachCalls.toList())
@@ -130,7 +130,7 @@ class MainShellOverviewTest {
         // The boundary: once the session VIEW shows a settled session, its own rule marks it seen.
         rule.onNodeWithTag(ShellTags.nav(TopBarDestination.Overview)).performClick()
         rule.waitForIdle()
-        rule.onNodeWithTag(OverviewTags.open("s1")).performScrollTo().performClick()
+        rule.onNodeWithTag(OverviewTags.card("s1")).performScrollTo().performClick()
         rule.waitForIdle()
         // The session view's mark-seen rule runs once the sidebar's own read of the stored preferences (a second DataStore
         // collection through Dispatchers.IO) has arrived, which waitForIdle() does not wait for: await the mark itself.
