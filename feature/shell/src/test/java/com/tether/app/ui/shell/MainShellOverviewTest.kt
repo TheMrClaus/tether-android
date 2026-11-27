@@ -108,7 +108,7 @@ class MainShellOverviewTest {
         assertEquals(emptyList<String>(), client.seenCalls)
 
         // Review a request: the session is opened (attached), nothing is answered or marked seen.
-        rule.onNodeWithTag(OverviewTags.review("s3")).performScrollTo().performClick()
+        rule.onNodeWithTag(OverviewTags.reviewPending("s3", "r1")).performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals("s3", vm.selectedSessionId.value)
         assertEquals(emptyList<String>(), client.seenCalls)

@@ -107,7 +107,7 @@ class MainShellReviewTest {
     }
 
     private fun review() {
-        rule.onNodeWithTag(OverviewTags.review("s3")).performScrollTo().performClick()
+        rule.onNodeWithTag(OverviewTags.reviewPending("s3", "r1")).performScrollTo().performClick()
     }
 
     private fun advance(ms: Long) {
