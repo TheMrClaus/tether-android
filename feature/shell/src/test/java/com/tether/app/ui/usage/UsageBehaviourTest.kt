@@ -63,6 +63,9 @@ import org.robolectric.annotation.Config
 abstract class UsageBehaviourBase {
     @get:Rule val rule = createComposeRule()
 
+    /** The page's subtitle: the phone layout (m04) abbreviates it, the wider one keeps the words. */
+    protected open val subtitle = "48 sessions · 1,260 turns"
+
     private fun setUp(content: @Composable () -> Unit) {
         rule.mainClock.autoAdvance = false
         rule.setContent {
@@ -115,7 +118,7 @@ abstract class UsageBehaviourBase {
         setUp { UsagePage(source, ORIGIN, onOpenConsole = { console++ }) }
         assertEquals(listOf(FakeUsageSource.Call("analytics", ORIGIN, "2026-09-12", null)), source.of("analytics"))
         rule.onNodeWithText("Usage analytics").assertExists()
-        rule.onNodeWithText("48 sessions · 1,260 turns").assertExists()
+        rule.onNodeWithText(subtitle).assertExists()
         rule.onNodeWithText("28.4M").assertExists()
         rule.onNodeWithText("Updated 07:00 AM · refreshes automatically").assertExists()
 
@@ -451,7 +454,9 @@ abstract class UsageBehaviourBase {
 
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w412dp-h915dp-420dpi")
-class UsageBehaviourPhoneTest : UsageBehaviourBase()
+class UsageBehaviourPhoneTest : UsageBehaviourBase() {
+    override val subtitle = "48 sess · 1.3K turns"
+}
 
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w1280dp-h800dp-mdpi")
