@@ -94,15 +94,31 @@ class Fix3ContrastTest {
             val g = glyph(tile, face, inner = true)
             assertTrue("${if (current) "current" else "idle"} badge glyph vs face $g ($skin)", g >= 4.5)
         }
-        // B3: the key is the accent with the accent ink.
+        // B3 (P8C, non-vacuous): the labelled "+ New session" key is the accent with the accent ink. The key's face is found as the
+        // most frequent pixel that is not the rail behind it; the measure is taken INSIDE the face's own box (never the rail around it),
+        // as the contrast of the glyph pixel FARTHEST IN LUMINANCE from that face (Light ink is lighter than its face: never "darkest"),
+        // and the glyph must exist (pixels that are not the face > 0).
         val keyBmp = node(SidebarTags.NewSession)
-        // the key's face: its most frequent pixel that is not the rail behind it
         val counts = HashMap<Int, Int>()
         for (y in 0 until keyBmp.height) for (x in 0 until keyBmp.width) keyBmp[x, y].toArgb().let { if (it != tk.css.bgRail.toArgb()) counts.merge(it, 1, Int::plus) }
         val keyFace = Color(counts.maxByOrNull { it.value }!!.key)
-        assertEquals("New session key face is --accent ($skin)", tk.accent.toArgb(), keyFace.toArgb())
-        val key = glyph(keyBmp, keyFace, inner = false)
-        assertTrue("New session label/icon vs face $key ($skin)", key >= 4.5)
+        assertEquals("New session key face is --accent ($skin, $layout)", tk.accent.toArgb(), keyFace.toArgb())
+        var x0 = Int.MAX_VALUE; var y0 = Int.MAX_VALUE; var x1 = -1; var y1 = -1
+        for (y in 0 until keyBmp.height) for (x in 0 until keyBmp.width) if (keyBmp[x, y].toArgb() == keyFace.toArgb()) { x0 = minOf(x0, x); y0 = minOf(y0, y); x1 = maxOf(x1, x); y1 = maxOf(y1, y) }
+        val bw = x1 - x0 + 1; val bh = y1 - y0 + 1
+        // the inner box: the face's box less 15% on every side (the corner radius and the border are not the glyph)
+        val ix0 = x0 + bw * 15 / 100; val ix1 = x1 - bw * 15 / 100; val iy0 = y0 + bh * 15 / 100; val iy1 = y1 - bh * 15 / 100
+        var glyphPixels = 0
+        var farthest = keyFace
+        for (y in iy0..iy1) for (x in ix0..ix1) {
+            val c = keyBmp[x, y]
+            if (c.toArgb() != keyFace.toArgb()) glyphPixels++
+            if (ratio(c, keyFace) > ratio(farthest, keyFace)) farthest = c
+        }
+        val key = ratio(farthest, keyFace)
+        println("P8C-FIX3 key-ink $skin $layout ${"%.2f".format(key)}:1 glyphPixels=$glyphPixels")
+        assertTrue("New session label/icon vs face ${"%.2f".format(key)}:1 ($skin, $layout)", key >= 4.5)
+        assertTrue("the key draws a glyph inside its face: $glyphPixels pixels ($skin, $layout)", glyphPixels > 0)
     }
 
     @Test fun lightIdleBadgeAndKeyKeepContrast() = check(TetherSkin.Studio, current = false)

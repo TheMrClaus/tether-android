@@ -68,7 +68,9 @@ class SidebarRtlNeutralsTest {
     @Test fun theMetaSeparatorAndTheEllipsizedLabelsAreLtrUnderRtl() {
         drawer(LayoutDirection.Rtl)
         assertLtr(directionOf { it.contains(" · ") }, "a meta \"· rel\"")
-        assertLtr(directionOf { it.startsWith("Filter sessions") }, "the filter placeholder")
+        assertLtr(directionOf { it.startsWith("Search conversations or filter") }, "the search placeholder")
+        assertLtr(directionOf { it.startsWith("All · ") }, "the scope pill")
+        assertLtr(directionOf { it.startsWith("Secure link · ") }, "the footer link line")
         assertLtr(directionOf { it == "Archive idle sessions…" }, "the archive label")
     }
 

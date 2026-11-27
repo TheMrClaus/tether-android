@@ -50,6 +50,12 @@ val LocalReducedMotion = staticCompositionLocalOf { false }
 val LocalSystemBarOverride = staticCompositionLocalOf<MutableState<Color?>> { mutableStateOf(null) }
 
 /**
+ * P8C-FIX3: a colour for the BOTTOM navigation / gesture bar area alone, over [LocalSystemBarOverride] (the phone drawer's footer band
+ * runs to the bottom of the screen). Null = the bar takes the other override or the skin's colour; the setter restores it on dispose.
+ */
+val LocalNavBarOverride = staticCompositionLocalOf<MutableState<Color?>> { mutableStateOf(null) }
+
+/**
  * The web's `prefers-reduced-motion: reduce` (globals.css 4530-4539 collapses every animation and
  * transition to 0.01ms, one iteration). Android's equivalent is "Remove animations", which sets
  * the animator duration scale to 0; any other scale (including an unreadable setting) animates.
@@ -110,7 +116,8 @@ fun TetherTheme(
     val context = LocalContext.current
 
     val barOverride = remember { mutableStateOf<Color?>(null) }
-    if (!view.isInEditMode) SystemBarAppearance(skin, barOverride)
+    val navOverride = remember { mutableStateOf<Color?>(null) }
+    if (!view.isInEditMode) SystemBarAppearance(skin, barOverride, navOverride)
 
     val reduced = if (view.isInEditMode) false else remember { reducedMotion(context.contentResolver) }
 
@@ -121,12 +128,13 @@ fun TetherTheme(
         LocalTetherTypography provides tetherType,
         LocalReducedMotion provides reduced,
         LocalSystemBarOverride provides barOverride,
+        LocalNavBarOverride provides navOverride,
     ) {
         MaterialTheme(
             colorScheme = interopScheme(tokens),
             typography = materialTypography(tetherType),
         ) {
-            if (view.isInEditMode) content() else SystemBarBackdrop(skin.systemBarColor, barOverride, content)
+            if (view.isInEditMode) content() else SystemBarBackdrop(skin.systemBarColor, barOverride, navOverride, content)
         }
     }
 }
@@ -138,15 +146,16 @@ fun TetherTheme(
  * Its own scope, so a change of the override recomposes only this.
  */
 @Composable
-private fun SystemBarAppearance(skin: TetherSkin, barOverride: MutableState<Color?>) {
+private fun SystemBarAppearance(skin: TetherSkin, barOverride: MutableState<Color?>, navOverride: MutableState<Color?>) {
     val view = LocalView.current
     val override = barOverride.value
+    val navColor = navOverride.value ?: override
     SideEffect {
         val window = (view.context as? Activity)?.window ?: return@SideEffect
         val lightIcons = if (override != null) override.luminance() > 0.5f else !skin.isDark
         val controller = WindowCompat.getInsetsController(window, view)
         controller.isAppearanceLightStatusBars = lightIcons
-        controller.isAppearanceLightNavigationBars = lightIcons
+        controller.isAppearanceLightNavigationBars = if (navColor != null) navColor.luminance() > 0.5f else !skin.isDark
         window.isStatusBarContrastEnforced = false
         window.isNavigationBarContrastEnforced = false
     }
@@ -158,12 +167,13 @@ private fun SystemBarAppearance(skin: TetherSkin, barOverride: MutableState<Colo
  * [LocalSystemBarOverride] colour while a full-window surface holds it.
  */
 @Composable
-private fun SystemBarBackdrop(skinColor: Color, barOverride: MutableState<Color?>, content: @Composable () -> Unit) {
+private fun SystemBarBackdrop(skinColor: Color, barOverride: MutableState<Color?>, navOverride: MutableState<Color?>, content: @Composable () -> Unit) {
     val color = barOverride.value ?: skinColor
+    val bottomColor = navOverride.value ?: color
     Box {
         content()
         Box(Modifier.align(Alignment.TopStart).fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(color))
-        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars).background(color))
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().windowInsetsBottomHeight(WindowInsets.navigationBars).background(bottomColor))
         Box(Modifier.align(Alignment.CenterStart).fillMaxHeight().windowInsetsStartWidth(WindowInsets.navigationBars).background(color))
         Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().windowInsetsEndWidth(WindowInsets.navigationBars).background(color))
     }

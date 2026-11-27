@@ -300,10 +300,8 @@ internal fun SessionRow(
 
     // W39 (ta-v0h8): on the phone the card clips the row, so the row itself is square (the card rounds its ends).
     val rowShape = androidx.compose.ui.graphics.RectangleShape
-    val rowFace = when {
-        active -> t.css.bgPanel // Vector: web .session-item-row.is-current { background: var(--bg-panel) }
-        else -> Color.Transparent
-    }
+    // Vector m02: the unit's CARD (WorkspaceBlock) carries the face and the current outline; the row is transparent.
+    val rowFace = Color.Transparent
     val rowBorder = null
     val rowShadows = emptyList<CssShadow>()
     val ink = if (active) t.css.inkStrong else t.ink
@@ -332,14 +330,6 @@ internal fun SessionRow(
                 .offset { IntOffset((swipeX.value * density.density).roundToInt(), 0) }
                 // `.session-item-swipe { background: inherit }`: the row's own surface travels with it.
                 .then(if (rowFace != Color.Transparent) Modifier.background(rowFace, rowShape) else Modifier)
-                // W39: the selected row's 3 dp `violet` bar at the start edge, full row height (mirrors in RTL).
-                .then(
-                    if (active) Modifier.drawBehind {
-                        val w = PhoneLook.SelectedBar.toPx()
-                        val x = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl) size.width - w else 0f
-                        drawRect(t.violet, Offset(x, 0f), androidx.compose.ui.geometry.Size(w, size.height))
-                    } else Modifier,
-                )
                 .then(
                     if (!swipeEnabled) Modifier else Modifier.pointerInput(entry.key, swipeOpen) {
                         val slop = 6.dp.toPx()
@@ -609,10 +599,10 @@ private fun PhoneRowBody(
             // The web draws "· location" (session-sidebar.tsx:409, the separator inside the location span): the shared separator, then the path.
             // ta-hkk7.1: the separator and the path are two pieces; the separator is drawn only when the path shares the age's line.
             separator = location?.let {
-                { Text(META_SEPARATOR, style = css(type.ui, 0.75f, 400, lineHeight = 1.3333f), color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { }) }
+                { Text(META_SEPARATOR, style = css(type.mono, 0.75f, 400, lineHeight = 1.3333f), color = t.faint, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { }) }
             },
             location = location?.let { path ->
-                { Text(codeLabel(path), style = css(type.ui, 0.75f, 400, lineHeight = 1.3333f), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                { Text(codeLabel(path), style = css(type.mono, 0.75f, 400, lineHeight = 1.3333f), color = t.faint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             },
         )
         entry.snippet?.let { SnippetLine(LabelText.hint(it), entry.matchCount, phone = true) }
@@ -844,7 +834,7 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     // The phone's words and time are 0.65rem (ta-1jj7, owner-directed design); the rail's stay 0.68rem.
-    val style = if (phone) css(type.ui, 0.75f, 500, lineHeight = 1.3333f) else css(type.ui, 0.68f, 500)
+    val style = if (phone) css(type.mono, 0.75f, 500, lineHeight = 1.3333f) else css(type.ui, 0.68f, 500)
     val live = entry.live
     val rel = Format.relativeTime(updatedAt.toDouble(), now.toDouble())
     // T13.2: an offline row carries more (the "was" words and the copy's glyph): its pieces wrap

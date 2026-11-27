@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.zIndex
 import com.tether.app.ui.sidebar.PhoneDrawer
 import com.tether.app.ui.theme.LocalReducedMotion
+import com.tether.app.ui.theme.LocalNavBarOverride
 import com.tether.app.ui.theme.LocalSystemBarOverride
 import com.tether.app.ui.theme.LocalTetherTokens
 
@@ -90,9 +91,18 @@ fun SessionDrawerHost(
     // to the slide; cleared when it closes and when the host leaves the composition.
     val rail = t.css.bgRail // Vector: the rail is the skin's own --bg-rail (Light #e7ebf2, Dark #0d1016)
     val bars = LocalSystemBarOverride.current
+    // P8C-FIX3: the area below the footer (gesture / navigation bar) takes the footer's panel colour, so the band runs to the screen's
+    // bottom as on m02; closing (or leaving) restores the previous value exactly.
+    val footer = t.css.bgPanel
+    val nav = LocalNavBarOverride.current
     DisposableEffect(open, bars, rail) {
         if (open) bars.value = rail
         onDispose { bars.value = null }
+    }
+    DisposableEffect(open, nav, footer) {
+        val previous = nav.value
+        if (open) nav.value = footer
+        onDispose { nav.value = previous }
     }
     BoxWithConstraints(
         modifier

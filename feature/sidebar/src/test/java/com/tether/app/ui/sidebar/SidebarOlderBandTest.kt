@@ -159,18 +159,18 @@ class SidebarOlderBandBehaviourTest {
         rule.onNodeWithTag(SidebarTags.row("live:month")).assertDoesNotExist()
         val band = rule.onNodeWithTag(SidebarTags.older(F.ROOT))
         band.assertIsDisplayed()
-        assertEquals(listOf("Older", "2"), label(band).filter { it.isNotEmpty() })
+        assertEquals(listOf("Older (2)", "Show"), label(band).filter { it.isNotEmpty() })
 
         band.performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(SidebarTags.row("live:ten")).assertIsDisplayed()
         rule.onNodeWithTag(SidebarTags.row("live:month")).assertExists()
-        assertEquals(listOf("Hide older", "2"), label(rule.onNodeWithTag(SidebarTags.older(F.ROOT))).filter { it.isNotEmpty() })
+        assertEquals(listOf("Hide older (2)", "Hide"), label(rule.onNodeWithTag(SidebarTags.older(F.ROOT))).filter { it.isNotEmpty() })
 
         rule.onNodeWithTag(SidebarTags.older(F.ROOT)).performClick()
         rule.waitForIdle()
         rule.onNodeWithTag(SidebarTags.row("live:ten")).assertDoesNotExist()
-        assertEquals(listOf("Older", "2"), label(rule.onNodeWithTag(SidebarTags.older(F.ROOT))).filter { it.isNotEmpty() })
+        assertEquals(listOf("Older (2)", "Show"), label(rule.onNodeWithTag(SidebarTags.older(F.ROOT))).filter { it.isNotEmpty() })
     }
 
     @Test fun onThePhoneDrawerTheBandIsCollapsedAndToggles() = checkBand(TetherLayoutClass.Phone)

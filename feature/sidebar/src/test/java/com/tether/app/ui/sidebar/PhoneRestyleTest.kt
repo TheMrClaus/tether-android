@@ -45,30 +45,32 @@ class PhoneRestyleTest {
 
     private fun bounds(tag: String) = rule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
 
-    @Test fun theHeaderHoldsTheTitleTheCountAndPrivateRuntimeAboveTheList() {
+    // Vector m02: the header holds the two labelled keys and Close, the search bar sits under it; the link line is the footer's.
+    @Test fun theHeaderHoldsTheKeysAndTheSearchAboveTheListAndTheFooterHoldsTheLink() {
         show(F.state(F.drawerSessions))
         val list = bounds(SidebarTags.List)
-        for (d in listOf("Search all conversations", "New session", "Close sessions")) {
+        for (d in listOf("Search all conversations", "New session", "Scheduled actions", "Close sessions")) {
             val b = rule.onNodeWithContentDescription(d).fetchSemanticsNode().boundsInRoot
             assertTrue("$d is above the list", b.bottom <= list.top + 0.5f)
         }
-        val title = rule.onAllNodes(SemanticsMatcher("the title") { n -> n.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull()?.matches(Regex("Workspaces, \\d+ open")) == true }).fetchSemanticsNodes().single().boundsInRoot
-        assertTrue("the title is in the header", title.bottom <= list.top)
-        val runtime = rule.onNodeWithContentDescription("Private runtime").fetchSemanticsNode().boundsInRoot
-        assertTrue("Private runtime is the header's second line: $runtime vs $title", runtime.top >= title.bottom - 1f && runtime.bottom <= list.top)
+        val link = rule.onNodeWithContentDescription("Secure link · Private runtime").fetchSemanticsNode().boundsInRoot
+        assertTrue("the link line is the footer's, below the list: $link vs $list", link.top >= list.bottom - 0.5f)
     }
 
-    @Test fun scheduledActionsIsTheFootersAndSitsBelowTheList() {
+    @Test fun settingsIsTheFootersAndSitsBelowTheList() {
         show(F.state(F.drawerSessions))
         val list = bounds(SidebarTags.List)
         val scheduled = bounds(SidebarTags.Scheduled)
-        assertTrue("scheduled $scheduled is below the list $list", scheduled.top >= list.bottom - 0.5f)
+        assertTrue("scheduled $scheduled is above the list $list", scheduled.bottom <= list.top + 0.5f)
         val settings = rule.onNodeWithContentDescription("Open settings").fetchSemanticsNode().boundsInRoot
-        assertTrue("settings is on the same bar, before it", settings.left < scheduled.left && settings.top < scheduled.bottom && settings.bottom > scheduled.top)
+        val link = rule.onNodeWithContentDescription("Secure link · Private runtime").fetchSemanticsNode().boundsInRoot
+        assertTrue("settings is below the list, on the link's bar, after it", settings.top >= list.bottom - 0.5f && settings.left > link.left && settings.top < link.bottom && settings.bottom > link.top)
     }
 
-    @Test fun theFilterFieldIsAlwaysDrawnEvenWithOneSession() {
+    @Test fun theSearchBarIsAlwaysDrawnEvenWithOneSessionInBothScopes() {
         show(F.state(listOf(F.live("only", "The only one", ago = 3))))
+        rule.onNodeWithContentDescription("Search all conversations").assertExistsCompat()
+        rule.switchToFilterScope()
         rule.onNodeWithContentDescription("Filter sessions").assertExistsCompat()
     }
 
@@ -106,15 +108,15 @@ class PhoneRestyleTest {
         val names = rule.onAllNodes(hasClickAction().or(hasSetTextAction())).fetchSemanticsNodes()
             .map { it.config.getOrNull(SemanticsProperties.ContentDescription)?.firstOrNull() ?: it.tag().orEmpty() }
         val order = listOf(
-            "Search all conversations", "New session", "Close sessions", "Filter sessions", "Active", "Unread",
-            "Filter sessions by harness", "Hide runs", "Sort sessions by Created Date",
+            "New session", "Scheduled actions", "Close sessions", "Search all conversations",
+            "Search scope: all conversations — switch to filtering this list", "All", "Running", "Unread", "Hide runs",
+            "Sort sessions by Created Date", "Filter sessions by harness",
         )
         val at = order.map { o -> names.indexOfFirst { it == o }.also { assertTrue("$o is in the tree: $names", it >= 0) } }
         assertEquals("header and filter order: $names", at.sorted(), at)
         val settings = names.indexOf("Open settings")
-        val scheduled = names.indexOf("Scheduled actions")
         assertTrue("sections come before the footer: $names", at.last() < names.indexOfFirst { it.startsWith("New session in") })
-        assertTrue("Settings then Scheduled actions close the drawer: $names", settings in 0 until scheduled)
+        assertTrue("Settings closes the drawer: $names", settings > names.indexOfFirst { it.startsWith("New session in") })
     }
 
     // The drag crosses the 16 dp gap between two workspace cards: no row answers there, the order holds, and it still lands in its own card.

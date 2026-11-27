@@ -43,8 +43,9 @@ class ActiveRowContrastTest {
             SidebarUnderTest(skin, F.state(listOf(F.live("c1", "Current one", ago = 0)), activeId = "c1"), TetherLayoutClass.Phone)
         }
         rule.waitForIdle()
-        val bmp = rule.onNodeWithTag(SidebarTags.row("live:c1")).captureToImage().toPixelMap()
-        val face = bmp[bmp.width / 2, 1]
+        // Vector m02: the current row's face is its CARD's --bg-panel (the row itself is transparent over it).
+        val bmp = rule.onNodeWithTag(SidebarTags.CurrentCard).captureToImage().toPixelMap()
+        val face = bmp[bmp.width / 2, 8]
         val tk = t!!
         assertEquals("active row face is --bg-panel ($skin)", tk.css.bgPanel.toArgb(), face.toArgb())
         val status = ratio(tk.muted, face)
