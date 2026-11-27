@@ -775,7 +775,7 @@ private fun TileBank(layout: UsageLayout, tiles: List<TileSpec>, footer: (@Compo
                 }
             }
             footer?.let { f ->
-                Box(Modifier.fillMaxWidth().drawBehind { drawRect(t.line, Offset.Zero, Size(size.width, 1.dp.toPx())) }.cssSurface(androidx.compose.ui.graphics.RectangleShape, t.mineral).padding(top = 1.dp)) { f() }
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(bottomStart = 11.dp, bottomEnd = 11.dp)).drawBehind { drawRect(t.line, Offset.Zero, Size(size.width, 1.dp.toPx())) }.cssSurface(androidx.compose.ui.graphics.RectangleShape, t.mineral).padding(top = 1.dp)) { f() }
             }
         }
     }

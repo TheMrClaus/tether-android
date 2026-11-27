@@ -745,7 +745,7 @@ private fun ClaudeResetGrants(reading: ClaudeResetGrantsReading, generatedAt: Do
         val available = views.count { (it.second["tone"] as JsStr).value == "available" }
         // `.grantsTitle`: "LIMIT RESETS · 2 GRANTS AVAILABLE" (mono, tracked, uppercase) over one compact row per grant.
         Text(
-            "Limit resets" + if (available > 0) " · $available ${if (available == 1) "grant" else "grants"} available" else "",
+            ("Limit resets" + if (available > 0) " · $available ${if (available == 1) "grant" else "grants"} available" else "").uppercase(),
             color = t.muted,
             style = cssText(type.mono, 0.6875f, 400, trackingEm = 0.06f),
             modifier = Modifier.semantics { heading() },
