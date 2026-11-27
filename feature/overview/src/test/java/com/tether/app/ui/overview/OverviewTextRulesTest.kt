@@ -4,6 +4,7 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import com.tether.app.protocol.model.OverviewActivity
 import com.tether.app.protocol.model.OverviewAttention
@@ -100,6 +101,9 @@ class OverviewTextRulesTest {
     }
 
     private fun openSelect(name: String) {
+        // m03: the Workspace / Provider selects sit behind the one "Filters" control (old: on the page).
+        rule.onNodeWithTag(OverviewTags.Filters).performClick()
+        rule.waitForIdle()
         rule.onNode(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf(name))).performClick()
         rule.waitForIdle()
     }

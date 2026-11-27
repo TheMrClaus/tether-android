@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,7 +35,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -139,19 +139,22 @@ fun HostUsagePanel(tile: HostUsagePresentation.Tile, modifier: Modifier = Modifi
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     Panel(HostUsageTags.Panel, attention = false, modifier = modifier) {
+        // m03: the title and "View usage →" in the head; the scope line moves below the meters.
         PanelTitle(HostUsagePresentation.TITLE) {
-            Text(
-                tile.scope,
-                style = css(type.ui, 0.78f, 400),
-                color = t.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.End,
-                modifier = Modifier
-                    .weight(1f)
-                    .semantics { contentDescription = "Readings are ${tile.scope}, for this Tether node only" }
-                    .testTag(HostUsageTags.Scope),
-            )
+            Spacer(Modifier.weight(1f))
+            if (onViewUsage != null) {
+                Row(
+                    Modifier
+                        .heightIn(min = TetherDimens.touchTargetDp)
+                        .clickable(role = Role.Button, onClick = onViewUsage)
+                        .testTag(HostUsageTags.ViewUsage),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Text("View usage", style = css(type.ui, 0.86f, 650), color = t.violet)
+                    Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
+                }
+            }
         }
         tile.freshness?.let { f ->
             FreshnessPill(
@@ -165,38 +168,33 @@ fun HostUsagePanel(tile: HostUsagePresentation.Tile, modifier: Modifier = Modifi
         tile.diskNote?.let {
             Text(it, style = css(type.ui, 0.75f, 400), color = t.faint, modifier = Modifier.padding(top = 8.dp).testTag(HostUsageTags.DiskNote))
         }
-        // `.usageRow`: a rule, then the figure and the link.
+        // `.usageRow`: a rule, then "Tokens today" on the left and the figure on the right (m03), the notes under it.
         Box(Modifier.padding(top = 14.4.dp).fillMaxWidth().height(1.dp).cssSurface(RoundedCornerShape(0.dp), t.line))
-        Row(
-            Modifier.fillMaxWidth().padding(top = 14.4.dp),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp)
+                .semantics(mergeDescendants = true) { }
+                .testTag(HostUsageTags.Tokens),
+            verticalArrangement = Arrangement.spacedBy(3.2.dp),
         ) {
-            Column(
-                Modifier
-                    .weight(1f)
-                    .semantics(mergeDescendants = true) { }
-                    .testTag(HostUsageTags.Tokens),
-                verticalArrangement = Arrangement.spacedBy(3.2.dp),
-            ) {
-                Text(tile.tokensLabel, style = css(type.ui, 0.8f, 600), color = t.muted)
-                Text(tile.tokensValue, style = css(type.mono, 1.05f, 550).copy(fontFeatureSettings = "tnum"), color = t.white)
-                Text(tile.usageNote, style = css(type.ui, 0.75f, 400), color = t.faint, modifier = Modifier.testTag(HostUsageTags.UsageNote))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(tile.tokensLabel, style = css(type.ui, 0.84f, 600), color = t.muted, modifier = Modifier.weight(1f))
+                Text(tile.tokensValue, style = css(type.mono, 1.05f, 600).copy(fontFeatureSettings = "tnum"), color = t.white)
             }
-            if (onViewUsage != null) {
-                Row(
-                    Modifier
-                        .heightIn(min = TetherDimens.touchTargetDp)
-                        .clickable(role = Role.Button, onClick = onViewUsage)
-                        .testTag(HostUsageTags.ViewUsage),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.4.dp),
-                ) {
-                    Text("View usage", style = css(type.ui, 0.86f, 650), color = t.violet)
-                    Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
-                }
-            }
+            Text(tile.usageNote, style = css(type.ui, 0.75f, 400), color = t.faint, modifier = Modifier.testTag(HostUsageTags.UsageNote))
         }
+        Text(
+            tile.scope,
+            style = css(type.ui, 0.75f, 400),
+            color = t.faint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .semantics { contentDescription = "Readings are ${tile.scope}, for this Tether node only" }
+                .testTag(HostUsageTags.Scope),
+        )
     }
 }
 
@@ -271,7 +269,13 @@ private fun MeterCell(meter: HostUsagePresentation.Meter, narrow: Boolean, modif
     val fill: Color = when (meter.tone) {
         HostUsagePresentation.Tone.Danger -> t.danger
         HostUsagePresentation.Tone.Warning -> t.warning
-        else -> t.violet
+        else -> if (meter.label == "Memory") t.running else t.violet
+    }
+    // m03: the figure takes the tone (87% disk in amber), else white.
+    val valueInk: Color = when (meter.tone) {
+        HostUsagePresentation.Tone.Danger -> t.danger
+        HostUsagePresentation.Tone.Warning -> t.attentionInk
+        else -> t.white
     }
     Column(
         modifier
@@ -284,21 +288,21 @@ private fun MeterCell(meter: HostUsagePresentation.Meter, narrow: Boolean, modif
         verticalArrangement = Arrangement.spacedBy(7.2.dp),
     ) {
         Text(meter.label, style = css(type.ui, 0.8f, 600), color = t.muted, maxLines = 1)
-        Box(Modifier.fillMaxWidth().height(6.4.dp).cssSurface(RoundedCornerShape(percent = 50), t.slate)) {
-            val clamped = meter.clamped
-            if (clamped != null && clamped > 0) {
-                Box(Modifier.fillMaxWidth((clamped / 100).toFloat()).fillMaxHeight().cssSurface(RoundedCornerShape(percent = 50), fill))
-            }
-        }
         if (meter.unavailable != null) {
             Text(meter.unavailable, style = css(type.ui, 0.8f, 500), color = t.faint)
         } else {
             Text(
                 meter.value,
                 style = css(type.mono, if (narrow) 0.82f else 0.95f, 550).copy(fontFeatureSettings = "tnum"),
-                color = t.white,
+                color = valueInk,
                 maxLines = if (narrow) 2 else 1,
             )
+        }
+        Box(Modifier.fillMaxWidth().height(6.4.dp).cssSurface(RoundedCornerShape(percent = 50), t.slate)) {
+            val clamped = meter.clamped
+            if (clamped != null && clamped > 0) {
+                Box(Modifier.fillMaxWidth((clamped / 100).toFloat()).fillMaxHeight().cssSurface(RoundedCornerShape(percent = 50), fill))
+            }
         }
     }
 }

@@ -96,8 +96,8 @@ class OverviewBehaviourTest {
         }
         rule.waitForIdle()
         assertEquals(listOf("subscribe:{}:0"), client.calls)
-        // A filter re-subscribes from the first page.
-        rule.onNodeWithTag(OverviewTags.tab(StatusTab.Ready)).performClick()
+        // A filter re-subscribes from the first page. (m03: the chip row is one scrolling line, so Ready is scrolled to; old: clicked in place.)
+        rule.onNodeWithTag(OverviewTags.tab(StatusTab.Ready)).performScrollTo().performClick()
         rule.waitForIdle()
         assertEquals("subscribe:{\"statuses\":[\"ready\"]}:0", client.calls.last())
         // ON_STOP (the app went to the background): one unsubscribe. ON_START: subscribe again.

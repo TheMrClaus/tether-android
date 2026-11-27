@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +26,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -88,6 +93,13 @@ object OverviewTags {
     const val Loading = "overview-loading"
     const val HostUsage = "overview-host-usage"
     const val Announcement = "overview-announcement"
+    /** m03: the one "Filters" control, the panel it opens (Workspace / Provider), the one-line status chip row, the 0-waiting strip, the activity header's "Event log" link. */
+    const val Filters = "overview-filters"
+    const val FilterPanel = "overview-filter-panel"
+    const val StatusChips = "overview-status-chips"
+    const val AllClear = "overview-all-clear"
+    const val EventLog = "overview-event-log"
+    const val StatusChip = "overview-status-chip"
     fun card(sessionId: String) = "overview-card:$sessionId"
     fun open(sessionId: String) = "overview-open:$sessionId"
     fun review(sessionId: String) = "overview-review:$sessionId"
@@ -166,8 +178,17 @@ fun OverviewScreen(
                 .padding(horizontal = if (narrow) 14.dp else 32.dp, vertical = if (narrow) 17.6.dp else 28.dp),
             verticalArrangement = Arrangement.spacedBy(if (narrow) 16.dp else 20.dp),
         ) {
-            Header(counts?.let { OverviewPresentation.countsLine(it, offline) } ?: OverviewPresentation.countsLine(null, offline), choice.filtered, narrow, actions.onNewSession)
-            Toolbar(state, choice, onChoice, narrow)
+            var filtersOpen by rememberSaveable { mutableStateOf(false) }
+            Header(
+                countsLine = counts?.let { OverviewPresentation.countsLine(it, offline) } ?: OverviewPresentation.countsLine(null, offline),
+                choice = choice,
+                narrow = narrow,
+                filtersOpen = filtersOpen,
+                onToggleFilters = { filtersOpen = !filtersOpen },
+                onNewSession = actions.onNewSession,
+            )
+            if (filtersOpen) FilterPanel(state, choice, onChoice, narrow)
+            StatusChips(state, choice, onChoice)
             if (offline && data != null) StaleNote(state.updatedAt, now)
 
             PendingPanel(
@@ -210,21 +231,53 @@ fun OverviewScreen(
 
 // ── Header ──────────────────────────────────────────────────────────────────
 
+/**
+ * m03: "Overview" + the counts line on the left, one "Filters" control (and New session) on the
+ * right. The Workspace / Provider selects live behind Filters ([FilterPanel]); a filter in force
+ * says so on the control ("Filters · 1").
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Header(countsLine: List<String>, filtered: Boolean, narrow: Boolean, onNewSession: () -> Unit) {
+private fun Header(
+    countsLine: List<String>,
+    choice: OverviewChoice,
+    narrow: Boolean,
+    filtersOpen: Boolean,
+    onToggleFilters: () -> Unit,
+    onNewSession: () -> Unit,
+) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Column(Modifier.weight(1f)) {
+    val active = listOfNotNull(choice.workspace, choice.provider).size
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
                 "Overview",
                 style = css(type.ui, if (narrow) 1.75f else 2.25f, 780, trackingEm = -0.04f, lineHeight = 1.1f),
                 color = t.white,
-                modifier = Modifier.semantics { heading() },
+                modifier = Modifier.weight(1f).semantics { heading() },
             )
+            TetherKey(
+                onClick = onToggleFilters,
+                classes = KeyClasses.ButtonSecondary,
+                label = if (active > 0) "Filters · $active" else "Filters",
+                contentDescription = if (active > 0) "Filters, $active in force" else "Filters",
+                modifier = Modifier
+                    .testTag(OverviewTags.Filters)
+                    .semantics { stateDescription = if (filtersOpen) "Expanded" else "Collapsed" },
+                trailing = {
+                    Icon(
+                        if (filtersOpen) TetherIcons.ChevronUp else TetherIcons.ChevronDown,
+                        contentDescription = null,
+                        tint = t.ink,
+                        modifier = Modifier.size(15.dp),
+                    )
+                },
+            )
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             FlowRow(
-                Modifier.padding(top = 5.6.dp),
+                Modifier.weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(3.2.dp),
             ) {
@@ -233,26 +286,28 @@ private fun Header(countsLine: List<String>, filtered: Boolean, narrow: Boolean,
                     if (index > 0) Text("·", style = style, color = t.faint, modifier = Modifier.clearAndSetSemantics { })
                     Text(part, style = style, color = t.muted)
                 }
-                if (filtered && countsLine.size > 1) Text("(filtered)", style = css(type.ui, 0.85f, 400), color = t.faint)
+                if (choice.filtered && countsLine.size > 1) Text("(filtered)", style = css(type.ui, 0.85f, 400), color = t.faint)
             }
+            TetherKey(
+                onClick = onNewSession,
+                classes = KeyClasses.ButtonPrimary,
+                label = if (narrow) "New" else "New session",
+                contentDescription = "New session",
+                icon = TetherIcons.Plus,
+                iconSize = 17.dp,
+                contentPadding = if (narrow) 14.4.dp else 20.dp,
+                modifier = Modifier.testTag(OverviewTags.NewSession),
+            )
         }
-        TetherKey(
-            onClick = onNewSession,
-            classes = KeyClasses.ButtonPrimary,
-            label = "New session",
-            icon = TetherIcons.Plus,
-            iconSize = 17.dp,
-            contentPadding = if (narrow) 14.4.dp else 20.dp,
-            modifier = Modifier.testTag(OverviewTags.NewSession),
-        )
     }
 }
 
-// ── Toolbar: filters and status tabs ────────────────────────────────────────
+// ── Filters (behind the one control) and the status chips ───────────────────
 
+/** The existing Workspace / Provider selects, opened by "Filters" (both still work, same options). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Toolbar(state: OverviewClientState, choice: OverviewChoice, onChoice: (OverviewChoice) -> Unit, narrow: Boolean) {
+private fun FilterPanel(state: OverviewClientState, choice: OverviewChoice, onChoice: (OverviewChoice) -> Unit, narrow: Boolean) {
     val t = LocalTetherTokens.current
     val type = LocalTetherTypography.current
     val facets = state.data?.facets
@@ -274,84 +329,83 @@ private fun Toolbar(state: OverviewClientState, choice: OverviewChoice, onChoice
             add(TetherSelectOption(p, label(p), description = "No sessions now"))
         }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        FlowRow(
-            Modifier.fillMaxWidth().semantics { contentDescription = "Filter sessions" },
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            TetherSelect(
-                options = workspaceOptions,
-                selectedValue = choice.workspace.orEmpty(),
-                onSelect = { onChoice(choice.copy(workspace = it.value.ifEmpty { null })) },
-                contentDescription = "Workspace",
-                modifier = if (narrow) Modifier.weight(1f) else Modifier,
-            )
-            TetherSelect(
-                options = providerOptions,
-                selectedValue = choice.provider.orEmpty(),
-                onSelect = { onChoice(choice.copy(provider = it.value.ifEmpty { null })) },
-                contentDescription = "Provider",
-                modifier = if (narrow) Modifier.weight(1f) else Modifier,
-            )
-            if (choice.filtered) {
-                Row(
-                    Modifier
-                        .heightIn(min = TetherDimens.touchTargetDp)
-                        .clickable(role = Role.Button) { onChoice(choice.copy(workspace = null, provider = null)) }
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.6.dp),
-                ) {
-                    Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
-                    Text("Clear", style = css(type.ui, 0.8f, 600), color = t.muted)
-                }
+    FlowRow(
+        Modifier.fillMaxWidth().testTag(OverviewTags.FilterPanel).semantics { contentDescription = "Filter sessions" },
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        TetherSelect(
+            options = workspaceOptions,
+            selectedValue = choice.workspace.orEmpty(),
+            onSelect = { onChoice(choice.copy(workspace = it.value.ifEmpty { null })) },
+            contentDescription = "Workspace",
+            modifier = if (narrow) Modifier.weight(1f) else Modifier,
+        )
+        TetherSelect(
+            options = providerOptions,
+            selectedValue = choice.provider.orEmpty(),
+            onSelect = { onChoice(choice.copy(provider = it.value.ifEmpty { null })) },
+            contentDescription = "Provider",
+            modifier = if (narrow) Modifier.weight(1f) else Modifier,
+        )
+        if (choice.filtered) {
+            Row(
+                Modifier
+                    .heightIn(min = TetherDimens.touchTargetDp)
+                    .clickable(role = Role.Button) { onChoice(choice.copy(workspace = null, provider = null)) }
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.6.dp),
+            ) {
+                Icon(TetherIcons.X, contentDescription = null, tint = t.muted, modifier = Modifier.size(14.dp))
+                Text("Clear", style = css(type.ui, 0.8f, 600), color = t.muted)
             }
         }
-        // `.statusTabs`: a pressed-state group (aria-pressed), selection carried by weight too.
-        FlowRow(
-            Modifier
-                .fillMaxWidth()
-                .cssSurface(RoundedCornerShape(t.radiusSm), t.graphite, CssBorder(1.dp, t.line))
-                .padding(3.2.dp)
-                .semantics { contentDescription = "Status" },
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            StatusTab.entries.forEach { tab ->
-                val count = OverviewPresentation.tabCount(state.data?.counts, tab)
-                val pressed = choice.status == tab
-                Row(
-                    Modifier
-                        .then(if (narrow) Modifier.weight(1f) else Modifier)
-                        .heightIn(min = TetherDimens.touchTargetDp)
-                        .widthIn(min = TetherDimens.touchTargetDp)
-                        .cssSurface(RoundedCornerShape(t.radiusSm - 2.4.dp), if (pressed) t.violetWash else Color.Transparent)
-                        .clickable(role = Role.Button) { onChoice(choice.copy(status = tab)) }
-                        .semantics(mergeDescendants = true) {
-                            selected = pressed
-                            stateDescription = if (pressed) "Selected" else "Not selected"
-                        }
-                        .testTag(OverviewTags.tab(tab))
-                        .padding(horizontal = 11.2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.4.dp, Alignment.CenterHorizontally),
-                ) {
-                    val ink = if (pressed) t.violet else t.muted
-                    Text(tab.label, style = css(type.ui, 0.8f, if (pressed) 750 else 600), color = ink, maxLines = 1)
-                    if (count != null) {
-                        Text(
-                            "$count",
-                            style = css(type.mono, 0.7f, 650),
-                            color = ink,
-                            modifier = Modifier
-                                .cssSurface(CircleShape, t.tintMd)
-                                .widthIn(min = 20.dp)
-                                .padding(horizontal = 4.8.dp),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        )
+    }
+}
+
+/**
+ * m03 `.statusTabs`: separate chips on ONE line, scrolling sideways when they do not fit, never
+ * wrapping (the chip row is exactly one chip tall at any font scale). A pressed-state group
+ * (aria-pressed), the selection carried by the outline and weight too.
+ */
+@Composable
+private fun StatusChips(state: OverviewClientState, choice: OverviewChoice, onChoice: (OverviewChoice) -> Unit) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .testTag(OverviewTags.StatusChips)
+            .semantics { contentDescription = "Status" },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StatusTab.entries.forEach { tab ->
+            val count = OverviewPresentation.tabCount(state.data?.counts, tab)
+            val pressed = choice.status == tab
+            val ink = if (pressed) t.violet else t.muted
+            Row(
+                Modifier
+                    .heightIn(min = TetherDimens.touchTargetDp)
+                    .cssSurface(RoundedCornerShape(t.radiusSm), if (pressed) t.violetWash else t.graphite, CssBorder(1.dp, if (pressed) t.violet else t.line))
+                    .clickable(role = Role.Button) { onChoice(choice.copy(status = tab)) }
+                    .semantics(mergeDescendants = true) {
+                        selected = pressed
+                        stateDescription = if (pressed) "Selected" else "Not selected"
                     }
-                }
+                    .testTag(OverviewTags.tab(tab))
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    tab.label + (count?.let { " · $it" } ?: ""),
+                    style = css(type.mono, 0.82f, if (pressed) 700 else 550),
+                    color = ink,
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
         }
     }
@@ -450,6 +504,11 @@ private fun PendingPanel(
     val total = panel?.total ?: 0
     val items = panel?.items.orEmpty()
     val outside = panel?.outsideFilters ?: 0
+    // m03: nothing waiting (and nothing waiting outside the filters either) is ONE emerald line, not a panel.
+    if (panel != null && items.isEmpty() && total == 0 && outside == 0) {
+        AllClearStrip(filtered)
+        return
+    }
     Panel(OverviewTags.Pending, attention = total > 0) {
         PanelTitle("Needs your attention", badge = total)
         when {
@@ -483,6 +542,31 @@ private fun PendingPanel(
                 Text("${OverviewFormat.plural(outside, "request")} waiting outside these filters — show all", style = css(type.ui, 0.86f, 650), color = t.attentionInk)
             }
         }
+    }
+}
+
+/** m03: the 0-waiting strip, emerald (`--run-*`): the check, the web's sentence, and "All clear" in mono. */
+@Composable
+private fun AllClearStrip(filtered: Boolean) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .cssSurface(RoundedCornerShape(t.radiusSm), t.css.runBg, CssBorder(1.dp, t.css.runBorder))
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .testTag(OverviewTags.AllClear),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(TetherIcons.CircleCheck, contentDescription = null, tint = t.running, modifier = Modifier.size(16.dp))
+        Text(
+            if (filtered) "Nothing is waiting for you in these filters." else "Nothing is waiting for you.",
+            style = css(type.ui, 0.9f, 650),
+            color = t.running,
+            modifier = Modifier.weight(1f),
+        )
+        Text("All clear", style = css(type.mono, 0.78f, 650), color = t.running, maxLines = 1, softWrap = false)
     }
 }
 
@@ -575,6 +659,8 @@ private fun CardGrid(cards: List<OverviewCard>, columns: Int, now: Long, offline
     }
 }
 
+private fun statusInk(t: TetherTokens, tone: CardTone): Color = toneColor(t, tone)
+
 private fun toneColor(t: TetherTokens, tone: CardTone): Color = when (tone) {
     CardTone.Running -> t.running
     CardTone.Waiting, CardTone.Attention -> t.attentionInk
@@ -624,9 +710,18 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
             .padding(20.dp)
             .testTag(OverviewTags.card(card.sessionId)),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.6.dp)) {
+        // m03 head: the provider mark and name on the left, the status chip on the right.
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.6.dp)) {
             ProviderMark(card.provider)
-            Text(label(card.providerLabel), style = css(type.ui, 0.84f, 600), color = t.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                label(card.providerLabel),
+                style = css(type.ui, 0.84f, 600),
+                color = t.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            StatusChip(status, qualified, elapsed, card)
         }
         Text(
             cardTitle,
@@ -634,54 +729,52 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
             color = t.white,
             modifier = Modifier.padding(top = 13.6.dp).semantics { heading() },
         )
-        FlowRow(
-            Modifier.padding(top = 5.6.dp).fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(3.2.dp),
-        ) {
-            val meta = css(type.mono, 0.78f, 500)
-            // ta-28i: a workspace's name is code, one line (the sidebar's rule), so a spoof shows.
-            Text(
-                codeLabel(OverviewPresentation.capped(card.workspace.label, OverviewPresentation.LABEL_CHARS)),
-                style = meta,
-                color = t.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            card.branch?.takeIf { it.isNotEmpty() }?.let { OverviewPresentation.capped(it, OverviewPresentation.LABEL_CHARS) }?.let { branch ->
-                Text("·", style = meta, color = t.faint, modifier = Modifier.clearAndSetSemantics { })
+        // Meta (workspace · branch) with the open link where the comp draws its "ctx →" link. The ctx
+        // bar itself is omitted: OverviewCard carries no context figure (E4), and `progress` is a
+        // different quantity, drawn below as the web draws it.
+        Row(Modifier.fillMaxWidth().padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(3.2.dp),
+            ) {
+                val meta = css(type.mono, 0.78f, 500)
+                // ta-28i: a workspace's name is code, one line (the sidebar's rule), so a spoof shows.
+                Text(
+                    codeLabel(OverviewPresentation.capped(card.workspace.label, OverviewPresentation.LABEL_CHARS)),
+                    style = meta,
+                    color = t.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                card.branch?.takeIf { it.isNotEmpty() }?.let { OverviewPresentation.capped(it, OverviewPresentation.LABEL_CHARS) }?.let { branch ->
+                    Text("·", style = meta, color = t.faint, modifier = Modifier.clearAndSetSemantics { })
+                    Row(
+                        Modifier.semantics(mergeDescendants = true) { contentDescription = "branch ${SafeText.code(branch)}" },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(TetherIcons.GitBranch, contentDescription = null, tint = t.muted, modifier = Modifier.size(12.dp))
+                        Text(codeText(branch, breakAnywhere = true), style = meta, color = t.muted)
+                    }
+                }
+            }
+            if (request == null) {
                 Row(
-                    Modifier.semantics(mergeDescendants = true) { contentDescription = "branch ${SafeText.code(branch)}" },
+                    Modifier
+                        .heightIn(min = TetherDimens.touchTargetDp)
+                        .clickable(onClickLabel = "Open session", role = Role.Button) { actions.onOpenSession(card.sessionId) }
+                        .semantics { contentDescription = "Open session: $cardTitle" }
+                        .testTag(OverviewTags.open(card.sessionId)),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Icon(TetherIcons.GitBranch, contentDescription = null, tint = t.muted, modifier = Modifier.size(12.dp))
-                    Text(codeText(branch, breakAnywhere = true), style = meta, color = t.muted)
+                    Text("Open", style = css(type.ui, 0.86f, 650), color = t.violet)
+                    Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
                 }
             }
         }
-        Box(Modifier.padding(top = 14.4.dp).fillMaxWidth().height(1.dp).cssSurface(RoundedCornerShape(0.dp), if (waiting) t.attentionBorder else t.line))
-
-        Row(
-            Modifier.padding(top = 14.4.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            val ink = if (qualified != null) t.muted else toneColor(t, status.tone)
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.2.dp)) {
-                Icon(if (qualified != null) TetherIcons.History else glyph(status.glyph), contentDescription = null, tint = ink, modifier = Modifier.size(16.dp))
-                Text(qualified ?: status.label, style = css(type.ui, 0.9f, 650), color = ink)
-            }
-            if (elapsed != null) {
-                Text(
-                    OverviewFormat.duration(elapsed),
-                    style = css(type.mono, 0.8f, 500).copy(fontFeatureSettings = "tnum"),
-                    color = t.muted,
-                    modifier = Modifier.semantics { contentDescription = "${OverviewPresentation.durationVerb(card)} ${OverviewFormat.describeDuration(elapsed)}" },
-                )
-            }
-        }
-        Column(Modifier.padding(top = 9.6.dp), verticalArrangement = Arrangement.spacedBy(5.6.dp)) {
+        Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(5.6.dp)) {
             val bodyStyle = css(type.ui, 0.92f, 400, lineHeight = 1.5f)
             val detail = status.detail?.takeIf { card.status != "running" }?.let(::prose)?.takeIf { it.isNotEmpty() }
             detail?.let { Text(it, style = bodyStyle, color = t.ink, maxLines = 3, overflow = TextOverflow.Ellipsis) }
@@ -700,8 +793,8 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
             }
             card.spawnedRunsActive?.takeIf { it > 0 }?.let { Text("${OverviewFormat.plural(it, "agent run")} in progress", style = note, color = t.muted) }
         }
-        Spacer(Modifier.height(16.dp))
         if (request != null) {
+            Spacer(Modifier.height(16.dp))
             TetherKey(
                 onClick = { actions.onReviewRequest(card.sessionId, request.requestId) },
                 classes = KeyClasses.ButtonPrimary,
@@ -710,14 +803,48 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
                 modifier = Modifier.fillMaxWidth().testTag(OverviewTags.review(card.sessionId)),
                 trailing = { Arrow(t.accentInk) },
             )
-        } else {
-            TetherKey(
-                onClick = { actions.onOpenSession(card.sessionId) },
-                classes = KeyClasses.ButtonSecondary,
-                label = "Open session",
-                contentDescription = "Open session: $cardTitle",
-                modifier = Modifier.fillMaxWidth().testTag(OverviewTags.open(card.sessionId)),
-                trailing = { Arrow(t.ink) },
+        }
+    }
+}
+
+/** m03 status chip: the tone's outline and wash, the state word, then "· <elapsed>" (a saved copy qualifies the word and drops the elapsed). */
+@Composable
+private fun StatusChip(status: CardStatus, qualified: String?, elapsed: Long?, card: OverviewCard) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    val tone = if (qualified != null) CardTone.Ready else status.tone
+    val ink = statusInk(t, tone)
+    val bg = when (tone) {
+        CardTone.Running -> t.css.runBg
+        CardTone.Waiting, CardTone.Attention -> t.attentionBg
+        CardTone.Danger -> t.dangerWash
+        else -> t.graphiteRaised
+    }
+    val edge = when (tone) {
+        CardTone.Running -> t.css.runBorder
+        CardTone.Waiting, CardTone.Attention -> t.attentionBorder
+        CardTone.Danger -> t.dangerEdge
+        else -> t.line
+    }
+    Row(
+        Modifier
+            .testTag(OverviewTags.StatusChip)
+            .cssSurface(RoundedCornerShape(t.radiusSm), bg, CssBorder(1.dp, edge))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(if (qualified != null) TetherIcons.History else glyph(status.glyph), contentDescription = null, tint = ink, modifier = Modifier.size(13.dp))
+        Text(qualified ?: status.label, style = css(type.ui, 0.8f, 650), color = ink, maxLines = 1, softWrap = false)
+        if (elapsed != null && qualified == null) {
+            Text("·", style = css(type.ui, 0.8f, 650), color = ink, modifier = Modifier.clearAndSetSemantics { })
+            Text(
+                OverviewFormat.duration(elapsed),
+                style = css(type.mono, 0.78f, 600).copy(fontFeatureSettings = "tnum"),
+                color = ink,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.semantics { contentDescription = "${OverviewPresentation.durationVerb(card)} ${OverviewFormat.describeDuration(elapsed)}" },
             )
         }
     }
@@ -862,6 +989,18 @@ private fun ActivityPanel(
                 Text(if (live) "Live" else "Paused", style = css(type.ui, 0.82f, 600), color = ink)
             }
             Spacer(Modifier.weight(1f))
+            // m03: "Event log →" in the header (was "Open event log" in the footer row).
+            Row(
+                Modifier
+                    .heightIn(min = TetherDimens.touchTargetDp)
+                    .clickable(role = Role.Button, onClick = onOpenEventLog)
+                    .testTag(OverviewTags.EventLog),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text("Event log", style = css(type.ui, 0.86f, 650), color = t.violet)
+                Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
+            }
         }
         if (activity.isEmpty()) {
             PanelEmpty(Lucide.MessageSquareText, activitySince?.let { "No activity since ${OverviewFormat.clock(it)}." } ?: "No activity yet.")
@@ -873,23 +1012,13 @@ private fun ActivityPanel(
                 }
             }
         }
-        Box(Modifier.padding(top = 8.dp).fillMaxWidth().height(1.dp).cssSurface(RoundedCornerShape(0.dp), t.line))
-        Row(
-            Modifier.fillMaxWidth().padding(top = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(
-                Modifier.heightIn(min = TetherDimens.touchTargetDp).clickable(role = Role.Button, onClick = onOpenEventLog),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.4.dp),
-            ) {
-                Text("Open event log", style = css(type.ui, 0.86f, 650), color = t.violet)
-                Icon(TetherIcons.ArrowRight, contentDescription = null, tint = t.violet, modifier = Modifier.size(14.dp))
-            }
-            activitySince?.let {
-                Text("Activity since ${OverviewFormat.clock(it)} (server start)", style = css(type.ui, 0.75f, 400), color = t.faint)
-            }
+        activitySince?.let {
+            Text(
+                "Activity since ${OverviewFormat.clock(it)} (server start)",
+                style = css(type.ui, 0.75f, 400),
+                color = t.faint,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
     }
 }

@@ -25,6 +25,7 @@ import java.util.TimeZone
  */
 enum class OverviewShot(val id: String, val state: OverviewClientState, val connected: Boolean) {
     Populated("populated", OverviewFixtures.populated, true),
+    Clear("clear", OverviewFixtures.clear, true),
     Empty("empty", OverviewFixtures.empty, true),
     Offline("offline", OverviewFixtures.offline, false),
     Loading("loading", OverviewFixtures.loading, true),
@@ -88,5 +89,69 @@ class OverviewFontScaleScreenshotTest(private val skin: TetherSkin) {
         @JvmStatic
         @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
         fun params(): List<Array<Any>> = listOf(arrayOf<Any>(TetherSkin.Studio))
+    }
+}
+
+/**
+ * P8D / m03: the comp's viewport — the phone at w412dp-h915dp-420dpi (the first screen, not the tall page) — with something
+ * waiting (the amber banner) and with nothing waiting (the emerald strip), Light and Dark, plus the 1.3x font scale
+ * (the chip row stays one line, scrolling).
+ */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi")
+class OverviewViewportScreenshotTest(private val shot: OverviewShot, private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    private val zone = TimeZone.getDefault()
+
+    @Before fun utc() = TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+
+    @After fun restore() = TimeZone.setDefault(zone)
+
+    @Test fun viewport() {
+        rule.mainClock.autoAdvance = false
+        rule.setContent { OverviewUnderTest(skin, shot.state, shot.connected) }
+        rule.mainClock.advanceTimeBy(CaptureAtMs)
+        rule.waitForIdle()
+        rule.onRoot().captureRoboImage(
+            "src/test/screenshots/overview-m03-${shot.id}/${skin.id}-phone-915.png",
+            roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),
+        )
+    }
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}-{1}")
+        fun params(): List<Array<Any>> =
+            listOf(OverviewShot.Populated, OverviewShot.Clear).flatMap { s -> listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(s, it) } }
+    }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w412dp-h915dp-420dpi", fontScale = 1.3f)
+class OverviewViewportFontScaleScreenshotTest(private val skin: TetherSkin) {
+    @get:Rule val rule = createComposeRule()
+
+    private val zone = TimeZone.getDefault()
+
+    @Before fun utc() = TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+
+    @After fun restore() = TimeZone.setDefault(zone)
+
+    @Test fun viewport() {
+        rule.mainClock.autoAdvance = false
+        rule.setContent { OverviewUnderTest(skin, OverviewFixtures.populated) }
+        rule.mainClock.advanceTimeBy(CaptureAtMs)
+        rule.waitForIdle()
+        rule.onRoot().captureRoboImage(
+            "src/test/screenshots/overview-m03-populated-font-1.3x/${skin.id}-phone-915.png",
+            roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0f)),
+        )
+    }
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun params(): List<Array<Any>> = listOf(TetherSkin.Studio, TetherSkin.StudioDark).map { arrayOf<Any>(it) }
     }
 }

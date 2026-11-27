@@ -99,6 +99,14 @@ object OverviewFixtures {
         data = populatedData, activity = activity, updatedAt = NOW,
     )
 
+    /** m03: sessions on the node, nothing waiting for the operator (the emerald "Nothing is waiting for you" strip). */
+    val clearData = populatedData.copy(
+        counts = populatedData.counts.copy(waiting = 0),
+        cards = cards.filter { it.status != "waiting" },
+        pending = OverviewPendingPanel(emptyList(), 0, 0),
+    )
+    val clear = populated.copy(data = clearData)
+
     /** The node has no managed session. */
     val empty = OverviewClientState(
         phase = OverviewPhase.Live, feedId = "feed_1", cursor = 1, awaitingSnapshot = false,
