@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -114,12 +115,13 @@ class VectorDrawerM02ContrastTest {
         report("meta-text", meta)
         assertTrue("meta text vs the card face $meta ($skin)", meta >= 4.5 && metaN > 0)
 
-        // footer link line, on the drawer's own face
+        // footer link line, on the footer band's own (panel) face
         val fb = boundsOf(PhoneChromeTags.FooterStatus)
         val fm = rule.onRoot().captureToImage().toPixelMap()
         val faceF = mostFrequent(fm, (fb.left + 24 * dp).toInt(), fb.top.toInt() + 4, (fb.left + 150 * dp).toInt(), fb.bottom.toInt() - 4)
         val (foot, footN) = measure(fm, (fb.left + 24 * dp).toInt(), fb.top.toInt() + 4, (fb.left + 150 * dp).toInt(), fb.bottom.toInt() - 4, faceF)
         report("footer-text", foot)
+        assertEquals("the footer sits on the panel face ($skin)", t.css.bgPanel.toArgb(), faceF.toArgb())
         assertTrue("footer text vs the drawer face $foot ($skin)", foot >= 4.5 && footN > 0)
 
         // the current card's outline vs the drawer's face (non-text contrast >= 3:1): the border pixel on the card's top edge, the drawer face in the gutter beside it
@@ -217,6 +219,18 @@ class VectorDrawerM02BehaviourTest {
         // one row, one place: the older text and the runs words share the row
         val older = boundsOfTag(SidebarTags.older(F.ROOT)); val runs = boundsOfTag(PhoneChromeTags.HiddenRuns)
         assertTrue("one row: $older / $runs", kotlin.math.abs(older.top - runs.top) < 2f && older.right <= runs.left + 1f)
+    }
+
+    @Test fun aOneDpHairlineSeparatesWorkspaceBlocksAndNeverSitsAboveTheFirst() {
+        show(F.state(F.groupSessions + F.live("d3", "Draft the changelog", cwd = F.DOCS, ago = 20), pinned = listOf(F.DOCS, F.ROOT), current = F.APP))
+        val rules = rule.onAllNodesWithTag(PhoneChromeTags.BlockRule)
+        val blocks = rule.onAllNodes(androidx.compose.ui.test.SemanticsMatcher("a workspace block") { n ->
+            (if (androidx.compose.ui.semantics.SemanticsProperties.TestTag in n.config) n.config[androidx.compose.ui.semantics.SemanticsProperties.TestTag] else null)?.startsWith("sidebar-block:") == true
+        }).fetchSemanticsNodes().size
+        assertTrue("at least two blocks seeded", blocks >= 2)
+        assertEquals("one hairline per boundary, none above the first", blocks - 1, rules.fetchSemanticsNodes().size)
+        val h = rules[0].fetchSemanticsNode().boundsInRoot.height / androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().resources.displayMetrics.density
+        assertEquals("1 dp tall (px rounding)", 1f, h, 0.25f)
     }
 
     private fun boundsOfTag(tag: String) = rule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot

@@ -70,6 +70,7 @@ internal object PhoneChromeTags {
     const val ChipRow = "sidebar-chips"
     const val FooterStatus = "sidebar-footer-status"
     const val FooterSettings = "sidebar-footer-settings"
+    const val BlockRule = "sidebar-block-rule"
     fun chip(id: String) = "sidebar-chip:$id"
     const val HiddenRuns = "sidebar-hidden-runs"
 }
@@ -394,6 +395,7 @@ internal fun PhoneFooter(connected: Boolean, onOpenSettings: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
+            .background(t.css.bgPanel)
             .drawBehind { drawRect(line, Offset.Zero, androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx())) }
             .heightIn(min = PhoneLook.RowMinHeight)
             .padding(horizontal = 8.dp),
