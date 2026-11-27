@@ -110,6 +110,8 @@ internal fun reduceEvent(state: JsObj, event: JsObj): JsObj {
 
 // events.ts:2758 (v156): the Codex app-server's main-thread background-terminal count, a session-level row (turnId null).
 private fun foldV156(state: JsObj, event: JsObj, type: String): JsObj {
+    // v175 (GH #293): the new-session proposal and its state carrier.
+    if (type == "session_proposal" || type == "session_proposal_updated") return foldProposal(state, event, type)
     if (type != "background_terminals_changed") return state
     val raw = (event["count"] as? JsNum)?.value
     val count = if (raw != null && raw.isFinite()) maxOf(0.0, kotlin.math.floor(raw)) else 0.0

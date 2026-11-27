@@ -3830,9 +3830,11 @@ class RealTetherClient(
                 // (i) a Stop's refusal reads the stop copy and keeps the claims; (ii) an abandoned composer's reads
                 // "Couldn't hand over: ..." and drops the claim; (iii) a live composer's is inline only (no toast) and
                 // drops the claim; (iv) anything else is the v150 reading.
-                val route = message.requestId?.let(::takeHandoverRoute)
+                // v175: a refusal echoing a proposal frame's requestId is inline on its card, never a toast.
+                val proposalRefusal = message.requestId?.let { takeProposalRefusal(it, message.message) } == true
+                val route = if (proposalRefusal) null else message.requestId?.let(::takeHandoverRoute)
                 val refusalCode = Handover.parseRefusal(message.message)?.code
-                when (route) {
+                if (!proposalRefusal) when (route) {
                     is HandoverRoute.Stop -> {
                         emitServerErrorIfCurrent(webSocket, Handover.stopRefusalCopy(refusalCode))
                         handoverStopRefusalsFlow.tryEmit(route.sessionId)
@@ -3999,6 +4001,8 @@ class RealTetherClient(
             // (another server's) can never show its sessions.
             // Moved BEFORE the list so a collector that sees the new list always reads the new count.
             snapshotSeqState.value += 1
+            // v175: a press in flight when the link dropped is settled by the replayed state; its refusals stay.
+            proposalLocalState.update { current -> current.filterValues { it.refusal != null } }
             sessionsState.value = message.sessions.sortedByDescending { it.updatedAt }
             listedSessionIds.clear()
             message.sessions.mapTo(listedSessionIds) { it.id }
@@ -6380,6 +6384,37 @@ class RealTetherClient(
             synchronized(handoverIdLock) { handoverComposerIds.boundedAdd(requestId) }
         }
         return sent
+    }
+
+    // v175: the proposal frames' own requestId map (a refusal routes by it) and the per-proposal local state the card reads.
+    private val proposalRequests = LinkedHashMap<String, String>()
+    private val proposalLocalState = MutableStateFlow<Map<String, ProposalLocalState>>(emptyMap())
+    override val proposalLocal: StateFlow<Map<String, ProposalLocalState>> = proposalLocalState
+
+    override fun sendProposal(frame: ClientMessage.ProposalFrame): Boolean {
+        val requestId = frame.requestId ?: return false
+        val sent = sendFrame(frame)
+        if (sent) {
+            synchronized(proposalRequests) {
+                proposalRequests[requestId] = frame.proposalId
+                while (proposalRequests.size > HANDOVER_ID_CAP) proposalRequests.remove(proposalRequests.keys.first())
+            }
+            proposalLocalState.update { it + (frame.proposalId to ProposalLocalState(frame.kind, requestId)) }
+        } else {
+            proposalLocalState.update { it + (frame.proposalId to ProposalLocalState(frame.kind, requestId, ProposalRefusal(null, LINK_RECONNECTING))) }
+        }
+        return sent
+    }
+
+    /** True when [requestId] was a proposal frame's: its refusal is kept on the proposal's local state, nothing else shows it. */
+    private fun takeProposalRefusal(requestId: String, message: String): Boolean {
+        val proposalId = synchronized(proposalRequests) { proposalRequests.remove(requestId) } ?: return false
+        val refusal = Proposals.parseRefusal(message)
+        proposalLocalState.update { current ->
+            val held = current[proposalId]?.takeIf { it.requestId == requestId } ?: return@update current
+            current + (proposalId to held.copy(refusal = refusal))
+        }
+        return true
     }
 
     override fun abandonHandoverRequest(requestId: String) {

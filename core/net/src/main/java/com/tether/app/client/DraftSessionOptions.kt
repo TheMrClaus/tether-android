@@ -38,9 +38,11 @@ data class DraftSessionOptions(
     val auto: AutoToggle?,
     /** #292 (owner ruling D2): the hint of the present-but-disabled Effort row of a Claude model KNOWN to have no effort; null otherwise. */
     val effortNoneHint: String? = null,
+    /** Reasonix's Approvals (Ask / Auto / YOLO), or null for every other provider (and a handover, whose successor inherits the source's). */
+    val approvals: ApprovalsControl? = null,
 ) {
     /** draft-composer.tsx `hasOtherSettings` minus Model: the phone's settings chip is drawn. */
-    val hasSettings: Boolean get() = effort != null || effortNoneHint != null || mode != null
+    val hasSettings: Boolean get() = effort != null || effortNoneHint != null || mode != null || approvals != null
 
     /**
      * The elevated posture in force, in words, for the phone's settings chip (app addition: the web
@@ -51,6 +53,7 @@ data class DraftSessionOptions(
         get() = when {
             auto?.on == true -> AUTO_LABEL
             modeDanger -> mode?.current?.label
+            approvals?.danger == true -> approvals.word
             else -> null
         }
 
@@ -106,9 +109,10 @@ object DraftSessionOptionsModel {
     fun of(state: DraftComposerState): DraftSessionOptions {
         val key = (state.form["key"] as? JsStr)?.value.orEmpty()
         val entry = state.entries.firstOrNull { it.key == key } ?: return DraftSessionOptions.None
+        // draft-composer.tsx:530: the Approvals row is drawn in handover mode too (seeded from the source, HandoverDraftForm.seedFromSource).
         val base = of(entry, state.form)
         // W34 (df:869-896): Codex "Current (custom)" is the FIRST, selected Mode row while the source's triple matches no preset.
-        val current = state.handover?.codexCurrentOption?.takeIf { entry.provider == "codex" } ?: return base
+        val current = (state.handover?.codexCurrentOption ?: state.proposalCodexCurrent?.let(HandoverDraftForm::codexCurrentOption))?.takeIf { entry.provider == "codex" } ?: return base
         val mode = base.mode ?: return base
         val row = ControlOption(current.value, current.label, current.hint, danger = current.danger)
         val withCurrent = mode.copy(options = listOf(row) + mode.options.filter { it.value != current.value })
@@ -161,6 +165,7 @@ object DraftSessionOptionsModel {
             modeAriaLabel = if (provider == "codex") CODEX_ARIA else PERMISSION_ARIA,
             modeDanger = current?.danger == true,
             auto = auto,
+            approvals = DraftApprovals.of(provider, (form["toolApproval"] as? JsStr)?.value),
         )
     }
 

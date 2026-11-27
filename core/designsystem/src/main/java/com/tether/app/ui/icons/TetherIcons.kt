@@ -134,6 +134,7 @@ import com.composables.icons.lucide.Terminal
 import com.composables.icons.lucide.Timer
 import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.TriangleAlert
+import com.composables.icons.lucide.Undo2
 import com.composables.icons.lucide.Upload
 import com.composables.icons.lucide.UserRound
 import com.composables.icons.lucide.Wrench
@@ -290,6 +291,7 @@ object TetherIcons {
     val Timer: ImageVector get() = Lucide.Timer
     val Trash2: ImageVector get() = Lucide.Trash2
     val TriangleAlert: ImageVector get() = Lucide.TriangleAlert
+    val Undo2: ImageVector get() = Lucide.Undo2
     val Upload: ImageVector get() = Lucide.Upload
     val UserRound: ImageVector get() = Lucide.UserRound
     val Wrench: ImageVector get() = Lucide.Wrench

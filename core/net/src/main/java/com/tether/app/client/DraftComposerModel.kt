@@ -83,6 +83,8 @@ data class DraftComposerState(
     val handover: HandoverDraftState? = null,
     /** Moves (never back) each time a handover request succeeded and closed the composer: the UI returns focus then. */
     val handoverSucceeded: Long = 0,
+    /** v175: the proposal card's Codex "Current (custom)" Mode row (the agent's own triple, no preset), else null. */
+    val proposalCodexCurrent: HandoverDraftForm.CodexCurrent? = null,
 ) {
     /** The wire attachments of [staged], in order. */
     val attachments: List<Attachment> get() = staged.map { it.attachment }
@@ -234,6 +236,11 @@ class DraftComposerModel(
     private val onHandoverRequested: (sourceId: String) -> Unit = {},
     /** v151: the source took the request (its row shows a stage or `handoverPending`): the composer closed. */
     private val onHandoverSucceeded: (sourceId: String) -> Unit = {},
+    /**
+     * v175: false for the proposal card's own instance: its picks stay in the card and never become the operator's
+     * remembered New Session choices.
+     */
+    private val persistPicks: Boolean = true,
 ) {
     private val _state = MutableStateFlow(DraftComposerState())
     val state: StateFlow<DraftComposerState> = _state.asStateFlow()
@@ -335,7 +342,7 @@ class DraftComposerModel(
     private fun persist(pick: (JsObj) -> JsObj) {
         // B1 (use-draft-composer.ts persistPreferences): handover mode NEVER writes saved preferences; the source's
         // settings must not become New Session's last-used.
-        if (_state.value.handover != null) return
+        if (_state.value.handover != null || !persistPicks) return
         preferences = pick(preferences)
         prefsPending?.add(pick)
         val origin = prefsOrigin ?: return
@@ -530,6 +537,17 @@ class DraftComposerModel(
         dispatch(JsObj.of("type" to JsStr("SET_MODE_FROM_USER"), "mode" to JsStr(mode)))
         val key = formKey()
         if (key.isNotEmpty()) persist { DraftForm.mergeDraftPreferences(it, JsStr(key), JsObj.of("mode" to JsStr(mode))) }
+        return true
+    }
+
+    /**
+     * use-draft-composer.ts onSelectToolApproval: Reasonix's Approvals pick (Ask / Auto / YOLO), kept in the draft form until
+     * Send. [drawnFor] is the provider the control was drawn for: a stale tap changes nothing. True when it was taken.
+     */
+    fun selectToolApproval(value: String, drawnFor: String): Boolean {
+        val provider = entryForKey(formKey())?.provider ?: return false
+        if (provider != drawnFor || provider != "reasonix" || !DraftApprovals.isChoice(value)) return false
+        dispatch(JsObj.of("type" to JsStr("SET_TOOL_APPROVAL_FROM_USER"), "toolApproval" to JsStr(value)))
         return true
     }
 
@@ -738,7 +756,7 @@ class DraftComposerModel(
         // df:1095 SEED_FROM_SOURCE: every seeded field AND its userModified flag, so a later RESOLVE cannot overwrite any.
         val form = DraftForm.INITIAL_DRAFT_FORM
             .put("key", JsStr(seed.key)).put("model", JsStr(seed.model)).put("reasoningEffort", JsStr(seed.reasoningEffort))
-            .put("mode", JsStr(seed.mode)).put("autoMode", JsBool.FALSE).put("cwd", JsStr(seed.cwd)).put("useWorktree", JsBool.FALSE)
+            .put("mode", JsStr(seed.mode)).put("autoMode", JsBool.FALSE).put("toolApproval", JsStr(seed.toolApproval)).put("cwd", JsStr(seed.cwd)).put("useWorktree", JsBool.FALSE)
         val modified = DraftForm.INITIAL_USER_MODIFIED
             .with(
                 "key" to JsBool.TRUE, "model" to JsBool.TRUE, "reasoningEffort" to JsBool.TRUE, "mode" to JsBool.TRUE,
@@ -756,6 +774,22 @@ class DraftComposerModel(
         reconcileWorktree()
         reconcileSetupCheck()
         return true
+    }
+
+    /** v175: the proposal card's instance reads the operator's saved New Session choices (its Mode and Approvals defaults), never writes them. */
+    fun usePreferences(prefs: JsObj) {
+        preferences = prefs
+    }
+
+    /**
+     * v175: the proposal card's form: [seed] replaces the form and its modified flags (nothing is sent or saved). A model the
+     * catalog lacks is listed while the card is open.
+     */
+    fun seedProposal(seed: ProposalSeed.Result) {
+        handoverModels = seed.extraModel?.let { mapOf(seed.key to listOf(it)) } ?: emptyMap()
+        _state.update { it.copy(form = seed.form, modified = seed.modified, proposalCodexCurrent = seed.codexCurrent, error = "") }
+        refresh()
+        reconcileWorktree()
     }
 
     /**

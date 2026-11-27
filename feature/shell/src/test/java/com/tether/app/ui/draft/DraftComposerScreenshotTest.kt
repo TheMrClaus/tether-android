@@ -91,6 +91,12 @@ enum class OptionsShot(val id: String) {
 
     /** #292: a Claude model with no levels and no signal (a data gap): a Default-only Effort, no hint. */
     ClaudeGap("draft-options-claude-gap"),
+
+    /** Reasonix: no Mode row, the Approvals row (Ask untouched; the phone's trigger row shows the settings chip). */
+    Reasonix("draft-options-reasonix"),
+
+    /** Reasonix with YOLO picked: the pill and the hub trigger take the warning tone and the word YOLO. */
+    ReasonixYolo("draft-options-reasonix-yolo"),
 }
 
 /**
@@ -103,6 +109,9 @@ enum class SettingsShot(val id: String, val options: OptionsShot, val view: Draf
     OpencodeMode("draft-settings-opencode-mode", OptionsShot.Opencode, DraftSettingsView.Mode),
     HubNone("draft-settings-hub-none", OptionsShot.ClaudeNone, DraftSettingsView.Root),
     HubGap("draft-settings-hub-gap", OptionsShot.ClaudeGap, DraftSettingsView.Root),
+    HubReasonix("draft-settings-hub-reasonix", OptionsShot.Reasonix, DraftSettingsView.Root),
+    HubReasonixYolo("draft-settings-hub-reasonix-yolo", OptionsShot.ReasonixYolo, DraftSettingsView.Root),
+    ApprovalsReasonixYolo("draft-settings-approvals-reasonix-yolo", OptionsShot.ReasonixYolo, DraftSettingsView.Approvals),
 }
 
 enum class DraftShot(val id: String) {
@@ -138,7 +147,15 @@ private class Seed(shot: DraftShot, val browser: BrowserShot? = null, val option
                     label = "ACP agent",
                 )
             }
-            else -> if (options != null) providerCatalog.value = OptionsFixtures.catalog
+            else -> if (options != null) {
+                providerCatalog.value = OptionsFixtures.catalog + com.tether.app.client.ProviderCatalogEntry(
+                    "reasonix",
+                    "reasonix",
+                    "ready",
+                    listOf(com.tether.app.protocol.SessionModelOption("m1", "Reasonix")),
+                    label = "Reasonix",
+                )
+            }
         }
     }
     val model = DraftComposerModel(
@@ -163,6 +180,11 @@ private class Seed(shot: DraftShot, val browser: BrowserShot? = null, val option
                 }
                 OptionsShot.ClaudeNone -> model.selectProviderAndModel("claude", "m3")
                 OptionsShot.ClaudeGap -> model.selectProviderAndModel("claude", "m2")
+                OptionsShot.Reasonix -> model.selectProviderAndModel("reasonix", "m1")
+                OptionsShot.ReasonixYolo -> {
+                    model.selectProviderAndModel("reasonix", "m1")
+                    check(model.selectToolApproval("yolo", "reasonix"))
+                }
                 OptionsShot.Codex -> {
                     model.selectProviderAndModel("codex", "m1")
                     check(model.selectMode("auto-review", "codex"))

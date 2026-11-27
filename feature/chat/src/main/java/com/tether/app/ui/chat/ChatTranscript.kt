@@ -10,6 +10,7 @@ import com.tether.app.ui.text.LocalCopyNotices
 import com.tether.app.ui.text.SafeCopyClipboard
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import com.tether.app.ui.theme.LocalReducedMotion
 import androidx.compose.foundation.border
@@ -221,9 +222,13 @@ private fun ChatTranscriptBody(
         if (wasActive[0] && !turnActive) mentionExistence?.endTurn()
         wasActive[0] = turnActive
     }
+    // v175: the card shows only when the host says the server speaks protocol >= 175 (ProposalActions.cardShown).
+    val proposalCard = LocalProposalActions.current.cardShown
+    val proposalViewport = remember { TranscriptViewport() }
+    proposalViewport.scrollBy = { delta -> listState.scrollBy(delta) }
     val observer = LocalChatDerivationObserver.current
-    val rowInputs = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentSessionId, observer, handedOffFrom, handoverV151) {
-        ChatRowsInputs(projection, tree, showThinking, zone, richCodex, showApprovals, consentSessionId, observer, handedOffFrom, handoverV151)
+    val rowInputs = remember(projection, tree, showThinking, zone, richCodex, groupToggles.version, showApprovals, consentSessionId, observer, handedOffFrom, handoverV151, proposalCard) {
+        ChatRowsInputs(projection, tree, showThinking, zone, richCodex, showApprovals, consentSessionId, observer, handedOffFrom, handoverV151, proposalCard)
     }
     val rows = rememberDerived(
         sessionKey = consentSessionId ?: projection.tetherSessionId,
@@ -480,7 +485,7 @@ private fun ChatTranscriptBody(
     val activityOpener = remember { ActivityOpener { openActivity.value = it } }
     val copyNotices = remember { CopyNotices() }
     Box(modifier.fillMaxSize().then(if (wellBackground) Modifier.background(chatWellColor(t)) else Modifier)) {
-        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices, LocalActivityOpener provides activityOpener) {
+        CompositionLocalProvider(LocalFindActiveMark provides if (activeKey != null) reportMark else null, LocalCopyNotices provides copyNotices, LocalActivityOpener provides activityOpener, LocalTranscriptViewport provides proposalViewport) {
         ProvideApprovalState {
         ProvideReviewFocus(review) {
         LazyColumn(
@@ -488,7 +493,7 @@ private fun ChatTranscriptBody(
             modifier = Modifier
                 .fillMaxSize()
                 .nestedScroll(followGuard)
-                .onGloballyPositioned { viewport[0] = it.boundsInRoot() }
+                .onGloballyPositioned { viewport[0] = it.boundsInRoot(); proposalViewport.bounds = it.boundsInWindow() }
                 .testTag("chat-transcript"),
             contentPadding = layoutPadding,
         ) {
@@ -696,7 +701,7 @@ internal val ChatItem.selectableText: Boolean
         is ChatItem.TurnPlan, is ChatItem.TurnDiff, is ChatItem.TurnReview,
         is ChatItem.Continuation, is ChatItem.Retry,
         is ChatItem.Approval, is ChatItem.Question, is ChatItem.RateLimit,
-        is ChatItem.ProviderNotice, is ChatItem.Compaction, is ChatItem.SessionNotice,
+        is ChatItem.ProviderNotice, is ChatItem.Compaction, is ChatItem.SessionNotice, is ChatItem.Proposal,
         -> true
         is ChatItem.LoadEarlier, is ChatItem.ToolGroup, is ChatItem.BgCommand -> false
     }
@@ -754,6 +759,7 @@ private fun ChatRowContent(
             is ChatItem.TurnReview -> CodexReviewCard(item.review)
             is ChatItem.BgCommand -> BackgroundCommandChip(item.command) { onOpenCommand(item.command.commandId) }
             is ChatItem.SessionError -> SessionErrorRow(item.text, item.ts, zone)
+            is ChatItem.Proposal -> ProposalCard(item.proposal)
         }
     }
 }

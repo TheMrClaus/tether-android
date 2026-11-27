@@ -166,4 +166,29 @@ class UsageModelTest {
         assertFalse(holiday.peak)
         assertEquals("National Day", holiday.holidayName)
     }
+
+    @Test fun theGrantSummaryIsOneRowAndKeepsTheAdvisoryLines() {
+        val (headline, advisory) = UsageAccountsModel.grantSummary(
+            "1 reset left",
+            listOf("Clears 5 h + weekly", "Expires unused in 15 d", "Usable once a limit is hit"),
+        )
+        assertEquals("1 left · Clears 5h + weekly · expires 15d", headline)
+        assertEquals(listOf("Usable once a limit is hit"), advisory)
+        assertEquals("3 left", UsageAccountsModel.grantSummary("3 resets left", emptyList()).first)
+    }
+
+    @Test fun theHeadBadgeFollowsTheUsageToneThresholds() {
+        fun entry(five: Int?, weekly: Int?) = UsageFixtures.accounts().claude.first().let { base ->
+            base.copy(
+                windows = base.windows?.copy(
+                    fiveHour = base.windows?.fiveHour?.copy(usedPercent = five?.toDouble()),
+                    weekly = base.windows?.weekly?.copy(usedPercent = weekly?.toDouble()),
+                ),
+            )
+        }
+        assertNull("below 75 is quiet, and there is never a Healthy badge", UsageAccountsModel.windowBadge(entry(74, 10)))
+        assertEquals(UsageAccountsModel.WindowBadge("75% 5h", false), UsageAccountsModel.windowBadge(entry(75, 10)))
+        assertEquals(UsageAccountsModel.WindowBadge("89% 5h", false), UsageAccountsModel.windowBadge(entry(89, 64)))
+        assertEquals(UsageAccountsModel.WindowBadge("90% weekly", true), UsageAccountsModel.windowBadge(entry(10, 90)))
+    }
 }
