@@ -40,20 +40,20 @@ class PhoneDrawerShortHeightTest {
     @Test fun theFilterFieldAndChipsScrollAwayWithTheList() {
         rule.showDrawer()
         val list = rule.onNodeWithTag(SidebarTags.List).fetchSemanticsNode().boundsInRoot
-        val field = rule.onNodeWithContentDescription("Filter sessions").fetchSemanticsNode().boundsInRoot
+        val field = rule.onNodeWithContentDescription("Search all conversations").fetchSemanticsNode().boundsInRoot
         assertTrue("the field $field is inside the list $list", field.top >= list.top - 0.5f)
         rule.onNodeWithTag(SidebarTags.List).performScrollToIndex(3)
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("Filter sessions").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Search all conversations").assertDoesNotExist()
         rule.onNodeWithTag(SidebarTags.NewSession).assertIsDisplayed()
     }
 
-    // W39: Scheduled actions is the footer's: pinned below the list at every height, never scrolled away.
-    @Test fun theScheduledKeyIsTheFootersAndStaysPut() {
+    // Vector m02: Scheduled is the header's key (beside "+ New session"): pinned above the list at every height, never scrolled away.
+    @Test fun theScheduledKeyIsTheHeadersAndStaysPut() {
         rule.showDrawer()
         val list = rule.onNodeWithTag(SidebarTags.List).fetchSemanticsNode().boundsInRoot
         val scheduled = rule.onNodeWithTag(SidebarTags.Scheduled).fetchSemanticsNode().boundsInRoot
-        assertTrue("scheduled $scheduled is below the list $list", scheduled.top >= list.bottom - 0.5f)
+        assertTrue("scheduled $scheduled is above the list $list", scheduled.bottom <= list.top + 0.5f)
         rule.onNodeWithTag(SidebarTags.List).performScrollToIndex(3)
         rule.waitForIdle()
         rule.onNodeWithTag(SidebarTags.Scheduled).assertIsDisplayed()
@@ -74,11 +74,11 @@ class PhoneDrawerTallHeightTest {
     @Test fun theFilterFieldSitsAboveTheList() {
         rule.showDrawer()
         val list = rule.onNodeWithTag(SidebarTags.List).fetchSemanticsNode().boundsInRoot
-        val field = rule.onNodeWithContentDescription("Filter sessions").fetchSemanticsNode().boundsInRoot
+        val field = rule.onNodeWithContentDescription("Search all conversations").fetchSemanticsNode().boundsInRoot
         assertTrue("the field $field is above the list $list", field.bottom <= list.top + 0.5f)
         rule.onNodeWithTag(SidebarTags.List).performScrollToIndex(2)
         rule.waitForIdle()
-        rule.onNodeWithContentDescription("Filter sessions").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Search all conversations").assertIsDisplayed()
     }
 }
 
@@ -91,7 +91,7 @@ class PhoneDrawerShortAtTwiceTheTextTest {
     @Test fun theHeaderScrollsAt2x() {
         rule.showDrawer()
         val list = rule.onNodeWithTag(SidebarTags.List).fetchSemanticsNode().boundsInRoot
-        val field = rule.onNodeWithContentDescription("Filter sessions").fetchSemanticsNode().boundsInRoot
+        val field = rule.onNodeWithContentDescription("Search all conversations").fetchSemanticsNode().boundsInRoot
         assertTrue(field.top >= list.top - 0.5f)
         assertFalse(PhoneDrawer.headerScrolls(915f, 1.0f))
         assertTrue(PhoneDrawer.headerScrolls(915f, 2.0f))

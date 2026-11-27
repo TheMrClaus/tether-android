@@ -179,7 +179,7 @@ class SidebarBehaviourTest {
 
     @Test fun theFilterBankTogglesAreSwitchesWithTheirStateInWords() {
         show(F.state(F.drawerSessions.take(4), activeOnly = true))
-        rule.onNodeWithContentDescription("Active").assert(
+        rule.onNodeWithContentDescription("Running").assert(
             SemanticsMatcher("switch, on") {
                 it.config.getOrNull(SemanticsProperties.Role) == androidx.compose.ui.semantics.Role.Switch &&
                     it.config.getOrNull(SemanticsProperties.StateDescription)?.startsWith("On.") == true
@@ -209,11 +209,12 @@ class SidebarBehaviourTest {
         show(F.state(F.statusSessions, histories = F.statusHistories))
         val minPx = with(rule.density) { 44.dp.toPx() }
         val small = rule.onAllNodes(hasClickAction(), useUnmergedTree = true).fetchSemanticsNodes().filter { n ->
-            val b = n.touchBoundsInRoot
-            b.width + 0.5f < minPx || b.height + 0.5f < minPx
+            // Vector m02: the layout size (node.size) of the control, not its clipped touch rect: the quick-filter chips scroll sideways, and one
+            // scrolled out of the viewport has an empty touch rect although it is a full 48 dp control (PhoneDrawerTouchFloorTest measures the same way).
+            n.size.width + 0.5f < minPx || n.size.height + 0.5f < minPx
         }
         assertTrue(
-            "controls under 44dp: " + small.map { it.config.getOrNull(SemanticsProperties.ContentDescription) to it.touchBoundsInRoot },
+            "controls under 44dp: " + small.map { it.config.getOrNull(SemanticsProperties.ContentDescription) to it.size },
             small.isEmpty(),
         )
     }
@@ -241,8 +242,8 @@ class SidebarBehaviourTest {
         rule.setContent { SidebarUnderTest(TetherSkin.StudioDark, F.state(F.drawerSessions.take(6)), actions = withHosts) }
         rule.waitForIdle()
         listOf(
-            "Close sessions", "Search all conversations", "New session", "Filter sessions by harness", "Active", "Unread", "Hide runs",
-            "Sort sessions by Created Date", "Filter sessions", "Open settings", "New session in ${F.ROOT.substringAfterLast('/')}",
+            "Close sessions", "Search all conversations", "New session", "Filter sessions by harness", "Running", "Unread", "Hide runs",
+            "Sort sessions by Created Date", "Scheduled actions", "Open settings", "New session in ${F.ROOT.substringAfterLast('/')}",
             "Actions for Worktree with a service",
         ).forEach { label ->
             rule.onNodeWithContentDescription(label).assertExists().assert(hasClickAction().or(hasSetTextAction()))
@@ -257,5 +258,9 @@ class SidebarBehaviourTest {
         rule.onNodeWithContentDescription("Search all conversations").performClick()
         rule.onNodeWithTag(SidebarTags.Scheduled).performClick()
         assertEquals(listOf("search", "scheduled"), events)
+        // Vector m02: the same field filters the list once the scope pill is switched; the filter field is a text field.
+        rule.switchToFilterScope()
+        rule.onNodeWithContentDescription("Filter sessions").assertExists().assert(hasSetTextAction())
+        rule.onNodeWithContentDescription("Search all conversations").assertDoesNotExist()
     }
 }

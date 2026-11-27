@@ -119,6 +119,7 @@ class SidebarSearchTest {
             }
         }
         rule.waitForIdle()
+        rule.switchToFilterScope()
         fun searches(): List<JsonObject> = client.frames.filter { (it["type"] as JsonPrimitive).content == "search" }
         val filter = rule.onNode(SemanticsMatcher("filter") { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Filter sessions") == true })
         rule.mainClock.autoAdvance = false

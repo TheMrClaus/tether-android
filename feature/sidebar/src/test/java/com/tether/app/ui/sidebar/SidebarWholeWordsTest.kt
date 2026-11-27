@@ -49,17 +49,18 @@ class SidebarWholeWordsRailTest {
 class SidebarWholeWordsDrawerTest {
     @get:Rule val rule = createComposeRule()
 
-    /** The drawer is wide enough for one line at 2.0x (the golden): the words are whole either way. */
+    /** The drawer's footer says "Secure link · Private runtime" (Vector m02): at 2.0x it wraps, if it must, at spaces only. */
     @Test fun theFooterNeverSplitsAWord() {
         rule.setContent { SidebarUnderTest(TetherSkin.Studio, sidebarState(SidebarShot.Status), TetherLayoutClass.Phone, sidebarSeed(SidebarShot.Status), SidebarActions(onCollapse = {})) }
         rule.waitForIdle()
         val out = ArrayList<TextLayoutResult>()
-        rule.onNodeWithContentDescription("Private runtime").fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!.invoke(out)
+        rule.onNodeWithContentDescription("Secure link · Private runtime").fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!.invoke(out)
         val l = out[0]
         val text = l.layoutInput.text.text
+        val whole = setOf("Secure", "link", "·", "Private", "runtime")
         (0 until l.lineCount).forEach { i ->
             val line = text.substring(l.getLineStart(i), l.getLineEnd(i)).trim()
-            assertTrue("'$line' is a whole word or words", line in setOf("Private runtime", "Private", "runtime"))
+            assertTrue("'$line' is whole words", line.split(" ").all { it in whole })
         }
     }
 }

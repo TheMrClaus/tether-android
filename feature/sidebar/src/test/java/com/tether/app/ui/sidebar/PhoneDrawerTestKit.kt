@@ -6,6 +6,8 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
 
 /** Shared readers for the phone drawer's tests (ta-1jj7, owner-directed design). */
@@ -31,3 +33,9 @@ internal fun SemanticsNode.description(): String? = config.getOrNull(SemanticsPr
 /** Every row's outer node (tag `sidebar-row:`), from the unmerged tree. */
 internal fun ComposeContentTestRule.rowNodes(): List<SemanticsNode> =
     onAllNodes(SemanticsMatcher("a session row") { it.tag()?.startsWith("sidebar-row:") == true }, useUnmergedTree = true).fetchSemanticsNodes()
+
+/** Vector m02: the merged search bar starts in the All scope; this taps its scope pill so the field filters the list ("Filter sessions"). */
+internal fun ComposeContentTestRule.switchToFilterScope() {
+    onNodeWithTag(PhoneChromeTags.SearchScope).performClick()
+    waitForIdle()
+}
