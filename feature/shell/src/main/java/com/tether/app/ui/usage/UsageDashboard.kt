@@ -824,7 +824,10 @@ private fun Tile(tile: TileSpec, modifier: Modifier, big: Boolean, layout: Usage
             Text(if (layout.compact && tile.compactLabel != null) tile.compactLabel else tile.label, color = t.muted, style = px(type.ui, if (layout.compact) 11f else 12f, 600))
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), itemVerticalAlignment = Alignment.CenterVertically) {
-            val valueStyle = if (big) {
+            val valueStyle = if (big && layout.compact) {
+                // Numeric telemetry is mono (DESIGN.md Honest-Mono; web `.tileValue` on the phone): Fira Code bold.
+                px(type.mono, 26f, 700, lineHeight = 1.25f)
+            } else if (big) {
                 px(type.ui, if (layout.medium) 28f else 34f, 650, trackingEm = -0.035f, lineHeight = 1.25f)
             } else {
                 px(type.ui, if (layout.compact) 14f else 16f, 650, trackingEm = -0.01f, lineHeight = 1.5f)

@@ -11,6 +11,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsOn
@@ -94,6 +95,24 @@ class UsageVectorTest {
         rule.onNodeWithTag(UsageTags.Leaders).assertExists()
         listOf("Harness:", "Model:", "Agent:", "Provider:").forEach { rule.onNodeWithText(it).assertExists() }
         rule.onNodeWithTag(UsageTags.Subtitle).assertExists()
+    }
+
+    @Test fun theTileFiguresAreSetInTheMonoFamily() {
+        var mono: androidx.compose.ui.text.font.FontFamily? = null
+        setUp {
+            mono = com.tether.app.ui.theme.LocalTetherTypography.current.mono
+            val state = remember { UsageDashboardState().apply { onResult(range, UsageCall.Ok(UsageFixtures.analytics(), ORIGIN)) } }
+            UsageDashboard(state, onOpenConsole = {})
+        }
+        val styles = rule.onAllNodes(useUnmergedTree = true, matcher = SemanticsMatcher("tile figure") { n ->
+            n.config.getOrNull(SemanticsProperties.Text)?.firstOrNull()?.text == "28.4M"
+        }).fetchSemanticsNodes().mapNotNull { n ->
+            val out = ArrayList<androidx.compose.ui.text.TextLayoutResult>()
+            n.config.getOrNull(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult)?.action?.invoke(out)
+            out.firstOrNull()?.layoutInput?.style
+        }
+        assertEquals(true, styles.isNotEmpty())
+        styles.forEach { assertEquals(mono, it.fontFamily) }
     }
 
     private class Harness(val accounts: UsageAccountsState)
