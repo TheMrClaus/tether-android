@@ -99,6 +99,18 @@ object OverviewPresentation {
         else -> "in this state for"
     }
 
+    /**
+     * overview.tsx E8: a waiting card is left out when every one of its pending requests is listed in the banner
+     * (key = session + request id); a card the banner's item cap cut stays.
+     */
+    fun cardsWithoutBannerCovered(cards: List<OverviewCard>, banner: com.tether.app.protocol.model.OverviewPendingPanel?): List<OverviewCard> {
+        val listed = banner?.items.orEmpty().mapTo(HashSet()) { com.tether.app.protocol.overview.OverviewClient.pendingKey(it) }
+        return cards.filterNot { card ->
+            card.status == "waiting" && card.pending.isNotEmpty() &&
+                card.pending.all { listed.contains(com.tether.app.protocol.overview.OverviewClient.pendingKey(it)) }
+        }
+    }
+
     /** overview-card.tsx:65 — only a waiting card reviews; its oldest pending request. */
     fun reviewTarget(card: OverviewCard): OverviewPending? = if (card.status == "waiting") card.pending.firstOrNull() else null
 

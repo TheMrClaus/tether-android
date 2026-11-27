@@ -99,6 +99,17 @@ object OverviewFixtures {
         data = populatedData, activity = activity, updatedAt = NOW,
     )
 
+    /**
+     * E8's other branch: the banner's item cap cut the waiting session's second request, so the banner does not list every
+     * one of its requests and its card stays (every card is drawn: the contrast, brand and text-rule tests need all four).
+     */
+    val populatedCapped = populated.copy(
+        data = populatedData.copy(
+            cards = listOf(cards.first().copy(pending = listOf(pending, pending.copy(requestId = "r-2")))) + cards.drop(1),
+            pending = OverviewPendingPanel(listOf(pending), 2, 0),
+        ),
+    )
+
     /** m03: sessions on the node, nothing waiting for the operator (the emerald "Nothing is waiting for you" strip). */
     val clearData = populatedData.copy(
         counts = populatedData.counts.copy(waiting = 0),

@@ -68,6 +68,7 @@ object HostUsageTags {
     const val DiskNote = "overview-host-disk-note"
     const val ViewUsage = "overview-host-view-usage"
     fun meter(label: String) = "overview-host-meter:$label"
+    fun track(label: String) = "overview-host-track:$label"
 }
 
 /**
@@ -279,26 +280,31 @@ private fun MeterCell(meter: HostUsagePresentation.Meter, narrow: Boolean, modif
     }
     Column(
         modifier
+            .fillMaxHeight()
             .testTag(HostUsageTags.meter(meter.label))
             .clearAndSetSemantics {
                 contentDescription = meter.label
                 stateDescription = meter.spoken
                 meter.clamped?.let { progressBarRangeInfo = ProgressBarRangeInfo(it.toFloat(), 0f..100f) }
             },
-        verticalArrangement = Arrangement.spacedBy(7.2.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(meter.label, style = css(type.ui, 0.8f, 600), color = t.muted, maxLines = 1)
-        if (meter.unavailable != null) {
-            Text(meter.unavailable, style = css(type.ui, 0.8f, 500), color = t.faint)
-        } else {
-            Text(
-                meter.value,
-                style = css(type.mono, if (narrow) 0.82f else 0.95f, 550).copy(fontFeatureSettings = "tnum"),
-                color = valueInk,
-                maxLines = if (narrow) 2 else 1,
-            )
+        Column(verticalArrangement = Arrangement.spacedBy(7.2.dp)) {
+            Text(meter.label, style = css(type.ui, 0.8f, 600), color = t.muted, maxLines = 1)
+            if (meter.unavailable != null) {
+                Text(meter.unavailable, style = css(type.ui, 0.8f, 500), color = t.faint)
+            } else {
+                Text(
+                    if (narrow) meter.compact else meter.value,
+                    style = css(type.mono, if (narrow) 0.82f else 0.95f, 550).copy(fontFeatureSettings = "tnum"),
+                    color = valueInk,
+                    maxLines = 1,
+                )
+            }
         }
-        Box(Modifier.fillMaxWidth().height(6.4.dp).cssSurface(RoundedCornerShape(percent = 50), t.slate)) {
+        // The track sits at the cell's bottom edge, so the three tracks share a baseline whatever the value's length.
+        Spacer(Modifier.height(7.2.dp))
+        Box(Modifier.fillMaxWidth().height(6.4.dp).cssSurface(RoundedCornerShape(percent = 50), t.slate).testTag(HostUsageTags.track(meter.label))) {
             val clamped = meter.clamped
             if (clamped != null && clamped > 0) {
                 Box(Modifier.fillMaxWidth((clamped / 100).toFloat()).fillMaxHeight().cssSurface(RoundedCornerShape(percent = 50), fill))

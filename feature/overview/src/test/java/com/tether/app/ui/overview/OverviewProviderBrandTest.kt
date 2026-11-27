@@ -29,7 +29,7 @@ class OverviewProviderBrandTest {
 
     @Test
     fun cardMarksAreBrandTiles() {
-        rule.setContent { OverviewUnderTest(TetherSkin.StudioDark, OverviewFixtures.populated) }
+        rule.setContent { OverviewUnderTest(TetherSkin.StudioDark, OverviewFixtures.populatedCapped) }
         rule.waitForIdle()
         // A 1.4rem tile at 420dpi is about 59x59px.
         assertTrue("claude card", (colours(OverviewTags.card("s-sync"))[Color(0xFFD97757)] ?: 0) > 1_500)

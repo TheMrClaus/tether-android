@@ -70,7 +70,9 @@ class OverviewTextRulesTest {
             sessionId = "s-h", title = hostileTitle, provider = "claude", providerLabel = "Cla${rlo}ude\nCode",
             workspace = hostileWs, cwd = "/srv/tether", status = "waiting", statusSince = f.NOW - 60_000,
             attention = OverviewAttention("approval", "Approve ${lri}this$zwsp\nnow"),
-            excerpt = OverviewExcerpt("assistant", "said ${rlo}this\nthat"), pending = listOf(pending),
+            excerpt = OverviewExcerpt("assistant", "said ${rlo}this\nthat"),
+            // a second request the banner (cap) does not list keeps this card on screen (E8)
+            pending = listOf(pending, pending.copy(requestId = "r-h2")),
         )
         val invisible = OverviewCard(
             sessionId = "s-inv", title = "$zwsp$zwsp$rlo", provider = "codex", providerLabel = "Codex",

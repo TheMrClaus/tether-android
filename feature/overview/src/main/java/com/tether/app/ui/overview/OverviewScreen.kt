@@ -2,7 +2,9 @@ package com.tether.app.ui.overview
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -98,6 +100,7 @@ object OverviewTags {
     const val FilterPanel = "overview-filter-panel"
     const val StatusChips = "overview-status-chips"
     const val AllClear = "overview-all-clear"
+    const val BannerPointer = "overview-banner-pointer"
     const val EventLog = "overview-event-log"
     const val StatusChip = "overview-status-chip"
     fun card(sessionId: String) = "overview-card:$sessionId"
@@ -161,7 +164,11 @@ fun OverviewScreen(
     val counts = data?.counts
     val offline = OverviewPresentation.offline(state, connected)
     val live = OverviewPresentation.live(state, connected)
-    val cards = OverviewClient.stableCardOrder(null, data?.cards)
+    val allCards = OverviewClient.stableCardOrder(null, data?.cards)
+    // E8 (web overview.tsx): a waiting session is shown by the banner alone; its card stays only when the banner
+    // does not list every one of its requests (the banner's item cap cut it).
+    val cards = OverviewPresentation.cardsWithoutBannerCovered(allCards, data?.pending)
+    val bannerCovered = allCards.size - cards.size
 
     // `.page { background: var(--mineral) }`.
     BoxWithConstraints(modifier.fillMaxSize().background(t.mineral).testTag(OverviewTags.Root)) {
@@ -203,6 +210,7 @@ fun OverviewScreen(
             when {
                 data == null -> SkeletonGrid(columns)
                 OverviewPresentation.noSessionsAtAll(data.facets) -> NoSessions(actions.onNewSession)
+                cards.isEmpty() && bannerCovered > 0 -> BannerPointer(bannerCovered)
                 cards.isEmpty() -> EmptyPage(OverviewPresentation.emptyPage(choice, counts), choice, onChoice)
                 else -> CardGrid(cards, columns, now, offline, state.updatedAt, actions)
             }
@@ -647,6 +655,25 @@ private fun PanelEmpty(icon: ImageVector?, text: String) {
 
 // ── Cards ───────────────────────────────────────────────────────────────────
 
+/** overview.tsx `.bannerPointer`: the filter emptied the list, so say where the waiting sessions went. */
+@Composable
+private fun BannerPointer(count: Int) {
+    val t = LocalTetherTokens.current
+    val type = LocalTetherTypography.current
+    Row(
+        Modifier.fillMaxWidth().testTag(OverviewTags.BannerPointer),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.4.dp),
+    ) {
+        Icon(TetherIcons.TriangleAlert, contentDescription = null, tint = t.attentionInk, modifier = Modifier.size(14.dp))
+        Text(
+            "${OverviewFormat.plural(count, "waiting session")} ${if (count == 1) "is" else "are"} in the banner above, ready to review.",
+            style = css(type.ui, 0.86f, 500),
+            color = t.muted,
+        )
+    }
+}
+
 @Composable
 private fun CardGrid(cards: List<OverviewCard>, columns: Int, now: Long, offline: Boolean, updatedAt: Long?, actions: OverviewActions) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -707,6 +734,8 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
                 CssBorder(1.dp, if (waiting) t.attentionBorder else t.line),
                 t.css.shadowRaised,
             )
+            // B2: the whole card is the open target (the web `.card`), so the "Open" label needs no padded hit area.
+            .then(if (request == null) Modifier.pointerInput(card.sessionId) { detectTapGestures { actions.onOpenSession(card.sessionId) } } else Modifier)
             .padding(20.dp)
             .testTag(OverviewTags.card(card.sessionId)),
     ) {
@@ -725,7 +754,7 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
         }
         Text(
             cardTitle,
-            style = css(type.ui, 1.2f, 720, trackingEm = -0.02f, lineHeight = 1.3f),
+            style = css(type.ui, 1.05f, 700, trackingEm = -0.01f, lineHeight = 1.3f),
             color = t.white,
             modifier = Modifier.padding(top = 13.6.dp).semantics { heading() },
         )
@@ -762,7 +791,6 @@ private fun SessionCard(card: OverviewCard, now: Long, offline: Boolean, updated
             if (request == null) {
                 Row(
                     Modifier
-                        .heightIn(min = TetherDimens.touchTargetDp)
                         .clickable(onClickLabel = "Open session", role = Role.Button) { actions.onOpenSession(card.sessionId) }
                         .semantics { contentDescription = "Open session: $cardTitle" }
                         .testTag(OverviewTags.open(card.sessionId)),

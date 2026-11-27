@@ -62,12 +62,12 @@ class OverviewBehaviourTest {
             onOpenEventLog = { calls += "log" },
         )
         rule.setContent { OverviewUnderTest(TetherSkin.Studio, OverviewFixtures.populated, actions = actions) }
-        rule.onNodeWithTag(OverviewTags.review("s-sync")).performScrollTo().performClick()
+        // P8D-FIX2 (E8): the banner lists s-sync's one request, so its card is gone; the banner's own Review is the path.
         rule.onNodeWithTag(OverviewTags.reviewPending("s-sync", "r-1")).performScrollTo().performClick()
         rule.onNodeWithTag(OverviewTags.open("s-proto")).performScrollTo().performClick()
         rule.onNodeWithTag(OverviewTags.activityRow(OverviewFixtures.activity[2].id)).performScrollTo().performClick()
         rule.onNodeWithTag(OverviewTags.NewSession).performClick()
-        assertEquals(listOf("review:s-sync:r-1", "review:s-sync:r-1", "open:s-proto", "open:s-game", "new"), calls)
+        assertEquals(listOf("review:s-sync:r-1", "open:s-proto", "open:s-game", "new"), calls)
     }
 
     @Test fun aStatusTabIsAFilterChoice() {

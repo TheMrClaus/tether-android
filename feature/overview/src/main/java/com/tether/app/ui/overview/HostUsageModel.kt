@@ -111,7 +111,7 @@ object HostUsagePresentation {
     }
 
     /** One `Meter`: [percent] null = no bar (unavailable or loading). */
-    data class Meter(val label: String, val percent: Double?, val value: String, val unavailable: String?) {
+    data class Meter(val label: String, val percent: Double?, val value: String, val unavailable: String?, val compact: String = value) {
         /** `Math.min(100, Math.max(0, percent))`. */
         val clamped: Double? get() = percent?.coerceIn(0.0, 100.0)
         val tone: Tone get() = clamped?.let(::meterTone) ?: Tone.None
@@ -164,6 +164,8 @@ object HostUsagePresentation {
                 memory?.let { it.usedBytes / it.totalBytes * 100 },
                 memory?.let { "${gigabytes(it.usedBytes)} / ${gigabytes(it.totalBytes)} GB" }.orEmpty(),
                 if (memory != null) null else reason(data?.memory),
+                // m03 narrow: "35.4/62.6G" keeps the value on one line so the three tracks share a baseline.
+                compact = memory?.let { "${gigabytes(it.usedBytes)}/${gigabytes(it.totalBytes)}G" }.orEmpty(),
             ),
             Meter(
                 "Disk",

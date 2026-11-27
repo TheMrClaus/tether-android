@@ -214,7 +214,8 @@ class OverviewM03ContrastTest {
         rule.onNode(hasText(tab.label, substring = true) and hasAnyAncestor(hasTestTag(OverviewTags.tab(tab))), useUnmergedTree = true)
 
     private fun chips(skin: TetherSkin) {
-        val t = tokens(skin, OverviewFixtures.populated)
+        // populatedCapped: E8 hides a waiting card the banner lists in full, so the kept (capped) waiting card keeps its chip in view.
+        val t = tokens(skin, OverviewFixtures.populatedCapped)
         // the chip's label TEXT node (not the whole chip, whose 1dp outline would satisfy the check on its own).
         report("selected status chip", skin, measure(chipLabel(StatusTab.Active), t.violetWash))
         report("idle status chip", skin, measure(chipLabel(StatusTab.Waiting), t.graphite))
