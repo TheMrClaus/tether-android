@@ -135,11 +135,14 @@ fun StatusDot(color: Color, size: Dp = StatusDotSize, modifier: Modifier = Modif
  * never takes layout space: the composable is the dot's own size and the ring overflows it.
  * Reduced motion: the dot alone (the animation's end state is a clear ring).
  */
+/** The ping halo of every waiting dot: the wait ramp's border step (web `--wait-border`, W7). */
+fun waitingPingGlow(t: com.tether.app.ui.theme.TetherTokens): Color = t.css.waitBorder
+
 @Composable
 fun WaitingPingDot(color: Color, dotSize: Dp = StatusDotSize, modifier: Modifier = Modifier) {
     val t = LocalTetherTokens.current
     val reduced = LocalReducedMotion.current
-    val glow = t.focusGlow
+    val glow = waitingPingGlow(t)
     val ease = t.css.easeOut.toEasing()
     val progress: Float = if (reduced) 1f else {
         val transition = rememberInfiniteTransition(label = "ping")
@@ -197,7 +200,7 @@ fun statusToneOf(status: String): StatusTone = when (status) {
 
 /**
  * Status as an etched pill: dot + printed word, never the dot alone (globals.css 11161-11175;
- * Studio: studio.css:354). Active carries the spinner, Waiting the pinging violet dot (violet
+ * Studio: studio.css:354). Active carries the spinner, Waiting the pinging amber dot (amber
  * = waiting for the operator). The accessible name is [label] as written.
  */
 @Composable
@@ -212,7 +215,7 @@ fun TetherStatusPill(label: String, tone: StatusTone, modifier: Modifier = Modif
         // `.status-badge.status-waiting` (0,3,0) out-ranks Studio's flat badge for the fill; the
         // border stays 0-width in Studio.
         waiting -> Modifier.cssSurface(
-            shape, t.violetWash,
+            shape, t.amberWash,
             null,
             emptyList(),
         )
@@ -238,13 +241,13 @@ fun TetherStatusPill(label: String, tone: StatusTone, modifier: Modifier = Modif
     }
 }
 
-/** `.status-active` running, `.status-waiting` violet, the rest faint. */
+/** `.status-active` running, `.status-waiting` amber, the rest faint. */
 @Composable
 fun statusColor(tone: StatusTone): Color {
     val t = LocalTetherTokens.current
     return when (tone) {
         StatusTone.Active -> t.running
-        StatusTone.Waiting -> t.violet
+        StatusTone.Waiting -> t.amber
         else -> t.faint
     }
 }

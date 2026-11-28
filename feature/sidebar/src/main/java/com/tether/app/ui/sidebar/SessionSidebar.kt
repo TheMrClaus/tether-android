@@ -1176,9 +1176,9 @@ private fun BlockActivityDot(block: BlockView, offline: Boolean, withGap: Boolea
     if (offline && (a.waiting > 0 || a.active > 0)) {
         StatusDot(t.faint, size = 0.5f.rem, modifier = Modifier.testTag(SidebarTags.blockDot(block.workspace)))
     } else if (a.waiting > 0) {
-        val wash = t.violetWash
+        val wash = t.amberWash
         WaitingPingDot(
-            t.violet,
+            t.amber,
             dotSize = 0.5f.rem,
             modifier = if (reduced) Modifier.drawBehind { drawCircle(wash, radius = size.minDimension / 2 + 3.dp.toPx()) } else Modifier,
         )
@@ -1244,7 +1244,7 @@ private fun ChainToggle(chain: ChainView, headName: String, open: Boolean, compa
     )
     val showSuffix = !open && chain.suffix != null
     val suffixInk = when (chain.suffix?.kind) {
-        SidebarOrder.ChainSuffixKind.Waiting -> t.violet
+        SidebarOrder.ChainSuffixKind.Waiting -> t.amber
         SidebarOrder.ChainSuffixKind.Active -> t.running
         else -> ink
     }

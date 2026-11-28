@@ -848,7 +848,7 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
             val color = when {
                 was != null || handed -> t.faint
                 live.status == "active" -> t.running
-                live.status == "waiting" -> t.violet
+                live.status == "waiting" -> t.amber
                 else -> t.faint
             }
             val word = when {
@@ -893,7 +893,7 @@ private fun StatusLine(entry: SidebarEntry, now: Long, updatedAt: Long, offline:
         } else if (live != null) {
             val color = when (live.status) {
                 "active" -> t.running
-                "waiting" -> t.violet
+                "waiting" -> t.amber
                 else -> t.faint
             }
             // W39: on the phone the word is `muted` at rest (7.2:1) and a waiting row's word is 600.

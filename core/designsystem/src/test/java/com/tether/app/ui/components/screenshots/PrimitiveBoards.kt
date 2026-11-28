@@ -275,7 +275,7 @@ fun IndicatorsBoard() {
         SpinnerRing(t.muted, size = 16.dp, stroke = 2.dp)
         SpinningIcon(TetherIcons.Loader, tint = t.muted, size = 16.dp)
         StatusDot(t.faint)
-        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { WaitingPingDot(t.violet) }
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { WaitingPingDot(t.amber) }
     }
 }
 
